@@ -74,7 +74,7 @@ class TestGridChargingProducesChargePeriod:
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         controller.write_ac_charge_times.assert_called_once()
         call_kwargs = controller.write_ac_charge_times.call_args.kwargs
@@ -87,7 +87,7 @@ class TestGridChargingProducesChargePeriod:
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         call_kwargs = controller.write_ac_charge_times.call_args.kwargs
         assert call_kwargs["mains_enabled"] is False
@@ -153,7 +153,7 @@ class TestDischargeIntentsProduceDischargeperiod:
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         controller.write_ac_discharge_times.assert_called_once()
 
@@ -185,7 +185,7 @@ class TestIdleOnlyDay:
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
-        writes, disables = manager.write_schedule_to_hardware(controller, 0, [])
+        writes, disables = manager.write_to_hardware(controller, 0, [])
 
         assert writes == 2
         assert disables == 0
@@ -317,7 +317,7 @@ class TestCompareSchedules:
         assert differ
 
 
-# ── write_schedule_to_hardware ────────────────────────────────────────────────
+# ── write_to_hardware ────────────────────────────────────────────────
 
 
 class TestWriteScheduleToHardware:
@@ -327,7 +327,7 @@ class TestWriteScheduleToHardware:
         manager.create_schedule(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
 
         controller = MagicMock()
-        writes, disables = manager.write_schedule_to_hardware(controller, 0, [])
+        writes, disables = manager.write_to_hardware(controller, 0, [])
 
         assert writes == 2
         assert disables == 0
@@ -340,7 +340,7 @@ class TestWriteScheduleToHardware:
         )
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         controller.write_ac_charge_times.assert_called_once()
         controller.write_ac_discharge_times.assert_called_once()
@@ -351,7 +351,7 @@ class TestWriteScheduleToHardware:
         manager.create_schedule(make_schedule_mock(["IDLE"] * 96))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         call_kwargs = controller.write_ac_charge_times.call_args.kwargs
         assert call_kwargs["charge_stop_soc"] == int(battery_settings.max_soc)
@@ -362,7 +362,7 @@ class TestWriteScheduleToHardware:
         manager.create_schedule(make_schedule_mock(["IDLE"] * 96))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         call_kwargs = controller.write_ac_discharge_times.call_args.kwargs
         assert call_kwargs["discharge_stop_soc"] == int(battery_settings.min_soc)
@@ -375,7 +375,7 @@ class TestWriteScheduleToHardware:
         manager.create_schedule(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_schedule_to_hardware(controller, 0, [])
+        manager.write_to_hardware(controller, 0, [])
 
         call_kwargs = controller.write_ac_charge_times.call_args.kwargs
         assert call_kwargs.get("period_1_enabled") is True

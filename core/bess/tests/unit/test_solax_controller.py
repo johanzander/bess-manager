@@ -83,7 +83,7 @@ class TestCreateSchedule:
         assert controller.current_schedule is schedule
 
 
-# ── write_schedule_to_hardware ────────────────────────────────────────────────
+# ── write_to_hardware ────────────────────────────────────────────────
 
 
 class TestWriteScheduleToHardware:
@@ -91,7 +91,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        writes, disables = controller.write_schedule_to_hardware(mock_hw, 0, [])
+        writes, disables = controller.write_to_hardware(mock_hw, 0, [])
 
         assert writes == 0
         assert disables == 0
@@ -100,7 +100,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        controller.write_schedule_to_hardware(mock_hw, 0, [])
+        controller.write_to_hardware(mock_hw, 0, [])
 
         mock_hw.assert_not_called()
 

@@ -149,14 +149,14 @@ class TestSolaxGridChargeAtMaxPower:
 
 
 class TestSolaxNoTouHardwareWrites:
-    def test_write_schedule_to_hardware_is_noop(self) -> None:
+    def test_write_to_hardware_is_noop(self) -> None:
         bsm, hw = _make_bsm_solax()
         intents = ["IDLE"] * 96
         intents[PERIOD] = "GRID_CHARGING"
         bsm._inverter_controller.strategic_intents = intents
 
-        # write_schedule_to_hardware should not call any hardware method
-        writes, disables = bsm._inverter_controller.write_schedule_to_hardware(
+        # write_to_hardware should not call any hardware method
+        writes, disables = bsm._inverter_controller.write_to_hardware(
             hw, effective_period=0, current_tou=[]
         )
 

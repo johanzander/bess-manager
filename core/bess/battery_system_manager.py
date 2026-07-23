@@ -2478,7 +2478,7 @@ class BatterySystemManager:
             if self._controller is None:
                 logger.error("Cannot apply schedule: controller is not available")
             else:
-                temp_growatt.write_schedule_to_hardware(
+                temp_growatt.write_to_hardware(
                     self._controller, effective_period, current_tou
                 )
 

@@ -878,7 +878,7 @@ class TestHardwareWriteRespectsSlotLimit:
     """Regression tests: the inverter only accepts segment_id 1-9.
 
     Writing a segment_id outside that range causes the Growatt HA service to
-    return 500. These tests verify that write_schedule_to_hardware never
+    return 500. These tests verify that write_to_hardware never
     issues such a call regardless of how many TOU intervals were generated.
     """
 
@@ -888,7 +888,7 @@ class TestHardwareWriteRespectsSlotLimit:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _CapturingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
 
@@ -899,12 +899,12 @@ class TestHardwareWriteRespectsSlotLimit:
             ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"
 
     def test_write_count_never_exceeds_hardware_slot_count(self, scheduler):
-        """write_schedule_to_hardware must not push more than 9 segments."""
+        """write_to_hardware must not push more than 9 segments."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _CapturingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
 
@@ -923,7 +923,7 @@ class TestHardwareWriteRespectsSlotLimit:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
 
         controller = _CapturingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=12, current_tou=[]
         )
 
@@ -943,7 +943,7 @@ class _FailingController(_CapturingController):
 class TestHardwareWriteFailurePropagates:
     """Regression: a failed segment write must raise, not be swallowed.
 
-    Previously write_schedule_to_hardware caught per-segment write
+    Previously write_to_hardware caught per-segment write
     exceptions and only logged them, returning normally. The caller
     (BatterySystemManager._apply_schedule) treated that as success and
     cleared _hardware_write_pending, so a failed write was never retried
@@ -957,7 +957,7 @@ class TestHardwareWriteFailurePropagates:
 
         controller = _FailingController()
         with pytest.raises(RuntimeError):
-            scheduler.write_schedule_to_hardware(
+            scheduler.write_to_hardware(
                 controller, effective_period=0, current_tou=[]
             )
 
@@ -1017,7 +1017,7 @@ class TestSlotAssignmentPreservesActiveSegments:
         # Cycle 1 at start of day: 9 of the 10 strategic segments fit on hardware.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
         controller = _SimulatingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
 
@@ -1029,7 +1029,7 @@ class TestSlotAssignmentPreservesActiveSegments:
         # Cycle 2 at 03:00: the 01:00 segment has expired and the previously
         # pending 19:00 segment is now part of the active 9.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller,
             effective_period=12,
             current_tou=controller.hardware_segments(),
@@ -1057,7 +1057,7 @@ class TestSlotAssignmentPreservesActiveSegments:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _SimulatingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
         cycle1_call_count = len(controller.calls)
@@ -1065,7 +1065,7 @@ class TestSlotAssignmentPreservesActiveSegments:
 
         # Re-run the same conversion at the same period — no state has changed.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller,
             effective_period=0,
             current_tou=controller.hardware_segments(),

@@ -477,7 +477,7 @@ class InverterController(ABC):
         """Build hardware-specific schedule from DPSchedule."""
 
     @abstractmethod
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,

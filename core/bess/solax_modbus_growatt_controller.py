@@ -65,7 +65,7 @@ class SolaxModbusGrowattController(GrowattMinController):
     mode each period when needed. ``control_mode="vpp"`` issues per-period VPP
     power commands instead, with no persistent TOU schedule — analogous to
     how ``SolaxController`` applies per-period VPP commands for real SolaX
-    hardware, with ``write_schedule_to_hardware`` doing only the one-time VPP
+    hardware, with ``write_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
 
@@ -366,7 +366,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             logger.error("FAILED: Growatt VPP period write: %s", e)
             return False, str(e)
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,

@@ -1122,7 +1122,7 @@ class GrowattMinController(InverterController):
         """
         return controller.read_inverter_time_segments()
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,

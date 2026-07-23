@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class SolaxController(InverterController):
     """SolaX inverter controller using VPP active-power commands.
 
-    SolaX does not use a persistent TOU schedule.  ``write_schedule_to_hardware``
+    SolaX does not use a persistent TOU schedule.  ``write_to_hardware``
     is a no-op; the actual hardware writes happen period-by-period via
     ``_write_period_to_hardware``, called from
     ``BatterySystemManager._apply_period_schedule``.
@@ -146,7 +146,7 @@ class SolaxController(InverterController):
             logger.error("FAILED: SolaX VPP period write: %s", e)
             return False, str(e)
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -160,7 +160,7 @@ class SolaxController(InverterController):
         Returns:
             (0, 0) — no writes or disables performed.
         """
-        logger.debug("SolaX: write_schedule_to_hardware is a no-op (per-period VPP)")
+        logger.debug("SolaX: write_to_hardware is a no-op (per-period VPP)")
         return 0, 0
 
     def initialize_hardware(self, controller) -> None:

@@ -233,7 +233,7 @@ class TestWriteScheduleToHardwareVpp:
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.create_schedule(make_schedule(intents), current_period=0)
 
-        writes, disables = controller.write_schedule_to_hardware(
+        writes, disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
         )
 
@@ -245,12 +245,12 @@ class TestWriteScheduleToHardwareVpp:
     def test_solar_export_initial_write_keeps_remote_control_enabled(
         self, controller, mock_ha
     ):
-        """#355: the initial write_schedule_to_hardware path must apply the
+        """#355: the initial write_to_hardware path must apply the
         same block_passive_charging distinction as per-period apply_period."""
         intents = hourly_to_quarterly({2: "SOLAR_EXPORT"})
         controller.create_schedule(make_schedule(intents), current_period=0)
 
-        writes, _disables = controller.write_schedule_to_hardware(
+        writes, _disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
         )
 

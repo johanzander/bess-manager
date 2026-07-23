@@ -377,7 +377,7 @@ class TestEndToEndHardwareWrite:
                 )
 
         controller = CapturingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
 
@@ -403,7 +403,7 @@ class TestEndToEndHardwareWrite:
                 write_count += 1
 
         controller = CountingController()
-        scheduler.write_schedule_to_hardware(
+        scheduler.write_to_hardware(
             controller, effective_period=0, current_tou=[]
         )
 

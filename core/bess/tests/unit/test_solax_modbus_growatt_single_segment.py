@@ -257,14 +257,14 @@ class TestApplyPeriod:
 
 
 class TestWriteScheduleToHardware:
-    """Test write_schedule_to_hardware initialises segment 1."""
+    """Test write_to_hardware initialises segment 1."""
 
     def test_sets_initial_mode(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
-        writes, _disables = controller.write_schedule_to_hardware(
+        writes, _disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
         )
 
@@ -281,7 +281,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
-        controller.write_schedule_to_hardware(
+        controller.write_to_hardware(
             mock_ha, effective_period=0, current_tou=[]
         )
 
@@ -293,7 +293,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.create_schedule(schedule, current_period=0)
 
-        controller.write_schedule_to_hardware(
+        controller.write_to_hardware(
             mock_ha, effective_period=20, current_tou=[]
         )
 

@@ -193,6 +193,17 @@ class TestServiceCallWithRetry:
             mock.assert_called_once()
             assert result == {"data": []}
 
+    def test_input_number_domain_categorized_as_battery_control(self, ctrl):
+        """Regression test for #372: input_number writes must be classified
+        the same as number writes, or a failed write to a user-configured
+        input_number.* entity silently degrades to the generic 'other'
+        category in the runtime failure alert UI."""
+        with patch.object(ctrl, "_api_request", return_value=None) as mock:
+            ctrl._service_call_with_retry(
+                "input_number", "set_value", entity_id="input_number.x", value=1
+            )
+            assert mock.call_args.kwargs["category"] == "battery_control"
+
 
 # ── _get_raw_state / _get_sensor_value / _get_binary_state ───────────────────
 
@@ -293,6 +304,22 @@ class TestSetOperations:
         with patch.object(ctrl, "_service_call_with_retry") as mock:
             ctrl.set_charge_stop_soc(90)
             assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_input_number_entity(self, ctrl):
+        """Regression test for #372: a user-overridden input_number.* entity
+        must be written via input_number.set_value, not number.set_value —
+        the latter is scoped to the number platform and silently fails
+        against an input_number entity."""
+        ctrl.sensors["battery_charge_stop_soc"] = "input_number.charge_stop_soc"
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("input_number", "set_value")
+            assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_number_entity_still_uses_number_domain(self, ctrl):
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("number", "set_value")
 
 
 class TestSetTouSegmentViaEntities:

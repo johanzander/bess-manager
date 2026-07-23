@@ -171,7 +171,7 @@ class StoredSchedule:
 
 **Per-period control** (shared across all platforms): At each 15-minute period boundary, `_write_period_to_hardware()` issues generic HA entity calls:
 - `switch.turn_on` / `switch.turn_off` — grid charge enable/disable
-- `number.set_value` — charge/discharge power rate
+- `number.set_value` (or `input_number.set_value` if the configured entity is a user-provided `input_number.*` helper) — charge/discharge power rate
 
 These resolve to platform-specific entities via the sensor config (e.g. `grid_charge` → `switch.rkm…_charge_from_grid` on Growatt cloud, or `switch.solax_charger_switch` on solax_modbus).
 

@@ -13,6 +13,7 @@ communication.
 | Growatt SPH (Cloud) | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods | — |
 | Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
+| Solis (EXPERIMENTAL) | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
 > Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
@@ -58,7 +59,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 **reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
 **grid-charge enable**.
 
-### The five existing platforms as coordinates
+### The six platforms as coordinates
 
 | Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
 |----------|-----------|------------------|------------|----------------------------|-----------|
@@ -67,26 +68,30 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solax_modbus_growatt_min` | TX-Modbus | SM-TOU-numbered (single-segment) | `SolaxModbusGrowattController` | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`) | `SOLAX_GROWATT_MIN_SUFFIX_MAP` |
 | `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
 | `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
+| `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
 
 ### Worked examples for new inverters
 
-- **Solis** (issue #130) — same **scheduling model** (persistent timed
-  charge/discharge slots + charge/discharge current) regardless of integration,
-  but Solis has several HA integrations across **both** transports. We support
-  **one of two** (chosen per the reporter's actual setup; **`solax_modbus` is the
-  default priority** because we already support that transport):
-  - **`solax_modbus`** (TX-Modbus, local; 491★ multi-brand, the community
-    standard) → **most additive**: new `SolisController` + `SOLIS_SUFFIX_MAP` + a
-    detection branch **before** the `solax_modbus_native` fallback. No new
-    transport, no ABC change.
-  - **`solis-cloud-control`** (TX-Cloud, SolisCloud Control API; easiest
-    onboarding, no wiring, but a young integration) → adds a **new TX-Cloud
-    domain** (detection branch + cloud service helpers), like Growatt cloud.
-    Treat as **experimental**.
+- **Solis** (issue #130) — **implemented** as `solis_modbus`: TX-Modbus ×
+  SM-Period-lists, via the dedicated
+  [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
+  integration (its own domain, not multiplexed through `wills106/homeassistant-
+  solax-modbus`). This supersedes the earlier note below (kept for history)
+  that considered `solis_modbus` "redundant with `solax_modbus`'s local niche"
+  — in practice `solax_modbus` (the `wills106` project) does **not** support
+  Solis inverters at all, so `solis_modbus` was the only viable local-Modbus
+  option. See "Solis — solis_modbus" below for the full write-up, including
+  which unique_ids were verified against the real integration source and
+  which control entities were intentionally left unwired (no global SOC-limit
+  write path yet). Ships **experimental** — not yet validated against a real
+  Solis installation; based on SA7BNT's research and initial implementation
+  in bess-manager-beta PR #51.
 
-  *Not supported:* `solis-sensor` (monitoring-only) and `Pho3niX90/solis_modbus`
-  (redundant with `solax_modbus`'s local niche). **Decision: ask the reporter
-  which of the two they run, implement that one, default to `solax_modbus`.**
+  *(Historical note, superseded above):* Solis has several HA integrations
+  across both transports — `solis-cloud-control` (TX-Cloud, SolisCloud
+  Control API) would be the cloud alternative if a future contributor wants
+  it; `solis-sensor` (monitoring-only, no control) was ruled out as strictly
+  worse than `solis_modbus`.
 - **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
   plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
   branch in detection + a `forcible_charge` service helper + a `HuaweiController`
@@ -326,6 +331,64 @@ button.press(trigger)
 
 **Idle/solar mode:** Disables VPP, inverter reverts to self-use.
 
+### Solis — `solis_modbus` (EXPERIMENTAL)
+
+Solis hybrids, connected via the community
+[`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
+integration (verified against release v4.1.6), share Growatt SPH's
+**SM-Period-lists** scheduling model — separate charge and discharge period
+lists — but Solis's "Grid Time of Use v2" schedule supports **6 charge
+periods and 6 discharge periods** (not SPH's 3+3), and each period is written
+directly to HA `time`/`switch` entities rather than via a cloud service call.
+Credit: based on SA7BNT's research and initial implementation in
+bess-manager-beta [PR #51](https://github.com/johanzander/bess-manager-beta/pull/51).
+
+**Schedule writes:** one `time.set_value` call for each slot's start and end,
+plus one `switch.turn_on`/`turn_off` for its enable bit — for all 6 charge
+slots and all 6 discharge slots, every time (full rewrite, unused slots get
+`00:00-00:00` + disabled):
+```
+time.set_value(entity: solis_charge_start_N, time: "HH:MM:00")
+time.set_value(entity: solis_charge_end_N,   time: "HH:MM:00")
+switch.turn_on/turn_off(entity: solis_charge_enable_N)
+# ...and the same for solis_discharge_{start,end,enable}_N, N = 1..6
+```
+
+**Per-period control:** none — Solis has no per-period charge/discharge rate
+register exposed by solis_modbus (`supports_charge_rate_control = False`,
+same limitation as SPH).
+
+**Verified integration bug (source-cited):** `SolisSensorGroup.__init__`
+(`sensors/solis_base_sensor.py:254`) calls
+`unique_id_generator(controller, entity)` — passing the **entire entity
+definition dict** instead of `entity["unique"]`. This means most read-only
+sensors and all "editable" number entities (per-slot TOU current/cutoff-SOC,
+global charge/discharge stop SOC) get a `unique_id` containing the Python
+`repr()` of their whole definition dict, e.g. ``solis_modbus_SN123_{'name':
+'Battery SOC', ..., 'unique': 'solis_modbus_inverter_battery_soc', ...}`` —
+not a clean, `endswith()`-matchable suffix. Present in v4.1.6 (stable) and
+unchanged on the integration's HEAD as of 2026-07-05. BESS works around this
+with a **Solis-only** substring matcher
+(`_match_solis_dict_embedded_entities` in `ha_api_controller.py`) that
+checks for the verified `'unique': '<key>'` fragment — this never touches
+the shared `_map_registry_entities` suffix matching every other platform
+uses. TOU period times (`time.py`) and per-slot enable switches
+(`solis_binary_sensor.py`) go through the integration's *correct*
+`unique_id_generator` call and are matched normally.
+
+**Known gaps in this first pass:**
+- Global charge/discharge stop SOC ("Max Charge SOC" / "Overdischarge SOC")
+  are affected by the same dict-embedded-unique_id bug and have no verified
+  write path yet — `sync_soc_limits()` is an explicit no-op, not a silent
+  fallback.
+- `pv_power` maps to PV string 1 only (`dc_power_1`); Solis hybrids with
+  multiple MPPT strings will under-report total PV power until a summed
+  sensor is added.
+- `import_power` and `export_power` both resolve to the single signed "Grid
+  Power Net" sensor (Solis exposes no separate import/export power
+  entities); `export_power` is left unconfigured by auto-discovery since one
+  suffix-map entry can only resolve to one BESS sensor key.
+
 ---
 
 ## Required Entities by Platform
@@ -510,6 +573,43 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `solax_battery_min_soc` | number | `battery_minimum_capacity` | Min battery SOC (%) |
 | `solax_charger_use_mode` | select | `charger_use_mode` | Charger use mode (optional) |
 
+### Solis — `solis_modbus` integration (EXPERIMENTAL)
+
+**Monitoring:**
+
+| BESS Sensor Key | Entity Type | solis_modbus unique_id (verified) | Purpose |
+|-----------------|-------------|-----------------------------------|---------|
+| `battery_soc` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_battery_soc'` | Current battery level |
+| `battery_charge_power` | sensor | `solis_modbus_inverter_battery_charge_power` (derived, clean) | Charge power (W) |
+| `battery_discharge_power` | sensor | `solis_modbus_inverter_battery_discharge_power` (derived, clean) | Discharge power (W) |
+| `import_power` / `export_power` | sensor | `solis_modbus_inverter_grid_power_net` (derived, clean, signed) | Net grid power (W); only `import_power` is auto-mapped |
+| `pv_power` | sensor | `solis_modbus_inverter_dc_power_1` (derived, clean) | PV string 1 power (W) — see known gaps above |
+| `local_load_power` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_household_load_power'` | Home consumption (W) |
+
+**Lifetime energy (optional, all dict-embedded — see "Verified integration bug" above):**
+
+| BESS Sensor Key | solis_modbus `unique` key | Notes |
+|-----------------|---------------------------|-------|
+| `lifetime_battery_charged` | `solis_modbus_inverter_total_battery_charge_energy` | |
+| `lifetime_battery_discharged` | `solis_modbus_inverter_total_battery_discharge_energy` | |
+| `lifetime_solar_energy` | `solis_modbus_inverter_pv_total_generation` | |
+| `lifetime_import_from_grid` | `solis_modbus_inverter_total_energy_imported_from_grid` | |
+| `lifetime_export_to_grid` | `solis_modbus_inverter_total_energy_fed_into_grid` | |
+
+**Grid Time of Use v2 schedule (required, 6 charge + 6 discharge slots):**
+
+| BESS Sensor Key | Entity Type | solis_modbus unique_id | Purpose |
+|-----------------|-------------|-------------------------|---------|
+| `solis_charge_start_N` (N=1-6) | time | `time_entity_{register}` (registers 43711/43718/43725/43732/43739/43746) | Charge slot N start |
+| `solis_charge_end_N` | time | `time_entity_{register}` (43713/43720/43727/43734/43741/43748) | Charge slot N end |
+| `solis_charge_enable_N` | switch | `{register}_{bit}` = `43707_0`..`43707_5` | Charge slot N enable |
+| `solis_discharge_start_N` | time | `time_entity_{register}` (43753/43760/43767/43774/43781/43788) | Discharge slot N start |
+| `solis_discharge_end_N` | time | `time_entity_{register}` (43755/43762/43769/43776/43783/43790) | Discharge slot N end |
+| `solis_discharge_enable_N` | switch | `{register}_{bit}` = `43707_6`..`43707_11` | Discharge slot N enable |
+
+Only slot 1 of each direction is strictly required; slots 2-6 are optional
+(unused slots are simply left disabled by BESS).
+
 ---
 
 ## Auto-Detection
@@ -530,6 +630,13 @@ registry:
    not `entity_id` (built from display `name`). For Growatt TOU entities the
    unique_id ends with `time_1_enabled` even though the entity_id contains
    `time_1_active`.
+
+3. **solis_modbus detected** (`platform: solis_modbus`, its own dedicated
+   integration domain — no sub-variant disambiguation needed): confirmed
+   further by checking for the `time_entity_43711` unique_id suffix (Grid
+   Time of Use v2 Charge Start, Slot 1) — if absent, the installed
+   inverter/firmware lacks the v2 schedule and schedule control is
+   unavailable (monitoring sensors are still mapped).
 
 If multiple platforms are detected (e.g. both Growatt and SolaX entities
 exist), the Settings page under Integrations & Sensors → Inverter Platform

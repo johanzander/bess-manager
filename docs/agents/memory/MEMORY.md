@@ -3,4 +3,5 @@
 - [Worktree sibling location](feedback_worktree_location.md) — Create worktrees as sibling folders, not inside .claude/worktrees/
 - [Parallel release train](feedback_parallel_release.md) — Use concurrent subagents for beta releases; check GitHub releases for version numbers
 - [solax_modbus unique_id format](reference_solax_modbus_unique_ids.md) — unique_id = {user_device_name}_{register_key}; suffix maps must use register key only, never hardcode device name prefix
+- [Inverter platform maturity levels](project_platform_maturity.md) — Only Growatt cloud + GEN4 solax_modbus are real-world tested; GEN3, SolaX VPP, and Solis (solis_modbus) are experimental
 - [Issue #275 investigation status](project_issue_275_investigation_status.md) — real defect fixed in v9.9.0b13 (PR #279); residual proven financially optimal via Bellman-optimality + realized-cost checks; #276/#285 recommended closed

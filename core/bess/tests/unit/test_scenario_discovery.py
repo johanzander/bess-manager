@@ -91,6 +91,7 @@ def _api_stub(scenario: dict):
 _INTEGRATION_KEYS = (
     "growatt_found",
     "solax_found",
+    "solis_found",
     "solax_has_growatt_tou",
     "solax_has_growatt_gen3",
     "nordpool_found",

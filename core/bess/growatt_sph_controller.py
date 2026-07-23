@@ -90,125 +90,10 @@ class GrowattSphController(InverterController):
         return self.tou_intervals
 
     # ── Period utility ────────────────────────────────────────────────────────
-
-    # ── SPH period grouping ───────────────────────────────────────────────────
-
-    def _group_sph_periods(self, intents: list[str]) -> tuple[list[dict], list[dict]]:
-        """Group consecutive periods into charge/discharge blocks.
-
-        Args:
-            intents: Strategic intents to group (the candidate being built).
-
-        Returns:
-            Tuple of (charge_blocks, discharge_blocks) where each block is a dict with
-            keys 'start_period', 'end_period', and 'intents'.
-        """
-        if not intents:
-            return [], []
-
-        charge_blocks: list[dict] = []
-        discharge_blocks: list[dict] = []
-
-        for _category, target_list, intent_set in [
-            ("charge", charge_blocks, self.CHARGE_INTENTS),
-            ("discharge", discharge_blocks, self.DISCHARGE_INTENTS),
-        ]:
-            current_block: dict | None = None
-
-            for period, intent in enumerate(intents):
-                if intent in intent_set:
-                    if current_block is None:
-                        current_block = {
-                            "start_period": period,
-                            "end_period": period,
-                            "intents": [intent],
-                        }
-                    else:
-                        current_block["end_period"] = period
-                        current_block["intents"].append(intent)
-                else:
-                    if current_block is not None:
-                        target_list.append(current_block)
-                        current_block = None
-
-            if current_block is not None:
-                target_list.append(current_block)
-
-        return charge_blocks, discharge_blocks
-
-    def _enforce_period_limit(self, blocks: list[dict], max_periods: int) -> list[dict]:
-        """Enforce maximum period count by dropping shortest blocks.
-
-        Args:
-            blocks: List of period blocks
-            max_periods: Maximum allowed blocks
-
-        Returns:
-            Trimmed list of at most max_periods blocks
-        """
-        if len(blocks) <= max_periods:
-            return blocks
-
-        logger.warning(
-            "SPH PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — dropping shortest",
-            len(blocks),
-            max_periods,
-        )
-
-        def block_duration(b: dict) -> int:
-            return b["end_period"] - b["start_period"] + 1
-
-        # Keep the longest blocks, sorted by original order
-        sorted_by_duration = sorted(blocks, key=block_duration, reverse=True)
-        kept = sorted_by_duration[:max_periods]
-        dropped = sorted_by_duration[max_periods:]
-
-        for b in dropped:
-            sh, sm = self._period_to_time(b["start_period"])
-            eh, em = self._period_to_time(b["end_period"])
-            logger.warning(
-                "  DROPPED: %02d:%02d-%02d:%02d (%d periods) intents=%s",
-                sh,
-                sm,
-                eh,
-                em + 14,
-                block_duration(b),
-                b["intents"],
-            )
-
-        # Return kept blocks in chronological order
-        return sorted(kept, key=lambda b: b["start_period"])
-
-    def _blocks_to_period_dicts(self, blocks: list[dict]) -> list[dict]:
-        """Convert period blocks to time-string dicts for hardware and display.
-
-        Args:
-            blocks: List of period blocks from _group_sph_periods
-
-        Returns:
-            List of dicts with 'start_time', 'end_time', 'enabled' keys
-        """
-        result = []
-        for block in blocks:
-            sh, sm = self._period_to_time(block["start_period"])
-            eh, em = self._period_to_time(block["end_period"])
-
-            # Cap end time to 23:59
-            if sh >= 24:
-                continue  # Skip DST fall-back periods beyond 23:59
-            if eh >= 24:
-                eh, em = 23, 59
-            else:
-                em += 14  # Last minute of the 15-min period
-
-            result.append(
-                {
-                    "start_time": f"{sh:02d}:{sm:02d}",
-                    "end_time": f"{eh:02d}:{em:02d}",
-                    "enabled": True,
-                }
-            )
-        return result
+    # NOTE: _group_period_blocks / _enforce_period_limit / _blocks_to_period_dicts
+    # live on InverterController (the base class) — they are pure functions of
+    # strategic_intents/CHARGE_INTENTS/DISCHARGE_INTENTS shared by any
+    # SM-Period-lists controller (SPH here, Solis via SolisModbusController).
 
     # ── Schedule building ─────────────────────────────────────────────────────
 
@@ -218,44 +103,9 @@ class GrowattSphController(InverterController):
         """Compute charge/discharge periods and display TOU intervals for the
         given intents, without mutating self. Shared by apply_intents (commits
         onto self) and evaluate_intents (diffs against self's current state)."""
-        charge_blocks, discharge_blocks = self._group_sph_periods(intents)
-
-        charge_blocks = self._enforce_period_limit(
-            charge_blocks, self.MAX_CHARGE_PERIODS
+        charge_periods, discharge_periods, tou_intervals = (
+            self._build_period_list_schedule(intents, commit=False)
         )
-        discharge_blocks = self._enforce_period_limit(
-            discharge_blocks, self.MAX_DISCHARGE_PERIODS
-        )
-
-        charge_periods = self._blocks_to_period_dicts(charge_blocks)
-        discharge_periods = self._blocks_to_period_dicts(discharge_blocks)
-
-        tou_intervals = []
-        for p in charge_periods:
-            tou_intervals.append(
-                {
-                    "start_time": p["start_time"],
-                    "end_time": p["end_time"],
-                    "batt_mode": "battery_first",
-                    "enabled": True,
-                    "is_default": False,
-                    "strategic_intent": "GRID_CHARGING",
-                }
-            )
-        for p in discharge_periods:
-            tou_intervals.append(
-                {
-                    "start_time": p["start_time"],
-                    "end_time": p["end_time"],
-                    "batt_mode": "grid_first",
-                    "enabled": True,
-                    "is_default": False,
-                    "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
-                }
-            )
-        tou_intervals.sort(key=lambda x: x["start_time"])
-        for idx, interval in enumerate(tou_intervals):
-            interval["segment_id"] = idx + 1
 
         logger.info(
             "SPH periods built: %d charge period(s), %d discharge period(s)",
@@ -505,28 +355,12 @@ class GrowattSphController(InverterController):
                     )
 
         # Build display intervals
-        self.tou_intervals = []
-        for p in self._charge_periods:
-            self.tou_intervals.append(
-                {
-                    "start_time": p["start_time"],
-                    "end_time": p["end_time"],
-                    "batt_mode": "battery_first",
-                    "enabled": True,
-                    "strategic_intent": "existing_schedule",
-                }
-            )
-        for p in self._discharge_periods:
-            self.tou_intervals.append(
-                {
-                    "start_time": p["start_time"],
-                    "end_time": p["end_time"],
-                    "batt_mode": "grid_first",
-                    "enabled": True,
-                    "strategic_intent": "existing_schedule",
-                }
-            )
-        self.tou_intervals.sort(key=lambda x: x["start_time"])
+        self.tou_intervals = self._periods_to_tou_intervals(
+            self._charge_periods,
+            self._discharge_periods,
+            charge_intent="existing_schedule",
+            discharge_intent="existing_schedule",
+        )
 
         logger.info(
             "SPH initialized from hardware: %d charge period(s), %d discharge period(s)",
@@ -536,46 +370,6 @@ class GrowattSphController(InverterController):
 
     # ── Schedule comparison ───────────────────────────────────────────────────
 
-    @staticmethod
-    def _periods_equal(a: list[dict], b: list[dict]) -> bool:
-        if len(a) != len(b):
-            return False
-        for pa, pb in zip(a, b, strict=False):
-            if (
-                pa.get("start_time") != pb.get("start_time")
-                or pa.get("end_time") != pb.get("end_time")
-                or pa.get("enabled") != pb.get("enabled")
-            ):
-                return False
-        return True
-
-    def _diff_sph_periods(
-        self,
-        current_charge: list[dict],
-        new_charge: list[dict],
-        current_discharge: list[dict],
-        new_discharge: list[dict],
-    ) -> tuple[bool, str]:
-        """Shared diff rules for SPH charge/discharge period lists."""
-        if not self._periods_equal(current_charge, new_charge):
-            logger.info(
-                "DECISION: SPH charge periods differ — current=%s new=%s",
-                current_charge,
-                new_charge,
-            )
-            return True, "SPH charge periods differ"
-
-        if not self._periods_equal(current_discharge, new_discharge):
-            logger.info(
-                "DECISION: SPH discharge periods differ — current=%s new=%s",
-                current_discharge,
-                new_discharge,
-            )
-            return True, "SPH discharge periods differ"
-
-        logger.info("DECISION: SPH schedules match")
-        return False, ""
-
     def evaluate_intents(
         self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
@@ -584,8 +378,12 @@ class GrowattSphController(InverterController):
         candidate_intents = schedule.original_dp_results["strategic_intent"]
         new_charge, new_discharge, _tou = self._build_candidate(candidate_intents)
 
-        return self._diff_sph_periods(
-            self._charge_periods, new_charge, self._discharge_periods, new_discharge
+        return self._diff_period_lists(
+            self._charge_periods,
+            self._discharge_periods,
+            new_charge,
+            new_discharge,
+            "SPH",
         )
 
     # ── Period settings ─────────────────────────────────────────────────────

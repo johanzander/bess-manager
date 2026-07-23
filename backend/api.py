@@ -3334,6 +3334,7 @@ async def run_setup_discovery():
                 "solax_has_growatt_gen3": integrations.get(
                     "solax_has_growatt_gen3", False
                 ),
+                "solis_found": integrations.get("solis_found", False),
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_custom_area": integrations.get("nordpool_custom_area"),

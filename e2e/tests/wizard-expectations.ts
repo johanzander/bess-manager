@@ -10,7 +10,9 @@ export interface WizardExpectation {
   // Mandatory integrations
   growattFound: boolean;
   solaxFound: boolean;
-  inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph';
+  /** Solis (solis_modbus) detected. Optional — defaults to false. */
+  solisFound?: boolean;
+  inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph' | 'solis_modbus';
   nordpoolFound: boolean;
   octopusFound: boolean;
   /** ENTSO-e Transparency Platform (e.g. Belpex). Optional — defaults to false. */
@@ -163,6 +165,20 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     growattFound: false,
     solaxFound: true,
     inverterPlatform: 'solax_modbus_native',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
+  'ci-wizard-solis': {
+    growattFound: false,
+    solaxFound: false,
+    solisFound: true,
+    inverterPlatform: 'solis_modbus',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',

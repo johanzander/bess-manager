@@ -1,0 +1,367 @@
+{
+  "name": "ci-wizard-solis",
+  "description": "Fresh install with a Solis hybrid inverter via solis_modbus (Grid Time of Use v2, local Modbus) + official Nordpool SE3. Source-derived fixture (Phase 1, add-inverter-platform skill) built from github.com/Pho3niX90/solis_modbus v4.1.6 — see core/bess/ha_api_controller.py SOLIS_SUFFIX_MAP for unique_id citations.",
+  "mock_time": "@2026-05-21 17:17:48",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "battery": {
+      "total_capacity": 15.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 6.0,
+      "max_discharge_power_kw": 6.0,
+      "cycle_cost_per_kwh": 0.4,
+      "min_action_profit_threshold": 0.0,
+      "efficiency_charge": 0.97,
+      "efficiency_discharge": 0.95
+    },
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1.0,
+      "phase_count": 1,
+      "power_monitoring_enabled": false
+    },
+    "electricity_price": {
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 0.773,
+      "tax_reduction": 0.1988,
+      "area": "SE4"
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": ""
+      },
+      "nordpool": {
+        "entity": ""
+      },
+      "octopus": {}
+    },
+    "growatt": {
+      "inverter_type": "",
+      "device_id": ""
+    },
+    "inverter": {
+      "platform": "",
+      "device_id": ""
+    },
+    "sensors": {}
+  },
+  "sensors": {
+    "sensor.solis_battery_soc": {
+      "state": "62",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.solis_battery_charge_power": {
+      "state": "0",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solis_battery_discharge_power": {
+      "state": "900",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solis_grid_power_net": {
+      "state": "1500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solis_pv_power_1": {
+      "state": "2200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solis_household_load_power": {
+      "state": "3100",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.solis_total_battery_charge_energy": {
+      "state": "4200",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solis_total_battery_discharge_energy": {
+      "state": "3900",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solis_pv_total_generation": {
+      "state": "9500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solis_total_energy_imported_from_grid": {
+      "state": "12000",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solis_total_energy_fed_into_grid": {
+      "state": "2500",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "time.solis_charge_start_1": {
+      "state": "00:00:00",
+      "attributes": {}
+    },
+    "time.solis_charge_end_1": {
+      "state": "00:00:00",
+      "attributes": {}
+    },
+    "time.solis_discharge_start_1": {
+      "state": "00:00:00",
+      "attributes": {}
+    },
+    "time.solis_discharge_end_1": {
+      "state": "00:00:00",
+      "attributes": {}
+    },
+    "switch.solis_tou_slot_bit_0": {
+      "state": "off",
+      "attributes": {}
+    },
+    "switch.solis_tou_slot_bit_6": {
+      "state": "off",
+      "attributes": {}
+    },
+    "sensor.nord_pool_se3_current_price": {
+      "state": "0.52",
+      "attributes": {
+        "unit_of_measurement": "SEK/kWh",
+        "price_area": "SE3"
+      }
+    }
+  },
+  "entity_registry": [
+    {
+      "entity_id": "sensor.solis_battery_charge_power",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_battery_charge_power",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_battery_discharge_power",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_battery_discharge_power",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_grid_power_net",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_grid_power_net",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_pv_power_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_dc_power_1",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_battery_soc",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Battery SOC', 'unique': 'solis_modbus_inverter_battery_soc', 'register': ['33139']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_household_load_power",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Household load power', 'unique': 'solis_modbus_inverter_household_load_power', 'register': ['33147']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_total_battery_charge_energy",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Total Battery Charge Energy', 'unique': 'solis_modbus_inverter_total_battery_charge_energy', 'register': ['33199']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_total_battery_discharge_energy",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Total Battery Discharge Energy', 'unique': 'solis_modbus_inverter_total_battery_discharge_energy', 'register': ['33205']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_pv_total_generation",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'PV Total Energy Generation', 'unique': 'solis_modbus_inverter_pv_total_generation', 'register': ['33029']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_total_energy_imported_from_grid",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Total Energy Imported From Grid', 'unique': 'solis_modbus_inverter_total_energy_imported_from_grid', 'register': ['33165']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_total_energy_fed_into_grid",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_{'name': 'Total Energy Fed Into Grid', 'unique': 'solis_modbus_inverter_total_energy_fed_into_grid', 'register': ['33169']}",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "time.solis_charge_start_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_time_entity_43711",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "time.solis_charge_end_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_time_entity_43713",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "time.solis_discharge_start_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_time_entity_43753",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "time.solis_discharge_end_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_time_entity_43755",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "switch.solis_tou_slot_bit_0",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_43707_0",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "switch.solis_tou_slot_bit_6",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_43707_6",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_current_price",
+      "platform": "nordpool",
+      "unique_id": "SE3-current_price",
+      "device_id": "dev-nordpool-001",
+      "config_entry_id": "entry-nordpool-001"
+    }
+  ],
+  "config_entries": [
+    {
+      "entry_id": "entry-nordpool-001",
+      "domain": "nordpool",
+      "title": "Nord Pool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "entry-solis-001",
+      "domain": "solis_modbus",
+      "title": "Solis",
+      "state": "loaded"
+    }
+  ],
+  "devices": [
+    {
+      "id": "dev-solis-001",
+      "name": "Solis Inverter",
+      "manufacturer": "Solis",
+      "model": null,
+      "identifiers": [
+        [
+          "solis_modbus",
+          "SN2024ABCDEF"
+        ]
+      ],
+      "config_entries": [
+        "entry-solis-001"
+      ]
+    },
+    {
+      "id": "dev-nordpool-001",
+      "name": "Nord Pool SE3",
+      "manufacturer": "Nord Pool",
+      "model": null,
+      "identifiers": [
+        [
+          "nordpool",
+          "SE3"
+        ]
+      ],
+      "config_entries": [
+        "entry-nordpool-001"
+      ]
+    }
+  ],
+  "services": {
+    "time": {
+      "set_value": {}
+    },
+    "switch": {
+      "turn_on": {},
+      "turn_off": {}
+    }
+  },
+  "price_data": {
+    "today": [
+      0.45, 0.38, 0.32, 0.28, 0.25, 0.3, 0.55, 0.82, 1.05, 1.15, 1.08, 0.95,
+      0.85, 0.78, 0.72, 0.8, 0.92, 1.25, 1.55, 1.42, 1.1, 0.75, 0.58, 0.48
+    ],
+    "tomorrow": [
+      0.42, 0.35, 0.3, 0.26, 0.23, 0.28, 0.5, 0.78, 1.0, 1.1, 1.02, 0.9, 0.8,
+      0.74, 0.68, 0.76, 0.88, 1.2, 1.48, 1.35, 1.05, 0.7, 0.55, 0.45
+    ]
+  },
+  "time_segments": [],
+  "expected_discovery": {
+    "growatt_found": false,
+    "solax_found": false,
+    "solis_found": true,
+    "nordpool_found": true,
+    "nordpool_area": "SE3",
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": "entry-nordpool-001",
+    "octopus_found": false,
+    "currency": "SEK",
+    "vat_multiplier": 1.25,
+    "detected_platform": "solis_modbus",
+    "required_sensors": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "import_power",
+      "pv_power",
+      "local_load_power",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_solar_energy",
+      "lifetime_import_from_grid",
+      "lifetime_export_to_grid",
+      "solis_charge_start_1",
+      "solis_charge_end_1",
+      "solis_discharge_start_1",
+      "solis_discharge_end_1",
+      "solis_charge_enable_1",
+      "solis_discharge_enable_1"
+    ],
+    "detected_inverter_platforms": [
+      "solis_modbus"
+    ]
+  },
+  "inverter_platform": "solis_modbus"
+}

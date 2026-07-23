@@ -30,7 +30,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     text: isDarkMode ? '#9CA3AF' : '#374151',
     background: isDarkMode ? '#1f2937' : '#ffffff',
     tooltip: isDarkMode ? '#374151' : '#ffffff',
-    tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db'
+    tooltipBorder: isDarkMode ? '#4b5563' : '#d1d5db',
+    soc: '#3b82f6',
+    solarCharging: '#fbbf24',
+    gridCharging: '#16a34a',
+    homeDischarging: '#f87171',
+    gridDischarging: '#dc2626'
   };
 
   // Extract values from FormattedValue objects or fallback to raw numbers
@@ -61,6 +66,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       throw new Error(`MISSING DATA: batteryAction is required but missing at index ${index}`);
     }
     const batteryAction = getValue(hour.batteryAction);
+    const solarToBattery = getValue(hour.solarToBattery);
+    const gridToBattery = getValue(hour.gridToBattery);
+    const batteryToHome = getValue(hour.batteryToHome);
+    const batteryToGrid = getValue(hour.batteryToGrid);
     const rawSoc = getValue(hour.batterySocEnd);
     const isActual = hour.dataSource === 'actual';
     // Treat zero SOC on predicted periods as missing data to avoid flat 0% lines
@@ -87,8 +96,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       hourLabel: periodToTimeString(periodNum, resolution),
       batterySocPercent: batterySocPercent,
       action: batteryAction,
-      charging: batteryAction > 0 ? batteryAction : 0,
-      discharging: batteryAction < 0 ? batteryAction : 0,
+      solarCharging: solarToBattery,
+      gridCharging: gridToBattery,
+      homeDischarging: batteryToHome > 0 ? -batteryToHome : 0,
+      gridDischarging: batteryToGrid > 0 ? -batteryToGrid : 0,
       price: price,
       dataSource: dataSource,
       isActual: dataSource === 'actual',
@@ -97,12 +108,16 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       // Include FormattedValue objects for tooltip
       batterySocEndFormatted: hour.batterySocEnd,
       batteryActionFormatted: hour.batteryAction,
-      buyPriceFormatted: hour.buyPrice
+      buyPriceFormatted: hour.buyPrice,
+      solarToBatteryFormatted: hour.solarToBattery,
+      gridToBatteryFormatted: hour.gridToBattery,
+      batteryToHomeFormatted: hour.batteryToHome,
+      batteryToGridFormatted: hour.batteryToGrid
     };
   });
 
   // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
-  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, charging: 0, discharging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted });
+  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, solarCharging: 0, gridCharging: 0, homeDischarging: 0, gridDischarging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted, solarToBatteryFormatted: chartData[0]?.solarToBatteryFormatted, gridToBatteryFormatted: chartData[0]?.gridToBatteryFormatted, batteryToHomeFormatted: chartData[0]?.batteryToHomeFormatted, batteryToGridFormatted: chartData[0]?.batteryToGridFormatted });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
@@ -113,6 +128,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         continue;
       }
       const batteryAction = getValue(hour.batteryAction);
+      const solarToBattery = getValue(hour.solarToBattery);
+      const gridToBattery = getValue(hour.gridToBattery);
+      const batteryToHome = getValue(hour.batteryToHome);
+      const batteryToGrid = getValue(hour.batteryToGrid);
       const rawSocTmrw = getValue(hour.batterySocEnd);
       const batterySocPercent = rawSocTmrw === 0 ? null : rawSocTmrw;
       const rawPriceTmrw = getValue(hour.buyPrice);
@@ -136,8 +155,10 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         hourLabel: periodToTimeString(periodNum, resolution),
         batterySocPercent,
         action: batteryAction,
-        charging: batteryAction > 0 ? batteryAction : 0,
-        discharging: batteryAction < 0 ? batteryAction : 0,
+        solarCharging: solarToBattery,
+        gridCharging: gridToBattery,
+        homeDischarging: batteryToHome > 0 ? -batteryToHome : 0,
+        gridDischarging: batteryToGrid > 0 ? -batteryToGrid : 0,
         price,
         dataSource,
         isActual: false,
@@ -145,7 +166,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         isTomorrow: true,
         batterySocEndFormatted: hour.batterySocEnd,
         batteryActionFormatted: hour.batteryAction,
-        buyPriceFormatted: hour.buyPrice
+        buyPriceFormatted: hour.buyPrice,
+        solarToBatteryFormatted: hour.solarToBattery,
+        gridToBatteryFormatted: hour.gridToBattery,
+        batteryToHomeFormatted: hour.batteryToHome,
+        batteryToGridFormatted: hour.batteryToGrid
       });
     }
   }
@@ -162,7 +187,11 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
   const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour : null;
   const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour : maxHourValue;
 
-  const maxAction = Math.max(...chartData.map(d => Math.abs(d.action || 0)), 1);
+  const maxAction = Math.max(
+    ...chartData.map(d => (d.solarCharging || 0) + (d.gridCharging || 0)),
+    ...chartData.map(d => Math.abs((d.homeDischarging || 0) + (d.gridDischarging || 0))),
+    1
+  );
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -208,7 +237,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               tick={{ fill: colors.text, fontSize: 12 }}
               tickFormatter={(value) => value.toLocaleString('sv-SE', {minimumFractionDigits: 1, maximumFractionDigits: 1})}
               label={{
-                value: 'Battery Action (kWh)',
+                value: 'Battery Flow (kWh)',
                 angle: 90,
                 position: 'outside',
                 offset: 40,
@@ -226,10 +255,12 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 return (
                   <div style={{ backgroundColor: colors.tooltip, border: `1px solid ${colors.tooltipBorder}`, borderRadius: '8px', padding: '10px', color: colors.text }}>
                     <p style={{ fontWeight: 'bold', marginBottom: 4 }}>{label}</p>
-                    <p style={{ color: '#16a34a' }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
+                    <p style={{ color: colors.soc }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
                     <p style={{ color: '#9CA3AF' }}>Electricity Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
-                    {data.action > 0 && <p style={{ color: '#16a34a' }}>Battery Charging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
-                    {data.action < 0 && <p style={{ color: '#dc2626' }}>Battery Discharging : {(data.batteryActionFormatted?.text ?? `${data.action}`).replace(/^-0(\b|\.)/, '0$1')}</p>}
+                    {data.solarCharging > 0 && <p style={{ color: colors.solarCharging }}>Solar → Battery : {data.solarToBatteryFormatted?.text ?? `${data.solarCharging}`}</p>}
+                    {data.gridCharging > 0 && <p style={{ color: colors.gridCharging }}>Grid → Battery : {data.gridToBatteryFormatted?.text ?? `${data.gridCharging}`}</p>}
+                    {data.homeDischarging < 0 && <p style={{ color: colors.homeDischarging }}>Battery → Home : {data.batteryToHomeFormatted?.text ?? `${-data.homeDischarging}`}</p>}
+                    {data.gridDischarging < 0 && <p style={{ color: colors.gridDischarging }}>Battery → Grid : {data.batteryToGridFormatted?.text ?? `${-data.gridDischarging}`}</p>}
                   </div>
                 );
               }}
@@ -286,34 +317,62 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
               yAxisId="left"
               type="monotone"
               dataKey="batterySocPercent"
-              stroke="#16a34a"
+              stroke={colors.soc}
               strokeWidth={2}
-              fill="#16a34a"
+              fill={colors.soc}
               fillOpacity={0.1}
               name="Battery SOC"
             />
-            
+
             <Area
               yAxisId="action"
               type="stepBefore"
-              dataKey="charging"
-              stroke="#16a34a"
+              dataKey="solarCharging"
+              stackId="charge"
+              stroke={colors.solarCharging}
               strokeWidth={1}
-              fill="#16a34a"
+              fill={colors.solarCharging}
               fillOpacity={0.7}
-              name="Battery Charging"
+              name="Solar → Battery"
               dot={false}
               connectNulls={false}
             />
             <Area
               yAxisId="action"
               type="stepBefore"
-              dataKey="discharging"
-              stroke="#dc2626"
+              dataKey="gridCharging"
+              stackId="charge"
+              stroke={colors.gridCharging}
               strokeWidth={1}
-              fill="#dc2626"
+              fill={colors.gridCharging}
               fillOpacity={0.7}
-              name="Battery Discharging"
+              name="Grid → Battery"
+              dot={false}
+              connectNulls={false}
+            />
+            <Area
+              yAxisId="action"
+              type="stepBefore"
+              dataKey="homeDischarging"
+              stackId="discharge"
+              stroke={colors.homeDischarging}
+              strokeWidth={1}
+              fill={colors.homeDischarging}
+              fillOpacity={0.7}
+              name="Battery → Home"
+              dot={false}
+              connectNulls={false}
+            />
+            <Area
+              yAxisId="action"
+              type="stepBefore"
+              dataKey="gridDischarging"
+              stackId="discharge"
+              stroke={colors.gridDischarging}
+              strokeWidth={1}
+              fill={colors.gridDischarging}
+              fillOpacity={0.7}
+              name="Battery → Grid"
               dot={false}
               connectNulls={false}
             />
@@ -324,16 +383,24 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       {/* Custom Legend */}
       <div className="flex flex-wrap justify-center gap-6 mt-1 text-sm">
         <div className="flex items-center">
-          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: '#16a34a' }}></div>
+          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.soc }}></div>
           <span className="text-gray-700 dark:text-gray-300">Battery SOC</span>
         </div>
         <div className="flex items-center">
-          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: '#16a34a' }}></div>
-          <span className="text-gray-700 dark:text-gray-300">Battery Charging</span>
+          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.solarCharging }}></div>
+          <span className="text-gray-700 dark:text-gray-300">Solar → Battery</span>
         </div>
         <div className="flex items-center">
-          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: '#dc2626' }}></div>
-          <span className="text-gray-700 dark:text-gray-300">Battery Discharging</span>
+          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.gridCharging }}></div>
+          <span className="text-gray-700 dark:text-gray-300">Grid → Battery</span>
+        </div>
+        <div className="flex items-center">
+          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.homeDischarging }}></div>
+          <span className="text-gray-700 dark:text-gray-300">Battery → Home</span>
+        </div>
+        <div className="flex items-center">
+          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.gridDischarging }}></div>
+          <span className="text-gray-700 dark:text-gray-300">Battery → Grid</span>
         </div>
       </div>
     </div>

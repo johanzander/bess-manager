@@ -681,61 +681,47 @@ async def get_dashboard_data(
         tomorrow_data: list[APIDashboardHourlyData] | None = None
         if not is_historical:
             try:
-                stored_schedule = (
-                    bess_controller.system.schedule_store.get_latest_schedule()
+                today_period_count = get_period_count(time_utils.today())
+                tomorrow_period_count = get_period_count(
+                    time_utils.today() + timedelta(days=1)
                 )
-                if stored_schedule:
-                    opt_result = stored_schedule.optimization_result
-                    opt_period = stored_schedule.optimization_period
-                    today_period_count = get_period_count(time_utils.today())
-                    tomorrow_period_count = get_period_count(
-                        time_utils.today() + timedelta(days=1)
+                tomorrow_periods = []
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
+                    period_data = (
+                        bess_controller.system.schedule_store.get_period_data_at(
+                            time_utils.period_index_to_timestamp(period_idx)
+                        )
                     )
-                    tomorrow_periods = []
-                    # Standalone next-day schedule (prepare_next_day path): opt_period=0
-                    # and period_data[0] carries tomorrow's date. In that case
-                    # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
-                    # is today_period_count rather than opt_period.
-                    # Regular schedules (including midnight runs with extended horizon)
-                    # have opt_period > 0 or period_data large enough to include tomorrow,
-                    # so they continue to use opt_period as the anchor.
-                    is_next_day_only = (
-                        opt_period == 0
-                        and bool(opt_result.period_data)
-                        and opt_result.period_data[0].timestamp is not None
-                        and opt_result.period_data[0].timestamp.date()
-                        == time_utils.today() + timedelta(days=1)
-                    )
-                    period_data_anchor = (
-                        today_period_count if is_next_day_only else opt_period
-                    )
-                    for period_idx in range(
-                        today_period_count,
-                        today_period_count + tomorrow_period_count,
-                    ):
-                        data_idx = period_idx - period_data_anchor
-                        if 0 <= data_idx < len(opt_result.period_data):
-                            tomorrow_periods.append(opt_result.period_data[data_idx])
-                    if tomorrow_periods:
+                    if period_data is not None:
+                        tomorrow_periods.append(period_data)
+                if tomorrow_periods:
+                    tomorrow_data = [
+                        APIDashboardHourlyData.from_internal(
+                            p, battery_capacity, currency
+                        )
+                        for p in tomorrow_periods
+                    ]
+                    if resolution == "hourly":
+                        tomorrow_data = _aggregate_quarterly_to_hourly(
+                            tomorrow_data, battery_capacity, currency
+                        )
+                    else:
+                        # Tomorrow's periods are indexed relative to the start of the
+                        # optimization window (e.g. 96..191 for a 96-period day).
+                        # The frontend maps period index to wall-clock time, so period 0
+                        # must represent 00:00 of the displayed day.
                         tomorrow_data = [
-                            APIDashboardHourlyData.from_internal(
-                                p, battery_capacity, currency
-                            )
-                            for p in tomorrow_periods
+                            dataclasses.replace(p, period=i)
+                            for i, p in enumerate(tomorrow_data)
                         ]
-                        if resolution == "hourly":
-                            tomorrow_data = _aggregate_quarterly_to_hourly(
-                                tomorrow_data, battery_capacity, currency
-                            )
-                        else:
-                            # Tomorrow's periods are indexed relative to the start of the
-                            # optimization window (e.g. 96..191 for a 96-period day).
-                            # The frontend maps period index to wall-clock time, so period 0
-                            # must represent 00:00 of the displayed day.
-                            tomorrow_data = [
-                                dataclasses.replace(p, period=i)
-                                for i, p in enumerate(tomorrow_data)
-                            ]
             except (AttributeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to get tomorrow's optimization data: {e}")
                 tomorrow_data = None
@@ -1715,27 +1701,28 @@ async def get_growatt_detailed_schedule():
         # Get period groups from schedule manager (15-minute resolution)
         period_groups = []
         try:
-            stored_schedule_for_today = (
-                bess_controller.system.schedule_store.get_latest_schedule()
-            )
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
             today_reconciled_intents: list[str] | None = None
-            if stored_schedule_for_today:
-                opt_result_today = stored_schedule_for_today.optimization_result
-                opt_period_today = stored_schedule_for_today.optimization_period
+            if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
                 planned_intents = schedule_manager.strategic_intents
                 today_reconciled_intents = []
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
                 for period_idx in range(today_period_count_local):
-                    data_idx = period_idx - opt_period_today
                     planned_intent = (
                         planned_intents[period_idx]
                         if planned_intents and period_idx < len(planned_intents)
                         else "IDLE"
                     )
-                    if 0 <= data_idx < len(opt_result_today.period_data):
-                        pd_today = opt_result_today.period_data[data_idx]
+                    pd_today = bess_controller.system.schedule_store.get_period_data_at(
+                        time_utils.period_index_to_timestamp(period_idx)
+                    )
+                    if pd_today is not None:
                         soe = pd_today.energy.battery_soe_end
                         today_soc_values.append(
                             (soe / battery_settings.total_capacity * 100.0)
@@ -1796,12 +1783,7 @@ async def get_growatt_detailed_schedule():
         # Extract tomorrow's period groups from ScheduleStore (same source as dashboard)
         tomorrow_period_groups: list[dict] | None = None
         try:
-            stored_schedule = (
-                bess_controller.system.schedule_store.get_latest_schedule()
-            )
-            if stored_schedule:
-                opt_result = stored_schedule.optimization_result
-                opt_period = stored_schedule.optimization_period
+            if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count = get_period_count(time_utils.today())
                 tomorrow_period_count = get_period_count(
                     time_utils.today() + timedelta(days=1)
@@ -1809,24 +1791,19 @@ async def get_growatt_detailed_schedule():
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
-                # Standalone next-day schedule: same anchor adjustment as dashboard.
-                is_next_day_only = (
-                    opt_period == 0
-                    and bool(opt_result.period_data)
-                    and opt_result.period_data[0].timestamp is not None
-                    and opt_result.period_data[0].timestamp.date()
-                    == time_utils.today() + timedelta(days=1)
-                )
-                period_data_anchor = (
-                    today_period_count if is_next_day_only else opt_period
-                )
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - period_data_anchor
-                    if 0 <= data_idx < len(opt_result.period_data):
-                        pd = opt_result.period_data[data_idx]
+                    pd = bess_controller.system.schedule_store.get_period_data_at(
+                        time_utils.period_index_to_timestamp(period_idx)
+                    )
+                    if pd is not None:
                         tomorrow_intents.append(pd.decision.strategic_intent)
                         tomorrow_actions.append(pd.decision.battery_action or 0.0)
                         soe = pd.energy.battery_soe_end

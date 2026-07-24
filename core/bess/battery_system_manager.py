@@ -1632,18 +1632,15 @@ class BatterySystemManager:
         Returns:
             Strategic intent string if available, None otherwise
         """
-        # First try the in-memory schedule store
-        latest_schedule = self.schedule_store.get_latest_schedule()
-        if latest_schedule is not None:
-            result = latest_schedule.optimization_result
-            if result.period_data:
-                opt_period = latest_schedule.optimization_period
-
-                # Check if this period is within the optimization range
-                if opt_period <= period < opt_period + len(result.period_data):
-                    index = period - opt_period
-                    period_data = result.period_data[index]
-                    return period_data.decision.strategic_intent
+        # First try the in-memory schedule store, resolved by exact
+        # timestamp (not positional index - optimization_period) so the
+        # standalone next-day schedule (period_data[0] anchored to tomorrow
+        # 00:00 despite optimization_period=0) is never misread as today's
+        # period at the same positional index.
+        target_timestamp = time_utils.period_index_to_timestamp(period)
+        period_data = self.schedule_store.get_period_data_at(target_timestamp)
+        if period_data is not None:
+            return period_data.decision.strategic_intent
 
         # Fall back to persisted intents (loaded from disk on startup)
         return self.schedule_store.get_persisted_intent(period)
@@ -2540,19 +2537,21 @@ class BatterySystemManager:
             )
             and self._inverter_controller.discharge_rate_is_load_following
         ):
-            stored = self.schedule_store.get_latest_schedule()
-            if stored is not None:
-                idx = period - stored.optimization_period
-                pd_list = stored.optimization_result.period_data
-                if 0 <= idx < len(pd_list):
-                    shadow = pd_list[idx].decision.shadow_price
-                    buy_prices, _ = self.price_manager.get_available_prices()
-                    if period < len(buy_prices):
-                        discharge_rate = intra_period_discharge_gate(
-                            buy_prices[period],
-                            shadow,
-                            self.battery_settings.efficiency_discharge,
-                        )
+            # Resolved by exact timestamp (not positional index -
+            # optimization_period) so the standalone next-day schedule
+            # (period_data[0] anchored to tomorrow 00:00 despite
+            # optimization_period=0) is never misread as today's period.
+            target_timestamp = time_utils.period_index_to_timestamp(period)
+            period_data = self.schedule_store.get_period_data_at(target_timestamp)
+            if period_data is not None:
+                shadow = period_data.decision.shadow_price
+                buy_prices, _ = self.price_manager.get_available_prices()
+                if period < len(buy_prices):
+                    discharge_rate = intra_period_discharge_gate(
+                        buy_prices[period],
+                        shadow,
+                        self.battery_settings.efficiency_discharge,
+                    )
 
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.

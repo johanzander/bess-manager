@@ -275,6 +275,26 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
+**LOAD_SUPPORT also uses this gate (#384), with one difference.** SOLAR_EXPORT/
+SOLAR_STORAGE always plan `discharge_rate=0`, so the gate result fully decides
+the outcome. LOAD_SUPPORT already plans a nonzero, plan-scaled rate (#147:
+deliberately partial discharge, reserving the rest for a later, pricier
+period) — the gate may only **raise** that ceiling, never lower it
+(`discharge_rate = max(planned_rate, gate_result)`), since zeroing out an
+already-committed LOAD_SUPPORT plan would reopen the #147 regression.
+
+**Known limitation, not yet fixed:** during a sustained overnight LOAD_SUPPORT
+drawdown, `shadow_price` tends to sit within a cent or two of `buy_price` for
+the entire stretch (that near-tie is close to the defining condition for
+choosing LOAD_SUPPORT at all), so the strict inequality above rarely opens in
+that regime — small, real grid imports (observed: 0.1–0.2 kWh/night) can still
+occur even with ample SOE headroom above the floor. This was investigated for
+issue #384/#381 and is believed to be a symptom of the shadow-price
+kink-interpolation gap tracked in #276, not something a wider gate tolerance
+should paper over: the gap between "genuinely arbitrary near-tie" and "real
+reserve protected for a meaningfully pricier future peak" is not currently
+distinguishable from the gate alone.
+
 ### The inverter AC output cap (solar clipping avoidance)
 
 `inverter_max_ac_power_kw` (BatterySettings, default 0 = disabled) models a

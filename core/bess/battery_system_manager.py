@@ -72,12 +72,15 @@ logger = logging.getLogger(__name__)
 def intra_period_discharge_gate(
     buy_price: float, shadow_price: float, eff_d: float
 ) -> int:
-    """Intra-period discharge gate for a SOLAR_EXPORT or SOLAR_STORAGE period.
+    """Intra-period discharge gate for a SOLAR_EXPORT, SOLAR_STORAGE, or
+    LOAD_SUPPORT period.
 
-    Both intents map to load_first with a planned discharge_rate=0; the battery
-    only discharges to cover an actual (sub-period) solar/load deficit. Whether
-    it SHOULD is economic: cover from battery only when the stored energy is
-    worth less than buying from grid now.
+    All three intents map to load_first; SOLAR_EXPORT/SOLAR_STORAGE plan
+    discharge_rate=0, LOAD_SUPPORT plans a nonzero plan-scaled rate. In every
+    case the battery can additionally cover an actual (sub-period) solar/load
+    deficit beyond whatever was planned. Whether it SHOULD is economic: cover
+    from battery only when the stored energy is worth less than buying from
+    grid now.
 
     Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
     ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
@@ -2520,20 +2523,30 @@ class BatterySystemManager:
             )
         )
 
-        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer plans hold
-        # (rate 0), but load_first lets the battery cover an intra-period
-        # solar/load dip. Allow that only when the stored energy is worth less
-        # than buying from grid now (shadow_price = DP marginal value of
-        # stored SoE). This is a sub-period hardware-robustness behaviour,
-        # invisible to the 15-min plan/sim. Only valid where discharge_rate is
-        # a load-following ceiling -- on platforms where it's an immediate
+        # SOLAR_EXPORT/SOLAR_STORAGE/LOAD_SUPPORT discharge gate: the
+        # optimizer's planned rate is a 15-min average, but load_first lets
+        # the battery cover an intra-period solar/load dip beyond that
+        # average. Allow that only when the stored energy is worth less than
+        # buying from grid now (shadow_price = DP marginal value of stored
+        # SoE). This is a sub-period hardware-robustness behaviour, invisible
+        # to the 15-min plan/sim. Only valid where discharge_rate is a
+        # load-following ceiling -- on platforms where it's an immediate
         # forced power command (VPP-style control), opening the gate would
         # force a full-power discharge instead of gently covering a dip (#324).
+        #
+        # For SOLAR_EXPORT/SOLAR_STORAGE the planned baseline is always 0, so
+        # the gate fully determines the outcome. For LOAD_SUPPORT the
+        # baseline is already a nonzero plan-scaled rate (#147: LOAD_SUPPORT
+        # deliberately reserves battery for a later, pricier period rather
+        # than dumping at full rate) -- the gate may only RAISE the ceiling
+        # above that baseline, never lower it, so `max()` here is load-bearing:
+        # it must never zero out a plan the DP already committed to.
         if (
             strategic_intent
             in (
                 "SOLAR_EXPORT",
                 "SOLAR_STORAGE",
+                "LOAD_SUPPORT",
             )
             and self._inverter_controller.discharge_rate_is_load_following
         ):
@@ -2547,10 +2560,13 @@ class BatterySystemManager:
                 shadow = period_data.decision.shadow_price
                 buy_prices, _ = self.price_manager.get_available_prices()
                 if period < len(buy_prices):
-                    discharge_rate = intra_period_discharge_gate(
-                        buy_prices[period],
-                        shadow,
-                        self.battery_settings.efficiency_discharge,
+                    discharge_rate = max(
+                        discharge_rate,
+                        intra_period_discharge_gate(
+                            buy_prices[period],
+                            shadow,
+                            self.battery_settings.efficiency_discharge,
+                        ),
                     )
 
         # Store the schedule's desired discharge rate before inhibit check so that

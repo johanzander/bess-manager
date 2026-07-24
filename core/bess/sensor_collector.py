@@ -11,6 +11,7 @@ from .exceptions import HistoricalDataUnavailableError
 from .health_check import perform_health_check
 from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
+from .power_sample_buffer import PowerSampleBuffer
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,9 @@ class SensorCollector:
         self.power_sensors = self._resolve_power_sensor_ids()
         self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
         self._power_batch_cache_loaded_on: dict = {}
+
+        # Live power-sample buffer for InfluxDB-free runtime gap-fill (#387)
+        self._power_sample_buffer = PowerSampleBuffer()
 
     def _resolve_sensor_entity_ids(self) -> list[str]:
         """Resolve sensor keys to entity IDs using the controller's abstraction layer.
@@ -657,6 +661,49 @@ class SensorCollector:
 
         logger.debug(f"Read {len(readings)} live sensors from HA API")
         return self._normalize_sensor_readings(readings)
+
+    def sample_live_power(self) -> None:
+        """Record one live power-sensor sample into the rolling buffer.
+
+        Called every minute by the scheduler. No-ops if no power sensors are
+        configured. A missing/invalid individual entity is skipped without
+        raising - the buffer just records whichever sensors succeeded this
+        poll.
+        """
+        if not self.power_sensors:
+            return
+
+        entity_to_flow = self._build_power_entity_to_flow_map()
+        if not entity_to_flow:
+            return
+
+        try:
+            states = self.ha_controller._fetch_all_states()
+        except Exception as e:
+            logger.warning("Failed to fetch live states for power sampling: %s", e)
+            return
+
+        readings: dict[str, float] = {}
+        for state in states:
+            entity_id = state.get("entity_id")
+            flow_name = entity_to_flow.get(entity_id)
+            if not flow_name:
+                continue
+            try:
+                readings[flow_name] = float(state.get("state"))
+            except (TypeError, ValueError):
+                logger.warning(
+                    "Skipping power sample for %s: invalid state %r",
+                    entity_id,
+                    state.get("state"),
+                )
+
+        if not readings:
+            return
+
+        now = time_utils.now()
+        current_period = now.hour * 4 + now.minute // 15
+        self._power_sample_buffer.record(current_period, readings)
 
     def warm_readings_cache(self) -> None:
         """Seed _last_readings from live HA sensors.

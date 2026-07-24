@@ -557,6 +557,60 @@ class TestSimulatorMapRates:
         assert rate == 0
         assert charge_rate == 100
 
+    def test_gate_omitted_leaves_solar_export_at_zero(self):
+        """#388: no shadow_price/buy_price supplied -> gate is a no-op,
+        matching pre-gate SOLAR_EXPORT behavior (discharge always 0)."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "SOLAR_EXPORT", 0.0, self._settings()
+        )
+        assert rate == 0
+
+    def test_gate_opens_solar_export_on_favorable_shadow_price(self):
+        """#388: buy_price * eff_d >= shadow_price -> gate opens, discharge
+        ceiling raised to 100 (mirrors BatterySystemManager's real gate)."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "SOLAR_EXPORT", 0.0, s, shadow_price=0.5, buy_price=2.0
+        )
+        assert rate == 100
+
+    def test_gate_stays_closed_on_unfavorable_shadow_price(self):
+        """#388: buy_price * eff_d < shadow_price -> gate stays closed."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "SOLAR_STORAGE", 0.0, s, shadow_price=4.0, buy_price=0.2
+        )
+        assert rate == 0
+
+    def test_gate_raises_but_never_lowers_load_support_baseline(self):
+        """#388: LOAD_SUPPORT already plans a nonzero baseline (#147) -- the
+        gate may only raise the ceiling via max(baseline, gate), never zero
+        it out, matching the real gate's regression guard for #147."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "LOAD_SUPPORT", -1.5, s, shadow_price=4.0, buy_price=0.2
+        )
+        assert rate == 10  # baseline preserved (1.5 / 15.0 * 100), gate closed
+
+    def test_battery_export_unaffected_by_gate(self):
+        """#388: BATTERY_EXPORT has no deficit backstop (grid_first) -- the
+        gate must never touch it, even with a favorable shadow price."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "BATTERY_EXPORT", -1.5, s, shadow_price=0.5, buy_price=2.0
+        )
+        assert rate == 10  # unchanged: gate never applies to BATTERY_EXPORT
+
 
 # ── SolaxController ──────────────────────────────────────────────────────────
 

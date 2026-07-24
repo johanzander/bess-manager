@@ -229,7 +229,12 @@ class SensorCollector:
             raise RuntimeError(f"Energy flow calculation failed for period {period}")
 
         # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
-        # use power (W) sensors which report every ~5 minutes for much higher resolution
+        # use power (W) sensors which report every ~5 minutes for much higher resolution.
+        # Applies to both historical backfill and runtime collection (#387) - a real tick
+        # that's too small to register in this period's counter delta produces a "0 ->
+        # double" pattern in the following period regardless of which path collected it.
+        # _get_power_based_flows degrades gracefully (returns None) when InfluxDB/power
+        # sensors aren't configured, so this is a no-op for deployments without them.
         energy_flow_keys = [
             "solar_production",
             "load_consumption",
@@ -241,7 +246,7 @@ class SensorCollector:
         all_energy_zero = all(
             abs(flow_dict.get(key, 0.0)) < 0.001 for key in energy_flow_keys
         )
-        if all_energy_zero and is_historical_backfill:
+        if all_energy_zero:
             target_date = time_utils.today()
             power_flows = self._get_power_based_flows(period, target_date)
             if power_flows:

@@ -260,6 +260,32 @@ class SensorCollector:
                     period,
                     {k: f"{v:.4f}" for k, v in power_flows.items() if v > 0.001},
                 )
+        elif not is_historical_backfill:
+            buffer_estimate = self._power_sample_buffer.consume(period)
+            if all_energy_zero:
+                if buffer_estimate:
+                    for key in energy_flow_keys:
+                        if key in buffer_estimate and buffer_estimate[key] > 0.001:
+                            flow_dict[key] = buffer_estimate[key]
+                    logger.info(
+                        "Period %d: Gap-filled from live power-sample buffer: %s",
+                        period,
+                        {
+                            k: f"{v:.4f}"
+                            for k, v in buffer_estimate.items()
+                            if v > 0.001
+                        },
+                    )
+            elif buffer_estimate:
+                logger.debug(
+                    "Period %d: counter vs power-sample estimate: %s",
+                    period,
+                    {
+                        k: f"{flow_dict.get(k, 0.0):.4f} vs {buffer_estimate.get(k, 0.0):.4f}"
+                        for k in energy_flow_keys
+                        if k in buffer_estimate
+                    },
+                )
 
         # Extract BOTH SOC readings from sensors - NO DEFAULTS
         # Use abstraction layer to resolve battery SOC sensor entity ID (without 'sensor.' prefix)

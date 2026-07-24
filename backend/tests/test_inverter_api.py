@@ -233,7 +233,7 @@ def _make_period_data(
     return PeriodData(
         period=period,
         energy=energy,
-        timestamp=datetime(2025, 7, 13, period // 4, (period % 4) * 15),
+        timestamp=time_utils.period_index_to_timestamp(period),
         data_source=data_source,
         decision=decision,
     )
@@ -288,6 +288,10 @@ class TestPeriodGroupsIntentReconciliation:
             ),
         )
         ctrl.system.schedule_store.get_latest_schedule.return_value = stored_schedule
+        by_timestamp = {p.timestamp: p for p in period_data}
+        ctrl.system.schedule_store.get_period_data_at.side_effect = (
+            lambda ts: by_timestamp.get(ts)
+        )
 
         sys.modules["app"].bess_controller = ctrl
         resp = _client.get("/api/growatt/detailed_schedule")
@@ -300,3 +304,58 @@ class TestPeriodGroupsIntentReconciliation:
         # ...but the actual physical flow was IDLE (no battery discharge) — the
         # reconciled dominant_intent must say so, not the stale plan.
         assert period_0_group["dominantIntent"] == "IDLE"
+
+
+class TestPeriodGroupsNextDaySchedule:
+    """Regression for issue #380: /api/growatt/detailed_schedule's "today"
+    period_groups block had no guard against the standalone prepare_next_day
+    schedule (optimization_period=0, period_data[0] anchored to tomorrow
+    00:00), unlike the two "tomorrow" lookups elsewhere in this file which
+    were already patched for it."""
+
+    def test_todays_period_groups_use_todays_schedule_not_next_days(self):
+        from core.bess.schedule_store import ScheduleStore
+
+        ctrl = _make_controller("growatt_server_sph")
+        sm = ctrl.system._inverter_controller
+        sm.strategic_intents = ["IDLE"] * 96
+        sm.get_detailed_period_groups.side_effect = _group_per_period
+
+        real_store = ScheduleStore()
+        num_periods = time_utils.get_period_count(time_utils.today())
+
+        # Today's real schedule, made moments earlier: period 0 already
+        # completed with an observed physical flow of LOAD_SUPPORT.
+        today_periods = [
+            _make_period_data(0, "actual", "BATTERY_EXPORT", "LOAD_SUPPORT"),
+        ] + [
+            _make_period_data(i, "predicted", "IDLE", None)
+            for i in range(1, num_periods)
+        ]
+        real_store.store_schedule(
+            OptimizationResult(input_data={}, period_data=today_periods),
+            optimization_period=0,
+        )
+
+        # The prepare_next_day schedule stored at 23:55: optimization_period=0,
+        # period_data[0] anchored to tomorrow 00:00 with a different observed
+        # intent -- must not shadow today's period 0 at the same positional
+        # index.
+        tomorrow_period_0 = _make_period_data(0, "actual", "IDLE", "GRID_CHARGE")
+        tomorrow_period_0.timestamp = time_utils.period_index_to_timestamp(num_periods)
+        real_store.store_schedule(
+            OptimizationResult(input_data={}, period_data=[tomorrow_period_0]),
+            optimization_period=0,
+        )
+
+        ctrl.system.schedule_store = real_store
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+
+        groups = resp.json()["periodGroups"]
+        period_0_group = next(
+            g for g in groups if g["startTime"] == "00:00" and g["endTime"] == "00:15"
+        )
+        assert period_0_group["dominantIntent"] == "LOAD_SUPPORT"

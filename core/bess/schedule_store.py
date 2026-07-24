@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 
-from core.bess.models import OptimizationResult
+from core.bess.models import OptimizationResult, PeriodData
 
 from . import time_utils
 
@@ -108,6 +108,31 @@ class ScheduleStore:
 
         return max(self._schedules, key=lambda s: s.timestamp)
 
+    def get_period_data_at(self, timestamp: datetime) -> PeriodData | None:
+        """Resolve the PeriodData for an exact timestamp.
+
+        Searches all stored schedules newest-first and returns the first
+        PeriodData whose own timestamp matches, so a schedule that doesn't
+        cover the requested moment (e.g. a prepare_next_day schedule has no
+        entries for today) is skipped rather than misread via positional
+        index arithmetic against an assumed anchor.
+
+        Args:
+            timestamp: Exact period start time to look up.
+
+        Returns:
+            PeriodData | None: Matching period data, or None if no stored
+            schedule contains a period at that timestamp.
+        """
+        for schedule in sorted(
+            self._schedules, key=lambda s: s.timestamp, reverse=True
+        ):
+            for period_data in schedule.optimization_result.period_data:
+                if period_data.timestamp == timestamp:
+                    return period_data
+
+        return None
+
     def get_all_schedules_today(self) -> list[StoredSchedule]:
         """Get all schedules created today.
 
@@ -148,20 +173,29 @@ class ScheduleStore:
         if not self._schedules:
             return
 
-        # Build intent map from all stored schedules
+        # Build intent map from all stored schedules. Resolved by each
+        # period's own timestamp (not optimization_period + index) so the
+        # standalone next-day schedule (period_data[i].period is 0..95 same
+        # as today's -- only its timestamp carries tomorrow's date) can
+        # never overwrite today's persisted intents at the same positional
+        # index.
         period_intents: dict[int, str] = {}
+        today = time_utils.today()
         for stored in self._schedules:
             result = stored.optimization_result
             if not result.period_data:
                 continue
 
-            opt_period = stored.optimization_period
-            for i, period_data in enumerate(result.period_data):
-                target_period = opt_period + i
-                if target_period < 96:
-                    period_intents[target_period] = (
-                        period_data.decision.strategic_intent
-                    )
+            for period_data in result.period_data:
+                if (
+                    period_data.timestamp is None
+                    or period_data.timestamp.date() != today
+                ):
+                    continue
+                target_period = time_utils.timestamp_to_period_index(
+                    period_data.timestamp
+                )
+                period_intents[target_period] = period_data.decision.strategic_intent
 
         # Store with date for validation on load
         data = {

@@ -20,6 +20,7 @@ actually written to hardware instead of the EMS discharge_rate register
 
 from types import SimpleNamespace
 
+from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.models import (
     DecisionData,
@@ -75,6 +76,7 @@ def _store_shadow_price(
     period_data = PeriodData(
         period=period,
         energy=energy,
+        timestamp=time_utils.period_index_to_timestamp(period),
         economic=EconomicData(),
         decision=decision,
     )

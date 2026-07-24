@@ -166,7 +166,12 @@ class TestCostSavingsFlow:
             addon_options={"inverter": {"platform": "growatt_server_min"}},
         )
 
-        # Store optimization result
+        # Store optimization result. optimize_battery_schedule() is
+        # time-agnostic (operates on relative indices) -- production always
+        # stamps real timestamps via _add_timestamps_to_period_data before
+        # storing, which DailyViewBuilder now looks periods up by, so tests
+        # must do the same instead of storing raw untimestamped output.
+        manager._add_timestamps_to_period_data(optimization_result, 0)
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
             optimization_period=0,
@@ -194,7 +199,12 @@ class TestCostSavingsFlow:
             addon_options={"inverter": {"platform": "growatt_server_min"}},
         )
 
-        # Store optimization result
+        # Store optimization result. optimize_battery_schedule() is
+        # time-agnostic (operates on relative indices) -- production always
+        # stamps real timestamps via _add_timestamps_to_period_data before
+        # storing, which DailyViewBuilder now looks periods up by, so tests
+        # must do the same instead of storing raw untimestamped output.
+        manager._add_timestamps_to_period_data(optimization_result, 0)
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
             optimization_period=0,
@@ -255,7 +265,12 @@ class TestCostSavingsFlow:
             addon_options={"inverter": {"platform": "growatt_server_min"}},
         )
 
-        # Store optimization result
+        # Store optimization result. optimize_battery_schedule() is
+        # time-agnostic (operates on relative indices) -- production always
+        # stamps real timestamps via _add_timestamps_to_period_data before
+        # storing, which DailyViewBuilder now looks periods up by, so tests
+        # must do the same instead of storing raw untimestamped output.
+        manager._add_timestamps_to_period_data(optimization_result, 0)
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
             optimization_period=0,
@@ -296,7 +311,12 @@ class TestCostSavingsFlow:
             addon_options={"inverter": {"platform": "growatt_server_min"}},
         )
 
-        # Store optimization result
+        # Store optimization result. optimize_battery_schedule() is
+        # time-agnostic (operates on relative indices) -- production always
+        # stamps real timestamps via _add_timestamps_to_period_data before
+        # storing, which DailyViewBuilder now looks periods up by, so tests
+        # must do the same instead of storing raw untimestamped output.
+        manager._add_timestamps_to_period_data(optimization_result, 0)
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
             optimization_period=0,

@@ -47,7 +47,9 @@ def _make_period(period: int) -> PeriodData:
     return PeriodData(
         period=period,
         energy=energy,
-        timestamp=datetime(2025, 7, 13, period // 4, (period % 4) * 15),
+        timestamp=datetime(
+            2025, 7, 13, period // 4, (period % 4) * 15, tzinfo=time_utils.TIMEZONE
+        ),
         data_source="predicted",
         economic=economic,
         decision=decision,
@@ -81,11 +83,34 @@ def _make_period_with_costs(
         period=period,
         energy=energy,
         timestamp=datetime.combine(
-            day, datetime.min.time().replace(hour=period // 4, minute=(period % 4) * 15)
+            day,
+            datetime.min.time().replace(hour=period // 4, minute=(period % 4) * 15),
+            tzinfo=time_utils.TIMEZONE,
         ),
         data_source="predicted",
         economic=economic,
         decision=decision,
+    )
+
+
+def _wire_schedule_store(
+    ctrl: MagicMock, period_data: list[PeriodData], optimization_period: int = 0
+) -> None:
+    """Stub schedule_store.get_latest_schedule + get_period_data_at consistently.
+
+    api.py resolves periods by exact timestamp (get_period_data_at), not by
+    positional index into optimization_result.period_data, so a bare
+    MagicMock's auto-generated get_period_data_at return value (another
+    MagicMock) would be treated as real data. Wire it to look up period_data
+    by timestamp, matching the real ScheduleStore's behavior.
+    """
+    mock_schedule = MagicMock()
+    mock_schedule.optimization_period = optimization_period
+    mock_schedule.optimization_result.period_data = period_data
+    ctrl.system.schedule_store.get_latest_schedule.return_value = mock_schedule
+    by_timestamp = {p.timestamp: p for p in period_data}
+    ctrl.system.schedule_store.get_period_data_at.side_effect = (
+        lambda ts: by_timestamp.get(ts)
     )
 
 
@@ -104,10 +129,7 @@ def _make_started_controller() -> MagicMock:
     ctrl.system.is_configured = True
     ctrl.startup_complete = True
 
-    mock_schedule = MagicMock()
-    mock_schedule.optimization_period = 0
-    mock_schedule.optimization_result.period_data = []
-    ctrl.system.schedule_store.get_latest_schedule.return_value = mock_schedule
+    _wire_schedule_store(ctrl, period_data=[])
 
     ctrl.system.get_current_daily_view.return_value = _make_daily_view()
     ctrl.system.get_settings.return_value = {"battery": MagicMock(total_capacity=30.0)}
@@ -272,10 +294,7 @@ class TestDashboardFullHorizonCost:
             )
             for i in range(96, 192)
         ]
-        mock_schedule = MagicMock()
-        mock_schedule.optimization_period = 0
-        mock_schedule.optimization_result.period_data = period_data
-        ctrl.system.schedule_store.get_latest_schedule.return_value = mock_schedule
+        _wire_schedule_store(ctrl, period_data)
 
         sys.modules["app"].bess_controller = ctrl
         resp = _client.get("/api/dashboard")

@@ -1,14 +1,12 @@
-"""Runtime collection must gap-fill zero-energy periods from power sensors too.
+"""Historical backfill gap-fills zero-energy periods from InfluxDB power sensors.
 
-The cumulative HA counters (e.g. Growatt lifetime discharge energy) only
-tick in 0.1 kWh steps. When a real discharge happens but is too small to
-register in this period's window, the counter delta reads exactly zero and
-the following period absorbs the missed energy once the counter finally
-ticks — a "0 -> double" pattern (issue #387). The historical/backfill path
-already corrects this via a power-sensor gap-fill
-(`sensor_collector.py:241-256`), but it was previously restricted to
-`is_historical_backfill` and never applied during runtime (live) collection,
-which is the path actually exercised on every 15-minute schedule update.
+Cumulative HA counters (e.g. Growatt lifetime discharge energy) only tick in
+0.1 kWh steps. When a real discharge happens but is too small to register in
+a period's window, the counter delta reads exactly zero. The historical/
+backfill collection path corrects this via InfluxDB power-sensor data
+(`sensor_collector.py:244-256`). Runtime (live) collection gets its own,
+InfluxDB-free correction via PowerSampleBuffer - see
+test_sensor_collector_runtime_gapfill.py (#387).
 """
 
 from datetime import date
@@ -40,48 +38,29 @@ def _make_ha_controller():
     ha = MagicMock()
     ha.resolve_sensor_for_influxdb.side_effect = lambda key: entity_map.get(key)
     ha._resolve_entity_id.return_value = ("soc_entity", None)
-
-    # Live sensor readings for the just-completed period: every cumulative
-    # counter reports the exact same value as the cached previous reading,
-    # i.e. a zero delta (the "0" half of the "0 -> double" pattern).
-    ha.get_battery_charged_lifetime.return_value = 100.0
-    ha.get_battery_discharged_lifetime.return_value = 50.0
-    ha.get_solar_production_lifetime.return_value = 200.0
-    ha.get_grid_import_lifetime.return_value = 300.0
-    ha.get_grid_export_lifetime.return_value = 10.0
-    ha.get_battery_soc.return_value = 45.0
     return ha
 
 
-def _make_collector():
-    ha = _make_ha_controller()
-    battery_settings = BatterySettings(total_capacity=30.0)
-    collector = SensorCollector(ha, battery_settings)
+class TestHistoricalBackfillGapFill:
+    def test_historical_backfill_gap_fills_zero_discharge_from_influxdb(self):
+        ha = _make_ha_controller()
+        battery_settings = BatterySettings(total_capacity=30.0)
+        collector = SensorCollector(ha, battery_settings)
 
-    # Seed the cache with identical cumulative readings so the live-diff
-    # delta is exactly zero, forcing the all-energy-zero gap-fill branch.
-    collector._last_readings = {
-        "battery_charged_entity": 100.0,
-        "battery_discharged_entity": 50.0,
-        "solar_entity": 200.0,
-        "import_entity": 300.0,
-        "export_entity": 10.0,
-        "soc_entity": 45.0,
-    }
-    return collector
-
-
-class TestRuntimeGapFill:
-    def test_runtime_collection_gap_fills_zero_discharge_from_power_sensors(self):
-        collector = _make_collector()
+        # Historical path queries InfluxDB for both current and previous
+        # period readings - make them identical (zero delta) for period 5.
+        identical_readings = {
+            "battery_charged_entity": 100.0,
+            "battery_discharged_entity": 50.0,
+            "solar_entity": 200.0,
+            "import_entity": 300.0,
+            "export_entity": 10.0,
+            "soc_entity": 45.0,
+        }
 
         power_batch_result = {
             "status": "success",
-            "data": {
-                10: {
-                    "sensor.discharge_power_entity": 0.35,
-                }
-            },
+            "data": {5: {"sensor.discharge_power_entity": 0.35}},
         }
 
         with (
@@ -91,12 +70,50 @@ class TestRuntimeGapFill:
                 return_value=power_batch_result,
             ),
         ):
-            # current_period = 11 -> collecting the just-completed period 10
-            # via the runtime (live-sensor) branch, not historical backfill.
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45
+            mock_time_utils.now.return_value.hour = 3
+            mock_time_utils.now.return_value.minute = 0  # current_period = 12
             mock_time_utils.today.return_value = date(2026, 7, 25)
 
-            energy_data = collector.collect_energy_data(10)
+            collector._get_period_readings = MagicMock(
+                return_value=dict(identical_readings)
+            )
+
+            # period=5 < current_period(12)-1 -> historical backfill branch.
+            energy_data = collector.collect_energy_data(5)
 
         assert energy_data.battery_discharged == 0.35
+
+    def test_runtime_collection_does_not_call_influxdb(self):
+        """Runtime collection must never depend on InfluxDB (#387 constraint)."""
+        ha = _make_ha_controller()
+        ha.get_battery_charged_lifetime.return_value = 100.0
+        ha.get_battery_discharged_lifetime.return_value = 50.0
+        ha.get_solar_production_lifetime.return_value = 200.0
+        ha.get_grid_import_lifetime.return_value = 300.0
+        ha.get_grid_export_lifetime.return_value = 10.0
+        ha.get_battery_soc.return_value = 45.0
+
+        battery_settings = BatterySettings(total_capacity=30.0)
+        collector = SensorCollector(ha, battery_settings)
+        collector._last_readings = {
+            "battery_charged_entity": 100.0,
+            "battery_discharged_entity": 50.0,
+            "solar_entity": 200.0,
+            "import_entity": 300.0,
+            "export_entity": 10.0,
+            "soc_entity": 45.0,
+        }
+
+        with (
+            patch("core.bess.sensor_collector.time_utils") as mock_time_utils,
+            patch(
+                "core.bess.sensor_collector.get_power_sensor_data_batch"
+            ) as mock_influxdb_power_batch,
+        ):
+            mock_time_utils.now.return_value.hour = 2
+            mock_time_utils.now.return_value.minute = 45  # current_period = 11
+            mock_time_utils.today.return_value = date(2026, 7, 25)
+
+            collector.collect_energy_data(10)  # period=10, runtime branch
+
+        mock_influxdb_power_batch.assert_not_called()

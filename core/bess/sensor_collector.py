@@ -234,11 +234,9 @@ class SensorCollector:
 
         # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
         # use power (W) sensors which report every ~5 minutes for much higher resolution.
-        # Applies to both historical backfill and runtime collection (#387) - a real tick
-        # that's too small to register in this period's counter delta produces a "0 ->
-        # double" pattern in the following period regardless of which path collected it.
-        # _get_power_based_flows degrades gracefully (returns None) when InfluxDB/power
-        # sensors aren't configured, so this is a no-op for deployments without them.
+        # Historical backfill sources this from InfluxDB (below); runtime collection uses
+        # a live PowerSampleBuffer instead (see the runtime branch further down in this
+        # method) so the 15-minute production path never depends on InfluxDB (#387).
         energy_flow_keys = [
             "solar_production",
             "load_consumption",
@@ -250,7 +248,7 @@ class SensorCollector:
         all_energy_zero = all(
             abs(flow_dict.get(key, 0.0)) < 0.001 for key in energy_flow_keys
         )
-        if all_energy_zero:
+        if all_energy_zero and is_historical_backfill:
             target_date = time_utils.today()
             power_flows = self._get_power_based_flows(period, target_date)
             if power_flows:
@@ -258,7 +256,7 @@ class SensorCollector:
                     if key in power_flows and power_flows[key] > 0.001:
                         flow_dict[key] = power_flows[key]
                 logger.info(
-                    "Period %d: Gap-filled from power sensors: %s",
+                    "Period %d: Gap-filled from InfluxDB power sensors: %s",
                     period,
                     {k: f"{v:.4f}" for k, v in power_flows.items() if v > 0.001},
                 )

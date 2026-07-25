@@ -12,9 +12,14 @@ Usage:
     # Writes: scripts/mock_ha/scenarios/2026-03-24-225535.json
     # Then:   ./mock-run.sh 2026-03-24-225535
 
+    # For a regression fixture (plan-faithfulness test), use --issue:
+    python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-2026-03-24-225535.md --issue 269 [--pr 391]
+    # Also writes: core/bess/tests/unit/data/regression_2026_03_24_225535.json
+
 The scenario name is derived from the debug log filename timestamp.
 """
 
+import argparse
 import json
 import re
 import sys
@@ -45,7 +50,66 @@ def _quarterly_to_hourly_detail(quarterly: list[float], date_str: str) -> list[d
     return hourly
 
 
-def generate_scenario(log_path: str) -> None:
+def _write_regression_fixture(
+    log, log_path: str, output_name: str, issue: int, pr: int | None
+) -> None:
+    """Write the lean, committed plan-faithfulness regression fixture
+    derived from a debug log's input_data -- a numeric-only sibling of the
+    full E2E scenario this script also writes, consumed by
+    core/bess/tests/unit/test_scenarios.py's generic loop and any dedicated
+    regression test. See
+    docs/superpowers/specs/2026-07-25-debug-log-regression-fixtures-design.md.
+    """
+    d = log.input_data
+    if not d:
+        print(
+            "Error: --issue requires input_data in the debug log (buy_price/"
+            "sell_price/home_consumption/solar_production/initial_soe) -- "
+            "this log doesn't have it."
+        )
+        sys.exit(1)
+
+    bs = log.battery_settings
+    fixture_name = f"regression_{output_name.replace('-', '_')}"
+    fixture = {
+        "name": fixture_name,
+        "description": f"Issue #{issue}",
+        "issue": issue,
+        "pr": pr,
+        "source": f"debug_log/{Path(log_path).name}",
+        "resolution": "quarterly",
+        "period_duration_hours": 0.25,
+        "buy_price": d["buy_price"],
+        "sell_price": d["sell_price"],
+        "home_consumption": d["home_consumption"],
+        "solar_production": d["solar_production"],
+        "battery": {
+            "max_soe_kwh": bs["max_soe_kwh"],
+            "min_soe_kwh": bs["min_soe_kwh"],
+            "max_charge_power_kw": bs["max_charge_power_kw"],
+            "max_discharge_power_kw": bs["max_discharge_power_kw"],
+            "efficiency_charge": bs["efficiency_charge"],
+            "efficiency_discharge": bs["efficiency_discharge"],
+            "cycle_cost_per_kwh": bs["cycle_cost_per_kwh"],
+            "inverter_max_ac_power_kw": bs.get("inverter_max_ac_power_kw", 0.0),
+            "inverter_ac_power_margin": bs.get("inverter_ac_power_margin", 0.0),
+            "initial_soe": d["initial_soe"],
+            "initial_cost_basis": d.get("initial_cost_basis"),
+        },
+    }
+
+    # Reuses the module-level `repo_root` already computed at the top of this
+    # file (for the `sys.path.insert` import of `core.bess.tests...`).
+    data_dir = repo_root / "core" / "bess" / "tests" / "unit" / "data"
+    fixture_path = data_dir / f"{fixture_name}.json"
+    with open(fixture_path, "w") as f:
+        json.dump(fixture, f, indent=2)
+    print(f"Wrote regression fixture: {fixture_path}")
+
+
+def generate_scenario(
+    log_path: str, issue: int | None = None, pr: int | None = None
+) -> None:
     """Parse a debug log and write a scenario JSON file named after its timestamp."""
     log = parse_debug_log(log_path)
 
@@ -299,6 +363,9 @@ def generate_scenario(log_path: str) -> None:
         json.dump(scenario, f, indent=2)
     print(f"Wrote scenario: {scenario_path}")
 
+    if issue is not None:
+        _write_regression_fixture(log, log_path, output_name, issue, pr)
+
     print(f"\nRun:  ./mock-run.sh {output_name}")
     print(f"      initial_soe={initial_soe:.1f} kWh ({initial_soc_pct}% SOC)")
     print(f"      horizon={horizon} periods, opt_period={opt_period}")
@@ -311,8 +378,25 @@ def generate_scenario(log_path: str) -> None:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print(f"Usage: python {sys.argv[0]} <debug_log.md>")
-        sys.exit(1)
+    parser = argparse.ArgumentParser(
+        description="Generate a mock_ha scenario JSON (and optionally a lean "
+        "plan-faithfulness regression fixture) from a BESS debug log file."
+    )
+    parser.add_argument("log_path", help="Path to the debug log .md file")
+    parser.add_argument(
+        "--issue",
+        type=int,
+        default=None,
+        help="GitHub issue number this debug log diagnoses -- when given, "
+        "also writes a lean regression fixture to core/bess/tests/unit/data/",
+    )
+    parser.add_argument(
+        "--pr",
+        type=int,
+        default=None,
+        help="GitHub PR number that fixes --issue (optional, can be added "
+        "later by re-running with both flags)",
+    )
+    args = parser.parse_args()
 
-    generate_scenario(sys.argv[1])
+    generate_scenario(args.log_path, issue=args.issue, pr=args.pr)

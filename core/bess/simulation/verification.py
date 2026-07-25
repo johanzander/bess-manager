@@ -33,9 +33,13 @@ def verify_plan_faithfulness(
     )
     commands = [
         derive_control_command(
-            pd.decision.strategic_intent, pd.decision.battery_action / dt, settings
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / dt,
+            settings,
+            shadow_price=pd.decision.shadow_price,
+            buy_price=buy_price[i],
         )
-        for pd in result.period_data
+        for i, pd in enumerate(result.period_data)
     ]
     sim = simulate(
         commands, solar, home, buy_price, sell_price, initial_soe, settings, dt
@@ -129,9 +133,13 @@ def realized_under_solar_error(
     )
     commands = [
         derive_control_command(
-            pd.decision.strategic_intent, pd.decision.battery_action / dt, settings
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / dt,
+            settings,
+            shadow_price=pd.decision.shadow_price,
+            buy_price=buy_price[i],
         )
-        for pd in result.period_data
+        for i, pd in enumerate(result.period_data)
     ]
     sim = simulate(
         commands, actual_solar, home, buy_price, sell_price, initial_soe, settings, dt

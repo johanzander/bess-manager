@@ -1405,6 +1405,13 @@ class BatterySystemManager:
     ) -> None:
         """Handle special cases like midnight transition."""
         if period == 0 and not prepare_next_day:
+            # Actual midnight rollover (the 00:00 quarterly job) - clear
+            # yesterday's actuals now that a new day has genuinely started.
+            # This must NOT happen during the 23:55 prepare_next_day run
+            # (see below): that fires 5 minutes before midnight, while today's
+            # dashboard is still showing today, and clearing there wiped
+            # today's real sensor data early (issue #380 follow-up).
+            self.historical_store.clear()
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()
@@ -1421,7 +1428,7 @@ class BatterySystemManager:
 
         if prepare_next_day:
             logger.info(
-                "Preparing for next day - clearing historical store and refreshing predictions"
+                "Preparing for next day - saving daily view and refreshing predictions"
             )
             if is_first_run:
                 # No schedule has ever been created yet (fresh start/restart), so
@@ -1431,8 +1438,6 @@ class BatterySystemManager:
                 )
             else:
                 self.daily_view_store.save_day(self.get_current_daily_view())
-            # Clear historical store to prevent yesterday's data from appearing as today's future data
-            self.historical_store.clear()
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 

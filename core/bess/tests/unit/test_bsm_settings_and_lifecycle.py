@@ -247,6 +247,31 @@ class TestHandleSpecialCases:
         )
         assert system._initial_soc_pct is None
 
+    def test_period_zero_actual_rollover_clears_historical_store(self, system):
+        """The true midnight boundary (00:00 quarterly job) is the only place
+        that should clear today's actuals - see issue #380 follow-up."""
+        with patch.object(system.historical_store, "clear") as mock_clear:
+            system._handle_special_cases(
+                period=0, prepare_next_day=False, is_first_run=True
+            )
+            mock_clear.assert_called_once()
+
+    def test_prepare_next_day_does_not_clear_historical_store(self, system):
+        """prepare_next_day fires at 23:55, 5 minutes before midnight, while
+        today's dashboard still needs today's actuals. Clearing here wiped
+        today's real sensor data early and produced false "missing hours"
+        and a broken chart (issue #380 follow-up)."""
+        with (
+            patch.object(system, "get_current_daily_view"),
+            patch.object(system.daily_view_store, "save_day"),
+            patch.object(system, "_fetch_predictions"),
+            patch.object(system.historical_store, "clear") as mock_clear,
+        ):
+            system._handle_special_cases(
+                period=95, prepare_next_day=True, is_first_run=False
+            )
+            mock_clear.assert_not_called()
+
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
         system._consumption_predictions = [1.0] * 96
         system._solar_predictions = [0.0] * 96

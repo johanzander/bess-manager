@@ -410,7 +410,7 @@ A second, related noise source lives one level up: even after #342's
 zero-aggregate cap, a `battery_to_grid` residual can still survive when its
 governing aggregate (`battery_discharged`) is itself nonzero — the residual
 is then indistinguishable from ordinary lifetime-counter quantization
-(documented 0.1 kWh resolution, `sensor_collector.py:231`) rather than a real
+(documented 0.1 kWh resolution, `sensor_collector.py:235`) rather than a real
 export, and it corrupts `infer_intent_from_flows`'s `observed_intent`
 (`BATTERY_EXPORT` requires an inverter mode change; a residual this small
 proves nothing about mode). Fixed in #350: `_calculate_detailed_flows` folds

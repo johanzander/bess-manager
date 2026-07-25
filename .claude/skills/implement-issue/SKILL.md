@@ -75,6 +75,40 @@ the bug (from the diagnosis's evidence — the specific period/scenario/input)
 and watch it fail, then write the minimal fix. No refactors outside the bug
 — match `docs/agents/patterns.md`.
 
+**Required test shape — checked against the diff, not optional:**
+
+If the fix touches the DP (`dp_battery_algorithm.py`), intent classification
+(`decision_intelligence.py`), or control/rate mapping (`inverter_controller.py`
+/ `battery_system_manager.py`), the PRIMARY RED test — not an extra test
+alongside it, the one that proves the bug — is a plan-faithfulness scenario,
+not a unit test calling the changed function with hand-built arguments. Write
+it as:
+
+```python
+from core.bess.tests.helpers import run_scenario_realized
+# scenario is a full DP-optimized schedule, not a hand-built period/decision
+result, realized_cost = run_scenario_realized(scenario)
+assert realized_cost == pytest.approx(result.total_cost, ...)  # R == P
+```
+
+A unit test on the changed function directly (e.g. calling
+`_apply_period_schedule` or `intra_period_discharge_gate` with stubbed
+arguments) can pass while the new branch is unreachable by any real
+DP-produced schedule — that is exactly the coverage gap that shipped
+undetected in PR #385 (`docs/agents/simulator.md`). Add such a unit test only
+as a supplement, never as the sole RED test, for this category of fix.
+
+If the diagnosis's evidence is a user-supplied debug log/bundle, build the
+scenario from that real data instead of a hand-assembled fixture:
+
+```bash
+python scripts/mock_ha/scenarios/from_debug_log.py <bundle.md>
+```
+
+(`docs/agents/testing.md` → Bug Reproduction with Mock HA). Do this before
+writing the RED test — the bundle already contains the exact conditions that
+reproduced the bug.
+
 ### 6. Quality gate + code review (background)
 
 Every PR must pass both the fast and slow suites, plus code review. This is
@@ -87,8 +121,16 @@ self-contained prompt covering:
 1. `./scripts/quality-check.sh` (fast suite) — if it fails, fix and re-run,
    do not proceed with failures.
 2. `.venv/bin/pytest -m slow` (slow suite) — same failure handling.
-3. Invoke the `code-review` skill on the diff.
-4. Report back: pass/fail on both suites, and any CONFIRMED code-review
+3. If the diff touches the DP, intent classification, or control/rate
+   mapping (the Step 5 table): confirm the diff's new/changed tests include
+   a `run_scenario_realized` / `verify_plan_faithfulness` call, not only a
+   unit test on the changed function with hand-built arguments. If missing,
+   this is a required-before-continuing gap, not a nice-to-have — report it
+   as a blocking finding alongside the suite results, same severity as a
+   failing test.
+4. Invoke the `code-review` skill on the diff.
+5. Report back: pass/fail on both suites, whether check 3 passed, and any
+   CONFIRMED code-review
    findings verbatim (everything else goes to `TODO.md`).
 
 Do not poll — you'll be notified on completion. This is a hard session
@@ -219,6 +261,8 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
 | "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
+| "a unit test on the changed function is enough" | Not for DP/intent/control-mapping changes — a synthetic-input unit test can pass while the new branch is unreachable by any real optimizer-derived scenario. `docs/agents/simulator.md` requires `R == P` for exactly this class of change. |
+| "the existing suite still passes, so nothing broke" | Passing unchanged means the new code path may simply be untested, not unbroken — check whether any existing fixture actually reaches the new branch before treating a green suite as coverage. |
 
 ## Red Flags — Stop and Go Back
 
@@ -233,6 +277,10 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
   dispatching the Step 6 background agent.
 - About to open the PR without checking whether the fix invalidates a claim
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
+- About to write only a synthetic-input unit test for a DP/intent/control-
+  mapping change instead of a plan-faithfulness (`R == P`) scenario test.
+- About to write a repro test from hand-built data when a user debug log/
+  bundle is available and `from_debug_log.py` could build it from real data.
 
 ## Quick Reference
 

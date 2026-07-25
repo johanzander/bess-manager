@@ -355,6 +355,13 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
+        # Live power-sample buffering for InfluxDB-free runtime gap-fill (#387)
+        self.scheduler.add_job(
+            self.system.sensor_collector.sample_live_power,
+            CronTrigger(minute="*"),
+            misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
+        )
+
         # Health check refresh (every 5 minutes) — so the dashboard banner
         # self-corrects if sensors recover after a transient failure, instead
         # of only refreshing at startup or on the next settings save.

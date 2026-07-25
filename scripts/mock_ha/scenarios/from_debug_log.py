@@ -12,6 +12,10 @@ Usage:
     # Writes: scripts/mock_ha/scenarios/2026-03-24-225535.json
     # Then:   ./mock-run.sh 2026-03-24-225535
 
+    # For a regression fixture (plan-faithfulness test), use --issue:
+    python scripts/mock_ha/scenarios/from_debug_log.py docs/bess-debug-2026-03-24-225535.md --issue 269 [--pr 330]
+    # Also writes: core/bess/tests/unit/data/regression_2026-03-24-225535.json
+
 The scenario name is derived from the debug log filename timestamp.
 """
 

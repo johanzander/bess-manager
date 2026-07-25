@@ -407,6 +407,49 @@ class TestRefreshHealthCheck:
         assert system.has_critical_sensor_failures()
         assert system.get_critical_sensor_failures() == ["Battery SOC"]
 
+    def test_retries_schedule_build_when_no_schedule_and_sensors_healthy(self, system):
+        """A health check that finds no critical failures but no schedule was
+        ever built (e.g. the initial startup schedule build failed while
+        sensors were unavailable) should trigger a retry. Otherwise the
+        dashboard is stuck showing "initializing" until the next quarterly
+        cron tick or a manual restart, even though the banner reports the
+        system is healthy. See debug log 2026-07-25-220017.
+        """
+        assert system._current_schedule is None
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(
+                system, "update_battery_schedule", return_value=True
+            ) as mock_update,
+        ):
+            system.refresh_health_check()
+
+        mock_update.assert_called_once()
+
+    def test_does_not_retry_schedule_build_when_schedule_already_exists(self, system):
+        system._current_schedule = MagicMock()
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(system, "update_battery_schedule") as mock_update,
+        ):
+            system.refresh_health_check()
+
+        mock_update.assert_not_called()
+
 
 class TestHealthRecoveryTracking:
     """A component that goes ERROR/WARNING -> OK between health checks should

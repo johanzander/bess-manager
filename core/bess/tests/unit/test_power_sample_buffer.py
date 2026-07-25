@@ -77,3 +77,25 @@ class TestPruning:
         buffer.record(6, {"pv_power": 200.0})
 
         assert buffer.consume(5) == {"pv_power": 0.025}
+
+    def test_prune_handles_the_day_boundary_wraparound(self):
+        buffer = PowerSampleBuffer()
+        # Bucket 95 is from "yesterday" (last period of the day).
+        buffer.record(95, {"pv_power": 100.0})
+
+        # A day has rolled over; current_period is now small again. Age of
+        # bucket 95 relative to period 1 is (1 - 95) % 96 = 2, which is not
+        # yet beyond MAX_BUCKET_AGE_PERIODS (2), so it should survive.
+        buffer.record(1, {"pv_power": 100.0})
+        assert buffer.consume(95) == {"pv_power": 0.025}
+
+    def test_prune_drops_the_period_95_bucket_once_far_enough_past_midnight(self):
+        buffer = PowerSampleBuffer()
+        buffer.record(95, {"pv_power": 100.0})
+
+        # Age of bucket 95 relative to period 2 is (2 - 95) % 96 = 3, which
+        # is beyond MAX_BUCKET_AGE_PERIODS (2) - must be pruned, not survive
+        # indefinitely across the day boundary.
+        buffer.record(2, {"pv_power": 100.0})
+
+        assert buffer.consume(95) is None

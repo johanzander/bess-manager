@@ -37,10 +37,16 @@ class PowerSampleBuffer:
         }
 
     def _prune(self, current_period: int) -> None:
+        # Periods run 0..95 and wrap at midnight, so "age" has to be computed
+        # modulo 96 - a plain `period < current_period - MAX_BUCKET_AGE`
+        # comparison never fires across the day boundary (e.g. current_period
+        # resets to 0/1/2 while a stale bucket 95 from the previous day is
+        # still sitting there), letting that bucket survive and accumulate
+        # indefinitely (#387 final review).
         stale = [
             period
             for period in self._samples
-            if period < current_period - self.MAX_BUCKET_AGE_PERIODS
+            if (current_period - period) % 96 > self.MAX_BUCKET_AGE_PERIODS
         ]
         for period in stale:
             del self._samples[period]

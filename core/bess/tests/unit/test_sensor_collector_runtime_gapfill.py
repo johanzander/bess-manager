@@ -61,7 +61,12 @@ def _make_runtime_collector():
 class TestRuntimeGapFillFromBuffer:
     def test_gap_fills_zero_discharge_from_the_live_power_buffer(self):
         collector = _make_runtime_collector()
-        collector._power_sample_buffer.record(10, {"battery_discharged": 1400.0})
+        # Several small samples averaging to a discharge estimate under the
+        # counter's 0.1 kWh resolution ceiling - physically consistent with
+        # the counter delta having read exactly zero for this period.
+        collector._power_sample_buffer.record(10, {"battery_discharged": 200.0})
+        collector._power_sample_buffer.record(10, {"battery_discharged": 300.0})
+        collector._power_sample_buffer.record(10, {"battery_discharged": 250.0})
 
         with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
             mock_time_utils.now.return_value.hour = 2
@@ -70,8 +75,25 @@ class TestRuntimeGapFillFromBuffer:
 
             energy_data = collector.collect_energy_data(10)
 
-        # 1400W * 0.25h / 1000 = 0.35 kWh
-        assert energy_data.battery_discharged == 0.35
+        # mean(200, 300, 250) = 250W * 0.25h / 1000 = 0.0625 kWh
+        assert energy_data.battery_discharged == 0.0625
+
+    def test_gap_fill_estimate_is_clamped_to_the_counter_resolution_ceiling(self):
+        collector = _make_runtime_collector()
+        # A single 1400W sample raw-averages to 0.35 kWh, well above the
+        # 0.1 kWh the zero counter delta already proved was the ceiling for
+        # this period's true energy - the estimate must be clamped, not
+        # written through as-is.
+        collector._power_sample_buffer.record(10, {"battery_discharged": 1400.0})
+
+        with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
+            mock_time_utils.now.return_value.hour = 2
+            mock_time_utils.now.return_value.minute = 45
+            mock_time_utils.today.return_value = date(2026, 7, 25)
+
+            energy_data = collector.collect_energy_data(10)
+
+        assert energy_data.battery_discharged == 0.1 - 0.001
 
     def test_stays_zero_when_buffer_is_empty(self):
         collector = _make_runtime_collector()

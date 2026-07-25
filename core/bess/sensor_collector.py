@@ -4,6 +4,7 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 
 import logging
 from datetime import timedelta
+from typing import ClassVar
 
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
@@ -264,15 +265,27 @@ class SensorCollector:
             buffer_estimate = self._power_sample_buffer.consume(period)
             if all_energy_zero:
                 if buffer_estimate:
+                    # Every cumulative-counter delta read zero for this period,
+                    # which proves the true energy for each flow is under the
+                    # counter's 0.1 kWh tick resolution (a real reading >= 0.1
+                    # kWh would have registered on the counter itself). The
+                    # buffer's average-of-however-many-samples estimate has no
+                    # coverage guarantee, so clamp it to just under that
+                    # resolution ceiling before it can flow into cost-basis /
+                    # savings calculations (#387 final review).
+                    clamped_estimate = {
+                        key: min(value, 0.1 - 0.001)
+                        for key, value in buffer_estimate.items()
+                    }
                     for key in energy_flow_keys:
-                        if key in buffer_estimate and buffer_estimate[key] > 0.001:
-                            flow_dict[key] = buffer_estimate[key]
+                        if key in clamped_estimate and clamped_estimate[key] > 0.001:
+                            flow_dict[key] = clamped_estimate[key]
                     logger.info(
                         "Period %d: Gap-filled from live power-sample buffer: %s",
                         period,
                         {
                             k: f"{v:.4f}"
-                            for k, v in buffer_estimate.items()
+                            for k, v in clamped_estimate.items()
                             if v > 0.001
                         },
                     )
@@ -686,6 +699,21 @@ class SensorCollector:
         logger.debug(f"Read {len(readings)} live sensors from HA API")
         return self._normalize_sensor_readings(readings)
 
+    # Power sensor key -> direct live-reading getter on ha_controller. Reading
+    # each sensor individually (kilobyte-sized single-entity requests) is far
+    # cheaper at this once-a-minute cadence than the full-instance
+    # `_fetch_all_states()` dump (potentially megabytes, every entity in the
+    # HA instance) used elsewhere for one-off entity discovery (#387 final
+    # review).
+    _POWER_SENSOR_GETTERS: ClassVar[dict[str, str]] = {
+        "pv_power": "get_pv_power",
+        "local_load_power": "get_local_load_power",
+        "import_power": "get_import_power",
+        "export_power": "get_export_power",
+        "battery_charge_power": "get_battery_charge_power",
+        "battery_discharge_power": "get_battery_discharge_power",
+    }
+
     def sample_live_power(self) -> None:
         """Record one live power-sensor sample into the rolling buffer.
 
@@ -697,29 +725,22 @@ class SensorCollector:
         if not self.power_sensors:
             return
 
-        entity_to_flow = self._build_power_entity_to_flow_map()
-        if not entity_to_flow:
-            return
-
-        try:
-            states = self.ha_controller._fetch_all_states()
-        except Exception as e:
-            logger.warning("Failed to fetch live states for power sampling: %s", e)
-            return
-
         readings: dict[str, float] = {}
-        for state in states:
-            entity_id = state.get("entity_id")
-            flow_name = entity_to_flow.get(entity_id)
-            if not flow_name:
+        for sensor_key, flow_name in self.power_sensor_flow_map.items():
+            getter_name = self._POWER_SENSOR_GETTERS.get(sensor_key)
+            if not getter_name:
                 continue
             try:
-                readings[flow_name] = float(state.get("state"))
-            except (TypeError, ValueError):
-                logger.warning(
-                    "Skipping power sample for %s: invalid state %r",
-                    entity_id,
-                    state.get("state"),
+                getter = getattr(self.ha_controller, getter_name)
+                value = getter()
+                if value is None:
+                    continue
+                readings[flow_name] = float(value)
+            except Exception as e:
+                logger.debug(
+                    "Skipping power sample for %s: %s",
+                    sensor_key,
+                    e,
                 )
 
         if not readings:

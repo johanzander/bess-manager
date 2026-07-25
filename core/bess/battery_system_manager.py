@@ -2923,6 +2923,20 @@ class BatterySystemManager:
                     "✓ All required sensors are functional - system fully operational"
                 )
                 self._critical_sensor_failures = []
+
+                # The startup schedule build may have failed while sensors
+                # were still unavailable (e.g. a restart racing a transient
+                # HA outage). Without this, the dashboard stays on
+                # "initializing" until the next quarterly cron tick even
+                # though this health check now reports the system healthy.
+                if self._current_schedule is None:
+                    logger.info(
+                        "No schedule exists yet and all required sensors are "
+                        "healthy — retrying the initial schedule build"
+                    )
+                    now = time_utils.now()
+                    current_period = now.hour * 4 + now.minute // 15
+                    self.update_battery_schedule(current_period=current_period)
             return health_results
 
         except Exception as e:

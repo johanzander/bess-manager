@@ -78,15 +78,15 @@ class HuaweiController(InverterController):
 
     # ── Period grouping ───────────────────────────────────────────────────
 
-    def _group_huawei_periods(self) -> list[dict]:
+    def _group_huawei_periods(self, intents: list[str]) -> list[dict]:
         """Group consecutive charge/discharge periods into flagged blocks."""
-        if not self.strategic_intents:
+        if not intents:
             return []
 
         blocks: list[dict] = []
         current: dict | None = None
 
-        for period, intent in enumerate(self.strategic_intents):
+        for period, intent in enumerate(intents):
             if intent in self.CHARGE_INTENTS:
                 flag = "+"
             elif intent in self.DISCHARGE_INTENTS:
@@ -153,11 +153,27 @@ class HuaweiController(InverterController):
             )
         return result
 
-    def _build_huawei_periods(self) -> None:
-        """Build the combined charge/discharge period list from strategic intents."""
-        blocks = self._group_huawei_periods()
+    def _build_candidate(self, intents: list[str]) -> list[dict]:
+        """Compute the Huawei period list for ``intents``, without mutating self.
+
+        Shared by apply_intents (commits onto self) and evaluate_intents
+        (diffs against self's current state).
+        """
+        blocks = self._group_huawei_periods(intents)
         blocks = self._enforce_period_limit(blocks)
-        self._periods = self._blocks_to_period_dicts(blocks)
+        periods = self._blocks_to_period_dicts(blocks)
+
+        logger.info("Huawei periods built: %d period(s)", len(periods))
+        for p in periods:
+            logger.info("  %s: %s-%s", p["flag"], p["start_time"], p["end_time"])
+
+        return periods
+
+    def _build_huawei_periods(self) -> None:
+        """Unchanged public behavior: mutates self._periods/self.tou_intervals
+        from self.strategic_intents. Delegates to _build_candidate, shared
+        with apply_intents/evaluate_intents."""
+        self._periods = self._build_candidate(self.strategic_intents)
 
         self.tou_intervals = []
         for idx, p in enumerate(self._periods):
@@ -177,17 +193,8 @@ class HuaweiController(InverterController):
                 }
             )
 
-        logger.info("Huawei periods built: %d period(s)", len(self._periods))
-        for p in self._periods:
-            logger.info("  %s: %s-%s", p["flag"], p["start_time"], p["end_time"])
-
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
-        """Process DPSchedule with strategic intents into Huawei TOU periods."""
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
+        """Adopt this cycle's DP intent list, rebuilding Huawei TOU periods."""
         logger.info("Creating Huawei schedule from strategic intents")
 
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
@@ -205,7 +212,7 @@ class HuaweiController(InverterController):
         ]
         return "\n".join(lines)
 
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -293,19 +300,21 @@ class HuaweiController(InverterController):
         huawei_solar exposes no read_tou_periods service — the periods are
         only visible via the (undocumented) coordinator state, not a public
         service call. Leaves strategic_intents empty; the next
-        create_schedule() call populates it, matching the pattern used
+        apply_intents() call populates it, matching the pattern used
         when hardware state genuinely can't be read back.
         """
         logger.info("Huawei: no TOU readback available — starting with empty schedule")
 
     # ── Schedule comparison ───────────────────────────────────────────────
 
-    def compare_schedules(
-        self, other_schedule: "HuaweiController", from_period: int = 0
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
-        """Compare Huawei period lists with another schedule controller."""
+        """Compare Huawei periods a candidate schedule would produce against
+        what's currently applied."""
+        candidate_intents = schedule.original_dp_results["strategic_intent"]
+        new = self._build_candidate(candidate_intents)
         current = self._periods
-        new = other_schedule._periods
 
         if len(current) != len(new):
             logger.info(

@@ -22,10 +22,15 @@ from core.bess.simulation.inverter_simulator import derive_control_command, simu
 
 def _scenario_inputs(scenario: dict):
     """Build optimizer inputs from a scenario dict. Shared by run_scenario and
-    run_scenario_realized so plan (P) and realized (R) use identical inputs."""
-    base_prices = scenario["base_prices"]
+    run_scenario_realized so plan (P) and realized (R) use identical inputs.
+
+    Two price inputs are supported: a scenario with `buy_price`/`sell_price`
+    keys uses those directly -- the exact final prices an optimizer run saw
+    (e.g. from a debug log's input_data) -- otherwise `base_prices` is run
+    through PriceManager as before, using `price_data` markup config
+    (including optional spot_multiplier/export_spot_multiplier) if present.
+    """
     battery = scenario["battery"]
-    price_data = scenario.get("price_data")
 
     battery_settings = BatterySettings(
         total_capacity=battery["max_soe_kwh"],
@@ -40,31 +45,51 @@ def _scenario_inputs(scenario: dict):
         inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
     )
 
-    if price_data:
-        markup_rate = price_data["markup_rate"]
-        vat_multiplier = price_data["vat_multiplier"]
-        additional_costs = price_data["additional_costs"]
-        tax_reduction = price_data["tax_reduction"]
+    if "buy_price" in scenario and "sell_price" in scenario:
+        buy_price = scenario["buy_price"]
+        sell_price = scenario["sell_price"]
     else:
-        markup_rate = MARKUP_RATE
-        vat_multiplier = VAT_MULTIPLIER
-        additional_costs = ADDITIONAL_COSTS
-        tax_reduction = TAX_REDUCTION
+        base_prices = scenario["base_prices"]
+        price_data = scenario.get("price_data")
 
-    price_manager = PriceManager(
-        MockSource(base_prices),
-        markup_rate=markup_rate,
-        vat_multiplier=vat_multiplier,
-        additional_costs=additional_costs,
-        tax_reduction=tax_reduction,
-        area="SE4",
-    )
+        if price_data:
+            markup_rate = price_data["markup_rate"]
+            vat_multiplier = price_data["vat_multiplier"]
+            additional_costs = price_data["additional_costs"]
+            tax_reduction = price_data["tax_reduction"]
+            # Optional -- default to PriceManager's own default (1.0, no
+            # adjustment) so existing fixtures that don't set these are
+            # unaffected.
+            spot_multiplier = price_data.get("spot_multiplier", 1.0)
+            export_spot_multiplier = price_data.get("export_spot_multiplier", 1.0)
+        else:
+            markup_rate = MARKUP_RATE
+            vat_multiplier = VAT_MULTIPLIER
+            additional_costs = ADDITIONAL_COSTS
+            tax_reduction = TAX_REDUCTION
+            spot_multiplier = 1.0
+            export_spot_multiplier = 1.0
+
+        price_manager = PriceManager(
+            MockSource(base_prices),
+            markup_rate=markup_rate,
+            vat_multiplier=vat_multiplier,
+            additional_costs=additional_costs,
+            tax_reduction=tax_reduction,
+            area="SE4",
+            spot_multiplier=spot_multiplier,
+            export_spot_multiplier=export_spot_multiplier,
+        )
+        buy_price = price_manager.get_buy_prices(raw_prices=base_prices)
+        sell_price = price_manager.get_sell_prices(raw_prices=base_prices)
+
     return {
-        "buy_price": price_manager.get_buy_prices(raw_prices=base_prices),
-        "sell_price": price_manager.get_sell_prices(raw_prices=base_prices),
+        "buy_price": buy_price,
+        "sell_price": sell_price,
         "home_consumption": scenario["home_consumption"],
         "solar_production": scenario["solar_production"],
         "initial_soe": battery["initial_soe"],
+        "initial_cost_basis": battery.get("initial_cost_basis"),
         "battery_settings": battery_settings,
         "period_duration_hours": scenario.get("period_duration_hours", 1.0),
     }

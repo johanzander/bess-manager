@@ -824,3 +824,15 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 **Suggestion**: remove `immediate_value` (and the `economic_chain` string's reliance on it) once a decision is made on `DecisionFramework.tsx`/`/api/decision-intelligence` — either wire it up to the real app using `grid_cost`/`netSavings` terminology instead of re-deriving a redundant metric, or delete the dead path entirely. Not filed as its own issue since it's a design/scope decision, not a bug.
 
 ---
+
+## From #387 runtime power gap-fill code review (non-blocking)
+
+**`PowerSampleBuffer.consume()`'s `if values` guard is dead code** (`core/bess/power_sample_buffer.py`) — `record()` always appends immediately via `setdefault(...).append(watts)`, so no `values` list can ever be empty when `consume()` reaches it. Harmless but unnecessary defensiveness; inconsistent with the "no speculative fallbacks" convention.
+
+**`sample_live_power()`'s per-getter `entity_id`/skip handling is implicit rather than defensive-by-design** (`core/bess/sensor_collector.py`) — correct today, just worth a second look if the getter-based rewrite (done in the #387 final-review fix wave) is touched again.
+
+**Stale line-number citation in a test docstring** (`core/bess/tests/unit/test_sensor_collector_gapfill.py:7`) — cites the InfluxDB gap-fill `if` block at a line range that has drifted by one line from its actual current location (`252-263`) after later edits in the same file. Cosmetic only.
+
+**`backend/app.py` has no `if __name__ == "__main__":` guard around its module-level `BESSController()` construction and `start_in_background()` call** — pre-existing, unrelated to #387, but it's what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing. Worth a guard so `backend/app.py` is import-safe for future tests without workarounds.
+
+---

@@ -187,25 +187,37 @@ def assert_physical_constraints(result, battery: dict) -> None:
     """
     tolerance = 1e-6
 
+    # A scenario may legitimately start below min_soe_kwh (e.g. a live sensor
+    # reading under Min SOC, see dp_battery_algorithm.py's _soe_floor()
+    # docstring, #233) -- the effective lower bound is the fixture's own
+    # starting point in that case, not the configured floor. For every
+    # fixture that starts at/above its floor (all of them until #269's
+    # regression_2026_07_25_090230), this is identical to min_soe_kwh --
+    # zero behavior change. Callers that don't pass "initial_soe" on the
+    # battery dict fall back to min_soe_kwh, which is also a no-op.
+    effective_min_soe_kwh = min(
+        battery["min_soe_kwh"], battery.get("initial_soe", battery["min_soe_kwh"])
+    )
+
     for pd in result.period_data:
         soe_start = pd.energy.battery_soe_start
         soe_end = pd.energy.battery_soe_end
 
         assert (
-            battery["min_soe_kwh"] - tolerance
+            effective_min_soe_kwh - tolerance
             <= soe_start
             <= battery["max_soe_kwh"] + tolerance
         ), (
             f"Period {pd.period}: SOE start {soe_start:.2f} outside "
-            f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+            f"[{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         )
         assert (
-            battery["min_soe_kwh"] - tolerance
+            effective_min_soe_kwh - tolerance
             <= soe_end
             <= battery["max_soe_kwh"] + tolerance
         ), (
             f"Period {pd.period}: SOE end {soe_end:.2f} outside "
-            f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+            f"[{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         )
 
         action = pd.decision.battery_action

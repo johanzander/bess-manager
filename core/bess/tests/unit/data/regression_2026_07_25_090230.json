@@ -266,5 +266,10 @@
     "inverter_ac_power_margin": 0.05,
     "initial_soe": 1.65,
     "initial_cost_basis": 0.035
+  },
+  "expected_behavior": {
+    "constraints": {
+      "soe_within_bounds": true
+    }
   }
 }

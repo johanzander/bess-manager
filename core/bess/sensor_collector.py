@@ -4,6 +4,7 @@ Robust SensorCollector - Clean sensor data collection from InfluxDB with strateg
 
 import logging
 from datetime import timedelta
+from typing import ClassVar
 
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
@@ -11,6 +12,7 @@ from .exceptions import HistoricalDataUnavailableError
 from .health_check import perform_health_check
 from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
+from .power_sample_buffer import PowerSampleBuffer
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -70,6 +72,9 @@ class SensorCollector:
         self.power_sensors = self._resolve_power_sensor_ids()
         self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
         self._power_batch_cache_loaded_on: dict = {}
+
+        # Live power-sample buffer for InfluxDB-free runtime gap-fill (#387)
+        self._power_sample_buffer = PowerSampleBuffer()
 
     def _resolve_sensor_entity_ids(self) -> list[str]:
         """Resolve sensor keys to entity IDs using the controller's abstraction layer.
@@ -229,7 +234,10 @@ class SensorCollector:
             raise RuntimeError(f"Energy flow calculation failed for period {period}")
 
         # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
-        # use power (W) sensors which report every ~5 minutes for much higher resolution
+        # use power (W) sensors which report every ~5 minutes for much higher resolution.
+        # Historical backfill sources this from InfluxDB (below); runtime collection uses
+        # a live PowerSampleBuffer instead (see the runtime branch further down in this
+        # method) so the 15-minute production path never depends on InfluxDB (#387).
         energy_flow_keys = [
             "solar_production",
             "load_consumption",
@@ -249,9 +257,47 @@ class SensorCollector:
                     if key in power_flows and power_flows[key] > 0.001:
                         flow_dict[key] = power_flows[key]
                 logger.info(
-                    "Period %d: Gap-filled from power sensors: %s",
+                    "Period %d: Gap-filled from InfluxDB power sensors: %s",
                     period,
                     {k: f"{v:.4f}" for k, v in power_flows.items() if v > 0.001},
+                )
+        elif not is_historical_backfill:
+            buffer_estimate = self._power_sample_buffer.consume(period)
+            if all_energy_zero:
+                if buffer_estimate:
+                    # Every cumulative-counter delta read zero for this period,
+                    # which proves the true energy for each flow is under the
+                    # counter's 0.1 kWh tick resolution (a real reading >= 0.1
+                    # kWh would have registered on the counter itself). The
+                    # buffer's average-of-however-many-samples estimate has no
+                    # coverage guarantee, so clamp it to just under that
+                    # resolution ceiling before it can flow into cost-basis /
+                    # savings calculations (#387 final review).
+                    clamped_estimate = {
+                        key: min(value, 0.1 - 0.001)
+                        for key, value in buffer_estimate.items()
+                    }
+                    for key in energy_flow_keys:
+                        if key in clamped_estimate and clamped_estimate[key] > 0.001:
+                            flow_dict[key] = clamped_estimate[key]
+                    logger.info(
+                        "Period %d: Gap-filled from live power-sample buffer: %s",
+                        period,
+                        {
+                            k: f"{v:.4f}"
+                            for k, v in clamped_estimate.items()
+                            if v > 0.001
+                        },
+                    )
+            elif buffer_estimate:
+                logger.debug(
+                    "Period %d: counter vs power-sample estimate: %s",
+                    period,
+                    {
+                        k: f"{flow_dict.get(k, 0.0):.4f} vs {buffer_estimate.get(k, 0.0):.4f}"
+                        for k in energy_flow_keys
+                        if k in buffer_estimate
+                    },
                 )
 
         # Extract BOTH SOC readings from sensors - NO DEFAULTS
@@ -652,6 +698,57 @@ class SensorCollector:
 
         logger.debug(f"Read {len(readings)} live sensors from HA API")
         return self._normalize_sensor_readings(readings)
+
+    # Power sensor key -> direct live-reading getter on ha_controller. Reading
+    # each sensor individually (kilobyte-sized single-entity requests) is far
+    # cheaper at this once-a-minute cadence than the full-instance
+    # `_fetch_all_states()` dump (potentially megabytes, every entity in the
+    # HA instance) used elsewhere for one-off entity discovery (#387 final
+    # review).
+    _POWER_SENSOR_GETTERS: ClassVar[dict[str, str]] = {
+        "pv_power": "get_pv_power",
+        "local_load_power": "get_local_load_power",
+        "import_power": "get_import_power",
+        "export_power": "get_export_power",
+        "battery_charge_power": "get_battery_charge_power",
+        "battery_discharge_power": "get_battery_discharge_power",
+    }
+
+    def sample_live_power(self) -> None:
+        """Record one live power-sensor sample into the rolling buffer.
+
+        Called every minute by the scheduler. No-ops if no power sensors are
+        configured. A missing/invalid individual entity is skipped without
+        raising - the buffer just records whichever sensors succeeded this
+        poll.
+        """
+        if not self.power_sensors:
+            return
+
+        readings: dict[str, float] = {}
+        for sensor_key, flow_name in self.power_sensor_flow_map.items():
+            getter_name = self._POWER_SENSOR_GETTERS.get(sensor_key)
+            if not getter_name:
+                continue
+            try:
+                getter = getattr(self.ha_controller, getter_name)
+                value = getter()
+                if value is None:
+                    continue
+                readings[flow_name] = float(value)
+            except Exception as e:
+                logger.debug(
+                    "Skipping power sample for %s: %s",
+                    sensor_key,
+                    e,
+                )
+
+        if not readings:
+            return
+
+        now = time_utils.now()
+        current_period = now.hour * 4 + now.minute // 15
+        self._power_sample_buffer.record(current_period, readings)
 
     def warm_readings_cache(self) -> None:
         """Seed _last_readings from live HA sensors.

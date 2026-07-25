@@ -200,6 +200,14 @@ def test_all_scenarios(scenario_name):
     # Battery usage should be within physical constraints
     # Small tolerance for floating-point precision errors (e.g., np.arange producing 30.000000000000025)
     soe_tolerance = 1e-6
+    # A scenario may legitimately start below min_soe_kwh (e.g. a live sensor
+    # reading under Min SOC, see dp_battery_algorithm.py's _soe_floor()
+    # docstring, #233) -- the effective lower bound is the fixture's own
+    # starting point in that case, not the configured floor. For every
+    # fixture that starts at/above its floor (all of them until #269's
+    # regression_2026_07_25_090230), this is identical to min_soe_kwh --
+    # zero behavior change.
+    effective_min_soe_kwh = min(battery["min_soe_kwh"], battery["initial_soe"])
     for hour_data in result.period_data:
         # Access SOE directly - these are already in kWh
         soe_start_kwh = hour_data.energy.battery_soe_start  # Already in kWh
@@ -207,15 +215,15 @@ def test_all_scenarios(scenario_name):
 
         # Validate SOE bounds in kWh (with tolerance for floating-point precision)
         assert (
-            battery["min_soe_kwh"] - soe_tolerance
+            effective_min_soe_kwh - soe_tolerance
             <= soe_start_kwh
             <= battery["max_soe_kwh"] + soe_tolerance
-        ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+        ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         assert (
-            battery["min_soe_kwh"] - soe_tolerance
+            effective_min_soe_kwh - soe_tolerance
             <= soe_end_kwh
             <= battery["max_soe_kwh"] + soe_tolerance
-        ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+        ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
 
         # Battery action should respect power limits - access through strategy field
         battery_action = hour_data.decision.battery_action

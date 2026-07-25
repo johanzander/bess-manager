@@ -176,6 +176,356 @@ def _battery(initial_soe):
     }
 
 
+def test_below_min_soe_charges_from_real_solar_instead_of_holding_at_negative_price():
+    """Regression for issue #269 (Frank-Leysen, 2026-07-25 ~09:02 CEST, v9.9.0b23,
+    Growatt MOD 5000TL3-XH GEN4). Values below are read verbatim from the
+    optimizer's own `input_data` in his debug bundle
+    (bess-debug-2026-07-25-090230.md), the full 60-period (15h) horizon of the
+    latest run (2026-07-25 09:00-24:00 CEST): SOE starts at 1.65 kWh, below
+    `min_soe_kwh=1.8`, with real solar surplus in the morning and a negative
+    sell price for the first 36 periods, followed by a clearly profitable
+    evening price window (buy up to 0.394, sell up to 0.161 EUR/kWh) that
+    makes an early-charged battery valuable later in the horizon.
+
+    Before the fix, `_idle_battery_flows` (and the vectorized IDLE branch in
+    `_compute_reward_grid`) zeroed the real charging credit for any period
+    starting below `min_soe_kwh`, while the wear-cost term still charged the
+    real SOE delta -- making genuine solar-charging look artificially
+    unprofitable. SOE stayed pinned at 1.65 kWh for periods 0-8 despite free
+    solar and a negative sell price throughout, only starting to rise once
+    the DP's own bookkeeping (elsewhere) inconsistently let it through --
+    exactly what the reporter observed (SOLAR_EXPORT at 11% SOC, 0% charge
+    rate, sell price negative). After the fix, charging starts immediately.
+    """
+    from core.bess.dp_battery_algorithm import optimize_battery_schedule
+    from core.bess.settings import BatterySettings
+    from core.bess.simulation.inverter_simulator import derive_control_command, simulate
+
+    buy_price = [
+        0.221830,
+        0.221830,
+        0.221830,
+        0.221830,
+        0.209751,
+        0.209751,
+        0.209751,
+        0.209751,
+        0.207065,
+        0.207065,
+        0.207065,
+        0.207065,
+        0.203452,
+        0.203452,
+        0.203452,
+        0.203452,
+        0.199418,
+        0.199418,
+        0.199418,
+        0.199418,
+        0.215262,
+        0.215262,
+        0.215262,
+        0.215262,
+        0.207723,
+        0.207723,
+        0.207723,
+        0.207723,
+        0.209654,
+        0.209654,
+        0.209654,
+        0.209654,
+        0.221367,
+        0.221367,
+        0.221367,
+        0.221367,
+        0.310994,
+        0.310994,
+        0.310994,
+        0.310994,
+        0.378145,
+        0.378145,
+        0.378145,
+        0.378145,
+        0.393805,
+        0.393805,
+        0.393805,
+        0.393805,
+        0.392155,
+        0.392155,
+        0.392155,
+        0.392155,
+        0.388358,
+        0.388358,
+        0.388358,
+        0.388358,
+        0.382448,
+        0.382448,
+        0.382448,
+        0.382448,
+    ]
+    sell_price = [
+        -0.001406,
+        -0.001406,
+        -0.001406,
+        -0.001406,
+        -0.012807,
+        -0.012807,
+        -0.012807,
+        -0.012807,
+        -0.015342,
+        -0.015342,
+        -0.015342,
+        -0.015342,
+        -0.018752,
+        -0.018752,
+        -0.018752,
+        -0.018752,
+        -0.022560,
+        -0.022560,
+        -0.022560,
+        -0.022560,
+        -0.007605,
+        -0.007605,
+        -0.007605,
+        -0.007605,
+        -0.014721,
+        -0.014721,
+        -0.014721,
+        -0.014721,
+        -0.012899,
+        -0.012899,
+        -0.012899,
+        -0.012899,
+        -0.001843,
+        -0.001843,
+        -0.001843,
+        -0.001843,
+        0.082753,
+        0.082753,
+        0.082753,
+        0.082753,
+        0.146133,
+        0.146133,
+        0.146133,
+        0.146133,
+        0.160915,
+        0.160915,
+        0.160915,
+        0.160915,
+        0.159357,
+        0.159357,
+        0.159357,
+        0.159357,
+        0.155774,
+        0.155774,
+        0.155774,
+        0.155774,
+        0.150195,
+        0.150195,
+        0.150195,
+        0.150195,
+    ]
+    home_consumption = [
+        0.135000,
+        0.135000,
+        0.135000,
+        0.135000,
+        0.200000,
+        0.200000,
+        0.200000,
+        0.200000,
+        0.165000,
+        0.165000,
+        0.165000,
+        0.165000,
+        0.150000,
+        0.150000,
+        0.150000,
+        0.150000,
+        0.170000,
+        0.170000,
+        0.170000,
+        0.170000,
+        0.210000,
+        0.210000,
+        0.210000,
+        0.210000,
+        0.245000,
+        0.245000,
+        0.245000,
+        0.245000,
+        0.230000,
+        0.230000,
+        0.230000,
+        0.230000,
+        0.215000,
+        0.215000,
+        0.215000,
+        0.215000,
+        0.220000,
+        0.220000,
+        0.220000,
+        0.220000,
+        0.185000,
+        0.185000,
+        0.185000,
+        0.185000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.175000,
+        0.145000,
+        0.145000,
+        0.145000,
+        0.145000,
+        0.105000,
+        0.105000,
+        0.105000,
+        0.105000,
+    ]
+    solar_production = [
+        0.518850,
+        0.518850,
+        0.518850,
+        0.518850,
+        0.646525,
+        0.646525,
+        0.646525,
+        0.646525,
+        0.766500,
+        0.766500,
+        0.766500,
+        0.766500,
+        0.841175,
+        0.841175,
+        0.841175,
+        0.841175,
+        0.787525,
+        0.787525,
+        0.787525,
+        0.787525,
+        0.679750,
+        0.679750,
+        0.679750,
+        0.679750,
+        0.668000,
+        0.668000,
+        0.668000,
+        0.668000,
+        0.664400,
+        0.664400,
+        0.664400,
+        0.664400,
+        0.589475,
+        0.589475,
+        0.589475,
+        0.589475,
+        0.449925,
+        0.449925,
+        0.449925,
+        0.449925,
+        0.277025,
+        0.277025,
+        0.277025,
+        0.277025,
+        0.117725,
+        0.117725,
+        0.117725,
+        0.117725,
+        0.009350,
+        0.009350,
+        0.009350,
+        0.009350,
+        0.000000,
+        0.000000,
+        0.000000,
+        0.000000,
+        0.000000,
+        0.000000,
+        0.000000,
+        0.000000,
+    ]
+    initial_soe = 1.65
+    initial_cost_basis = 0.035
+    dt = 0.25
+    bs = BatterySettings(
+        total_capacity=15,
+        min_soc=12,
+        max_soc=100,
+        max_charge_power_kw=5,
+        max_discharge_power_kw=5,
+        charging_power_rate=40,
+        cycle_cost_per_kwh=0.035,
+        min_action_profit_threshold=0,
+        efficiency_charge=0.97,
+        efficiency_discharge=0.95,
+        inverter_max_ac_power_kw=0,
+        inverter_ac_power_margin=0.05,
+    )
+    assert bs.min_soe_kwh == pytest.approx(1.8)
+
+    result = optimize_battery_schedule(
+        buy_price=buy_price,
+        sell_price=sell_price,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        initial_soe=initial_soe,
+        initial_cost_basis=initial_cost_basis,
+        battery_settings=bs,
+        period_duration_hours=dt,
+    )
+
+    # Below min_soe_kwh with real solar surplus every period, storing costs
+    # only wear (0.035 EUR/kWh); the DP should recognize that and put real
+    # energy into the battery well before the crossover the bug produced
+    # (previously stuck flat at 1.65 kWh through period 8 / #269 comment).
+    total_charged_first_20 = sum(
+        pd.energy.battery_charged for pd in result.period_data[:20]
+    )
+    assert total_charged_first_20 > 5.0, (
+        "optimizer should charge substantially from the available real solar "
+        "surplus while below min_soe_kwh instead of holding-and-exporting at a "
+        f"negative sell price; got total_charged={total_charged_first_20:.3f} kWh "
+        "over the first 20 periods"
+    )
+    soe_above_floor = next(
+        (pd for pd in result.period_data if pd.energy.battery_soe_end > bs.min_soe_kwh),
+        None,
+    )
+    assert soe_above_floor is not None and soe_above_floor.period <= 4, (
+        "SOE should recover above min_soe_kwh within the first few periods given "
+        f"real solar surplus every period; recovered at period "
+        f"{soe_above_floor.period if soe_above_floor else 'never'}"
+    )
+
+    # Exercise the real DP-produced schedule through the inverter simulator
+    # (not a hand-built command sequence) so this also proves the plan the
+    # fix produces is faithfully executable, per docs/agents/simulator.md.
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent, pd.decision.battery_action / dt, bs
+        )
+        for pd in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        solar_production,
+        home_consumption,
+        buy_price,
+        sell_price,
+        initial_soe,
+        bs,
+        dt,
+    )
+    assert sim.realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=0.05
+    ), f"R={sim.realized_cost} != P={result.economic_summary.battery_solar_cost}"
+
+
 def test_load_support_self_throttles_discretization_overshoot():
     """#240 regression: load-first hardware never exports a discharge that
     overshoots home_consumption -- it self-throttles to the actual deficit,

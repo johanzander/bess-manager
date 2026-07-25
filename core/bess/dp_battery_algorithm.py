@@ -156,12 +156,12 @@ def _idle_battery_flows(
     Returns:
         (battery_charged, battery_discharged) in kWh throughput.
     """
-    # When soe is already below the minimum floor, _state_transition clamps
-    # next_soe up to min_soe_kwh. That delta is a floor artefact, not solar
-    # production — treating it as charging would misclassify the period as
-    # SOLAR_STORAGE even at 2 am with no sun.
-    if soe < battery_settings.min_soe_kwh:
-        return 0.0, 0.0
+    # No below-floor special case needed: _soe_floor (#233) only clamps next_soe
+    # up to min_soe_kwh when soe already started at/above it -- when soe is
+    # below the floor, the floor is soe itself, so a zero-solar period already
+    # yields next_soe == soe (delta 0) without help from this function. Below
+    # the floor with real solar, the delta is genuine stored energy and must
+    # be credited the same as any other IDLE period (#269).
     passive_energy_stored = next_soe - soe
     battery_charged = (
         passive_energy_stored / battery_settings.efficiency_charge
@@ -371,7 +371,6 @@ def _compute_reward_grid(
     exactly, branch for branch, for numerical parity. See #236.
     """
     max_soe = battery_settings.max_soe_kwh
-    min_soe = battery_settings.min_soe_kwh
     eff_charge = battery_settings.efficiency_charge
     cycle_cost = battery_settings.cycle_cost_per_kwh
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
@@ -390,11 +389,12 @@ def _compute_reward_grid(
         home_served = np.minimum(ac_output, home_consumption)
         return home_consumption - home_served, ac_output - home_served
 
-    # Idle passive-absorption flows
-    idle_below_min = soe < min_soe
+    # Idle passive-absorption flows. No below-floor special case needed --
+    # see _idle_battery_flows's docstring (#269): the delta is already zero
+    # below the floor when there's no real solar, and genuine when there is.
     passive_energy_stored = next_soe - soe
     idle_battery_charged = np.where(
-        (~idle_below_min) & (passive_energy_stored > 0),
+        passive_energy_stored > 0,
         passive_energy_stored / eff_charge,
         0.0,
     )

@@ -157,6 +157,12 @@ reproduce the exact conditions that caused the bug. Mock HA replays it identical
 python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md>
 # Outputs: scripts/mock_ha/scenarios/<timestamp>.json
 
+# For a DP/control-mapping fix that needs a fast, no-container plan-faithfulness
+# regression test (see .claude/skills/implement-issue/SKILL.md's TDD step),
+# also tag the log with the issue it diagnoses -- this additionally writes a
+# lean fixture to core/bess/tests/unit/data/regression_<timestamp>.json:
+python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md> --issue <N>
+
 # 2. Start mock HA + BESS (runs at the frozen timestamp from the log)
 ./mock-run.sh <timestamp>
 # e.g. ./mock-run.sh 2026-03-24-225535

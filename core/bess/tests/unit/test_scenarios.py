@@ -18,15 +18,8 @@ from core.bess.dp_battery_algorithm import (
     print_optimization_results,
 )
 from core.bess.models import EconomicSummary, PeriodData
-from core.bess.price_manager import MockSource, PriceManager
-from core.bess.settings import (
-    ADDITIONAL_COSTS,
-    MARKUP_RATE,
-    TAX_REDUCTION,
-    VAT_MULTIPLIER,
-    BatterySettings,
-)
 from core.bess.tests.helpers import (
+    _scenario_inputs,
     assert_intent_absent,
     assert_intent_present,
     assert_physical_constraints,
@@ -64,60 +57,42 @@ def get_all_scenario_files():
 def build_scenario_inputs(scenario_name):
     """Load a scenario file and derive battery settings + buy/sell prices.
 
-    Shared by every test that runs a scenario through the optimizer, so the
-    battery/price derivation logic (and its price_data fallback rules) lives
-    in exactly one place.
+    Thin wrapper around helpers._scenario_inputs so every consumer of
+    scenario files (this module and its several importers) shares one
+    derivation path -- including the buy_price/sell_price direct-input and
+    spot_multiplier handling added for debug-log-derived regression
+    fixtures.
     """
     scenario = load_test_scenario(scenario_name)
-    base_prices = scenario["base_prices"]
-    battery = scenario["battery"]
-    price_data = scenario.get("price_data")
-
-    battery_settings = BatterySettings(
-        total_capacity=battery["max_soe_kwh"],
-        min_soc=(battery["min_soe_kwh"] / battery["max_soe_kwh"]) * 100.0,
-        max_soc=100.0,
-        max_charge_power_kw=battery["max_charge_power_kw"],
-        max_discharge_power_kw=battery["max_discharge_power_kw"],
-        efficiency_charge=battery["efficiency_charge"],
-        efficiency_discharge=battery["efficiency_discharge"],
-        cycle_cost_per_kwh=battery["cycle_cost_per_kwh"],
-        inverter_max_ac_power_kw=battery.get("inverter_max_ac_power_kw", 0.0),
-        inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
+    inputs = _scenario_inputs(scenario)
+    return (
+        scenario,
+        inputs["battery_settings"],
+        inputs["buy_price"],
+        inputs["sell_price"],
+        inputs["period_duration_hours"],
     )
 
-    if price_data:
-        markup_rate = price_data["markup_rate"]
-        vat_multiplier = price_data["vat_multiplier"]
-        additional_costs = price_data["additional_costs"]
-        tax_reduction = price_data["tax_reduction"]
-        # Optional -- default to PriceManager's own default (1.0, no adjustment)
-        # so existing fixtures that don't set these are unaffected.
-        spot_multiplier = price_data.get("spot_multiplier", 1.0)
-        export_spot_multiplier = price_data.get("export_spot_multiplier", 1.0)
-    else:
-        markup_rate = MARKUP_RATE
-        vat_multiplier = VAT_MULTIPLIER
-        additional_costs = ADDITIONAL_COSTS
-        tax_reduction = TAX_REDUCTION
-        spot_multiplier = 1.0
-        export_spot_multiplier = 1.0
 
-    price_manager = PriceManager(
-        MockSource(base_prices),
-        markup_rate=markup_rate,
-        vat_multiplier=vat_multiplier,
-        additional_costs=additional_costs,
-        tax_reduction=tax_reduction,
-        area="SE4",
-        spot_multiplier=spot_multiplier,
-        export_spot_multiplier=export_spot_multiplier,
+def test_build_scenario_inputs_matches_shared_scenario_inputs_directly():
+    """Safety net for delegating build_scenario_inputs to the shared
+    helpers._scenario_inputs (#269 follow-up, avoids the two copies of this
+    logic drifting apart again -- see
+    docs/superpowers/specs/2026-07-25-debug-log-regression-fixtures-design.md):
+    output must be identical to calling the shared helper directly, for a
+    real existing fixture."""
+    from core.bess.tests.helpers import _scenario_inputs
+
+    scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
+        "realworld_2026_03_24_225535"
     )
-    buy_prices = price_manager.get_buy_prices(raw_prices=base_prices)
-    sell_prices = price_manager.get_sell_prices(raw_prices=base_prices)
-    period_duration_hours = scenario.get("period_duration_hours", 1.0)
+    expected = _scenario_inputs(scenario)
 
-    return scenario, battery_settings, buy_prices, sell_prices, period_duration_hours
+    assert buy_prices == expected["buy_price"]
+    assert sell_prices == expected["sell_price"]
+    assert dt == expected["period_duration_hours"]
+    assert battery_settings.max_soe_kwh == expected["battery_settings"].max_soe_kwh
+    assert battery_settings.min_soe_kwh == expected["battery_settings"].min_soe_kwh
 
 
 @pytest.mark.parametrize("scenario_name", get_all_scenario_files())
@@ -130,8 +105,10 @@ def test_all_scenarios(scenario_name):
     solar_production = scenario["solar_production"]
     battery = scenario["battery"]
 
-    # Determine the actual horizon from the scenario data
-    horizon = len(scenario["base_prices"])
+    # Determine the actual horizon from the scenario data -- use the
+    # derived buy_prices (always present) rather than base_prices (only
+    # present for non-regression fixtures using the markup-config path).
+    horizon = len(buy_prices)
 
     # Validate that all arrays have the same length
     assert (
@@ -223,6 +200,14 @@ def test_all_scenarios(scenario_name):
     # Battery usage should be within physical constraints
     # Small tolerance for floating-point precision errors (e.g., np.arange producing 30.000000000000025)
     soe_tolerance = 1e-6
+    # A scenario may legitimately start below min_soe_kwh (e.g. a live sensor
+    # reading under Min SOC, see dp_battery_algorithm.py's _soe_floor()
+    # docstring, #233) -- the effective lower bound is the fixture's own
+    # starting point in that case, not the configured floor. For every
+    # fixture that starts at/above its floor (all of them until #269's
+    # regression_2026_07_25_090230), this is identical to min_soe_kwh --
+    # zero behavior change.
+    effective_min_soe_kwh = min(battery["min_soe_kwh"], battery["initial_soe"])
     for hour_data in result.period_data:
         # Access SOE directly - these are already in kWh
         soe_start_kwh = hour_data.energy.battery_soe_start  # Already in kWh
@@ -230,15 +215,15 @@ def test_all_scenarios(scenario_name):
 
         # Validate SOE bounds in kWh (with tolerance for floating-point precision)
         assert (
-            battery["min_soe_kwh"] - soe_tolerance
+            effective_min_soe_kwh - soe_tolerance
             <= soe_start_kwh
             <= battery["max_soe_kwh"] + soe_tolerance
-        ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+        ), f"SOE start {soe_start_kwh:.2f} kWh outside bounds [{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         assert (
-            battery["min_soe_kwh"] - soe_tolerance
+            effective_min_soe_kwh - soe_tolerance
             <= soe_end_kwh
             <= battery["max_soe_kwh"] + soe_tolerance
-        ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+        ), f"SOE end {soe_end_kwh:.2f} kWh outside bounds [{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
 
         # Battery action should respect power limits - access through strategy field
         battery_action = hour_data.decision.battery_action

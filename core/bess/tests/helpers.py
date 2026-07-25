@@ -22,10 +22,15 @@ from core.bess.simulation.inverter_simulator import derive_control_command, simu
 
 def _scenario_inputs(scenario: dict):
     """Build optimizer inputs from a scenario dict. Shared by run_scenario and
-    run_scenario_realized so plan (P) and realized (R) use identical inputs."""
-    base_prices = scenario["base_prices"]
+    run_scenario_realized so plan (P) and realized (R) use identical inputs.
+
+    Two price inputs are supported: a scenario with `buy_price`/`sell_price`
+    keys uses those directly -- the exact final prices an optimizer run saw
+    (e.g. from a debug log's input_data) -- otherwise `base_prices` is run
+    through PriceManager as before, using `price_data` markup config
+    (including optional spot_multiplier/export_spot_multiplier) if present.
+    """
     battery = scenario["battery"]
-    price_data = scenario.get("price_data")
 
     battery_settings = BatterySettings(
         total_capacity=battery["max_soe_kwh"],
@@ -40,31 +45,51 @@ def _scenario_inputs(scenario: dict):
         inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
     )
 
-    if price_data:
-        markup_rate = price_data["markup_rate"]
-        vat_multiplier = price_data["vat_multiplier"]
-        additional_costs = price_data["additional_costs"]
-        tax_reduction = price_data["tax_reduction"]
+    if "buy_price" in scenario and "sell_price" in scenario:
+        buy_price = scenario["buy_price"]
+        sell_price = scenario["sell_price"]
     else:
-        markup_rate = MARKUP_RATE
-        vat_multiplier = VAT_MULTIPLIER
-        additional_costs = ADDITIONAL_COSTS
-        tax_reduction = TAX_REDUCTION
+        base_prices = scenario["base_prices"]
+        price_data = scenario.get("price_data")
 
-    price_manager = PriceManager(
-        MockSource(base_prices),
-        markup_rate=markup_rate,
-        vat_multiplier=vat_multiplier,
-        additional_costs=additional_costs,
-        tax_reduction=tax_reduction,
-        area="SE4",
-    )
+        if price_data:
+            markup_rate = price_data["markup_rate"]
+            vat_multiplier = price_data["vat_multiplier"]
+            additional_costs = price_data["additional_costs"]
+            tax_reduction = price_data["tax_reduction"]
+            # Optional -- default to PriceManager's own default (1.0, no
+            # adjustment) so existing fixtures that don't set these are
+            # unaffected.
+            spot_multiplier = price_data.get("spot_multiplier", 1.0)
+            export_spot_multiplier = price_data.get("export_spot_multiplier", 1.0)
+        else:
+            markup_rate = MARKUP_RATE
+            vat_multiplier = VAT_MULTIPLIER
+            additional_costs = ADDITIONAL_COSTS
+            tax_reduction = TAX_REDUCTION
+            spot_multiplier = 1.0
+            export_spot_multiplier = 1.0
+
+        price_manager = PriceManager(
+            MockSource(base_prices),
+            markup_rate=markup_rate,
+            vat_multiplier=vat_multiplier,
+            additional_costs=additional_costs,
+            tax_reduction=tax_reduction,
+            area="SE4",
+            spot_multiplier=spot_multiplier,
+            export_spot_multiplier=export_spot_multiplier,
+        )
+        buy_price = price_manager.get_buy_prices(raw_prices=base_prices)
+        sell_price = price_manager.get_sell_prices(raw_prices=base_prices)
+
     return {
-        "buy_price": price_manager.get_buy_prices(raw_prices=base_prices),
-        "sell_price": price_manager.get_sell_prices(raw_prices=base_prices),
+        "buy_price": buy_price,
+        "sell_price": sell_price,
         "home_consumption": scenario["home_consumption"],
         "solar_production": scenario["solar_production"],
         "initial_soe": battery["initial_soe"],
+        "initial_cost_basis": battery.get("initial_cost_basis"),
         "battery_settings": battery_settings,
         "period_duration_hours": scenario.get("period_duration_hours", 1.0),
     }
@@ -167,25 +192,37 @@ def assert_physical_constraints(result, battery: dict) -> None:
     """
     tolerance = 1e-6
 
+    # A scenario may legitimately start below min_soe_kwh (e.g. a live sensor
+    # reading under Min SOC, see dp_battery_algorithm.py's _soe_floor()
+    # docstring, #233) -- the effective lower bound is the fixture's own
+    # starting point in that case, not the configured floor. For every
+    # fixture that starts at/above its floor (all of them until #269's
+    # regression_2026_07_25_090230), this is identical to min_soe_kwh --
+    # zero behavior change. Callers that don't pass "initial_soe" on the
+    # battery dict fall back to min_soe_kwh, which is also a no-op.
+    effective_min_soe_kwh = min(
+        battery["min_soe_kwh"], battery.get("initial_soe", battery["min_soe_kwh"])
+    )
+
     for pd in result.period_data:
         soe_start = pd.energy.battery_soe_start
         soe_end = pd.energy.battery_soe_end
 
         assert (
-            battery["min_soe_kwh"] - tolerance
+            effective_min_soe_kwh - tolerance
             <= soe_start
             <= battery["max_soe_kwh"] + tolerance
         ), (
             f"Period {pd.period}: SOE start {soe_start:.2f} outside "
-            f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+            f"[{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         )
         assert (
-            battery["min_soe_kwh"] - tolerance
+            effective_min_soe_kwh - tolerance
             <= soe_end
             <= battery["max_soe_kwh"] + tolerance
         ), (
             f"Period {pd.period}: SOE end {soe_end:.2f} outside "
-            f"[{battery['min_soe_kwh']}, {battery['max_soe_kwh']}]"
+            f"[{effective_min_soe_kwh}, {battery['max_soe_kwh']}]"
         )
 
         action = pd.decision.battery_action

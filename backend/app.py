@@ -136,7 +136,11 @@ class BESSController:
         sensor_config = self.settings_store.get_active_sensors()
         growatt_config = merged.get("growatt", {})
         growatt_device_id = growatt_config.get("device_id")
-        self.ha_controller = self._init_ha_controller(sensor_config, growatt_device_id)
+        inverter_config = merged.get("inverter", {})
+        huawei_device_id = inverter_config.get("device_id")
+        self.ha_controller = self._init_ha_controller(
+            sensor_config, growatt_device_id, huawei_device_id
+        )
 
         # Set timezone from HA config before any BESS modules use it
         try:
@@ -198,12 +202,15 @@ class BESSController:
 
         logger.info("BESS Controller initialized with early settings loading")
 
-    def _init_ha_controller(self, sensor_config, growatt_device_id=None):
+    def _init_ha_controller(
+        self, sensor_config, growatt_device_id=None, huawei_device_id=None
+    ):
         """Initialize Home Assistant API controller based on environment.
 
         Args:
             sensor_config: Sensor configuration dictionary to use for the controller.
             growatt_device_id: Growatt device ID for TOU segment operations.
+            huawei_device_id: Huawei device ID for battery operations.
         """
         ha_token = os.getenv("HASSIO_TOKEN")
         if ha_token:
@@ -221,6 +228,7 @@ class BESSController:
             token=ha_token,
             sensor_config=sensor_config,
             growatt_device_id=growatt_device_id,
+            huawei_device_id=huawei_device_id,
         )
 
     def _load_options(self):
@@ -271,6 +279,7 @@ class BESSController:
         nordpool_area: str | None = None,
         nordpool_config_entry_id: str | None = None,
         growatt_device_id: str | None = None,
+        huawei_device_id: str | None = None,
     ) -> None:
         """Persist discovered config and apply it to the running controller.
 
@@ -279,18 +288,22 @@ class BESSController:
             nordpool_area: Nordpool price area (e.g. "SE4")
             nordpool_config_entry_id: HA config entry ID for Nordpool integration
             growatt_device_id: HA device registry ID for Growatt device
+            huawei_device_id: HA device registry ID for Huawei battery device
         """
         self.settings_store.apply_discovered(
             sensor_map=sensor_map,
             nordpool_area=nordpool_area,
             nordpool_config_entry_id=nordpool_config_entry_id,
             growatt_device_id=growatt_device_id,
+            huawei_device_id=huawei_device_id,
         )
 
         # Apply to running controller so BESS starts using new sensors immediately
         self.refresh_active_sensors()
         if growatt_device_id:
             self.ha_controller.growatt_device_id = growatt_device_id
+        if huawei_device_id:
+            self.ha_controller.huawei_device_id = huawei_device_id
         if nordpool_area:
             self.system.price_manager.area = nordpool_area
             self.system.price_manager.clear_cache()

@@ -14,6 +14,7 @@ communication.
 | Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
 | Solis (EXPERIMENTAL) | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
+| Huawei LUNA2000 (Local) | Huawei LUNA2000 | [huawei_solar](https://github.com/wlcrs/huawei_solar) | Local Modbus | TOU period-list writes | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
 > Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
@@ -36,7 +37,7 @@ is new.
 |-----------|-------------------|-----------|-------------------|---------------------|
 | **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
 | **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
-| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes **+** ephemeral **service calls** (`forcible_charge`) | ❌ not yet | *(would model on `SolaxController` for the ephemeral half)* |
+| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes to persistent **TOU period lists** gated by working-mode select | ✅ | `HuaweiController` |
 | **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
 
 `solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
@@ -47,9 +48,9 @@ serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
 | Scheduling model | Description | Implemented example |
 |------------------|-------------|---------------------|
 | **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
-| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud) |
+| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud), Huawei LUNA2000 (local) |
 | **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
-| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP; Huawei `forcible_charge` would land here |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP |
 
 ### Common control primitives (the shared vocabulary)
 
@@ -69,6 +70,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
 | `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
 | `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
+| `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
 
 ### Worked examples for new inverters
 
@@ -92,11 +94,9 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
   Control API) would be the cloud alternative if a future contributor wants
   it; `solis-sensor` (monitoring-only, no control) was ruled out as strictly
   worse than `solis_modbus`.
-- **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
-  plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
-  branch in detection + a `forcible_charge` service helper + a `HuaweiController`
-  modeled on `SolaxController`. **Additive, but the first platform to use a third
-  integration** (touches the detection dispatch).
+- **Huawei LUNA2000** — persistent charge/discharge TOU period lists via the
+  `huawei_solar` integration, shipping with full schedule control and
+  auto-discovery. See **"How BESS Controls Huawei LUNA2000"** section below.
 
 > **Both axes new?** A coordinate that needs a **new transport AND a new
 > scheduling model** is the expensive case. The safe interim for any new inverter
@@ -106,7 +106,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 > **Note on the controller ABC:** `InverterController`'s method names are
 > TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
 > `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
-> Growatt register interface. SM-Ephemeral inverters (SolaX today, Huawei later)
+> Growatt register interface. SM-Ephemeral inverters (SolaX today)
 > implement these by synthesizing "segments." It works; renaming to neutral terms
 > is an optional future cleanup, not a prerequisite.
 
@@ -389,6 +389,39 @@ uses. TOU period times (`time.py`) and per-slot enable switches
   entities); `export_power` is left unconfigured by auto-discovery since one
   suffix-map entry can only resolve to one BESS sensor key.
 
+### Huawei LUNA2000 (Local) — `huawei_solar_luna2000`
+
+Huawei LUNA2000 batteries use a persistent charge/discharge period list (max
+14 periods) gated behind the working-mode select entity. BESS writes a combined
+list with separate charge and discharge periods, each specifying a time range
+and the number of periods effective.
+
+**Schedule writes:** Single HA service call with atomically-deployed charge/discharge lists:
+```
+huawei_solar.set_tou_periods(device_id, charge_periods, discharge_periods, working_mode_settings="time_of_use_luna2000")
+```
+
+The service call is gated by a preflight check verifying the battery model via
+`get_huawei_working_mode_options()` — **LUNA2000 only**; LG RESU batteries are
+explicitly not supported (they use a price-bidding TOU format incompatible with
+BESS's optimization model).
+
+**Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
+discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.
+Periods without an explicit flag (SOLAR_STORAGE, SOLAR_EXPORT, IDLE) use the
+inverter's default self-consumption mode.
+
+**Per-period control:** None — all control (power, SOC limits, working mode) is
+embedded in the service call parameters or requires manual inverter
+configuration.
+
+**Note on open items:** The LUNA2000's `days_effective` digit convention
+(mapping "1234567" to day-of-week slots) and out-of-period battery behavior
+remain unverified on real hardware — currently specified per the `huawei_solar`
+integration's source code (`services.py`). See
+[`docs/superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md`](superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md)
+for design rationale and open items.
+
 ---
 
 ## Required Entities by Platform
@@ -610,6 +643,34 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 Only slot 1 of each direction is strictly required; slots 2-6 are optional
 (unused slots are simply left disabled by BESS).
 
+### Huawei LUNA2000 (Local) — `huawei_solar` integration
+
+**Monitoring and schedule control:**
+
+| BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
+|-----------------|-------------|---------------------|---------|
+| `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
+| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
+| `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
+| `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |
+| `battery_discharge_stop_soc` | number | `storage_grid_charge_cutoff_state_of_charge` | Discharge stop SOC (%) |
+| `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
+| `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
+| `local_load_power` | sensor | `active_power` | Home consumption (W) |
+
+**Lifetime energy (optional):**
+
+The `huawei_solar` integration does not expose lifetime energy counters for BESS's
+standard usage (battery input/output, solar production, grid import/export). Custom
+register reads via a separate Modbus probe are required; this is not yet
+integrated into BESS.
+
+**Auto-detection:** Presence of `huawei_solar` integration entities with the
+`storage_working_mode_settings` unique_id suffix triggers Huawei platform
+detection; the setup wizard confirms the battery model is LUNA2000 via
+`get_huawei_working_mode_options()` before proceeding.
+
 ---
 
 ## Auto-Detection
@@ -637,6 +698,11 @@ registry:
    Time of Use v2 Charge Start, Slot 1) — if absent, the installed
    inverter/firmware lacks the v2 schedule and schedule control is
    unavailable (monitoring sensors are still mapped).
+
+4. **huawei_solar detected** (`platform: huawei_solar`):
+   - If `storage_working_mode_settings` unique_id suffix found → Probe `get_huawei_working_mode_options(device_id)` to verify LUNA2000 model
+   - If confirmed LUNA2000 → **Huawei LUNA2000 (Local)**
+   - Else (LG RESU or other unsupported model) → **Not supported**
 
 If multiple platforms are detected (e.g. both Growatt and SolaX entities
 exist), the Settings page under Integrations & Sensors → Inverter Platform

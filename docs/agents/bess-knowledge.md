@@ -289,11 +289,10 @@ the entire stretch (that near-tie is close to the defining condition for
 choosing LOAD_SUPPORT at all), so the strict inequality above rarely opens in
 that regime — small, real grid imports (observed: 0.1–0.2 kWh/night) can still
 occur even with ample SOE headroom above the floor. This was investigated for
-issue #384/#381 and is believed to be a symptom of the shadow-price
-kink-interpolation gap tracked in #276, not something a wider gate tolerance
-should paper over: the gap between "genuinely arbitrary near-tie" and "real
-reserve protected for a meaningfully pricier future peak" is not currently
-distinguishable from the gate alone.
+issue #384/#381 and is tracked as its own residual limitation in #393, not
+something a wider gate tolerance should paper over: the gap between
+"genuinely arbitrary near-tie" and "real reserve protected for a meaningfully
+pricier future peak" is not currently distinguishable from the gate alone.
 
 ### The inverter AC output cap (solar clipping avoidance)
 

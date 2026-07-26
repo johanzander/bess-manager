@@ -2533,31 +2533,34 @@ class BatterySystemManager:
             )
         )
 
-        # SOLAR_EXPORT/SOLAR_STORAGE/LOAD_SUPPORT discharge gate: the
-        # optimizer's planned rate is a 15-min average, but load_first lets
-        # the battery cover an intra-period solar/load dip beyond that
-        # average. Allow that only when the stored energy is worth less than
-        # buying from grid now (shadow_price = DP marginal value of stored
-        # SoE). This is a sub-period hardware-robustness behaviour, invisible
-        # to the 15-min plan/sim. Only valid where discharge_rate is a
-        # load-following ceiling -- on platforms where it's an immediate
-        # forced power command (VPP-style control), opening the gate would
-        # force a full-power discharge instead of gently covering a dip (#324).
+        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer's planned
+        # rate is a 15-min average, but load_first lets the battery cover an
+        # intra-period solar/load dip beyond that average. Allow that only
+        # when the stored energy is worth less than buying from grid now
+        # (shadow_price = DP marginal value of stored SoE). This is a
+        # sub-period hardware-robustness behaviour, invisible to the 15-min
+        # plan/sim. Only valid where discharge_rate is a load-following
+        # ceiling -- on platforms where it's an immediate forced power
+        # command (VPP-style control), opening the gate would force a
+        # full-power discharge instead of gently covering a dip (#324).
         #
         # For SOLAR_EXPORT/SOLAR_STORAGE the planned baseline is always 0, so
-        # the gate fully determines the outcome. For LOAD_SUPPORT the
-        # baseline is already a nonzero plan-scaled rate (#147: LOAD_SUPPORT
-        # deliberately reserves battery for a later, pricier period rather
-        # than dumping at full rate) -- the gate may only RAISE the ceiling
-        # above that baseline, never lower it, so `max()` here is load-bearing:
-        # it must never zero out a plan the DP already committed to.
+        # the gate fully determines the outcome.
+        #
+        # LOAD_SUPPORT deliberately does NOT use this gate (#393): #384/#385
+        # added it here, but #385's own validation against the reporting
+        # user's real captured data found the gate doesn't open during the
+        # sustained overnight near-tie regime it was built for (shadow_price
+        # sits within a cent or two of buy_price there), while a second,
+        # independent real-world report (different day, different price
+        # shape) showed the same gate condition evaluating true for the
+        # large majority of LOAD_SUPPORT periods -- a broad, mostly-untested
+        # override of the #147 reservation pacing, not the narrow safety
+        # valve it was meant to be. Reverted until a mechanism is validated
+        # against real captured data before shipping. LOAD_SUPPORT keeps its
+        # plan-scaled cap unconditionally, same as pre-#384.
         if (
-            strategic_intent
-            in (
-                "SOLAR_EXPORT",
-                "SOLAR_STORAGE",
-                "LOAD_SUPPORT",
-            )
+            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE")
             and self._inverter_controller.discharge_rate_is_load_following
         ):
             # Resolved by exact timestamp (not positional index -

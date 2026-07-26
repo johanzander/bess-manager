@@ -275,24 +275,37 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
-**LOAD_SUPPORT also uses this gate (#384), with one difference.** SOLAR_EXPORT/
-SOLAR_STORAGE always plan `discharge_rate=0`, so the gate result fully decides
-the outcome. LOAD_SUPPORT already plans a nonzero, plan-scaled rate (#147:
-deliberately partial discharge, reserving the rest for a later, pricier
-period) — the gate may only **raise** that ceiling, never lower it
-(`discharge_rate = max(planned_rate, gate_result)`), since zeroing out an
-already-committed LOAD_SUPPORT plan would reopen the #147 regression.
+**LOAD_SUPPORT does NOT use this gate (#393 — reverted #384/#385).** #384
+briefly extended this gate to LOAD_SUPPORT (`discharge_rate =
+max(planned_rate, gate_result)`, raising but never lowering the plan-scaled
+ceiling), reasoning that `load_first`'s physical self-limiting to the real
+house deficit made an open ceiling safe. Two problems surfaced:
 
-**Known limitation, not yet fixed:** during a sustained overnight LOAD_SUPPORT
-drawdown, `shadow_price` tends to sit within a cent or two of `buy_price` for
-the entire stretch (that near-tie is close to the defining condition for
-choosing LOAD_SUPPORT at all), so the strict inequality above rarely opens in
-that regime — small, real grid imports (observed: 0.1–0.2 kWh/night) can still
-occur even with ample SOE headroom above the floor. This was investigated for
-issue #384/#381 and is tracked as its own residual limitation in #393, not
-something a wider gate tolerance should paper over: the gap between
-"genuinely arbitrary near-tie" and "real reserve protected for a meaningfully
-pricier future peak" is not currently distinguishable from the gate alone.
+- #385's own validation against the reporting user's real captured data found
+  the gate does **not** open during the sustained overnight near-tie regime it
+  was built to fix — `shadow_price` sits within a cent or two of `buy_price`
+  for the whole stretch there (that near-tie is close to the defining
+  condition for choosing LOAD_SUPPORT at all), so the strict inequality rarely
+  trips in exactly the case that motivated the change.
+- Replaying a full day of real captured data from a second, independent
+  report showed the same gate condition evaluating **true for the large
+  majority of LOAD_SUPPORT periods (51/67, ~76%)** — not the rare "reserve
+  genuinely not needed elsewhere" case the gate was designed for. In
+  practice this meant a broad, mostly-untested override of the #147
+  reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
+  later, pricier period rather than dumping at full rate).
+
+LOAD_SUPPORT is back to its plan-scaled cap unconditionally, matching
+pre-#384/v9.9.0b23 behavior — no shadow-price gate at all. The original
+overnight-leak problem #381/#384 described (small real grid imports, 0.1–0.2
+kWh/night, while SOE has ample headroom above the floor) remains open and
+tracked in #393, to be revisited with a mechanism actually validated against
+real captured data across representative regimes (not just the motivating
+case) before it ships again. See
+`core/bess/tests/unit/test_load_support_gate_regression_393.py`, which
+replays real captured data (`regression_2026_07_26_203726.json`) reproducing
+the 76% figure and asserting LOAD_SUPPORT's discharge_rate never exceeds the
+plan-scaled baseline regardless of shadow_price.
 
 ### The inverter AC output cap (solar clipping avoidance)
 

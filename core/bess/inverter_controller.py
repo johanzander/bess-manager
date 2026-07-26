@@ -109,6 +109,18 @@ class InverterController(ABC):
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
 
+    # Whether the default _write_period_to_hardware() should skip re-sending
+    # a register (grid_charge/discharge_rate) that already matches the last
+    # value it successfully wrote (#402: unguarded resends from the 15-min
+    # period tick, its own retry, and the discharge-inhibit path could each
+    # independently re-trigger the same Growatt cloud API write, which was
+    # implicated in rate-limit write failures there). True by default for
+    # the base register-write path. SolaxModbusGrowattController's TOU mode
+    # overrides this to False -- it deliberately writes unconditionally
+    # pending a real-hardware test of the #166 gate revert, and must not be
+    # silently re-gated by this unrelated change.
+    dedupe_register_writes: ClassVar[bool] = True
+
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
         execute, in kW. Default: Growatt's integer-percent-of-max grid (1%
@@ -139,6 +151,13 @@ class InverterController(ABC):
         self.strategic_intents: list[str] = []
         self.tou_intervals: list[dict] = []
         self.corruption_detected: bool = False
+
+        # Last register values successfully written by _write_period_to_hardware,
+        # so repeat calls with an unchanged value skip the hardware write instead
+        # of re-sending it (grid_charge/discharge_rate #402). None means unknown
+        # (always write). Left unset on a failed write so the next call retries.
+        self._last_written_grid_charge: bool | None = None
+        self._last_written_discharge_rate: int | None = None
 
     # ── Period utility ────────────────────────────────────────────────────────
 
@@ -826,19 +845,29 @@ class InverterController(ABC):
         """
         errors = []
 
-        try:
-            controller.set_grid_charge(grid_charge)
-        except Exception as e:
-            logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
-            errors.append(str(e))
+        if (
+            not self.dedupe_register_writes
+            or grid_charge != self._last_written_grid_charge
+        ):
+            try:
+                controller.set_grid_charge(grid_charge)
+                self._last_written_grid_charge = grid_charge
+            except Exception as e:
+                logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
+                errors.append(str(e))
 
-        try:
-            controller.set_discharging_power_rate(discharge_rate)
-        except Exception as e:
-            logger.error(
-                "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
-            )
-            errors.append(str(e))
+        if (
+            not self.dedupe_register_writes
+            or discharge_rate != self._last_written_discharge_rate
+        ):
+            try:
+                controller.set_discharging_power_rate(discharge_rate)
+                self._last_written_discharge_rate = discharge_rate
+            except Exception as e:
+                logger.error(
+                    "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
+                )
+                errors.append(str(e))
 
         if errors:
             return False, "; ".join(errors)

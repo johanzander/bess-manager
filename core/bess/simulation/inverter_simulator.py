@@ -39,11 +39,13 @@ def derive_control_command(
     reusing the production controller mappings so the simulator executes exactly
     what the real controller would write.
 
-    ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE/
-    LOAD_SUPPORT intra-period discharge gate (mirrors
-    ``BatterySystemManager._apply_period_schedule``). Omit both to leave the
-    gate closed -- callers that don't care about it (most existing tests) see
-    unchanged, pre-gate behavior."""
+    ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE
+    intra-period discharge gate (mirrors
+    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT does NOT
+    use this gate (#393 -- reverted #384/#385's extension, see
+    test_load_support_discharge_gate.py). Omit both to leave the gate closed
+    -- callers that don't care about it (most existing tests) see unchanged,
+    pre-gate behavior."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
         strategic_intent, battery_action_kw, settings, shadow_price, buy_price
@@ -110,14 +112,16 @@ def _map_rates(
         rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
         return False, rate, 0
     if intent == "LOAD_SUPPORT":
+        # No shadow-price gate (#393): reverted #384/#385's extension -- see
+        # test_load_support_discharge_gate.py for why. Plan-scaled cap only,
+        # same as BATTERY_EXPORT.
         if action_kw < -0.01:
-            baseline = min(
+            rate = min(
                 100,
                 max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100)),
             )
         else:
-            baseline = 0
-        rate = _gated_discharge_rate(baseline, settings, shadow_price, buy_price)
+            rate = 0
         return False, rate, 100
     if intent == "BATTERY_EXPORT":
         # No shadow-price gate: grid_first has no physical deficit backstop,

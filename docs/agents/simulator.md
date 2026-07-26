@@ -59,10 +59,13 @@ scenarios.
 - **Shadow-price discharge gate was invisible to the simulator** (#388): `derive_control_command`
   had no `shadow_price`/`buy_price` params, so it couldn't call the same
   `intra_period_discharge_gate` production uses for SOLAR_EXPORT/SOLAR_STORAGE
-  (#187/#319) and LOAD_SUPPORT (#384) — an `R == P` test for gate-related changes
-  was structurally unsatisfiable until this was fixed. Pass both (from
-  `pd.decision.shadow_price` and the period's `buy_price`) to exercise the gate;
-  omit both to leave it closed (pre-gate behavior, the default).
+  (#187/#319) — an `R == P` test for gate-related changes was structurally
+  unsatisfiable until this was fixed. Pass both (from `pd.decision.shadow_price`
+  and the period's `buy_price`) to exercise the gate; omit both to leave it
+  closed (pre-gate behavior, the default). #384 briefly extended this gate to
+  LOAD_SUPPORT too; #393 reverted that extension after real captured data
+  showed it firing far more broadly than intended — see
+  `docs/agents/bess-knowledge.md`'s SOLAR_EXPORT discharge gate section.
 
 ## Known gaps and `xfail`
 

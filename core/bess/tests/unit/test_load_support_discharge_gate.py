@@ -1,22 +1,25 @@
-"""LOAD_SUPPORT intra-period discharge gate (#384).
+"""LOAD_SUPPORT discharge-rate cap stays plan-scaled, unconditionally (#393).
 
-_map_intent_to_rates shares one branch for LOAD_SUPPORT and BATTERY_EXPORT,
-capping the discharge_rate register at the DP's planned average power for the
-period. That cap is correct for BATTERY_EXPORT (grid_first has no deficit
-backstop -- an open ceiling would oversell beyond the arbitrage plan). But
-LOAD_SUPPORT runs through load_first, which is already self-limiting to the
-real house deficit: opening its ceiling can never cause it to export or
-overshoot beyond actual need, only to spend reserve covering a real spike.
+#384/#385 extended intra_period_discharge_gate (the shadow-price economic gate
+already used for SOLAR_EXPORT/SOLAR_STORAGE) to LOAD_SUPPORT, opening the
+discharge-rate ceiling above the DP's plan-scaled rate whenever
+`buy_price * eff_d >= shadow_price`. Two problems surfaced after shipping:
 
-This reuses the existing intra_period_discharge_gate (shadow-price economic
-gate, see test_solar_export_discharge_gate.py) for LOAD_SUPPORT, but unlike
-SOLAR_EXPORT/SOLAR_STORAGE (whose planned baseline is always 0, so the gate
-fully determines the outcome), LOAD_SUPPORT's baseline is already a nonzero
-plan-scaled rate. So the fix is `discharge_rate = max(baseline, gate_rate)`:
-only ever raise the ceiling when the reserve isn't needed elsewhere, never
-lower it below what the DP already planned (that would regress #147, where a
-hardcoded 100% LOAD_SUPPORT rate drained the battery early on high-consumption
-days).
+- #385's own validation against the reporting user's real captured data found
+  the gate does NOT open during the sustained overnight near-tie regime it was
+  built to fix -- shadow_price sits within a cent or two of buy_price for the
+  whole stretch there, so the strict inequality rarely trips.
+- A second, independent real-world report (different day, different price
+  shape) showed the same gate condition evaluating true for the large
+  majority of LOAD_SUPPORT periods -- a broad, mostly-untested override of the
+  #147 reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
+  later, pricier period rather than dumping at full rate), not the narrow
+  safety valve it was meant to be.
+
+LOAD_SUPPORT no longer consults this gate at all -- back to the plan-scaled
+cap alone, matching pre-#384 (and current v9.9.0b23) behavior. SOLAR_EXPORT/
+SOLAR_STORAGE are unaffected (older, unrelated, pre-date #384) -- see
+test_solar_export_discharge_gate.py / test_solar_storage_discharge_gate.py.
 """
 
 from types import SimpleNamespace
@@ -91,27 +94,28 @@ def _store_shadow_price(
     bsm.schedule_store.store_schedule(result, optimization_period=period)
 
 
-class TestLoadSupportDischargeGate:
-    """BSM-integration coverage: proves the gate fires in the real
-    hardware-write path (_apply_period_schedule), not just the standalone
-    gate function. Mirrors TestSolarExportDischargeGate."""
+class TestLoadSupportDischargeCap:
+    """BSM-integration coverage: proves LOAD_SUPPORT's discharge_rate stays at
+    the DP's plan-scaled baseline regardless of shadow_price/buy_price, i.e.
+    the gate is never consulted for this intent. Mirrors
+    TestSolarExportDischargeGate's structure, inverted expectations."""
 
-    def test_gate_opens_to_full_rate_when_reserve_not_needed(self):
-        """High buy price, low shadow price -> gate opens, ceiling raised
-        above the plan-scaled baseline to cover a real load spike."""
+    def test_baseline_preserved_even_when_gate_condition_would_be_favorable(self):
+        """High buy price, low shadow price -- exactly the condition that used
+        to open the gate to 100% -- now leaves the plan-scaled baseline
+        untouched."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
         _store_shadow_price(bsm, PERIOD, shadow_price=0.5)
 
         bsm._apply_period_schedule(PERIOD)
 
-        assert controller.calls["discharge_rate"][-1] == 100
+        assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
 
     def test_baseline_preserved_when_shadow_price_high(self):
-        """Low buy price, high shadow price -> gate stays closed, but the
-        DP's own planned discharge (the baseline) is NOT zeroed out -- unlike
-        SOLAR_EXPORT/SOLAR_STORAGE, LOAD_SUPPORT already has a nonzero plan to
-        protect, and the gate must never lower it (that would regress #147)."""
+        """Low buy price, high shadow price -- the DP's own planned discharge
+        (the baseline) is NOT zeroed out -- LOAD_SUPPORT already has a nonzero
+        plan to protect, and nothing may lower it (that would regress #147)."""
         bsm, controller = _make_bsm(buy_prices=[0.2] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
         _store_shadow_price(bsm, PERIOD, shadow_price=4.0)
@@ -121,8 +125,8 @@ class TestLoadSupportDischargeGate:
         assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
 
     def test_no_stored_schedule_keeps_baseline(self):
-        """No schedule stored yet -> gate cannot evaluate, baseline (plan-scaled
-        rate) is used as-is, matching pre-gate LOAD_SUPPORT behavior."""
+        """No schedule stored yet -- baseline (plan-scaled rate) is used as-is,
+        matching pre-gate LOAD_SUPPORT behavior."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
 
@@ -130,10 +134,9 @@ class TestLoadSupportDischargeGate:
 
         assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
 
-    def test_battery_export_is_unaffected_by_the_gate(self):
-        """BATTERY_EXPORT has no deficit backstop (grid_first) -- the gate
-        must not touch it even with a favorable (low) shadow price, since
-        opening its ceiling would oversell beyond the arbitrage plan."""
+    def test_battery_export_is_unaffected(self):
+        """BATTERY_EXPORT has no deficit backstop (grid_first) -- it was never
+        part of this gate and still isn't, regardless of shadow price."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "BATTERY_EXPORT", BASELINE_ACTION_KWH)
         energy = EnergyData(

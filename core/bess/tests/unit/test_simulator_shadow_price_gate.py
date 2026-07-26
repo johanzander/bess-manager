@@ -3,7 +3,13 @@ maintained mirror of `InverterController._map_intent_to_rates` that has no
 `shadow_price` parameter and never calls `intra_period_discharge_gate` --
 so `run_scenario_realized`/`verify_plan_faithfulness` cannot exercise the
 shadow-price intra-period discharge gate (SOLAR_EXPORT/SOLAR_STORAGE since
-#187/#319, extended to LOAD_SUPPORT by #385) at all.
+#187/#319) at all.
+
+#385 briefly extended this gate to LOAD_SUPPORT too; #393 reverted that
+extension (see test_load_support_discharge_gate.py) after real-world data
+showed the gate opens for the large majority of LOAD_SUPPORT periods rather
+than the narrow "reserve genuinely not needed elsewhere" case it was meant
+for. LOAD_SUPPORT is back to its plan-scaled cap only, unconditionally.
 
 These tests use a real DP-optimized schedule (`optimize_battery_schedule`),
 not a hand-built period/decision, so the gate branch is genuinely reachable
@@ -59,13 +65,13 @@ def _optimize():
     return inp, result
 
 
-def test_load_support_simulator_opens_gate_on_favorable_shadow_price():
-    """A real DP-optimized LOAD_SUPPORT period whose shadow price makes
-    covering the full deficit now favorable (buy_price * eff_d >= shadow_price)
-    must reach the production `intra_period_discharge_gate` and raise the
-    discharge ceiling to 100%, exactly as `battery_system_manager.py`'s
-    `_apply_period_schedule` does -- not stay capped at the DP's plan-scaled
-    baseline (14% here), which is all the un-fixed simulator can produce."""
+def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
+    """A real DP-optimized LOAD_SUPPORT period whose shadow price would have
+    made the (now-reverted) gate condition favorable
+    (buy_price * eff_d >= shadow_price) must NOT raise the discharge ceiling
+    above the DP's plan-scaled baseline (#393) -- LOAD_SUPPORT no longer
+    consults `intra_period_discharge_gate` at all, matching
+    `battery_system_manager.py`'s `_apply_period_schedule`."""
     inp, result = _optimize()
     dt = inp["period_duration_hours"]
     settings = inp["battery_settings"]
@@ -82,8 +88,9 @@ def test_load_support_simulator_opens_gate_on_favorable_shadow_price():
         settings.efficiency_discharge,
     )
     assert expected_gate == 100, (
-        "scenario sanity check failed -- expected the shadow-price gate to "
-        f"be favorable at period {LOAD_SUPPORT_PERIOD}"
+        "scenario sanity check failed -- expected the shadow-price gate "
+        f"condition to be favorable at period {LOAD_SUPPORT_PERIOD} (the "
+        "point of this test is that a favorable condition is still ignored)"
     )
 
     cmd = derive_control_command(
@@ -93,24 +100,32 @@ def test_load_support_simulator_opens_gate_on_favorable_shadow_price():
         shadow_price=pd.decision.shadow_price,
         buy_price=buy_price[LOAD_SUPPORT_PERIOD],
     )
-    assert cmd.discharge_rate_pct == 100, (
-        f"simulator did not model the shadow-price gate: got "
-        f"discharge_rate_pct={cmd.discharge_rate_pct}, expected 100 (production's "
-        f"intra_period_discharge_gate would raise the ceiling here)"
+    baseline = min(
+        100,
+        max(
+            0,
+            round(
+                abs(pd.decision.battery_action / dt)
+                / settings.max_discharge_power_kw
+                * 100
+            ),
+        ),
+    )
+    assert cmd.discharge_rate_pct == baseline, (
+        f"LOAD_SUPPORT must stay at its plan-scaled baseline ({baseline}%) "
+        f"regardless of shadow_price, got discharge_rate_pct="
+        f"{cmd.discharge_rate_pct} -- the gate should not fire for "
+        "LOAD_SUPPORT (#393)"
     )
 
 
-def test_run_scenario_realized_wires_shadow_price_gate_by_default():
+def test_run_scenario_realized_stays_plan_faithful_for_load_support():
     """`run_scenario_realized` (the helper every plan-faithfulness scenario
     test uses) must pass shadow_price/buy_price through by default -- not
-    just when a test opts in by calling derive_control_command directly.
-
-    On this scenario, opening the gate lets the battery cover the full
-    period-10 deficit instead of leaving an avoidable grid import the DP's
-    plan already priced in, so realized cost must land at or below the
-    planned cost -- strictly below here, not just within the usual
-    grid-resolution tolerance, because the gate captures value the DP's own
-    15-min-average plan didn't (and couldn't) model."""
+    just when a test opts in by calling derive_control_command directly --
+    but for LOAD_SUPPORT that must be a no-op (#393): the gate is not
+    consulted, so realized cost tracks the plan within the usual
+    grid-resolution tolerance, not below it."""
     scenario = {
         "base_prices": BUY_PRICE,
         "home_consumption": HOME_CONSUMPTION,
@@ -119,10 +134,10 @@ def test_run_scenario_realized_wires_shadow_price_gate_by_default():
     }
     result, realized_cost = run_scenario_realized(scenario)
     planned_cost = result.economic_summary.battery_solar_cost
-    assert realized_cost < planned_cost - 0.05, (
-        f"R={realized_cost:.4f} not below P={planned_cost:.4f} by the expected "
-        f"gate-captured margin -- run_scenario_realized is not wiring "
-        f"shadow_price/buy_price into derive_control_command"
+    assert abs(realized_cost - planned_cost) < 0.05, (
+        f"R={realized_cost:.4f} vs P={planned_cost:.4f} diverged beyond the "
+        "usual grid-resolution tolerance -- LOAD_SUPPORT should be plan-"
+        "faithful now that the shadow-price gate is reverted (#393)"
     )
 
 

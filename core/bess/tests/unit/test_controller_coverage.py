@@ -588,17 +588,19 @@ class TestSimulatorMapRates:
         )
         assert rate == 0
 
-    def test_gate_raises_but_never_lowers_load_support_baseline(self):
-        """#388: LOAD_SUPPORT already plans a nonzero baseline (#147) -- the
-        gate may only raise the ceiling via max(baseline, gate), never zero
-        it out, matching the real gate's regression guard for #147."""
+    def test_load_support_ignores_shadow_price_gate_entirely(self):
+        """#393: LOAD_SUPPORT no longer consults the shadow-price gate at all
+        (reverted #384/#385) -- shadow_price/buy_price are accepted but have
+        no effect, so the plan-scaled baseline (#147) is always what's
+        applied, regardless of whether the (unused) gate condition would
+        have been favorable or not."""
         from core.bess.simulation.inverter_simulator import _map_rates
 
         s = self._settings()
         _grid_charge, rate, _charge_rate = _map_rates(
             "LOAD_SUPPORT", -1.5, s, shadow_price=4.0, buy_price=0.2
         )
-        assert rate == 10  # baseline preserved (1.5 / 15.0 * 100), gate closed
+        assert rate == 10  # baseline preserved (1.5 / 15.0 * 100)
 
     def test_battery_export_unaffected_by_gate(self):
         """#388: BATTERY_EXPORT has no deficit backstop (grid_first) -- the

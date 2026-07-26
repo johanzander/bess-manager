@@ -3169,6 +3169,17 @@ class BatterySystemManager:
         try:
             if "battery" in settings:
                 self.battery_settings.update(**settings["battery"])
+                # InverterController snapshots these at construction time
+                # (see InverterController.__init__) for its discharge/charge
+                # rate-percent math -- refresh them so a live settings change
+                # doesn't leave the % calc using the old value (#398).
+                if self._inverter_controller is not None:
+                    self._inverter_controller.max_charge_power_kw = (
+                        self.battery_settings.max_charge_power_kw
+                    )
+                    self._inverter_controller.max_discharge_power_kw = (
+                        self.battery_settings.max_discharge_power_kw
+                    )
 
             if "home" in settings:
                 prev_strategy = self.home_settings.consumption_strategy

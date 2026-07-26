@@ -47,6 +47,18 @@ class TestUpdateSettings:
         system.update_settings({"battery": {"total_capacity": 20.0}})
         assert system.battery_settings.total_capacity == 20.0
 
+    def test_max_discharge_power_synced_to_inverter_controller(self, system):
+        """Issue #398: discharge_rate% used the InverterController's stale
+        max_discharge_power_kw snapshot from construction time, so a user
+        lowering the power setting kept getting rates computed against the
+        old (higher) value."""
+        system.update_settings({"battery": {"max_discharge_power_kw": 10.0}})
+        assert system._inverter_controller.max_discharge_power_kw == 10.0
+
+    def test_max_charge_power_synced_to_inverter_controller(self, system):
+        system.update_settings({"battery": {"max_charge_power_kw": 10.0}})
+        assert system._inverter_controller.max_charge_power_kw == 10.0
+
     def test_price_settings_synced_to_price_manager(self, system):
         system.update_settings({"price": {"markup_rate": 0.05}})
         assert system.price_settings.markup_rate == 0.05

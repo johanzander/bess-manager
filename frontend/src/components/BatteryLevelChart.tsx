@@ -34,8 +34,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     soc: '#16a34a',
     solarCharging: '#fbbf24',
     gridCharging: '#3b82f6',
-    homeDischarging: '#f87171',
-    gridDischarging: '#dc2626'
+    homeDischarging: '#dc2626',
+    gridDischarging: '#1d4ed8'
   };
 
   // Extract values from FormattedValue objects or fallback to raw numbers

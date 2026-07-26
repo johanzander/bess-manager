@@ -442,6 +442,61 @@ class TestApplyPeriod:
         assert success is False
         assert "fail" in error
 
+    def test_repeat_call_with_unchanged_values_skips_writes(
+        self, min_ctrl, mock_controller
+    ):
+        """#402: GrowattMinController (cloud) must not re-send a register
+        that already matches the last value it successfully wrote -- the
+        15-min period tick, its retry, and the discharge-inhibit path each
+        independently call apply_period() and previously always re-issued
+        both hardware writes even when nothing had changed."""
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
+
+        assert mock_controller.calls["grid_charge"] == [True]
+        assert mock_controller.calls["discharge_rate"] == [50]
+
+    def test_changed_value_is_still_written(self, min_ctrl, mock_controller):
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=75)
+
+        assert mock_controller.calls["grid_charge"] == [True, False]
+        assert mock_controller.calls["discharge_rate"] == [50, 75]
+
+    def test_failed_write_is_retried_next_call(self, min_ctrl, mock_controller):
+        mock_controller.set_grid_charge = lambda _: (_ for _ in ()).throw(
+            RuntimeError("fail")
+        )
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
+
+        mock_controller.set_grid_charge = lambda enable: mock_controller.calls[
+            "grid_charge"
+        ].append(enable)
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
+
+        assert mock_controller.calls["grid_charge"] == [True]
+
+
+class TestSolaxModbusGrowattTouWritesUnconditionally:
+    """#402: unlike GrowattMinController (cloud), the solax_modbus TOU path
+    must keep writing every period regardless of whether the value changed
+    -- it deliberately writes unconditionally pending a real-hardware test
+    of the #166 gate revert, and must not be silently re-gated."""
+
+    def test_repeat_call_with_unchanged_values_still_writes(self, mock_controller):
+        ctrl = SolaxModbusGrowattController(
+            battery_settings=BatterySettings(), control_mode="tou"
+        )
+        ctrl._write_period_to_hardware(
+            mock_controller, grid_charge=True, discharge_rate=50
+        )
+        ctrl._write_period_to_hardware(
+            mock_controller, grid_charge=True, discharge_rate=50
+        )
+
+        assert mock_controller.calls["grid_charge"] == [True, True]
+        assert mock_controller.calls["discharge_rate"] == [50, 50]
+
 
 class TestComputeRatesForPeriod:
     def test_grid_charging_intent(self, min_ctrl):

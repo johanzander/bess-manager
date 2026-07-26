@@ -43,6 +43,7 @@ SolaX's autorepeat duration.
 
 import logging
 import time
+from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -68,6 +69,14 @@ class SolaxModbusGrowattController(GrowattMinController):
     hardware, with ``write_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
+
+    # TOU mode's per-period write goes through the inherited base
+    # _write_period_to_hardware() (#166 comment above _apply_period_tou):
+    # writes unconditionally rather than gating on the last-written value,
+    # since the #166 gate-removal is itself an active real-hardware test on
+    # GEN4. Do not let GrowattMinController's dedupe_register_writes (#402,
+    # cloud-only) silently re-gate this.
+    dedupe_register_writes: ClassVar[bool] = False
 
     def __init__(
         self, battery_settings: BatterySettings, control_mode: str = "tou"

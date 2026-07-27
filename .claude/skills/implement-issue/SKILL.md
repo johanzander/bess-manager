@@ -60,9 +60,15 @@ with `## Root cause` / `## Evidence` / `## Proposed fix` sections (label
 
 ### 3. Confirm gate
 
-Present the root cause and proposed fix to the user. Wait for explicit
-go-ahead before touching code. One message — cheap insurance against
-building an entire implementation on a wrong diagnosis.
+Present the root cause, proposed fix, AND its scope assessment per
+`docs/agents/rules.md`'s Debugging Protocol step 8: does the fix stay within
+the target method's existing contract (local), does it need a different/new
+owner (structural), or does it have multiple plausible owners worth a second
+opinion? State which, explicitly — don't let the user infer it from the diff
+description. A structural assessment with no stated reason for the chosen
+owner is not ready to present. Wait for explicit go-ahead before touching
+code. One message — cheap insurance against building an entire
+implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 

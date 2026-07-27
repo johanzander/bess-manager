@@ -185,9 +185,15 @@ class BatterySystemManager:
         self._desired_block_passive_charging: bool = False  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
-        # Prediction caches (populated by _fetch_predictions)
+        # Consumption forecast cache. Only used for the 'influxdb_7d_avg'
+        # and 'ha_statistics' strategies, whose value is a window of full
+        # calendar days ending at today's midnight and so provably can't
+        # change intraday — the cache is invalidated on date rollover, not
+        # a clock-based TTL (see issue #395). 'sensor'/'fixed' read a cheap,
+        # continuously-updating source and always fetch fresh, same as
+        # solar's controller.get_solar_forecast() every quarterly run.
         self._consumption_predictions: list[float] | None = None
-        self._solar_predictions: list[float] | None = None
+        self._consumption_predictions_date: date | None = None
 
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
@@ -276,6 +282,14 @@ class BatterySystemManager:
         return platform
 
     VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
+
+    # Strategies whose forecast is a window of full calendar days ending at
+    # today's midnight — the value can't change intraday, so it's cached
+    # until the date rolls over instead of refetched every quarterly cycle.
+    _DATE_CACHED_CONSUMPTION_STRATEGIES: ClassVar[set[str]] = {
+        "influxdb_7d_avg",
+        "ha_statistics",
+    }
 
     @staticmethod
     def _resolve_control_mode(options: dict, platform: str | None) -> str:
@@ -963,18 +977,22 @@ class BatterySystemManager:
             logger.error(f"Failed to initialize historical data: {e}")
 
     def _fetch_predictions(self) -> None:
-        """Fetch consumption and solar predictions and store them."""
+        """Fetch the consumption forecast and store it.
+
+        Solar has no cache to warm here — _gather_optimization_data fetches
+        it live via controller.get_solar_forecast() on every quarterly run.
+        """
         try:
             if self._controller is None:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
             consumption_predictions = self._get_consumption_forecast()
-            solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
             if consumption_predictions:
                 self._consumption_predictions = consumption_predictions
+                self._consumption_predictions_date = time_utils.today()
                 logger.debug(
                     "Fetched consumption predictions: %s",
                     [round(value, 1) for value in consumption_predictions],
@@ -983,15 +1001,6 @@ class BatterySystemManager:
                 logger.warning(
                     "Invalid consumption predictions format, keeping defaults"
                 )
-
-            if solar_predictions:
-                self._solar_predictions = solar_predictions
-                logger.info(
-                    "Fetched solar predictions: %s",
-                    [round(value, 1) for value in solar_predictions],
-                )
-            else:
-                logger.warning("Invalid solar predictions format, keeping defaults")
 
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
@@ -1710,14 +1719,29 @@ class BatterySystemManager:
 
         current_soe = current_soc / 100.0 * self.battery_settings.total_capacity
 
-        # --- Fetch predictions (shared, cache-first) ---
-        # Use cached predictions when available to avoid re-fetching
-        # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
-        consumption_predictions = (
-            self._consumption_predictions
-            if self._consumption_predictions
-            else self._get_consumption_forecast()
-        )
+        # --- Fetch predictions (issue #395) ---
+        # 'sensor'/'fixed' read a cheap, continuously-updating source, so
+        # they refetch every quarterly cycle (same as solar, below).
+        # 'influxdb_7d_avg'/'ha_statistics' average a window of full
+        # calendar days ending at today's midnight — that value can't
+        # change intraday, so it's only refetched once the date rolls over,
+        # instead of only at startup/23:55.
+        if (
+            self.home_settings.consumption_strategy
+            in self._DATE_CACHED_CONSUMPTION_STRATEGIES
+        ):
+            consumption_predictions_fresh = (
+                self._consumption_predictions is not None
+                and self._consumption_predictions_date == time_utils.today()
+            )
+            if consumption_predictions_fresh:
+                consumption_predictions = self._consumption_predictions
+            else:
+                consumption_predictions = self._get_consumption_forecast()
+                self._consumption_predictions = consumption_predictions
+                self._consumption_predictions_date = time_utils.today()
+        else:
+            consumption_predictions = self._get_consumption_forecast()
 
         if prepare_next_day:
             # The next-day schedule must be built from tomorrow's solar forecast, not today's.

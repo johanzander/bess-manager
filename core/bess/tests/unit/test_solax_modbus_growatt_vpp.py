@@ -204,15 +204,29 @@ class TestApplyPeriodVpp:
         assert period["remote_control_enabled"] is True
         assert period["power_pct"] == 0
 
-    def test_unchanged_command_skips_write(self, controller, mock_ha):
+    def test_unchanged_active_command_refreshes_timer(self, controller, mock_ha):
+        """#404: a stable run of identical active periods must still write,
+        or the inverter's fallback timer lapses and it reverts to load_first."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         writes_after_first = len(mock_ha.calls["growatt_vpp_periods"])
 
-        # Same command again — should not write again
+        # Same active command again — must still write to refresh the timer
         _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
+        assert len(mock_ha.calls["growatt_vpp_periods"]) == writes_after_first + 1
+
+    def test_unchanged_disabled_command_skips_write(self, controller, mock_ha):
+        intents = hourly_to_quarterly({2: "SOLAR_STORAGE"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        _apply_at_period(controller, mock_ha, 8, grid_charge=False, discharge_rate=0)
+        writes_after_first = len(mock_ha.calls["growatt_vpp_periods"])
+
+        # Same disabled (load_first) command again — nothing active, no
+        # timer to protect, so the write is still skipped.
+        _apply_at_period(controller, mock_ha, 9, grid_charge=False, discharge_rate=0)
         assert len(mock_ha.calls["growatt_vpp_periods"]) == writes_after_first
 
     def test_power_change_within_active_control_triggers_write(

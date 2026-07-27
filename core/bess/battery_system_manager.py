@@ -1633,6 +1633,8 @@ class BatterySystemManager:
         else:
             logger.info("Historical store: no periods stored yet")
 
+        self._persist_today_view()
+
     def _get_planned_intent_for_period(self, period: int) -> str | None:
         """Get the DP-planned strategic intent for a period.
 
@@ -3090,6 +3092,20 @@ class BatterySystemManager:
 
         # Build daily view with current period
         return self.daily_view_builder.build_daily_view(current_period)
+
+    def _persist_today_view(self) -> None:
+        """Best-effort snapshot of today's merged view to disk.
+
+        Write-through cache for HistoricalDataStore: called on every tick
+        that may have recorded new actuals, so a mid-day restart can seed
+        from disk instead of relying solely on InfluxDB backfill. No-op
+        until the first schedule of the day exists (build_daily_view raises
+        ValueError otherwise) — this mirrors the is_first_run skip that used
+        to gate the old 23:55-only save call.
+        """
+        if self.schedule_store.get_latest_schedule() is None:
+            return
+        self.daily_view_store.save_day(self.get_current_daily_view())
 
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption.

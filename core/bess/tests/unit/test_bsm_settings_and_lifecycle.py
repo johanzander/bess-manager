@@ -351,6 +351,39 @@ class TestHandleSpecialCases:
         mock_save.assert_not_called()
 
 
+class TestPersistTodayView:
+    def test_no_op_when_no_schedule_exists_yet(self, system):
+        with patch.object(system, "get_current_daily_view") as mock_get_view:
+            system._persist_today_view()
+        mock_get_view.assert_not_called()
+
+    def test_saves_current_view_when_schedule_exists(self, system, tmp_path):
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+        from datetime import date as date_cls
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        fake_view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[],
+            total_savings=4.0,
+            actual_count=0,
+            predicted_count=0,
+        )
+
+        with (
+            patch.object(
+                system.schedule_store, "get_latest_schedule", return_value=MagicMock()
+            ),
+            patch.object(system, "get_current_daily_view", return_value=fake_view),
+        ):
+            system._persist_today_view()
+
+        saved = system.daily_view_store.load_day(date_cls(2026, 7, 27))
+        assert saved is not None
+        assert saved.total_savings == 4.0
+
+
 class TestRuntimeFailureTracking:
     def test_no_failures_initially(self, system):
         assert system.get_runtime_failures() == []

@@ -346,6 +346,15 @@ class TestPersistTodayView:
         assert saved.total_savings == 4.0
 
 
+class TestUpdateEnergyDataCallsPersist:
+    def test_update_energy_data_calls_persist_today_view(self, system):
+        with patch.object(system, "_persist_today_view") as mock_persist:
+            system._update_energy_data(
+                period=1, is_first_run=True, prepare_next_day=False
+            )
+        mock_persist.assert_called_once()
+
+
 class TestRuntimeFailureTracking:
     def test_no_failures_initially(self, system):
         assert system.get_runtime_failures() == []
@@ -947,8 +956,10 @@ class TestLoadTodayFromDisk:
 
 class TestBackfillSkipsDiskSeededPeriods:
     def test_infludb_backfill_does_not_recollect_seeded_period(self, system, tmp_path):
+        from datetime import date as date_cls
         from datetime import datetime
 
+        from core.bess.daily_view_builder import DailyView
         from core.bess.daily_view_store import DailyViewStore
         from core.bess.models import DecisionData, EnergyData, PeriodData
 
@@ -969,7 +980,18 @@ class TestBackfillSkipsDiskSeededPeriods:
             data_source="actual",
             decision=DecisionData(),
         )
-        system.historical_store.record_period(0, seeded_period)
+        # Pre-seed disk with today's view (rather than calling
+        # historical_store.record_period directly) so this test also proves
+        # _load_today_from_disk (invoked by _fetch_and_initialize_historical_data
+        # below) is what performs the seeding.
+        view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[seeded_period],
+            total_savings=0.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        system.daily_view_store.save_day(view)
 
         with (
             patch(

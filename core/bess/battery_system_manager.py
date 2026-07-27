@@ -3130,10 +3130,22 @@ class BatterySystemManager:
         until the first schedule of the day exists (build_daily_view raises
         ValueError otherwise) — this mirrors the is_first_run skip that used
         to gate the old 23:55-only save call.
+
+        Never lets a disk-related failure propagate: this is called from
+        _update_energy_data on every tick, and an uncaught exception here
+        would abort that tick's optimization and hardware write.
         """
+        # Skip during BESS_HISTORICAL_SEED_FILE replay (see _load_historical_seed):
+        # persisting replayed fixture data to /data/daily_views would corrupt
+        # real disk state for a test/E2E run.
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
         if self.schedule_store.get_latest_schedule() is None:
             return
-        self.daily_view_store.save_day(self.get_current_daily_view())
+        try:
+            self.daily_view_store.save_day(self.get_current_daily_view())
+        except Exception as e:
+            logger.warning("Failed to persist today's view: %s", e)
 
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption.

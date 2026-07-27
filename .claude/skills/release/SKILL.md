@@ -38,12 +38,14 @@
      --base main --head beta-release-tmp \
      --title "release: v<version>" --body "<changelog>"
    ```
+
+   **If `beta/main`'s history still contains an old squash-merged release (from before step 12 switched to a regular merge), the Commits tab on this PR will show ~100 unrelated-looking commits spanning weeks — that's expected, not a sign something went wrong.** A squashed release commit has no ancestry to `origin/main`'s individual commits, so a branch cut fresh from `origin/main` (step 3) sees all of that history as "not yet in `beta/main`," even though most of it already shipped to beta users in substance. Once every release in the chain has used a regular merge (step 12), this stops happening — `beta/main` stays a true descendant of `origin/main` and each release's diff shrinks to the real delta. To review what's actually new regardless, use the **Files Changed** diff (`gh pr diff <pr-number> --stat`), not the Commits tab.
 11. **Monitor CI** on the PR. Check with:
    ```
    gh pr checks <pr-number> --repo johanzander/bess-manager-beta --watch
    ```
    **If any check fails**: read the failure logs with `gh run view <run-id> --repo johanzander/bess-manager-beta --log-failed`, fix the issue locally, commit, push, and re-check. Do NOT proceed to merge until all required checks pass. Also run `npx tsc --noEmit` locally before pushing — the CI type-check catches errors that `npm run build` misses.
-12. **Merge PR**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --squash`
+12. **Merge PR with a regular merge commit, not squash**: `gh pr merge <pr-number> --repo johanzander/bess-manager-beta --merge`. Squashing discards `beta/main`'s ancestry to `origin/main`'s real commit history, so every future release branch (cut fresh from `origin/main`, step 3) sees `beta/main`'s file content as unrelated blobs instead of an older snapshot of the same lineage — producing spurious merge conflicts in step 5 on any file that changed in between, even when one side is simply stale. A regular merge keeps `beta/main` a true descendant of `origin/main`, so subsequent releases get a clean 3-way merge with only the two structurally-expected conflicts.
 13. **Tag and push tag**:
     ```
     git fetch beta main

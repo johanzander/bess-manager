@@ -487,6 +487,39 @@ class TestRefreshHealthCheck:
 
         mock_update.assert_not_called()
 
+    def test_internal_run_health_check_does_not_build_schedule(self, system):
+        """Issue #399: ``start()`` calls the private ``_run_health_check``
+        before ``_initialize_tou_schedule_from_inverter`` has read the
+        inverter's current VPP/remote-control state. If ``_run_health_check``
+        itself retries the schedule build (as it did when #394 added the
+        retry directly to the private method), the very first
+        ``update_battery_schedule`` of the process fires before the
+        controller's write-skip guards are seeded from hardware, so Growatt
+        VPP registers get written unconditionally on every restart even when
+        the hardware is already in the desired state.
+
+        The retry belongs only in the public ``refresh_health_check``
+        wrapper, which is exclusively used by the periodic post-startup
+        cron/manual-recheck path (see debug log 2026-07-27-075654 on #399,
+        showing VPP writes at 07:40:19-21 before the hardware-read log at
+        07:40:24). The private method must never trigger a schedule build.
+        """
+        assert system._current_schedule is None
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(system, "update_battery_schedule") as mock_update,
+        ):
+            system._run_health_check()
+
+        mock_update.assert_not_called()
+
 
 class TestHealthRecoveryTracking:
     """A component that goes ERROR/WARNING -> OK between health checks should

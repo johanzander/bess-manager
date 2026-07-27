@@ -1462,17 +1462,10 @@ class BatterySystemManager:
                 logger.warning(f"Failed to get initial SOC: {e}")
 
         if prepare_next_day:
-            logger.info(
-                "Preparing for next day - saving daily view and refreshing predictions"
-            )
-            if is_first_run:
-                # No schedule has ever been created yet (fresh start/restart), so
-                # there is no completed day's view to persist.
-                logger.info(
-                    "Skipping daily view save: no schedule exists yet for today"
-                )
-            else:
-                self.daily_view_store.save_day(self.get_current_daily_view())
+            # Today's file is already current — _persist_today_view() (called
+            # from _update_energy_data on every tick, including this one) has
+            # been keeping it up to date all day. Nothing to save here.
+            logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 

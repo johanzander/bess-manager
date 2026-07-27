@@ -328,20 +328,20 @@ class SolaxModbusGrowattController(GrowattMinController):
     ) -> tuple[bool, str]:
         """Write one period's VPP power command.
 
-        Only writes when the command actually changes (remote-control state or
-        power level), minimising inverter writes — the fallback timer is
-        rewritten alongside any active command to keep the dead-man's-switch
-        from lapsing during a stable run of identical periods.
+        Writes every period while remote control is active, refreshing the
+        fallback timer so the inverter's dead-man's-switch never lapses
+        during a stable run of identical periods (#404). Only skipped when
+        remote control is (and was already) disabled — nothing active, no
+        timer to protect.
         """
         power_pct, remote_control_enabled = self._intent_to_vpp(
             grid_charge, discharge_rate, block_passive_charging
         )
 
-        command_changed = (
+        needs_write = remote_control_enabled or (
             remote_control_enabled != self._last_written_vpp_remote_control
-            or (remote_control_enabled and power_pct != self._last_written_vpp_power)
         )
-        if not command_changed:
+        if not needs_write:
             return True, ""
 
         try:

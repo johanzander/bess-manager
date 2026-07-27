@@ -152,3 +152,40 @@ class TestDiskUsageAndClear:
 
         assert store.list_available_dates() == []
         assert store.get_disk_usage() == {"day_count": 0, "total_bytes": 0}
+
+
+class TestTodayExcludedFromHistoryWideOperations:
+    def test_list_available_dates_excludes_today(self, tmp_path, monkeypatch):
+        from core.bess import time_utils
+
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 27))
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(_make_view(date(2026, 7, 26)))
+        store.save_day(_make_view(date(2026, 7, 27)))
+
+        assert store.list_available_dates() == ["2026-07-26"]
+
+    def test_disk_usage_excludes_today(self, tmp_path, monkeypatch):
+        from core.bess import time_utils
+
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 27))
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(_make_view(date(2026, 7, 26)))
+        store.save_day(_make_view(date(2026, 7, 27)))
+
+        usage = store.get_disk_usage()
+
+        assert usage["day_count"] == 1
+
+    def test_clear_all_leaves_todays_file_in_place(self, tmp_path, monkeypatch):
+        from core.bess import time_utils
+
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 27))
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(_make_view(date(2026, 7, 26)))
+        store.save_day(_make_view(date(2026, 7, 27)))
+
+        store.clear_all()
+
+        assert store.load_day(date(2026, 7, 26)) is None
+        assert store.load_day(date(2026, 7, 27)) is not None

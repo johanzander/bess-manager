@@ -564,8 +564,9 @@ def _aggregate_quarterly_to_hourly(
 async def get_dashboard_available_dates():
     """List ISO dates that have dashboard data available (for date-picker greying).
 
-    Today is always included even though it isn't persisted to the
-    DailyViewStore until day rollover.
+    Today is always included even though it is deliberately excluded from
+    DailyViewStore.list_available_dates() by design — today's view is
+    persisted continuously, but only past days are listed as history.
     """
     from app import bess_controller
 

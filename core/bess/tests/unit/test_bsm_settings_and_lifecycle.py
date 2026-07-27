@@ -274,8 +274,6 @@ class TestHandleSpecialCases:
         today's real sensor data early and produced false "missing hours"
         and a broken chart (issue #380 follow-up)."""
         with (
-            patch.object(system, "get_current_daily_view"),
-            patch.object(system.daily_view_store, "save_day"),
             patch.object(system, "_fetch_predictions"),
             patch.object(system.historical_store, "clear") as mock_clear,
         ):
@@ -287,53 +285,16 @@ class TestHandleSpecialCases:
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
         system._consumption_predictions = [1.0] * 96
         system._solar_predictions = [0.0] * 96
-        with (
-            patch.object(system, "get_current_daily_view"),
-            patch.object(system.daily_view_store, "save_day"),
-            patch.object(system, "_fetch_predictions") as mock_fetch,
-        ):
+        with patch.object(system, "_fetch_predictions") as mock_fetch:
             system._handle_special_cases(
                 period=0, prepare_next_day=True, is_first_run=False
             )
             mock_fetch.assert_called_once()
 
-    def test_prepare_next_day_saves_daily_view_before_clearing(self, system, tmp_path):
-        from datetime import date as date_cls
-        from unittest.mock import patch
-
-        from core.bess.daily_view_builder import DailyView
-        from core.bess.daily_view_store import DailyViewStore
-
-        # Use a temp persist dir instead of the production default (/data/daily_views),
-        # which isn't writable in local/sandboxed test environments.
-        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
-
-        fake_view = DailyView(
-            date=date_cls(2026, 7, 9),
-            periods=[],
-            total_savings=1.5,
-            actual_count=0,
-            predicted_count=0,
-        )
-
-        with patch.object(system, "get_current_daily_view", return_value=fake_view):
-            with patch.object(system, "_fetch_predictions"):
-                system._handle_special_cases(
-                    period=0, prepare_next_day=True, is_first_run=False
-                )
-
-        saved = system.daily_view_store.load_day(date_cls(2026, 7, 9))
-        assert saved is not None
-        assert saved.total_savings == 1.5
-
-    def test_prepare_next_day_skips_save_on_first_run(self, system, tmp_path):
-        """No schedule has ever been created yet, so there is nothing to save.
-
-        This reproduces the CI failure in PR #260: build_daily_view() raises
-        ValueError("No optimization schedule available") when schedule_store
-        is empty, which previously aborted update_battery_schedule entirely
-        on the very first call of a fresh run.
-        """
+    def test_prepare_next_day_does_not_save_daily_view_itself(self, system, tmp_path):
+        """Saving today's file is now _persist_today_view()'s job (called every
+        tick from _update_energy_data), not _handle_special_cases's. Regression
+        guard against reintroducing a second, now-redundant write path."""
         from core.bess.daily_view_store import DailyViewStore
 
         system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
@@ -344,11 +305,54 @@ class TestHandleSpecialCases:
             patch.object(system, "_fetch_predictions"),
         ):
             system._handle_special_cases(
-                period=0, prepare_next_day=True, is_first_run=True
+                period=95, prepare_next_day=True, is_first_run=False
             )
 
         mock_get_view.assert_not_called()
         mock_save.assert_not_called()
+
+
+class TestPersistTodayView:
+    def test_no_op_when_no_schedule_exists_yet(self, system):
+        with patch.object(system, "get_current_daily_view") as mock_get_view:
+            system._persist_today_view()
+        mock_get_view.assert_not_called()
+
+    def test_saves_current_view_when_schedule_exists(self, system, tmp_path):
+        from datetime import date as date_cls
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        fake_view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[],
+            total_savings=4.0,
+            actual_count=0,
+            predicted_count=0,
+        )
+
+        with (
+            patch.object(
+                system.schedule_store, "get_latest_schedule", return_value=MagicMock()
+            ),
+            patch.object(system, "get_current_daily_view", return_value=fake_view),
+        ):
+            system._persist_today_view()
+
+        saved = system.daily_view_store.load_day(date_cls(2026, 7, 27))
+        assert saved is not None
+        assert saved.total_savings == 4.0
+
+
+class TestUpdateEnergyDataCallsPersist:
+    def test_update_energy_data_calls_persist_today_view(self, system):
+        with patch.object(system, "_persist_today_view") as mock_persist:
+            system._update_energy_data(
+                period=1, is_first_run=True, prepare_next_day=False
+            )
+        mock_persist.assert_called_once()
 
 
 class TestRuntimeFailureTracking:
@@ -888,3 +892,127 @@ class TestNotApplyBranchRefreshesCurrentSchedule:
 
         assert system._inverter_controller.current_schedule is second_schedule
         assert system._inverter_controller.current_schedule.actions == [5.0, 6.0]
+
+
+class TestLoadTodayFromDisk:
+    def test_seeds_only_actual_periods_within_range(self, system, tmp_path):
+        from datetime import date as date_cls
+        from datetime import datetime
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+        from core.bess.models import DecisionData, EnergyData, PeriodData
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+
+        def _period(index, data_source):
+            return PeriodData(
+                period=index,
+                energy=EnergyData(
+                    solar_production=0.0,
+                    home_consumption=0.5,
+                    battery_charged=0.0,
+                    battery_discharged=0.0,
+                    grid_imported=0.5,
+                    grid_exported=0.0,
+                    battery_soe_start=10.0,
+                    battery_soe_end=10.0,
+                ),
+                timestamp=datetime(2026, 7, 27, index // 4, (index % 4) * 15),
+                data_source=data_source,
+                decision=DecisionData(),
+            )
+
+        view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[
+                _period(0, "actual"),
+                _period(1, "actual"),
+                _period(2, "missing"),
+                _period(3, "actual"),  # out of range: current_period will be 2
+            ],
+            total_savings=0.0,
+            actual_count=2,
+            predicted_count=0,
+        )
+        system.daily_view_store.save_day(view)
+
+        system._load_today_from_disk(current_period=2)
+
+        assert system.historical_store.get_period(0) is not None
+        assert system.historical_store.get_period(1) is not None
+        assert (
+            system.historical_store.get_period(2) is None
+        )  # was "missing", not seeded
+        assert system.historical_store.get_period(3) is None  # out of range, not seeded
+
+    def test_no_op_when_no_file_saved(self, system, tmp_path):
+        from core.bess.daily_view_store import DailyViewStore
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        system._load_today_from_disk(current_period=4)
+        assert system.historical_store.get_stored_count() == 0
+
+
+class TestBackfillSkipsDiskSeededPeriods:
+    def test_infludb_backfill_does_not_recollect_seeded_period(self, system, tmp_path):
+        from datetime import date as date_cls
+        from datetime import datetime
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+        from core.bess.models import DecisionData, EnergyData, PeriodData
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        seeded_period = PeriodData(
+            period=0,
+            energy=EnergyData(
+                solar_production=0.0,
+                home_consumption=0.5,
+                battery_charged=0.0,
+                battery_discharged=0.0,
+                grid_imported=0.5,
+                grid_exported=0.0,
+                battery_soe_start=10.0,
+                battery_soe_end=10.0,
+            ),
+            timestamp=datetime(2026, 7, 27, 0, 0),
+            data_source="actual",
+            decision=DecisionData(),
+        )
+        # Pre-seed disk with today's view (rather than calling
+        # historical_store.record_period directly) so this test also proves
+        # _load_today_from_disk (invoked by _fetch_and_initialize_historical_data
+        # below) is what performs the seeding.
+        view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[seeded_period],
+            total_savings=0.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        system.daily_view_store.save_day(view)
+
+        with (
+            patch(
+                "core.bess.battery_system_manager.is_influxdb_configured",
+                return_value=True,
+            ),
+            patch.object(
+                system.sensor_collector, "collect_energy_data"
+            ) as mock_collect,
+            patch.object(
+                system.price_manager,
+                "get_available_prices",
+                return_value=([1.0] * 96, [0.5] * 96),
+            ),
+            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+        ):
+            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+            system._fetch_and_initialize_historical_data()
+
+        # Period 0 was already seeded (from disk, in this test's setup) —
+        # the backfill loop must not re-collect it.
+        collected_periods = [call.args[0] for call in mock_collect.call_args_list]
+        assert 0 not in collected_periods
+        assert 1 in collected_periods

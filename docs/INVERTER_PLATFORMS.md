@@ -222,8 +222,9 @@ has since diverged — see "LOAD_SUPPORT semantics" below — plus a
 semantics" below):
 - `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
 - `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
-- `LOAD_SUPPORT` (rate>0) → `vpp_power=0`, remote control **disabled**
-  (releases to `load_first` self-use — see "LOAD_SUPPORT semantics" below)
+- `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
+  regardless of `discharge_rate` (releases to `load_first` self-use — see
+  "LOAD_SUPPORT semantics" below)
 - `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
   control disabled (`load_first`/self-use — battery may absorb solar surplus)
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,

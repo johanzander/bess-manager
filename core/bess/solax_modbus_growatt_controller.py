@@ -30,10 +30,11 @@ LOAD_SUPPORT has since diverged (#413 -- see below): ``SolaxController``
 still forces a rate for it, this controller now releases VPP control instead.
 - GRID_CHARGING              -> power=+100%, remote_control enabled
 - BATTERY_EXPORT (rate>0)    -> power=-rate%, remote_control enabled
-- LOAD_SUPPORT (rate>0)      -> power=0, remote_control DISABLED (#413 --
-  releases control to the inverter's own load-following self-use instead of
-  forcing a fixed discharge rate, which causes unnecessary grid imports/
-  exports whenever the schedule's load prediction misses)
+- LOAD_SUPPORT (any rate)    -> power=0, remote_control DISABLED, regardless
+  of discharge_rate (#413 -- releases control to the inverter's own
+  load-following self-use instead of forcing a fixed discharge rate, which
+  causes unnecessary grid imports/exports whenever the schedule's load
+  prediction misses)
 - SOLAR_STORAGE/IDLE (rate=0, block_passive_charging=False) -> remote_control
   disabled (load_first self-use -- battery may absorb solar surplus)
 - SOLAR_EXPORT (rate=0, block_passive_charging=True) -> power=0,

@@ -67,6 +67,7 @@ def _apply_at_period(
     grid_charge,
     discharge_rate,
     block_passive_charging=False,
+    strategic_intent="",
 ):
     hour = period // 4
     minute = (period % 4) * 15
@@ -74,7 +75,11 @@ def _apply_at_period(
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
             controller.apply_period(
-                mock_ha, grid_charge, discharge_rate, block_passive_charging
+                mock_ha,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
 
 
@@ -121,6 +126,45 @@ class TestIntentToVpp:
         assert power_pct == -60
         assert enabled is True
 
+    def test_battery_export_still_forces_fixed_rate(self, controller):
+        """BATTERY_EXPORT must keep forcing a fixed grid_first rate --
+        only LOAD_SUPPORT releases control (#413)."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False, discharge_rate=60, strategic_intent="BATTERY_EXPORT"
+        )
+        assert power_pct == -60
+        assert enabled is True
+
+    def test_load_support_releases_vpp_control(self, controller):
+        """#413: LOAD_SUPPORT must release VPP control (fall back to the
+        inverter's own load-following self-use) instead of forcing a fixed
+        discharge rate via grid_first -- a fixed rate causes unnecessary
+        grid imports/exports whenever the schedule's load prediction misses.
+        """
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False, discharge_rate=60, strategic_intent="LOAD_SUPPORT"
+        )
+        assert power_pct == 0
+        assert enabled is False
+
+    def test_load_support_releases_vpp_control_at_zero_discharge_rate(self, controller):
+        """PR #414 review: LOAD_SUPPORT's INTENT_TO_CONTROL charge_rate is 0
+        (same as BATTERY_EXPORT/SOLAR_EXPORT), so block_passive_charging is
+        True for it in production (compute_rates_for_period). Whenever the
+        DP plan calls for no net discharge, or discharge-inhibit forces the
+        rate to 0, discharge_rate is 0 too -- both common, not edge cases.
+        The discharge_rate==0 branch must not take priority over the
+        LOAD_SUPPORT release for real block_passive_charging=True callers.
+        """
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=True,
+            strategic_intent="LOAD_SUPPORT",
+        )
+        assert power_pct == 0
+        assert enabled is False
+
 
 class TestApplyPeriodVpp:
     def test_no_tou_segments_written(self, controller, mock_ha):
@@ -159,11 +203,40 @@ class TestApplyPeriodVpp:
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
-        _apply_at_period(controller, mock_ha, 40, grid_charge=False, discharge_rate=70)
+        _apply_at_period(
+            controller,
+            mock_ha,
+            40,
+            grid_charge=False,
+            discharge_rate=70,
+            strategic_intent="BATTERY_EXPORT",
+        )
 
         period = mock_ha.calls["growatt_vpp_periods"][-1]
         assert period["remote_control_enabled"] is True
         assert period["power_pct"] == -70
+
+    def test_load_support_releases_remote_control_on_hardware(
+        self, controller, mock_ha
+    ):
+        """#413: unlike BATTERY_EXPORT, LOAD_SUPPORT must disable
+        vpp_remote_control on the hardware write, not force a fixed rate."""
+        intents = hourly_to_quarterly({10: "LOAD_SUPPORT"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+        controller._last_written_vpp_remote_control = True  # force a change
+
+        _apply_at_period(
+            controller,
+            mock_ha,
+            40,
+            grid_charge=False,
+            discharge_rate=70,
+            strategic_intent="LOAD_SUPPORT",
+        )
+
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["remote_control_enabled"] is False
+        assert period["power_pct"] == 0
 
     def test_idle_disables_remote_control_on_hardware(self, controller, mock_ha):
         intents = hourly_to_quarterly({0: "IDLE"})

@@ -29,6 +29,7 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
   solax_modbus_native: 'solax_modbus_native',
   solis_modbus: 'solis_modbus',
   huawei_solar_luna2000: 'huawei_solar_luna2000',
+  huawei_emma_sun2000: 'huawei_emma_sun2000',
 };
 
 // Platform IDs are now used consistently at all layers — no conversion needed.
@@ -42,6 +43,7 @@ export const VALID_PLATFORMS = [
   'solax_modbus_native',
   'solis_modbus',
   'huawei_solar_luna2000',
+  'huawei_emma_sun2000',
 ] as const;
 
 export type PlatformId = typeof VALID_PLATFORMS[number];
@@ -61,6 +63,7 @@ export interface PerPlatformSensors {
   solax_modbus_native: Record<string, string>;
   solis_modbus: Record<string, string>;
   huawei_solar_luna2000: Record<string, string>;
+  huawei_emma_sun2000: Record<string, string>;
   shared: Record<string, string>;
 }
 
@@ -81,6 +84,7 @@ export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
     solax_modbus_native: {},
     solis_modbus: {},
     huawei_solar_luna2000: {},
+    huawei_emma_sun2000: {},
     shared: {},
   };
 }
@@ -470,6 +474,53 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Power Monitoring',
         sensors: [
           { key: 'local_load_power', label: 'Inverter Active Power', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'huawei_emma_sun2000',
+    name: 'Huawei EMMA / SUN2000',
+    required: true,
+    description: 'Huawei SUN2000 controlled through the Huawei EMMA Management integration',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'State of Charge (SOC)', required: true },
+          { key: 'battery_charge_power', label: 'Charging Power', required: true },
+          { key: 'battery_discharge_power', label: 'Discharging Power', required: true },
+        ],
+      },
+      {
+        name: 'Battery Control',
+        sensors: [
+          { key: 'huawei_maximum_charging_power', label: 'Maximum Charging Power (W)', required: true },
+          { key: 'huawei_maximum_discharging_power', label: 'Maximum Discharging Power (W)', required: true },
+          { key: 'battery_charge_stop_soc', label: 'Charge Stop SOC', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'Discharge Stop SOC', required: true },
+          { key: 'grid_charge', label: 'Grid Charge Enable', required: true },
+          { key: 'huawei_emma_tou_schedule', label: 'Active TOU Schedule', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'Solar PV Power', required: false },
+          { key: 'local_load_power', label: 'Local Load Power', required: false },
+          { key: 'import_power', label: 'Grid Import Power', required: false },
+          { key: 'export_power', label: 'Grid Export Power', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy Totals',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Total Battery Charged', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharged', required: true },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
+          { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
         ],
       },
     ],

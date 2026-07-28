@@ -171,6 +171,9 @@ def _generate_entity_registry(inverter_platform: str) -> list[dict]:
         "solax_modbus_growatt_min": "solax_modbus",
         "solax_modbus_growatt_sph": "solax_modbus",
         "solax_modbus_native": "solax_modbus",
+        "solis_modbus": "solis_modbus",
+        "huawei_solar_luna2000": "huawei_solar",
+        "huawei_emma_sun2000": "huawei_emma_management",
     }
     inverter_platform = platform_map.get(inverter_platform, "growatt_server")
 
@@ -238,6 +241,15 @@ def _generate_config_entries(scenario: dict) -> list[dict]:
                 "state": "loaded",
             }
         )
+    elif inverter_platform == "huawei_emma_sun2000":
+        entries.append(
+            {
+                "entry_id": "mock_huawei_emma_config_entry",
+                "domain": "huawei_emma_management",
+                "title": "Huawei EMMA Management",
+                "state": "loaded",
+            }
+        )
 
     return entries
 
@@ -258,6 +270,10 @@ def _generate_services(inverter_platform: str) -> dict:
             growatt_services["write_ac_discharge_times"] = {}
             growatt_services["read_ac_discharge_times"] = {}
         services["growatt_server"] = growatt_services
+    elif inverter_platform == "huawei_emma_sun2000":
+        services["huawei_emma_management"] = {
+            "set_tou_periods": {},
+        }
 
     # solax_modbus platforms use entity-based control — no
     # growatt_server services needed. Detection relies on entity

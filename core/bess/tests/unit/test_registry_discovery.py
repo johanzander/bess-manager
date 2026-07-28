@@ -327,6 +327,45 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
     ]
 
 
+def _huawei_emma_registry(serial: str = "EMMA-A02-1234") -> list[dict]:
+    """Source-derived Huawei EMMA Management registry at source revision 7fba670."""
+    register_entities = {
+        "state_of_capacity": "sensor.huawei_emma_a02_state_of_capacity",
+        "battery_charge_discharge_power": (
+            "sensor.huawei_emma_a02_battery_charge_discharge_power"
+        ),
+        "storage_maximum_charging_power": (
+            "number.huawei_sun2000_10ktl_m1_storage_maximum_charging_power"
+        ),
+        "storage_maximum_discharging_power": (
+            "number.huawei_sun2000_10ktl_m1_storage_maximum_discharging_power"
+        ),
+        "storage_charging_cutoff_capacity": (
+            "number.huawei_sun2000_10ktl_m1_storage_charging_cutoff_capacity"
+        ),
+        "storage_discharging_cutoff_capacity": (
+            "number.huawei_sun2000_10ktl_m1_storage_discharging_cutoff_capacity"
+        ),
+        "storage_charge_from_grid_function": (
+            "switch.huawei_sun2000_10ktl_m1_storage_charge_from_grid_function"
+        ),
+        "emma_tou_schedule_text": ("sensor.huawei_emma_a02_tou_1_active_schedule"),
+        "pv_output_power": "sensor.huawei_emma_a02_pv_output_power",
+        "load_power": "sensor.huawei_emma_a02_load_power",
+        "feed_in_power": "sensor.huawei_emma_a02_feed_in_power",
+        "total_charged_energy": "sensor.huawei_emma_a02_total_charged_energy",
+        "total_discharged_energy": ("sensor.huawei_emma_a02_total_discharged_energy"),
+        "total_pv_energy_yield": "sensor.huawei_emma_a02_total_pv_energy_yield",
+        "total_feed_in_to_grid": "sensor.huawei_emma_a02_total_feed_in_to_grid",
+        "total_supply_from_grid": "sensor.huawei_emma_a02_total_supply_from_grid",
+        "total_energy_consumption": ("sensor.huawei_emma_a02_total_energy_consumption"),
+    }
+    return [
+        _entity(entity_id, "huawei_emma_management", f"{serial}_{register_name}")
+        for register_name, entity_id in register_entities.items()
+    ]
+
+
 # ---------------------------------------------------------------------------
 # SolaX entity registry: Growatt inverter connected via solax_modbus
 #
@@ -1935,3 +1974,20 @@ class TestHuaweiDiscovery:
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
         assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
         assert len(result) == 9
+
+
+class TestHuaweiEmmaDiscovery:
+    def test_maps_emma_and_sun2000_entities_and_signed_pairs(self):
+        controller = _make_controller()
+
+        platform_sensors, detected = controller.discover_sensors_from_registry(
+            _huawei_emma_registry()
+        )
+
+        assert detected == "huawei_emma_sun2000"
+        sensors = platform_sensors["huawei_emma_sun2000"]
+        assert sensors["battery_soc"] == "sensor.huawei_emma_a02_state_of_capacity"
+        assert sensors["battery_charge_power"] == sensors["battery_discharge_power"]
+        assert sensors["import_power"] == sensors["export_power"]
+        assert sensors["huawei_maximum_charging_power"].startswith("number.")
+        assert len(sensors) == 19

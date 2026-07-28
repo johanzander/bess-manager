@@ -89,6 +89,7 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "solax": frozenset({"name"}),
     "solis_modbus": frozenset({"name"}),
     "huawei_solar": frozenset({"name"}),
+    "huawei_emma_management": frozenset({"mode", "name"}),
     "entsoe": frozenset({"area", "currency", "energy_scale", "name"}),
 }
 
@@ -102,6 +103,7 @@ _WS_TARGET_DOMAINS = frozenset(
         "solax",
         "solis_modbus",
         "huawei_solar",
+        "huawei_emma_management",
         "entsoe",
     }
 )
@@ -114,6 +116,7 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
         "solax",
         "solis_modbus",
         "huawei_solar",
+        "huawei_emma_management",
         "nordpool",
         "octopus_energy",
         "entsoe",

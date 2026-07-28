@@ -77,3 +77,100 @@ class TestHuaweiServiceCalls:
         with patch.object(controller, "_api_request") as mock_request:
             mock_request.return_value = None
             assert controller.get_huawei_working_mode_options() == []
+
+
+class TestHuaweiEmmaServiceCalls:
+    def test_set_tou_periods_uses_native_huawei_emma_service(self) -> None:
+        ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local",
+            token="tok",
+            sensor_config={},
+            huawei_emma_config_entry_id="emma-entry",
+        )
+        periods = [
+            {
+                "start_time": "00:00",
+                "end_time": "06:00",
+                "action": "charge",
+                "days": [True] * 7,
+            }
+        ]
+        with patch.object(ctrl, "_api_request", return_value={}) as request:
+            ctrl.write_huawei_emma_tou_periods(periods)
+
+        args, kwargs = request.call_args
+        assert args[1] == ("/api/services/huawei_emma_management/set_tou_periods")
+        assert kwargs["json"]["config_entry_id"] == "emma-entry"
+        assert kwargs["json"]["periods"] == periods
+
+    def test_reads_structured_periods_from_active_schedule_sensor(self) -> None:
+        ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local",
+            token="tok",
+            sensor_config={
+                "huawei_emma_tou_schedule": (
+                    "sensor.huawei_emma_a02_tou_1_active_schedule"
+                )
+            },
+        )
+        response = {
+            "state": "2 periods",
+            "attributes": {
+                "periods": [
+                    {
+                        "start_time": 0,
+                        "end_time": 360,
+                        "action": 0,
+                        "days": [True] * 7,
+                    },
+                    {
+                        "start_time": 360,
+                        "end_time": 1439,
+                        "action": "discharge",
+                        "days": [True] * 7,
+                    },
+                ]
+            },
+        }
+        with patch.object(ctrl, "_api_request", return_value=response):
+            assert ctrl.read_huawei_emma_tou_periods() == [
+                {
+                    "start_time": "00:00",
+                    "end_time": "06:00",
+                    "action": "charge",
+                    "days": [True] * 7,
+                },
+                {
+                    "start_time": "06:00",
+                    "end_time": "23:59",
+                    "action": "discharge",
+                    "days": [True] * 7,
+                },
+            ]
+
+    def test_signed_emma_power_entities_are_split_by_direction(self) -> None:
+        shared_battery = "sensor.huawei_emma_battery_charge_discharge_power"
+        shared_grid = "sensor.huawei_emma_feed_in_power"
+        ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local",
+            token="tok",
+            sensor_config={
+                "battery_charge_power": shared_battery,
+                "battery_discharge_power": shared_battery,
+                "import_power": shared_grid,
+                "export_power": shared_grid,
+            },
+        )
+        states = {
+            shared_battery: "-2400",
+            shared_grid: "1300",
+        }
+        with patch.object(
+            ctrl,
+            "_get_raw_state",
+            side_effect=lambda key: states[ctrl.sensors[key]],
+        ):
+            assert ctrl.get_battery_charge_power() == 0
+            assert ctrl.get_battery_discharge_power() == 2400
+            assert ctrl.get_import_power() == 1300
+            assert ctrl.get_export_power() == 0

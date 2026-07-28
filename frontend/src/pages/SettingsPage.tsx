@@ -57,7 +57,12 @@ const EMPTY_PRICING: PricingForm = {
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
 };
-const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '', controlMode: 'tou' };
+const EMPTY_INVERTER: InverterForm = {
+  inverterPlatform: 'growatt_server_min',
+  deviceId: '',
+  configEntryId: '',
+  controlMode: 'tou',
+};
 
 // ---------------------------------------------------------------------------
 // Component
@@ -214,7 +219,8 @@ const SettingsPage: React.FC = () => {
       const uiType = invNew.platform ?? 'growatt_server_min';
       const inv: InverterForm = {
         inverterPlatform: uiType,
-        deviceId: growatt_s.deviceId ?? '',
+        deviceId: invNew.deviceId ?? growatt_s.deviceId ?? '',
+        configEntryId: invNew.configEntryId ?? '',
         controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
       };
       setInverterForm(inv);
@@ -300,6 +306,12 @@ const SettingsPage: React.FC = () => {
       }
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId }));
+      }
+      if (detectedPlatform === 'huawei_solar_luna2000' && d.huaweiDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.huaweiDeviceId! }));
+      }
+      if (detectedPlatform === 'huawei_emma_sun2000' && d.huaweiEmmaConfigEntryId) {
+        setInverterForm(f => ({ ...f, configEntryId: d.huaweiEmmaConfigEntryId! }));
       }
 
       // Only update discovery fields that actually changed.
@@ -463,6 +475,8 @@ const SettingsPage: React.FC = () => {
         },
         inverter: {
           platform: inverterForm.inverterPlatform,
+          deviceId: inverterForm.deviceId,
+          configEntryId: inverterForm.configEntryId,
           controlMode: inverterForm.controlMode ?? 'tou',
         },
       });

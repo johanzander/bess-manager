@@ -60,6 +60,7 @@ const SetupWizardPage: React.FC = () => {
   const [inverterForm, setInverterForm] = useState<InverterForm>({
     inverterPlatform: 'growatt_server_min',
     deviceId: '',
+    configEntryId: '',
     controlMode: 'tou',
   });
 
@@ -155,11 +156,14 @@ const SetupWizardPage: React.FC = () => {
       if (detectedPlatform) {
         setInverterForm(f => ({ ...f, inverterPlatform: detectedPlatform }));
       }
-      if (d.growattDeviceId) {
-        setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
+      const detectedDeviceId = detectedPlatform === 'huawei_solar_luna2000'
+          ? d.huaweiDeviceId
+          : d.growattDeviceId;
+      if (detectedDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: detectedDeviceId }));
       }
-      if (d.huaweiDeviceId) {
-        setInverterForm(f => ({ ...f, deviceId: d.huaweiDeviceId! }));
+      if (detectedPlatform === 'huawei_emma_sun2000' && d.huaweiEmmaConfigEntryId) {
+        setInverterForm(f => ({ ...f, configEntryId: d.huaweiEmmaConfigEntryId! }));
       }
 
       // Build per-platform sensor structure from discovery results.
@@ -281,6 +285,9 @@ const SetupWizardPage: React.FC = () => {
         setInverterForm(f => ({ ...f, controlMode: invNew.controlMode }));
       }
       if (inv.deviceId) setInverterForm(f => ({ ...f, deviceId: inv.deviceId }));
+      if (inv.configEntryId) {
+        setInverterForm(f => ({ ...f, configEntryId: inv.configEntryId }));
+      }
     }).catch((err: unknown) => {
       const status = (err as { response?: { status?: number } })?.response?.status;
       if (status !== 404) {
@@ -311,12 +318,15 @@ const SetupWizardPage: React.FC = () => {
         // attribute it to the platform actually selected, or a stale value
         // typed for one platform gets cross-written into the other's device_id
         // (backend persists whichever field is non-null unconditionally).
-        growattDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+        growattDeviceId: inverterForm.inverterPlatform.startsWith('huawei_')
           ? discovery.growattDeviceId
           : inverterForm.deviceId || discovery.growattDeviceId,
         huaweiDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
           ? inverterForm.deviceId || discovery.huaweiDeviceId
           : discovery.huaweiDeviceId,
+        huaweiEmmaConfigEntryId: inverterForm.inverterPlatform === 'huawei_emma_sun2000'
+          ? inverterForm.configEntryId || discovery.huaweiEmmaConfigEntryId
+          : discovery.huaweiEmmaConfigEntryId,
         // Battery
         totalCapacity: batteryForm.totalCapacity,
         minSoc: batteryForm.minSoc,

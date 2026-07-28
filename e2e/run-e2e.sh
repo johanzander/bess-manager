@@ -88,6 +88,7 @@ if [ "$RUN_WIZARD" = true ]; then
     "ci-wizard-growatt-modbus"
     "ci-wizard-growatt-modbus-gen3"
     "ci-wizard-solis"
+    "ci-wizard-huawei-emma"
     "ci-wizard-growatt-vpp"
   )
 

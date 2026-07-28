@@ -76,6 +76,7 @@ class HomeAssistantAPIController:
         sensor_config: dict | None = None,
         growatt_device_id: str | None = None,
         huawei_device_id: str | None = None,
+        huawei_emma_config_entry_id: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -85,6 +86,7 @@ class HomeAssistantAPIController:
             sensor_config: Sensor configuration mapping from options.json
             growatt_device_id: Growatt device ID for TOU segment operations
             huawei_device_id: Huawei battery device ID for TOU period operations
+            huawei_emma_config_entry_id: Huawei EMMA Management config entry ID
 
         """
         self.base_url = ha_url
@@ -105,6 +107,7 @@ class HomeAssistantAPIController:
 
         # Store Huawei battery device ID for TOU period operations
         self.huawei_device_id = huawei_device_id
+        self.huawei_emma_config_entry_id = huawei_emma_config_entry_id
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -827,6 +830,30 @@ class HomeAssistantAPIController:
         "active_power": "local_load_power",
     }
 
+    # Huawei EMMA Management unique_ids are
+    # f"{coordinator.parent_identifier}_{register_name}" (entity.py:19-22).
+    # The two signed power entities are expanded to directional BESS keys after
+    # registry matching; _get_sensor_value splits their values by sign.
+    HUAWEI_EMMA_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "state_of_capacity": "battery_soc",
+        "battery_charge_discharge_power": "battery_charge_power",
+        "storage_maximum_charging_power": "huawei_maximum_charging_power",
+        "storage_maximum_discharging_power": "huawei_maximum_discharging_power",
+        "storage_charging_cutoff_capacity": "battery_charge_stop_soc",
+        "storage_discharging_cutoff_capacity": "battery_discharge_stop_soc",
+        "storage_charge_from_grid_function": "grid_charge",
+        "emma_tou_schedule_text": "huawei_emma_tou_schedule",
+        "pv_output_power": "pv_power",
+        "load_power": "local_load_power",
+        "feed_in_power": "import_power",
+        "total_charged_energy": "lifetime_battery_charged",
+        "total_discharged_energy": "lifetime_battery_discharged",
+        "total_pv_energy_yield": "lifetime_solar_energy",
+        "total_feed_in_to_grid": "lifetime_export_to_grid",
+        "total_supply_from_grid": "lifetime_import_from_grid",
+        "total_energy_consumption": "lifetime_load_consumption",
+    }
+
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
         """Resolve sensor key to entity ID formatted for InfluxDB (without 'sensor.' prefix).
 
@@ -1213,7 +1240,20 @@ class HomeAssistantAPIController:
         if raw is None:
             return None
         try:
-            return float(raw)
+            value = float(raw)
+            signed_pair = {
+                "battery_charge_power": ("battery_discharge_power", 1),
+                "battery_discharge_power": ("battery_charge_power", -1),
+                "import_power": ("export_power", 1),
+                "export_power": ("import_power", -1),
+            }.get(sensor_name)
+            if signed_pair is not None:
+                counterpart, polarity = signed_pair
+                if self.sensors.get(sensor_name) and self.sensors.get(
+                    sensor_name
+                ) == self.sensors.get(counterpart):
+                    return max(value * polarity, 0.0)
+            return value
         except (ValueError, TypeError):
             logger.warning("Could not convert value for %s: %s", sensor_name, raw)
             return None
@@ -1463,6 +1503,70 @@ class HomeAssistantAPIController:
             device_id=self.huawei_device_id,
             periods=periods_text,
         )
+
+    def set_huawei_maximum_charging_power(self, watts: int) -> None:
+        entity_id = self._get_entity_for_service("huawei_maximum_charging_power")
+        self._set_number_like(
+            entity_id, watts, f"Set Huawei maximum charging power to {watts} W"
+        )
+
+    def set_huawei_maximum_discharging_power(self, watts: int) -> None:
+        entity_id = self._get_entity_for_service("huawei_maximum_discharging_power")
+        self._set_number_like(
+            entity_id, watts, f"Set Huawei maximum discharging power to {watts} W"
+        )
+
+    def write_huawei_emma_tou_periods(self, periods: list[dict]) -> None:
+        if not self.huawei_emma_config_entry_id:
+            raise SystemConfigurationError(
+                "Huawei EMMA config_entry_id not configured. Run the setup "
+                "wizard to configure the inverter."
+            )
+        self._service_call_with_retry(
+            "huawei_emma_management",
+            "set_tou_periods",
+            operation="Write Huawei EMMA native TOU periods",
+            config_entry_id=self.huawei_emma_config_entry_id,
+            periods=periods,
+        )
+
+    def read_huawei_emma_tou_periods(self) -> list[dict]:
+        entity_id = self._get_entity_for_service("huawei_emma_tou_schedule")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read Huawei EMMA native TOU periods",
+            category="config",
+        )
+        if not response:
+            raise SystemConfigurationError("Huawei EMMA TOU sensor returned no data")
+        raw_periods = response.get("attributes", {}).get("periods")
+        if not isinstance(raw_periods, list):
+            raise SystemConfigurationError(
+                "Huawei EMMA TOU sensor has no structured periods attribute"
+            )
+        periods: list[dict] = []
+        for period in raw_periods:
+            start_minutes = int(period["start_time"])
+            end_minutes = int(period["end_time"])
+            raw_action = str(period["action"]).lower()
+            if raw_action in ("charge", "c", "0"):
+                action = "charge"
+            elif raw_action in ("discharge", "d", "1"):
+                action = "discharge"
+            else:
+                raise SystemConfigurationError(
+                    f"Huawei EMMA TOU period has invalid action: {raw_action}"
+                )
+            periods.append(
+                {
+                    "start_time": f"{start_minutes // 60:02d}:{start_minutes % 60:02d}",
+                    "end_time": f"{end_minutes // 60:02d}:{end_minutes % 60:02d}",
+                    "action": action,
+                    "days": list(period["days"]),
+                }
+            )
+        return periods
 
     def set_inverter_time_segment(
         self,
@@ -2637,6 +2741,15 @@ class HomeAssistantAPIController:
                     huawei_device_id = device["id"]
                     break
 
+        huawei_emma_config_entry_id: str | None = None
+        for entry in config_entries_result:
+            if (
+                entry.get("domain") == "huawei_emma_management"
+                and entry.get("state") == "loaded"
+            ):
+                huawei_emma_config_entry_id = entry["entry_id"]
+                break
+
         # Determine inverter type from entity registry unique_id prefixes.
         # The HA growatt_server integration uses different sensor key prefixes
         # depending on the Growatt Cloud device_type:
@@ -2676,6 +2789,11 @@ class HomeAssistantAPIController:
         ):
             detected_platforms.append("solis_modbus")
 
+        if huawei_emma_config_entry_id and self._has_huawei_emma_sun2000_entities(
+            entity_registry_result
+        ):
+            detected_platforms.append("huawei_emma_sun2000")
+
         logger.info(
             "WS discovery: nordpool_config_entry_id=%s, nordpool_area=%s, "
             "growatt_device_id=%s, huawei_device_id=%s, octopus_found=%s, "
@@ -2690,6 +2808,7 @@ class HomeAssistantAPIController:
         return {
             "growatt_device_id": growatt_device_id,
             "huawei_device_id": huawei_device_id,
+            "huawei_emma_config_entry_id": huawei_emma_config_entry_id,
             "nordpool_config_entry_id": nordpool_config_entry_id,
             "nordpool_area": nordpool_area,
             "detected_platforms": detected_platforms,
@@ -2773,6 +2892,8 @@ class HomeAssistantAPIController:
             "solis_found": False,
             "huawei_found": False,
             "huawei_device_id": None,
+            "huawei_emma_found": False,
+            "huawei_emma_config_entry_id": None,
             "nordpool_found": False,
             "nordpool_area": None,
             "nordpool_custom_area": None,
@@ -2812,6 +2933,7 @@ class HomeAssistantAPIController:
         result["solax_found"] = inverter_detected.get("solax", False)
         result["solis_found"] = inverter_detected.get("solis", False)
         result["huawei_found"] = inverter_detected.get("huawei", False)
+        result["huawei_emma_found"] = inverter_detected.get("huawei_emma", False)
 
         # ── States: Growatt device SN, Nordpool area ─────────────────────
         states = self._fetch_all_states()
@@ -2850,6 +2972,9 @@ class HomeAssistantAPIController:
             )
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["huawei_device_id"] = metadata.get("huawei_device_id")
+            result["huawei_emma_config_entry_id"] = metadata.get(
+                "huawei_emma_config_entry_id"
+            )
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
             if metadata["nordpool_config_entry_id"]:
                 result["nordpool_found"] = True
@@ -2883,6 +3008,12 @@ class HomeAssistantAPIController:
                 detected.append("solis_modbus")
         if result["huawei_found"]:
             detected.append("huawei_solar_luna2000")
+        if (
+            result["huawei_emma_found"]
+            and "huawei_emma_sun2000" not in detected
+            and self._has_huawei_emma_sun2000_entities(registry)
+        ):
+            detected.append("huawei_emma_sun2000")
         result["detected_inverter_platforms"] = detected
 
         # Currency & VAT from Nordpool area or Octopus defaults
@@ -3179,6 +3310,7 @@ class HomeAssistantAPIController:
         "solax": ["solax_modbus", "solax"],
         "solis": ["solis_modbus"],
         "huawei": ["huawei_solar"],
+        "huawei_emma": ["huawei_emma_management"],
     }
     _PRICE_PLATFORMS: ClassVar[dict[str, list[str]]] = {
         "nordpool": ["nordpool"],
@@ -3228,6 +3360,7 @@ class HomeAssistantAPIController:
     _HUAWEI_BATTERY_MARKER_SUFFIX: ClassVar[str] = (
         "storage_working_mode_settings"  # only present on battery-equipped Huawei installs
     )
+    _HUAWEI_EMMA_SUN2000_MARKER_SUFFIX: ClassVar[str] = "storage_maximum_charging_power"
 
     _SOLAX_PLATFORMS: ClassVar[set[str]] = {"solax_modbus", "solax"}
 
@@ -3249,6 +3382,14 @@ class HomeAssistantAPIController:
             self._SOLIS_TOU_MARKER_SUFFIX,
             "Solis TOU v2",
             platforms=self._SOLIS_PLATFORMS,
+        )
+
+    def _has_huawei_emma_sun2000_entities(self, entities: list[dict]) -> bool:
+        return self._has_solax_entity_suffix(
+            entities,
+            self._HUAWEI_EMMA_SUN2000_MARKER_SUFFIX,
+            "Huawei EMMA SUN2000",
+            platforms={"huawei_emma_management"},
         )
 
     def _match_solis_dict_embedded_entities(
@@ -3493,6 +3634,29 @@ class HomeAssistantAPIController:
                     "entities found — schedule control unavailable on this "
                     "inverter/firmware; monitoring sensors mapped but "
                     "solis_modbus is not auto-selected as detected_platform"
+                )
+
+        if inverter_detected.get("huawei_emma"):
+            huawei_emma_sensors = self._map_registry_entities(
+                entities,
+                ["huawei_emma_management"],
+                self.HUAWEI_EMMA_SUFFIX_MAP,
+            )
+            battery_power = huawei_emma_sensors.get("battery_charge_power")
+            if battery_power:
+                huawei_emma_sensors["battery_discharge_power"] = battery_power
+            grid_power = huawei_emma_sensors.get("import_power")
+            if grid_power:
+                huawei_emma_sensors["export_power"] = grid_power
+            platform_sensors["huawei_emma_sun2000"] = huawei_emma_sensors
+            if self._has_huawei_emma_sun2000_entities(entities):
+                if not detected_platform:
+                    detected_platform = "huawei_emma_sun2000"
+            else:
+                logger.warning(
+                    "Huawei EMMA Management detected without SUN2000 storage "
+                    "controls; monitoring sensors mapped but the platform was "
+                    "not auto-selected"
                 )
 
         return platform_sensors, detected_platform

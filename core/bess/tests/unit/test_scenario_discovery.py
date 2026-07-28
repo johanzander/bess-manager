@@ -93,6 +93,8 @@ _INTEGRATION_KEYS = (
     "growatt_found",
     "solax_found",
     "solis_found",
+    "huawei_emma_found",
+    "huawei_emma_config_entry_id",
     "solax_has_growatt_tou",
     "solax_has_growatt_gen3",
     "nordpool_found",

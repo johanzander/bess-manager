@@ -56,6 +56,7 @@ test.describe('Setup Wizard', () => {
     await expect(page.getByRole('tab', { name: /Growatt Cloud/i })).toBeVisible();
     await expect(page.getByRole('tab', { name: /SolaX Modbus/i })).toBeVisible();
     await expect(page.getByRole('tab', { name: /Solis Modbus/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Huawei/i })).toBeVisible();
   });
 
   test('auto-selects correct pricing provider', async ({ page }) => {
@@ -79,6 +80,7 @@ test.describe('Setup Wizard', () => {
     const isModbus = expected.inverterPlatform.startsWith('solax_modbus');
     const isCloud = expected.inverterPlatform.startsWith('growatt_server');
     const isSolis = expected.inverterPlatform === 'solis_modbus';
+    const isHuawei = expected.inverterPlatform === 'huawei_emma_sun2000';
 
     if (isCloud) {
       // Growatt Cloud tab should be active
@@ -89,6 +91,8 @@ test.describe('Setup Wizard', () => {
     } else if (isSolis) {
       // Solis Modbus tab should be active
       await expect(page.getByRole('tab', { name: /Solis Modbus/i })).toHaveAttribute('data-state', 'active');
+    } else if (isHuawei) {
+      await expect(page.getByRole('tab', { name: /Huawei/i })).toHaveAttribute('data-state', 'active');
     }
   });
 
@@ -266,7 +270,7 @@ test.describe('Setup Wizard', () => {
   test('home step gates features by platform capabilities', async ({ page }) => {
     // SPH lacks local_load_power; SolaX native has it (as house_load)
     const platformsWithoutLocalLoad = ['growatt_server_sph'];
-    const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus'];
+    const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus', 'huawei_emma_sun2000'];
     const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
     const expectFuseDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
 

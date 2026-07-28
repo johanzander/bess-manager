@@ -12,7 +12,9 @@ export interface WizardExpectation {
   solaxFound: boolean;
   /** Solis (solis_modbus) detected. Optional — defaults to false. */
   solisFound?: boolean;
-  inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph' | 'solis_modbus';
+  /** Huawei EMMA Management detected. Optional — defaults to false. */
+  huaweiEmmaFound?: boolean;
+  inverterPlatform: 'growatt_server_min' | 'growatt_server_sph' | 'solax_modbus_native' | 'solax_modbus_growatt_min' | 'solax_modbus_growatt_sph' | 'solis_modbus' | 'huawei_emma_sun2000';
   nordpoolFound: boolean;
   octopusFound: boolean;
   /** ENTSO-e Transparency Platform (e.g. Belpex). Optional — defaults to false. */
@@ -179,6 +181,20 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     solaxFound: false,
     solisFound: true,
     inverterPlatform: 'solis_modbus',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
+  'ci-wizard-huawei-emma': {
+    growattFound: false,
+    solaxFound: false,
+    huaweiEmmaFound: true,
+    inverterPlatform: 'huawei_emma_sun2000',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',

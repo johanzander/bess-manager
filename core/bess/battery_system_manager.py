@@ -33,6 +33,7 @@ from .health_check import describe_failing_checks, run_system_health_checks
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
 from .huawei_controller import HuaweiController
+from .huawei_emma_controller import HuaweiEmmaController
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
 from .models import (
@@ -231,6 +232,7 @@ class BatterySystemManager:
         "solax_modbus_native",
         "solis_modbus",
         "huawei_solar_luna2000",
+        "huawei_emma_sun2000",
     }
 
     _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
@@ -241,6 +243,7 @@ class BatterySystemManager:
         "solax_modbus_native": "solax_modbus_native",
         "solis_modbus": "solis_modbus",
         "huawei_solar_luna2000": "huawei_solar_luna2000",
+        "huawei_emma_sun2000": "huawei_emma_sun2000",
         # Legacy values stored in growatt.inverter_type
         "MIN": "growatt_server_min",
         "SPH": "growatt_server_sph",
@@ -319,6 +322,8 @@ class BatterySystemManager:
             return SolisModbusController(battery_settings=self.battery_settings)
         if self.inverter_platform == "huawei_solar_luna2000":
             return HuaweiController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "huawei_emma_sun2000":
+            return HuaweiEmmaController(battery_settings=self.battery_settings)
         if self.inverter_platform in (
             "solax_modbus_growatt_min",
             "solax_modbus_growatt_sph",

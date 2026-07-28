@@ -1015,6 +1015,7 @@ const InverterStatusDashboard: React.FC = () => {
                     : platform === 'solax_modbus_growatt_min' ? 'SolaX/Growatt MIN'
                     : platform === 'solax_modbus_growatt_sph' ? 'SolaX/Growatt SPH'
                     : platform === 'huawei_solar_luna2000' ? 'Huawei LUNA2000'
+                    : platform === 'huawei_emma_sun2000' ? 'Huawei EMMA / SUN2000'
                     : platform}
                 </span>
               </div>

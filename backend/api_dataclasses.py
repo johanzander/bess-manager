@@ -1099,6 +1099,7 @@ class APISetupCompletePayload(BaseModel):
     nordpoolConfigEntryId: str | None = None
     growattDeviceId: str | None = None
     huaweiDeviceId: str | None = None
+    huaweiEmmaConfigEntryId: str | None = None
     # Battery settings
     totalCapacity: float | None = None
     minSoc: float | None = None

@@ -41,6 +41,7 @@ VALID_PLATFORMS = (
     "solax_modbus_native",
     "solis_modbus",
     "huawei_solar_luna2000",
+    "huawei_emma_sun2000",
 )
 
 # Sensor keys that are shared across all platforms (not inverter-specific).
@@ -72,6 +73,7 @@ VALID_PLATFORMS = (
     "solax_modbus_native",
     "solis_modbus",
     "huawei_solar_luna2000",
+    "huawei_emma_sun2000",
 )
 
 # Sensor keys that are shared across all platforms (not inverter-specific).
@@ -205,6 +207,7 @@ class SettingsStore:
         nordpool_config_entry_id: str | None = None,
         growatt_device_id: str | None = None,
         huawei_device_id: str | None = None,
+        huawei_emma_config_entry_id: str | None = None,
     ) -> None:
         """Merge auto-discovered values into the store and persist.
 
@@ -223,6 +226,8 @@ class SettingsStore:
             growatt_device_id: HA device registry ID for the Growatt device.
             huawei_device_id: HA device registry ID for the Huawei battery
                 device.
+            huawei_emma_config_entry_id: HA config entry ID for Huawei EMMA
+                Management.
         """
         sensors = dict(self.data.get("sensors", {}))
 
@@ -276,6 +281,11 @@ class SettingsStore:
         if huawei_device_id:
             inverter = dict(self.data.get("inverter", {}))
             inverter["device_id"] = huawei_device_id
+            self.data["inverter"] = inverter
+
+        if huawei_emma_config_entry_id:
+            inverter = dict(self.data.get("inverter", {}))
+            inverter["config_entry_id"] = huawei_emma_config_entry_id
             self.data["inverter"] = inverter
 
         self._write(self.data)
@@ -432,7 +442,12 @@ class SettingsStore:
                 "entsoe": {"entity": ""},
             },
             "growatt": {"inverter_type": "", "device_id": ""},
-            "inverter": {"platform": "", "device_id": "", "control_mode": "tou"},
+            "inverter": {
+                "platform": "",
+                "device_id": "",
+                "config_entry_id": "",
+                "control_mode": "tou",
+            },
             "sensors": {
                 "platform": "",
                 "growatt_server_min": {},
@@ -440,6 +455,7 @@ class SettingsStore:
                 "solax_modbus_growatt_min": {},
                 "solax_modbus_growatt_sph": {},
                 "solax_modbus_native": {},
+                "huawei_emma_sun2000": {},
                 "shared": {},
             },
             "demo_mode": {"enabled": False},

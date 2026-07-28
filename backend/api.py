@@ -3267,6 +3267,7 @@ async def run_setup_discovery():
                 "solax_modbus_growatt_min": ha.SOLAX_GROWATT_MIN_SUFFIX_MAP,
                 "solax_modbus_growatt_sph": ha.SOLAX_GROWATT_SPH_SUFFIX_MAP,
                 "solax_modbus_native": ha.SOLAX_NATIVE_SUFFIX_MAP,
+                "huawei_emma_sun2000": ha.HUAWEI_EMMA_SUFFIX_MAP,
             }
             suffix_map = _suffix_maps.get(effective_platform, ha.GROWATT_MIN_SUFFIX_MAP)
             all_bess_keys = list(set(suffix_map.values()))
@@ -3305,6 +3306,10 @@ async def run_setup_discovery():
                 "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
                 "huawei_device_id": integrations.get("huawei_device_id"),
+                "huawei_emma_found": integrations.get("huawei_emma_found", False),
+                "huawei_emma_config_entry_id": integrations.get(
+                    "huawei_emma_config_entry_id"
+                ),
                 "solax_found": integrations["solax_found"],
                 "solax_has_growatt_tou": integrations.get(
                     "solax_has_growatt_tou", False
@@ -3370,6 +3375,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             or payload.nordpoolConfigEntryId
             or payload.growattDeviceId
             or payload.huaweiDeviceId
+            or payload.huaweiEmmaConfigEntryId
         ):
             bess_controller.apply_discovered_config(
                 sensor_map={},  # sensors already in sections — avoid double-write
@@ -3377,6 +3383,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                 nordpool_config_entry_id=payload.nordpoolConfigEntryId,
                 growatt_device_id=payload.growattDeviceId,
                 huawei_device_id=payload.huaweiDeviceId,
+                huawei_emma_config_entry_id=payload.huaweiEmmaConfigEntryId,
             )
 
         # All sections use read-modify-write so that keys not managed by the wizard
@@ -3485,6 +3492,8 @@ async def setup_complete(payload: APISetupCompletePayload):
                 inv_section["control_mode"] = payload.inverterControlMode
             if payload.huaweiDeviceId:
                 inv_section["device_id"] = payload.huaweiDeviceId
+            if payload.huaweiEmmaConfigEntryId:
+                inv_section["config_entry_id"] = payload.huaweiEmmaConfigEntryId
             sections["inverter"] = inv_section
             if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
@@ -3527,6 +3536,10 @@ async def setup_complete(payload: APISetupCompletePayload):
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:
             bess_controller.ha_controller.huawei_device_id = payload.huaweiDeviceId
+        if payload.huaweiEmmaConfigEntryId:
+            bess_controller.ha_controller.huawei_emma_config_entry_id = (
+                payload.huaweiEmmaConfigEntryId
+            )
 
         def _nn(d: dict) -> dict:
             """Strip None values so update() only overwrites explicitly provided fields."""

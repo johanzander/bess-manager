@@ -518,6 +518,23 @@ class TestSetupComplete:
         assert call_args["inverter"]["platform"] == "huawei_solar_luna2000"
         assert call_args["inverter"]["device_id"] == "huawei-dev-456"
 
+    def test_huawei_emma_config_entry_id_persisted(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_emma_sun2000",
+                huaweiEmmaConfigEntryId="emma-entry-456",
+            ),
+        )
+
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "huawei_emma_sun2000"
+        assert call_args["inverter"]["config_entry_id"] == "emma-entry-456"
+        assert (
+            complete_controller.ha_controller.huawei_emma_config_entry_id
+            == "emma-entry-456"
+        )
+
     def test_growatt_inverter_type_not_written(self, complete_controller):
         """Setup should not write legacy growatt.inverter_type for any platform."""
         # Clear pre-existing legacy field to verify setup doesn't add it
@@ -738,6 +755,7 @@ class TestSetupComplete:
             nordpool_config_entry_id="entry-abc",
             growatt_device_id="dev-123",
             huawei_device_id=None,
+            huawei_emma_config_entry_id=None,
         )
 
     def test_discovered_config_applied_with_huawei_device_id(self, complete_controller):
@@ -751,6 +769,7 @@ class TestSetupComplete:
             nordpool_config_entry_id="entry-abc",
             growatt_device_id="dev-123",
             huawei_device_id="huawei-dev-456",
+            huawei_emma_config_entry_id=None,
         )
 
     # -- Partial payloads --

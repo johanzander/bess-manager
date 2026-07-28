@@ -12,6 +12,7 @@ import type { HealthStatus } from '../../types';
 export interface InverterForm {
   inverterPlatform: string;
   deviceId: string;
+  configEntryId: string;
   /** Growatt-via-solax_modbus control strategy. GEN4 default "tou"; GEN3 is
    * always "vpp" server-side regardless of this value. */
   controlMode?: 'tou' | 'vpp';
@@ -31,6 +32,8 @@ export interface DiscoveryResult {
   solisFound: boolean;
   huaweiFound: boolean;
   huaweiDeviceId: string | null;
+  huaweiEmmaFound: boolean;
+  huaweiEmmaConfigEntryId: string | null;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolCustomArea: string | null;
@@ -84,6 +87,7 @@ function isIntegrationFound(
   if (id === 'solax_modbus_native') return discovery.solaxFound;
   if (id === 'solis_modbus') return discovery.solisFound;
   if (id === 'huawei_solar_luna2000') return discovery.huaweiFound;
+  if (id === 'huawei_emma_sun2000') return discovery.huaweiEmmaFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(shared['current_l1'] || shared['current_l2'] || shared['current_l3']);
@@ -154,7 +158,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native', 'solis_modbus', 'huawei_solar_luna2000']);
+const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native', 'solis_modbus', 'huawei_solar_luna2000', 'huawei_emma_sun2000']);
 
 interface Props {
   sensors: PerPlatformSensors;
@@ -231,11 +235,13 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
     || inverterForm.inverterPlatform === 'solax_modbus_growatt_sph'
     || inverterForm.inverterPlatform === 'solax_modbus_native';
   const isSolisActive = inverterForm.inverterPlatform === 'solis_modbus';
-  const isHuaweiActive = inverterForm.inverterPlatform === 'huawei_solar_luna2000';
+  const isHuaweiActive = inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+    || inverterForm.inverterPlatform === 'huawei_emma_sun2000';
 
   const huaweiDetected = wizardMode
-    ? discovery.huaweiFound
-    : Boolean((sensors.huawei_solar_luna2000 ?? {})['huawei_working_mode']);
+    ? discovery.huaweiFound || discovery.huaweiEmmaFound
+    : Boolean((sensors.huawei_solar_luna2000 ?? {})['huawei_working_mode']
+      || (sensors.huawei_emma_sun2000 ?? {})['huawei_maximum_charging_power']);
 
   const handleIntegrationChange = (integration: 'cloud' | 'modbus' | 'solis' | 'huawei') => {
     if (integration === 'cloud') {
@@ -247,7 +253,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
       onInverterChange({ ...inverterForm, inverterPlatform: newType });
       onChange({ ...sensors, platform: newType });
     } else if (integration === 'huawei') {
-      const newType = 'huawei_solar_luna2000';
+      const newType = discovery?.huaweiEmmaFound
+        ? 'huawei_emma_sun2000'
+        : 'huawei_solar_luna2000';
       onInverterChange({ ...inverterForm, inverterPlatform: newType });
       onChange({ ...sensors, platform: newType });
     } else {
@@ -469,19 +477,55 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
 
               <TabsContent value="huawei">
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="px-3 py-1 rounded-full text-xs font-medium border bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300">
-                    LUNA2000
-                  </span>
+                  {([
+                    { value: 'huawei_solar_luna2000' as const, label: 'LUNA2000', detected: discovery?.huaweiFound ?? true },
+                    { value: 'huawei_emma_sun2000' as const, label: 'EMMA / SUN2000', detected: discovery?.huaweiEmmaFound ?? true },
+                  ]).map(opt => {
+                    const selected = inverterForm.inverterPlatform === opt.value;
+                    const disabled = wizardMode && !opt.detected;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        disabled={disabled}
+                        onClick={() => {
+                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
+                          onChange({ ...sensors, platform: opt.value });
+                        }}
+                        className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                          disabled
+                            ? 'opacity-40 cursor-not-allowed bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-400'
+                            : selected
+                              ? 'bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300'
+                              : 'bg-white dark:bg-gray-700 border-gray-200 dark:border-gray-600 text-gray-600 dark:text-gray-300'
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
                   <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">experimental</span>
                 </div>
 
                 <label className="block mt-3">
-                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                    {inverterForm.inverterPlatform === 'huawei_emma_sun2000'
+                      ? 'Config Entry ID'
+                      : 'Device ID'}
+                  </span>
                   <input
                     type="text"
-                    value={inverterForm.deviceId}
-                    placeholder="Huawei battery device ID"
-                    onChange={e => onInverterChange({ ...inverterForm, deviceId: e.target.value })}
+                    value={inverterForm.inverterPlatform === 'huawei_emma_sun2000'
+                      ? inverterForm.configEntryId
+                      : inverterForm.deviceId}
+                    placeholder={inverterForm.inverterPlatform === 'huawei_emma_sun2000'
+                      ? 'Huawei EMMA config entry ID'
+                      : 'Huawei battery device ID'}
+                    onChange={e => onInverterChange(
+                      inverterForm.inverterPlatform === 'huawei_emma_sun2000'
+                        ? { ...inverterForm, configEntryId: e.target.value }
+                        : { ...inverterForm, deviceId: e.target.value },
+                    )}
                     className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
                   />
                 </label>

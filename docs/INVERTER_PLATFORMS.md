@@ -1,6 +1,6 @@
 # Inverter Platforms
 
-BESS Manager supports four inverter platform configurations. Each combines a
+BESS Manager supports eight inverter platform configurations. Each combines a
 specific inverter hardware family with a Home Assistant integration for
 communication.
 
@@ -15,6 +15,7 @@ communication.
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
 | Solis (EXPERIMENTAL) | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
 | Huawei LUNA2000 (Local) | Huawei LUNA2000 | [huawei_solar](https://github.com/wlcrs/huawei_solar) | Local Modbus | TOU period-list writes | — |
+| Huawei EMMA / SUN2000 (Local, EXPERIMENTAL) | Huawei SUN2000 managed by EMMA | [Huawei EMMA Management](https://github.com/valexi7/Huawei-Modbus-TLS-Server) | Reverse Modbus/TLS | Native TOU period-list writes | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
 > Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
@@ -37,7 +38,7 @@ is new.
 |-----------|-------------------|-----------|-------------------|---------------------|
 | **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
 | **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
-| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes to persistent **TOU period lists** gated by working-mode select | ✅ | `HuaweiController` |
+| **TX-Vendor-service** | `huawei_solar`, `huawei_emma_management` | Local vendor integration service calls writing persistent **TOU period lists** | ✅ | `HuaweiController`, `HuaweiEmmaController` |
 | **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
 
 `solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
@@ -60,7 +61,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 **reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
 **grid-charge enable**.
 
-### The six platforms as coordinates
+### The eight platforms as coordinates
 
 | Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
 |----------|-----------|------------------|------------|----------------------------|-----------|
@@ -71,6 +72,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
 | `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
 | `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
+| `huawei_emma_sun2000` (EXPERIMENTAL) | TX-Vendor-service | SM-Period-lists | `HuaweiEmmaController` | `_HUAWEI_EMMA_SUN2000_MARKER_SUFFIX` (`storage_maximum_charging_power`) | `HUAWEI_EMMA_SUFFIX_MAP` |
 
 ### Worked examples for new inverters
 
@@ -422,6 +424,34 @@ integration's source code (`services.py`). See
 [`docs/superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md`](superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md)
 for design rationale and open items.
 
+### Huawei EMMA / SUN2000 — `huawei_emma_sun2000` (EXPERIMENTAL)
+
+Huawei SUN2000 inverters managed by EMMA use the
+[`huawei_emma_management`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
+integration's native 14-period schedule service. BESS does not depend on that
+integration's optional Growatt compatibility aliases.
+
+```yaml
+action: huawei_emma_management.set_tou_periods
+data:
+  config_entry_id: "<Huawei EMMA config entry ID>"
+  periods:
+    - start_time: "00:00"
+      end_time: "06:00"
+      action: charge
+      days: [true, true, true, true, true, true, true]
+```
+
+`GRID_CHARGING` becomes a `charge` period;
+`LOAD_SUPPORT`/`BATTERY_EXPORT` become `discharge` periods. Other intents leave
+the inverter in its default behavior outside explicit periods. BESS reads the
+structured `periods` attribute from the integration's active-schedule sensor
+before comparing schedules.
+
+The SUN2000 maximum charge/discharge controls are absolute watts, not percentage
+rate controls. BESS writes the configured max charge/discharge power to those
+entities at initialization and does not send per-period percentage values.
+
 ---
 
 ## Required Entities by Platform
@@ -671,6 +701,32 @@ integrated into BESS.
 detection; the setup wizard confirms the battery model is LUNA2000 via
 `get_huawei_working_mode_options()` before proceeding.
 
+### Huawei EMMA / SUN2000 — `huawei_emma_management` integration (EXPERIMENTAL)
+
+All unique IDs below use
+`<EMMA parent identifier>_<register_name>`, verified against
+`EmmaEntity.__init__` at source revision `7fba670`.
+
+| BESS Sensor Key | Entity Type | Unique ID Suffix |
+|-----------------|-------------|------------------|
+| `battery_soc` | sensor | `state_of_capacity` |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `battery_charge_discharge_power` (signed: positive charge, negative discharge) |
+| `huawei_maximum_charging_power` | number | `storage_maximum_charging_power` (W) |
+| `huawei_maximum_discharging_power` | number | `storage_maximum_discharging_power` (W) |
+| `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` |
+| `battery_discharge_stop_soc` | number | `storage_discharging_cutoff_capacity` |
+| `grid_charge` | switch | `storage_charge_from_grid_function` |
+| `huawei_emma_tou_schedule` | sensor | `emma_tou_schedule_text` |
+| `pv_power` | sensor | `pv_output_power` |
+| `local_load_power` | sensor | `load_power` |
+| `import_power` / `export_power` | sensor | `feed_in_power` (signed: positive import, negative export) |
+| `lifetime_battery_charged` | sensor | `total_charged_energy` |
+| `lifetime_battery_discharged` | sensor | `total_discharged_energy` |
+| `lifetime_solar_energy` | sensor | `total_pv_energy_yield` |
+| `lifetime_export_to_grid` | sensor | `total_feed_in_to_grid` |
+| `lifetime_import_from_grid` | sensor | `total_supply_from_grid` |
+| `lifetime_load_consumption` | sensor | `total_energy_consumption` |
+
 ---
 
 ## Auto-Detection
@@ -703,6 +759,12 @@ registry:
    - If `storage_working_mode_settings` unique_id suffix found → Probe `get_huawei_working_mode_options(device_id)` to verify LUNA2000 model
    - If confirmed LUNA2000 → **Huawei LUNA2000 (Local)**
    - Else (LG RESU or other unsupported model) → **Not supported**
+
+5. **huawei_emma_management detected** (`platform: huawei_emma_management`):
+   - If `storage_maximum_charging_power` unique_id suffix is present →
+     **Huawei EMMA / SUN2000**
+   - The setup wizard stores the integration's config-entry ID for native
+     `set_tou_periods` calls.
 
 If multiple platforms are detected (e.g. both Growatt and SolaX entities
 exist), the Settings page under Integrations & Sensors → Inverter Platform

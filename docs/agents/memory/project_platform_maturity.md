@@ -21,6 +21,11 @@ file) is the stability flag for this codebase — see `feature-lifecycle` skill.
   (release v4.1.6) but has not been confirmed against a real Solis
   installation. Do not describe it as validated in user-facing docs or
   release notes until a beta tester confirms via a debug log.
+- `huawei_emma_sun2000` (Huawei SUN2000 managed by EMMA through
+  valexi7/Huawei-Modbus-TLS-Server) — source-verified at revision `7fba670`
+  and uses the integration's native `set_tou_periods` service. Not yet
+  confirmed against a real BESS Manager installation; do not describe it as
+  validated until a beta debug export confirms discovery and schedule writes.
 
 ## Real-world validated
 

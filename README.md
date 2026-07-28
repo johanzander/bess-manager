@@ -53,6 +53,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 - **SolaX** — via Solax modbus integration
 - **Solis** — via the [solis_modbus](https://github.com/Pho3niX90/solis_modbus) integration (local Modbus) *(experimental)*
 - **Huawei LUNA2000** *(experimental)* — via huawei_solar integration (local Modbus)
+- **Huawei EMMA / SUN2000** *(experimental)* — via [Huawei EMMA Management](https://github.com/valexi7/Huawei-Modbus-TLS-Server) using native TOU schedules
 
 ### Electricity Markets
 - **Nordpool** — Nordic spot market (SE, NO, FI, DK, EE, LT, LV)

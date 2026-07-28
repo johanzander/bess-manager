@@ -4,6 +4,7 @@ import pytest
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.huawei_controller import HuaweiController
+from core.bess.huawei_emma_controller import HuaweiEmmaController
 from core.bess.price_manager import MockSource
 
 
@@ -20,3 +21,12 @@ class TestCreateInverterController:
     def test_create_inverter_controller_huawei(self, system):
         controller = system._create_inverter_controller()
         assert isinstance(controller, HuaweiController)
+
+    def test_create_inverter_controller_huawei_emma(self, mock_controller):
+        system = BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource([1.0] * 96),
+            addon_options={"inverter": {"platform": "huawei_emma_sun2000"}},
+        )
+
+        assert isinstance(system._create_inverter_controller(), HuaweiEmmaController)

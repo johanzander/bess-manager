@@ -147,6 +147,24 @@ class TestIntentToVpp:
         assert power_pct == 0
         assert enabled is False
 
+    def test_load_support_releases_vpp_control_at_zero_discharge_rate(self, controller):
+        """PR #414 review: LOAD_SUPPORT's INTENT_TO_CONTROL charge_rate is 0
+        (same as BATTERY_EXPORT/SOLAR_EXPORT), so block_passive_charging is
+        True for it in production (compute_rates_for_period). Whenever the
+        DP plan calls for no net discharge, or discharge-inhibit forces the
+        rate to 0, discharge_rate is 0 too -- both common, not edge cases.
+        The discharge_rate==0 branch must not take priority over the
+        LOAD_SUPPORT release for real block_passive_charging=True callers.
+        """
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=True,
+            strategic_intent="LOAD_SUPPORT",
+        )
+        assert power_pct == 0
+        assert enabled is False
+
 
 class TestApplyPeriodVpp:
     def test_no_tou_segments_written(self, controller, mock_ha):

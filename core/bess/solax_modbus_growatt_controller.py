@@ -305,6 +305,18 @@ class SolaxModbusGrowattController(GrowattMinController):
         strategic_intent) to (power_pct, remote_control_enabled).
 
         - grid_charge=True                       -> +100% (charge at max rate)
+        - grid_charge=False, intent=LOAD_SUPPORT  -> 0%, remote control
+          DISABLED, regardless of rate (#413 -- releases control to the
+          inverter's own load-following self-use instead of forcing a fixed
+          discharge rate, which causes unnecessary grid imports/exports
+          whenever the schedule's load prediction misses). Checked before
+          the rate=0/block_passive_charging branch below: LOAD_SUPPORT's
+          INTENT_TO_CONTROL charge_rate is 0 (same as BATTERY_EXPORT/
+          SOLAR_EXPORT), so block_passive_charging is True for it in
+          production whenever discharge_rate is also 0 (a common case --
+          the DP plan calling for no net discharge, or discharge-inhibit
+          forcing the rate to 0) -- without this ordering that would wrongly
+          fall into the grid_first-hold branch below instead of releasing.
         - grid_charge=False, rate=0, block=True   -> 0%, remote control ENABLED
           (SOLAR_EXPORT). Per the Growatt VPP protocol (V2.01, section 3.5),
           vpp_power<=0 with remote control enabled selects "grid first"
@@ -315,20 +327,15 @@ class SolaxModbusGrowattController(GrowattMinController):
           confirmation.
         - grid_charge=False, rate=0, block=False  -> 0%, remote control DISABLED
           (load_first self-use -- SOLAR_STORAGE/IDLE, battery may absorb solar)
-        - grid_charge=False, rate>0, intent=LOAD_SUPPORT -> 0%, remote control
-          DISABLED (#413 -- releases control to the inverter's own
-          load-following self-use instead of forcing a fixed discharge rate,
-          which causes unnecessary grid imports/exports whenever the
-          schedule's load prediction misses)
         - grid_charge=False, rate>0 (otherwise, i.e. BATTERY_EXPORT)
           -> -rate% (discharge/export)
         """
         if grid_charge:
             return 100, True
-        if discharge_rate == 0:
-            return 0, block_passive_charging
         if strategic_intent == "LOAD_SUPPORT":
             return 0, False
+        if discharge_rate == 0:
+            return 0, block_passive_charging
         return -discharge_rate, True
 
     def _ensure_vpp_status_enabled(self, controller) -> None:

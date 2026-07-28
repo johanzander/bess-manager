@@ -2960,20 +2960,6 @@ class BatterySystemManager:
                     "✓ All required sensors are functional - system fully operational"
                 )
                 self._critical_sensor_failures = []
-
-                # The startup schedule build may have failed while sensors
-                # were still unavailable (e.g. a restart racing a transient
-                # HA outage). Without this, the dashboard stays on
-                # "initializing" until the next quarterly cron tick even
-                # though this health check now reports the system healthy.
-                if self._current_schedule is None:
-                    logger.info(
-                        "No schedule exists yet and all required sensors are "
-                        "healthy — retrying the initial schedule build"
-                    )
-                    now = time_utils.now()
-                    current_period = now.hour * 4 + now.minute // 15
-                    self.update_battery_schedule(current_period=current_period)
             return health_results
 
         except Exception as e:
@@ -3030,8 +3016,30 @@ class BatterySystemManager:
         scheduler, a manual "recheck" endpoint) so the dashboard banner can
         reflect current sensor state instead of only what was true at
         startup or the last settings save.
+
+        Also retries the initial schedule build if none exists yet and all
+        required sensors are now healthy. This covers a startup schedule
+        build that failed while sensors were still unavailable (e.g. a
+        restart racing a transient HA outage) — without it, the dashboard
+        stays on "initializing" until the next quarterly cron tick even
+        though this health check now reports the system healthy. This must
+        NOT live in ``_run_health_check`` itself: ``start()`` calls that
+        method before the inverter hardware read that seeds each
+        controller's write-skip guards, so a retry there fires the
+        process's first schedule build — and therefore its first hardware
+        write — before those guards are seeded, forcing unconditional VPP
+        register writes on every restart (#399).
         """
-        return self._run_health_check()
+        health_results = self._run_health_check()
+        if not self._critical_sensor_failures and self._current_schedule is None:
+            logger.info(
+                "No schedule exists yet and all required sensors are "
+                "healthy — retrying the initial schedule build"
+            )
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            self.update_battery_schedule(current_period=current_period)
+        return health_results
 
     def has_critical_sensor_failures(self) -> bool:
         """Check if the system has critical sensor failures (degraded mode)."""

@@ -19,6 +19,8 @@ Ask before writing:
 - Should this method be called from this caller at all, or is there a better owner?
 - Is there an existing lifecycle path (`start()`, `__init__`) that already handles this? Why is it failing there?
 - Does the test assert a specific internal call chain — and if so, is that call chain the right architecture?
+- **Does the method you're about to modify have more than one caller?** `grep` for every call site first. If the callers sit at different points in a lifecycle (e.g. one runs during `start()` before some other init step, another runs later from a periodic job or a manual endpoint), a change scoped to "make caller A's symptom go away" can silently change behavior for caller B too. See `docs/agents/rules.md` → Architecture → Separation of concerns, and the Debugging Protocol's fix-scope-assessment step, for the general rule this falls under.
+- **If the method has multiple callers with different lifecycle timing, write one test per caller context**, not just one test for the behavior the fix motivates. A test on the wrapper/most-visible caller passing is not evidence the other callers are unaffected.
 
 If you can't answer these, stop and reason through the design first. A test that says "call `_foo()` from layer X" may be specifying bad architecture, not good behavior.
 

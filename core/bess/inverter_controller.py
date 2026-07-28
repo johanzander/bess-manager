@@ -516,6 +516,7 @@ class InverterController(ABC):
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool = False,
+        strategic_intent: str = "",
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -532,6 +533,11 @@ class InverterController(ABC):
                 (adjust_charging_power()) and ignore this flag. Forced-power
                 platforms with no such register (VPP-style) act on it
                 directly -- see #355.
+            strategic_intent: The period's strategic intent string.
+                grid_charge/discharge_rate collapse LOAD_SUPPORT and
+                BATTERY_EXPORT to the same values, so platforms that need to
+                treat them differently (VPP-style -- see #413) require the
+                intent itself. Register-based platforms ignore this.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

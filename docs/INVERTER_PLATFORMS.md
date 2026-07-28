@@ -216,15 +216,32 @@ Verified against `wills106/homeassistant-solax-modbus`'s
 | `growatt_vpp_time` | number | 30408 | Fallback timer, minutes — reset every active period; reverts inverter to `load_first` on its own if BESS stops writing |
 | `growatt_vpp_power` | number | 30409 | Power target, -100..100% (negative=discharge/export, positive=charge) |
 
-**Intent → VPP mapping** (mirrors `SolaxController`, plus a
+**Intent → VPP mapping** (originally mirrored `SolaxController`; `LOAD_SUPPORT`
+has since diverged — see "LOAD_SUPPORT semantics" below — plus a
 `block_passive_charging` distinction at rate=0 — see "SOLAR_EXPORT
 semantics" below):
 - `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
-- `LOAD_SUPPORT`/`BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
+- `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
+- `LOAD_SUPPORT` (rate>0) → `vpp_power=0`, remote control **disabled**
+  (releases to `load_first` self-use — see "LOAD_SUPPORT semantics" below)
 - `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
   control disabled (`load_first`/self-use — battery may absorb solar surplus)
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
   remote control **enabled** (`grid_first` hold)
+
+**LOAD_SUPPORT semantics (fixed — issue [#413](https://github.com/johanzander/bess-manager/issues/413)):**
+Unlike TOU mode (where `LOAD_SUPPORT` maps to `load_first`, letting the
+inverter's own control loop follow actual house load), VPP mode previously
+forced `LOAD_SUPPORT` into the same branch as `BATTERY_EXPORT` — a fixed
+`grid_first` discharge percentage, immune to real load. Since `grid_first`'s
+power value is an immediate forced command rather than a load-following
+ceiling, this caused unnecessary grid imports/exports whenever the DP's
+average-power discharge rate for the period didn't match the real,
+fluctuating house load. `LOAD_SUPPORT` now disables `vpp_remote_control`
+outright, falling back to the inverter's native `load_first` self-consumption
+— the VPP-mode equivalent of TOU's `load_first` mapping. Reported
+independently by two real-hardware testers (Growatt MIN, control_mode=vpp)
+on issue [#118](https://github.com/johanzander/bess-manager/issues/118).
 
 **SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
 The Growatt VPP protocol

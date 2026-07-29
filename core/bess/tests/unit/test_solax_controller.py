@@ -44,6 +44,11 @@ def controller(battery_settings: BatterySettings) -> SolaxController:
     return SolaxController(battery_settings=battery_settings)
 
 
+@pytest.fixture
+def solax_controller(battery_settings: BatterySettings) -> SolaxController:
+    return SolaxController(battery_settings=battery_settings)
+
+
 # ── Active TOU intervals ──────────────────────────────────────────────────────
 
 
@@ -404,3 +409,36 @@ class TestGetAllTouSegments:
 
         for segment in segments:
             assert required_fields.issubset(segment.keys())
+
+
+# ── _vpp_display_state ────────────────────────────────────────────────────────
+
+
+class TestVppDisplayState:
+    """_vpp_display_state must mirror _write_period_to_hardware exactly —
+    same three branches, same sign convention (power_pct as percent of
+    max, matching the discharge_rate parameter it's built from)."""
+
+    def test_grid_charge_shows_full_positive_power_remote_enabled(
+        self, solax_controller
+    ):
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=True, discharge_rate=0
+        )
+        assert (power_pct, remote_control) == (100, True)
+
+    def test_discharge_shows_negative_power_remote_enabled(self, solax_controller):
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=False, discharge_rate=60
+        )
+        assert (power_pct, remote_control) == (-60, True)
+
+    def test_idle_shows_zero_power_remote_disabled(self, solax_controller):
+        """Matches _write_period_to_hardware's `set_solax_vpp_disabled()`
+        branch (grid_charge=False, discharge_rate=0) -- self-use passthrough,
+        NOT a grid-first hold. SolaX has no block_passive_charging
+        equivalent (see TODO.md gap note)."""
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=False, discharge_rate=0
+        )
+        assert (power_pct, remote_control) == (0, False)

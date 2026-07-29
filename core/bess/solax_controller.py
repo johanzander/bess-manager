@@ -152,6 +152,28 @@ class SolaxController(InverterController):
             logger.error("FAILED: SolaX VPP period write: %s", e)
             return False, str(e)
 
+    def _vpp_display_state(
+        self, grid_charge: bool, discharge_rate: int
+    ) -> tuple[int, bool]:
+        """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
+        for display, mirroring _write_period_to_hardware()'s three branches
+        exactly. Unlike SolaxModbusGrowattController._intent_to_vpp(), this
+        has no block_passive_charging or strategic_intent input -- SolaX's
+        actual hardware write logic doesn't use them either (see the
+        TODO.md gap note: SolaX never received the #355/#413 Growatt VPP
+        fixes, so its real behavior for SOLAR_EXPORT/LOAD_SUPPORT differs).
+
+        Returns:
+            (power_pct, remote_control_enabled) -- power_pct expressed as a
+            percent of max charge/discharge power, matching discharge_rate's
+            own convention (not raw watts).
+        """
+        if not grid_charge and discharge_rate == 0:
+            return 0, False
+        if grid_charge:
+            return 100, True
+        return -discharge_rate, True
+
     def write_to_hardware(
         self,
         controller,

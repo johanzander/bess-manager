@@ -392,7 +392,8 @@ class SolaxController(InverterController):
                     "segment_id": i,
                     "start_time": group["start_time"],
                     "end_time": group["end_time"],
-                    "batt_mode": group["mode"],
+                    "vpp_power_pct": group["vpp_power_pct"],
+                    "vpp_remote_control": group["vpp_remote_control"],
                     "enabled": True,
                     "strategic_intent": group["intent"],
                 }

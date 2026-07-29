@@ -403,12 +403,25 @@ class TestGetAllTouSegments:
             "segment_id",
             "start_time",
             "end_time",
-            "batt_mode",
+            "vpp_power_pct",
+            "vpp_remote_control",
             "enabled",
         }
 
         for segment in segments:
             assert required_fields.issubset(segment.keys())
+
+    def test_get_all_tou_segments_solar_export_reflects_self_use_not_a_hold(
+        self, solax_controller
+    ) -> None:
+        solax_controller.strategic_intents = ["SOLAR_EXPORT"] * 4
+        solax_controller.current_schedule = None
+        segments = solax_controller.get_all_tou_segments()
+        assert len(segments) == 1
+        segment = segments[0]
+        assert "batt_mode" not in segment
+        assert segment["vpp_power_pct"] == 0
+        assert segment["vpp_remote_control"] is False  # SolaX's real (unfixed) behavior
 
 
 # ── _vpp_display_state ────────────────────────────────────────────────────────

@@ -607,6 +607,48 @@ class InverterController(ABC):
             "batt_mode": mode,
         }
 
+    def _mode_display_fields(
+        self,
+        intent: str,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool,
+    ) -> dict:
+        """Single source of truth for what mode-related fields a period
+        gets, branching on CONTROL_MODEL. Never fabricates a label the
+        hardware doesn't back — see design spec
+        docs/superpowers/specs/2026-07-29-control-model-display-design.md.
+
+        vpp_power controllers each keep their own power-computation method
+        (SolaxModbusGrowattController._intent_to_vpp,
+        SolaxController._vpp_display_state) rather than sharing one --
+        their real hardware behavior has diverged (design spec section 1
+        correction).
+
+        Returns:
+            {"batt_mode": str} for tou_register.
+            {"vpp_power_pct": int, "vpp_remote_control": bool} for vpp_power.
+            {} for period_list.
+        """
+        if self.CONTROL_MODEL == "tou_register":
+            return {"batt_mode": self.INTENT_TO_MODE[intent]}
+
+        if self.CONTROL_MODEL == "vpp_power":
+            if hasattr(self, "_intent_to_vpp"):
+                power_pct, remote_control = self._intent_to_vpp(
+                    grid_charge, discharge_rate, block_passive_charging, intent
+                )
+            else:
+                power_pct, remote_control = self._vpp_display_state(
+                    grid_charge, discharge_rate
+                )
+            return {
+                "vpp_power_pct": power_pct,
+                "vpp_remote_control": remote_control,
+            }
+
+        return {}
+
     def get_strategic_intent_summary(self) -> dict:
         """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
         if not self.strategic_intents:

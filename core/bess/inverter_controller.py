@@ -576,7 +576,6 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        mode = self.INTENT_TO_MODE[intent]
 
         if (
             self.current_schedule is not None
@@ -587,7 +586,7 @@ class InverterController(ABC):
             num_periods = len(self.current_schedule.actions)
             period_duration_hours = 24.0 / num_periods
             battery_action_kw = battery_action_kwh / period_duration_hours
-            grid_charge, discharge_rate, _block_passive_charging = (
+            grid_charge, discharge_rate, block_passive_charging = (
                 self.compute_rates_for_period(period, battery_action_kw)
             )
             charge_rate = self._compute_charge_rate(
@@ -598,13 +597,16 @@ class InverterController(ABC):
             grid_charge = control["grid_charge"]
             charge_rate = control["charge_rate"]
             discharge_rate = control["discharge_rate"]
+            block_passive_charging = control["charge_rate"] == 0
 
         return {
             "grid_charge": grid_charge,
             "charge_rate": charge_rate,
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
-            "batt_mode": mode,
+            **self._mode_display_fields(
+                intent, grid_charge, discharge_rate, block_passive_charging
+            ),
         }
 
     def _mode_display_fields(

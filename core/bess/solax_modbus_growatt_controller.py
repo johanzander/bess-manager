@@ -431,8 +431,14 @@ class SolaxModbusGrowattController(GrowattMinController):
         window. Legacy segments 2-9 are cleaned up at startup
         (read_and_initialize_from_hardware), not here.
 
-        VPP mode: enables VPP Status/AC-charging once, then issues the initial
-        per-period power command — subsequent periods go through apply_period.
+        VPP mode: enables VPP Status/AC-charging once. No power command is
+        issued here — VPP has no persistent/bulk schedule to push, and
+        BatterySystemManager._apply_period_schedule always writes the
+        current period's real power command immediately after this call
+        returns (via apply_period). Issuing a power command here as well
+        used to compute it from a hardcoded battery_action_kw=0.0 stub,
+        sending a spurious power=0% write that briefly preceded the correct
+        value written moments later (#421).
 
         Args:
             controller: HomeAssistantAPIController instance
@@ -443,23 +449,8 @@ class SolaxModbusGrowattController(GrowattMinController):
             Tuple of (segments_updated, segments_disabled)
         """
         if self.control_mode == "vpp":
-            grid_charge, discharge_rate, block_passive_charging = False, 0, False
-            if effective_period < len(self.strategic_intents):
-                intent = self.strategic_intents[effective_period]
-                grid_charge, discharge_rate = self._map_intent_to_rates(
-                    intent, battery_action_kw=0.0
-                )
-                block_passive_charging = (
-                    self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
-                )
-            success, _ = self._apply_period_vpp(
-                controller,
-                grid_charge,
-                discharge_rate,
-                block_passive_charging,
-                intent if effective_period < len(self.strategic_intents) else "",
-            )
-            return (1, 0) if success else (0, 0)
+            self._ensure_vpp_status_enabled(controller)
+            return (0, 0)
 
         mode = "load_first"
         if effective_period < len(self.strategic_intents):

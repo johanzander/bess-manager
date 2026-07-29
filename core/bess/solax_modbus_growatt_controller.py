@@ -346,6 +346,25 @@ class SolaxModbusGrowattController(GrowattMinController):
             return 0, block_passive_charging
         return -discharge_rate, True
 
+    def _vpp_display_state(
+        self,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
+        strategic_intent: str = "",
+    ) -> tuple[int, bool]:
+        """Display-facing alias for _intent_to_vpp().
+
+        The base class's _mode_display_fields() calls _vpp_display_state()
+        uniformly across all vpp_power controllers (see
+        core/bess/inverter_controller.py) rather than duck-typing a
+        subclass-private method name. This is a pure interface unification
+        wrapper -- _intent_to_vpp()'s own logic is unchanged.
+        """
+        return self._intent_to_vpp(
+            grid_charge, discharge_rate, block_passive_charging, strategic_intent
+        )
+
     def _ensure_vpp_status_enabled(self, controller) -> None:
         """Enable the VPP Status register once, if not already confirmed.
 
@@ -632,9 +651,13 @@ class SolaxModbusGrowattController(GrowattMinController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
+                    **(
+                        {"batt_mode": "load_first"}
+                        if self.CONTROL_MODEL == "tou_register"
+                        else {}
+                    ),
                 }
             ]
 

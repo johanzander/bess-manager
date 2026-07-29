@@ -222,7 +222,14 @@ test.describe('API Contracts: /api/growatt/inverter_status', () => {
     expect(typeof body.batterySoe).toBe('number');
     expect(typeof body.batteryChargePower).toBe('number');
     expect(typeof body.batteryDischargePower).toBe('number');
-    expect(typeof body.batteryMode).toBe('string');
+    // batteryMode is a real TOU register label only for tou_register
+    // platforms -- vpp_power/period_list controllers have no such register,
+    // so the backend must not fabricate one (#415).
+    if (body.controlModel === 'tou_register') {
+      expect(typeof body.batteryMode).toBe('string');
+    } else {
+      expect(body.batteryMode).toBeUndefined();
+    }
     expect(typeof body.gridChargeEnabled).toBe('boolean');
     expect(typeof body.chargeStopSoc).toBe('number');
     expect(typeof body.dischargeStopSoc).toBe('number');
@@ -251,7 +258,13 @@ test.describe('API Contracts: /api/growatt/detailed_schedule', () => {
     // Each hour entry (camelCase keys)
     const hour = body.scheduleData[0];
     expect(typeof hour.hour).toBe('number');
-    expect(typeof hour.batteryMode).toBe('string');
+    // batteryMode is only a real value for tou_register platforms -- see
+    // the /api/growatt/inverter_status batteryMode assertion above (#415).
+    if (body.controlModel === 'tou_register') {
+      expect(typeof hour.batteryMode).toBe('string');
+    } else {
+      expect(hour.batteryMode).toBeUndefined();
+    }
     expect(typeof hour.strategicIntent).toBe('string');
     expect(typeof hour.action).toBe('string');
     expect(hour).toHaveProperty('price');

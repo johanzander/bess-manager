@@ -634,20 +634,22 @@ class InverterController(ABC):
             return {"batt_mode": self.INTENT_TO_MODE[intent]}
 
         if self.CONTROL_MODEL == "vpp_power":
-            if hasattr(self, "_intent_to_vpp"):
-                power_pct, remote_control = self._intent_to_vpp(
-                    grid_charge, discharge_rate, block_passive_charging, intent
-                )
-            else:
-                power_pct, remote_control = self._vpp_display_state(
-                    grid_charge, discharge_rate
-                )
+            # Every vpp_power controller must implement _vpp_display_state()
+            # with this unified signature (SolaxController,
+            # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
+            # subclass-private method name.
+            power_pct, remote_control = self._vpp_display_state(
+                grid_charge, discharge_rate, block_passive_charging, intent
+            )
             return {
                 "vpp_power_pct": power_pct,
                 "vpp_remote_control": remote_control,
             }
 
-        return {}
+        if self.CONTROL_MODEL == "period_list":
+            return {}
+
+        raise ValueError(f"Unknown CONTROL_MODEL: {self.CONTROL_MODEL!r}")
 
     def get_strategic_intent_summary(self) -> dict:
         """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""

@@ -444,3 +444,116 @@ class TestPeriodGroupsVppFields:
             assert "vppPowerPct" in group
             assert "vppRemoteControl" in group
             assert "battMode" not in group
+
+
+# ===========================================================================
+# GET /api/growatt/inverter_status, /api/growatt/detailed_schedule --
+# no fabricated batt_mode for non-tou_register controllers (final-review
+# fix wave for issue #415, Finding 1)
+# ===========================================================================
+
+
+class TestInverterStatusBatteryModeNotFabricated:
+    """battery_mode/batteryMode must not default to "load_first" when the
+    underlying controller has no TOU register concept -- get_period_settings()
+    for a vpp_power controller returns vpp_power_pct/vpp_remote_control
+    instead of batt_mode, and the endpoint must not paper over that with a
+    hardcoded default."""
+
+    def test_vpp_power_status_has_no_battery_mode(self):
+        ctrl = _make_controller("solax_vpp")
+        sm = ctrl.system._inverter_controller
+        sm.CONTROL_MODEL = "vpp_power"
+        sm.get_period_settings.return_value = {
+            "vpp_power_pct": 50,
+            "vpp_remote_control": True,
+            "strategic_intent": "IDLE",
+            "grid_charge": False,
+            "discharge_rate": 100,
+        }
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/growatt/inverter_status")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["controlModel"] == "vpp_power"
+        assert "batteryMode" not in body or body["batteryMode"] is None
+
+    def test_tou_register_status_still_has_battery_mode(self):
+        ctrl = _make_controller("growatt_server_sph")
+        sm = ctrl.system._inverter_controller
+        sm.CONTROL_MODEL = "tou_register"
+        sm.get_period_settings.return_value = {
+            "batt_mode": "battery_first",
+            "strategic_intent": "GRID_CHARGING",
+            "grid_charge": True,
+            "discharge_rate": 0,
+        }
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.get("/api/growatt/inverter_status")
+
+        assert resp.status_code == 200
+        assert resp.json()["batteryMode"] == "battery_first"
+
+
+class TestScheduleDataBatteryModeNotFabricated:
+    """scheduleData[].batt_mode/batteryMode and modeDistribution must not
+    fabricate "load_first" for a vpp_power controller -- mirrors the
+    periodGroups fix (TestPeriodGroupsVppFields) at hourly-schedule
+    resolution."""
+
+    def test_vpp_power_schedule_data_has_no_battery_mode(self):
+        ctrl = _make_controller("solax_vpp")
+        sm = ctrl.system._inverter_controller
+        sm.CONTROL_MODEL = "vpp_power"
+        sm.strategic_intents = ["IDLE"] * 96
+        sm.get_period_settings.return_value = {
+            "vpp_power_pct": 0,
+            "vpp_remote_control": False,
+            "strategic_intent": "IDLE",
+            "grid_charge": False,
+            "discharge_rate": 100,
+        }
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["controlModel"] == "vpp_power"
+
+        schedule = body["scheduleData"]
+        assert len(schedule) == 24
+        for entry in schedule:
+            assert "batteryMode" not in entry, entry
+            assert "battMode" not in entry, entry
+            assert entry.get("vppPowerPct") == 0
+            assert entry.get("vppRemoteControl") is False
+
+        # mode_distribution must not report a fabricated "load_first: 24"
+        assert body["modeDistribution"] == {}
+
+    def test_tou_register_schedule_data_keeps_battery_mode(self):
+        ctrl = _make_controller("growatt_server_sph")
+        sm = ctrl.system._inverter_controller
+        sm.CONTROL_MODEL = "tou_register"
+        sm.strategic_intents = ["IDLE"] * 96
+        sm.get_period_settings.return_value = {
+            "batt_mode": "load_first",
+            "strategic_intent": "IDLE",
+            "grid_charge": False,
+            "discharge_rate": 100,
+        }
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+
+        assert resp.status_code == 200
+        body = resp.json()
+        schedule = body["scheduleData"]
+        assert len(schedule) == 24
+        for entry in schedule:
+            assert entry["batteryMode"] == "load_first"
+        assert body["modeDistribution"] == {"loadFirst": 24}

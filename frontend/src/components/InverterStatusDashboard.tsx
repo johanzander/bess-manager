@@ -567,6 +567,11 @@ const InverterStatusDashboard: React.FC = () => {
 
   const currentPeriodGroup = getCurrentPeriodGroup();
 
+  // controlModel gates the "Current Mode" metric below the same way
+  // SystemStatusCard gates its Battery Mode metric -- never fabricate a
+  // TOU label for platforms that don't have one.
+  const dashboardControlModel: ControlModel = inverterSchedule?.controlModel ?? 'tou_register';
+
   const formatDuration = (minutes: number): string => {
     const hours = Math.floor(minutes / 60);
     const mins = minutes % 60;
@@ -653,12 +658,23 @@ const InverterStatusDashboard: React.FC = () => {
             color: 'blue'
           }}
           metrics={[
-            {
-              label: "Current Mode",
-              value: formatBatteryMode(currentPeriodGroup?.battMode || currentBatteryMode),
-              unit: "",
-              icon: Battery
-            },
+            ...(dashboardControlModel === 'period_list' ? [] : [
+              dashboardControlModel === 'vpp_power'
+                ? {
+                    label: "Current Mode",
+                    value: currentPeriodGroup?.vppPowerPct !== undefined
+                      ? `${currentPeriodGroup.vppPowerPct > 0 ? '+' : ''}${currentPeriodGroup.vppPowerPct}% (${currentPeriodGroup.vppRemoteControl ? 'Remote' : 'Local'})`
+                      : 'Unavailable',
+                    unit: "",
+                    icon: Battery
+                  }
+                : {
+                    label: "Current Mode",
+                    value: formatBatteryMode(currentPeriodGroup?.battMode || currentBatteryMode),
+                    unit: "",
+                    icon: Battery
+                  }
+            ]),
             {
               label: "Battery Action",
               value: getDisplayText(dashboardData?.hourlyData?.find(h => h.period === new Date().getHours())?.batteryAction),
@@ -1037,7 +1053,10 @@ const InverterStatusDashboard: React.FC = () => {
       {(() => {
         const platform = inverterSchedule?.inverterPlatform ?? inverterStatus?.inverterPlatform ?? 'growatt_server_min';
         const controlModel: ControlModel = inverterSchedule?.controlModel ?? 'tou_register';
-        const isPerPeriodCommand = controlModel !== 'tou_register';
+        // Only vpp_power genuinely has no stored schedule to show -- SPH/Solis/Huawei
+        // (period_list) still write real charge/discharge windows to hardware, so
+        // they keep the touIntervals panel below just like tou_register platforms.
+        const isVppNoSchedule = controlModel === 'vpp_power';
 
         return (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -1046,7 +1065,7 @@ const InverterStatusDashboard: React.FC = () => {
                 <div className="flex items-center">
                   <Clock className="h-5 w-5 text-blue-600 mr-2" />
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {isPerPeriodCommand ? (controlModel === 'vpp_power' ? 'VPP Control' : 'Charge/Discharge Periods') : 'Time of Use (TOU) Intervals'}
+                    {controlModel === 'vpp_power' ? 'VPP Control' : controlModel === 'period_list' ? 'Charge/Discharge Periods' : 'Time of Use (TOU) Intervals'}
                   </h3>
                 </div>
                 <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
@@ -1060,15 +1079,13 @@ const InverterStatusDashboard: React.FC = () => {
                 </span>
               </div>
 
-              {isPerPeriodCommand ? (
+              {isVppNoSchedule ? (
                 <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4">
                   <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
-                    {controlModel === 'vpp_power' ? 'Per-period VPP commands' : 'Charge/discharge time periods'}
+                    Per-period VPP commands
                   </p>
                   <p className="text-sm text-blue-700 dark:text-blue-400">
-                    {controlModel === 'vpp_power'
-                      ? 'This inverter uses real-time power commands instead of a stored schedule. Commands are issued at each 15-minute period boundary and kept active via autorepeat. The strategic intent timeline above shows what the optimizer has planned.'
-                      : 'This inverter uses discrete charge/discharge time slots instead of a mode register. The strategic intent timeline above shows what the optimizer has planned; the schedule table shows the periods actually written to hardware.'}
+                    This inverter uses real-time power commands instead of a stored schedule. Commands are issued at each 15-minute period boundary and kept active via autorepeat. The strategic intent timeline above shows what the optimizer has planned.
                   </p>
                 </div>
               ) : (
@@ -1103,7 +1120,7 @@ const InverterStatusDashboard: React.FC = () => {
                           </div>
                         </div>
                         <div className="flex items-center space-x-3">
-                          {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode!)}
+                          {!interval.isExpired && !interval.isEmpty && interval.battMode && getBatteryModeDisplay(interval.battMode)}
                           <span className={`px-2 py-1 rounded text-xs font-medium ${
                             interval.isExpired
                               ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'

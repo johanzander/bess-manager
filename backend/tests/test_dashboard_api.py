@@ -675,6 +675,43 @@ class TestSnapshotComparison:
         )
         assert resp.status_code == 503
 
+    def test_handles_vpp_schedule_without_batt_mode(self):
+        """Task 6-8 controllers may emit growatt_schedule intervals that carry
+        vpp_power_pct/vpp_remote_control instead of batt_mode. The endpoint
+        must not KeyError on interval["batt_mode"] for those intervals.
+        """
+        ctrl = _make_started_controller()
+
+        vpp_interval = {
+            "start_time": "00:00",
+            "end_time": "01:00",
+            "vpp_power_pct": 0,
+            "vpp_remote_control": True,
+        }
+
+        def make_snapshot(period: int):
+            snapshot = MagicMock()
+            snapshot.snapshot_timestamp = datetime(
+                2025, 7, 13, 0, 0, tzinfo=time_utils.TIMEZONE
+            )
+            snapshot.daily_view = _make_daily_view()
+            snapshot.growatt_schedule = [vpp_interval]
+            return snapshot
+
+        ctrl.system.prediction_snapshot_store.get_snapshot_at_period.side_effect = (
+            lambda period: make_snapshot(period)
+        )
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get(
+            "/api/prediction-analysis/snapshot-comparison?period_a=0&period_b=10"
+        )
+        assert resp.status_code == 200  # must not 500/KeyError
+        schedule_a = resp.json()["growattScheduleA"]
+        assert schedule_a
+        assert "vppPowerPct" in schedule_a[0] or "battMode" in schedule_a[0]
+        assert "battMode" not in schedule_a[0]
+
 
 # ===========================================================================
 # GET /api/consumption-forecast-comparison

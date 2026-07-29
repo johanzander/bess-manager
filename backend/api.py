@@ -2717,6 +2717,16 @@ async def compare_two_snapshots(
             }
             period_comparisons.append(comparison)
 
+        def _interval_display_fields(interval: dict) -> dict:
+            if "vpp_power_pct" in interval:
+                return {
+                    "vpp_power_pct": interval["vpp_power_pct"],
+                    "vpp_remote_control": interval["vpp_remote_control"],
+                }
+            if "batt_mode" in interval:
+                return {"batt_mode": interval["batt_mode"]}
+            return {}
+
         # Build response
         response = {
             "snapshotAPeriod": period_a,
@@ -2727,7 +2737,7 @@ async def compare_two_snapshots(
             "growattScheduleA": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),
@@ -2737,7 +2747,7 @@ async def compare_two_snapshots(
             "growattScheduleB": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),

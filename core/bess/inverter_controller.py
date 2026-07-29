@@ -367,7 +367,6 @@ class InverterController(ABC):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "battery_first",
                     "enabled": p.get("enabled", True),
                     "is_default": is_default,
                     "strategic_intent": charge_intent,
@@ -378,7 +377,6 @@ class InverterController(ABC):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "grid_first",
                     "enabled": p.get("enabled", True),
                     "is_default": is_default,
                     "strategic_intent": discharge_intent,
@@ -763,9 +761,7 @@ class InverterController(ABC):
         for ps in period_settings:
             if current_group is not None and (
                 ps["intent"] == current_group["intent"]
-                and all(
-                    ps.get(k) == current_group.get(k) for k in mode_field_keys
-                )
+                and all(ps.get(k) == current_group.get(k) for k in mode_field_keys)
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]

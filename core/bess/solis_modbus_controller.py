@@ -382,7 +382,6 @@ class SolisModbusController(InverterController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }

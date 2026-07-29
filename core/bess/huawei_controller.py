@@ -183,7 +183,6 @@ class HuaweiController(InverterController):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "battery_first" if p["flag"] == "+" else "grid_first",
                     "enabled": True,
                     "is_default": False,
                     "strategic_intent": (
@@ -354,7 +353,6 @@ class HuaweiController(InverterController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }

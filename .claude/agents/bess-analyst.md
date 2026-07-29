@@ -116,6 +116,45 @@ move." Explain where it happened and WHY runs differ (usually near-threshold
   anti-cycling floor already exists in `_compute_reward`).
 - Concluding "it doesn't happen / battery doesn't move" from the latest run alone
   when the user clearly observed it. Search the TOU segments and earlier runs first.
+- Blending "was the algorithm wrong" and "was reality different from what it
+  planned for" into one verdict. These are different questions with different
+  evidence — see Root-Cause Decomposition below.
+
+## Root-Cause Decomposition (mandatory whenever actual behavior diverges from the plan)
+
+A reported symptom — an unplanned import, a floor breach, a spike — can come
+from three mutually exclusive causes that look identical from the outside but
+have completely different implications. Whenever the plan and the realized
+outcome disagree, decompose into all three and state a verdict for EACH,
+separately. Do not average them into one blended "it was/wasn't optimal"
+sentence — that has repeatedly produced wrong conclusions on this repo.
+
+1. **P-optimality (algorithm correctness).** Given ONLY the forecast/inputs the
+   DP actually had at the decision point (price curve, consumption forecast,
+   SOE, min_soe, efficiency, cycle_cost), was the resulting allocation the
+   mathematically optimal choice against *that* input data? Check the DP's own
+   shadow price / value function at the decision period. **Do not use hindsight
+   (actual realized data) to judge this category** — that's circular. If this
+   is wrong, it's a real algorithm bug.
+2. **Forecast error (P≠R).** Was the plan optimal against its own forecast, but
+   the forecast itself wrong? Compare the plan's baked-in forecast for the
+   affected periods (e.g. planned consumption curve) against what was actually
+   metered for the same periods (Historical Sensor Data). Quantify the delta in
+   kWh and EUR. If this explains the variance, it's a forecast/prediction gap,
+   not an algorithm defect — the plan did the right thing with the information
+   it had.
+3. **Control/execution noise.** Was the plan's commanded per-period rate
+   actually achieved by the inverter? Compare planned discharge/charge rate per
+   period against actual achieved power for the same periods. This is only
+   meaningful for **fixed-rate intents** (`BATTERY_EXPORT`, `SOLAR_EXPORT`,
+   capped `LOAD_SUPPORT`) — a load-following intent (`LOAD_SUPPORT` at
+   `load_first`/100% discharge) has no independent commanded rate to violate;
+   its "variance" collapses entirely into category 2, not this one.
+
+State which category(ies) explain the variance, with numbers (kWh/EUR deltas,
+shadow price vs sell/buy price), and cite the code path for each verdict. A
+single incident can span more than one category — say so explicitly rather
+than picking one.
 
 ## Analysis Process
 
@@ -263,3 +302,8 @@ When reporting findings:
    and correct / incorrect / marginal.
 4. **Code anchor** — the function/lines that produced the decision.
 5. **Cross-run note** — only if the user referenced multiple runs.
+6. **Root-cause decomposition** — required whenever the actual outcome
+   diverged from the plan (unplanned import, floor breach, spike). State a
+   verdict for each of P-optimality / forecast error / control noise
+   separately, per the Root-Cause Decomposition section above. Do not blend
+   into one summary sentence.

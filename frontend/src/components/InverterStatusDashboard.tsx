@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import api from '../lib/api';
 
+type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
+
 interface InverterStatus {
   batterySoc: number;
   batterySoe: number;
@@ -36,6 +38,7 @@ interface InverterStatus {
   systemStatus: string;
   lastUpdated: string;
   inverterPlatform?: string;
+  controlModel?: ControlModel;
   // Formatted fields
   batterySoeCapacityFormatted?: string;
 }
@@ -44,7 +47,9 @@ interface TOUInterval {
   segmentId: number;
   startTime: string;
   endTime: string;
-  battMode: string;
+  battMode?: string;
+  vppPowerPct?: number;
+  vppRemoteControl?: boolean;
   enabled: boolean;
   isEmpty?: boolean;
   isDefault?: boolean;
@@ -75,7 +80,9 @@ interface ScheduleHour {
 interface PeriodGroup {
   startTime: string;
   endTime: string;
-  mode: string;
+  battMode?: string;
+  vppPowerPct?: number;
+  vppRemoteControl?: boolean;
   dominantIntent: string;
   intentCounts: Record<string, number>;
   periodCount: number;
@@ -91,6 +98,7 @@ interface PeriodGroup {
 interface InverterSchedule {
   currentHour: number;
   inverterPlatform?: string;
+  controlModel?: ControlModel;
   touIntervals: TOUInterval[];
   scheduleData: ScheduleHour[];
   periodGroups: PeriodGroup[];
@@ -648,7 +656,7 @@ const InverterStatusDashboard: React.FC = () => {
           metrics={[
             {
               label: "Current Mode",
-              value: formatBatteryMode(currentPeriodGroup?.mode || currentBatteryMode),
+              value: formatBatteryMode(currentPeriodGroup?.battMode || currentBatteryMode),
               unit: "",
               icon: Battery
             },
@@ -725,9 +733,10 @@ const InverterStatusDashboard: React.FC = () => {
           </div>
 
           {inverterSchedule?.periodGroups && inverterSchedule.periodGroups.length > 0 ? (() => {
-            const schedulePlatform = inverterSchedule.inverterPlatform ?? 'growatt_server_min';
-            const isTouBased = schedulePlatform !== 'solax_modbus_native';
-            const totalCols = isTouBased ? 10 : 6;
+            const controlModel: ControlModel = inverterSchedule.controlModel ?? 'tou_register';
+            const isTouBased = controlModel === 'tou_register';
+            const isVppPower = controlModel === 'vpp_power';
+            const totalCols = isTouBased ? 10 : isVppPower ? 7 : 6;
             return (
             <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
               <table className="min-w-full border-collapse">
@@ -748,6 +757,11 @@ const InverterStatusDashboard: React.FC = () => {
                     {isTouBased && (
                       <th colSpan={4} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
                         Inverter Configuration
+                      </th>
+                    )}
+                    {isVppPower && (
+                      <th colSpan={1} className="px-3 py-2 text-center text-xs font-semibold text-indigo-700 dark:text-indigo-300 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50 dark:bg-indigo-900/20">
+                        VPP Control
                       </th>
                     )}
                   </tr>
@@ -778,6 +792,11 @@ const InverterStatusDashboard: React.FC = () => {
                         Grid Charge
                       </th>
                     </>)}
+                    {isVppPower && (
+                      <th className="px-3 py-2 text-center text-xs font-semibold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider border border-gray-200 dark:border-gray-700 bg-indigo-50/70 dark:bg-indigo-900/10">
+                        VPP Power
+                      </th>
+                    )}
                   </tr>
                 </thead>
 
@@ -858,7 +877,7 @@ const InverterStatusDashboard: React.FC = () => {
                           )}
                         </td>
                         {isTouBased && (<>
-                          <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.mode)}</td>
+                          <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.battMode!)}</td>
                           <td className={`${invCell} text-center`}>
                             {group.chargePowerRate > 0 ? (
                               <span className="text-green-600 dark:text-green-400 font-medium">{group.chargePowerRate}%</span>
@@ -881,6 +900,17 @@ const InverterStatusDashboard: React.FC = () => {
                             )}
                           </td>
                         </>)}
+                        {isVppPower && (
+                          <td className={`${invCell} text-center`}>
+                            {group.vppPowerPct !== undefined ? (
+                              <span className={`font-medium ${group.vppPowerPct > 0 ? 'text-green-600 dark:text-green-400' : group.vppPowerPct < 0 ? 'text-orange-500 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                                {group.vppPowerPct > 0 ? '+' : ''}{group.vppPowerPct}%
+                              </span>
+                            ) : (
+                              <span className="text-gray-300 dark:text-gray-600">—</span>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -954,7 +984,7 @@ const InverterStatusDashboard: React.FC = () => {
                                 )}
                               </td>
                               {isTouBased && (<>
-                                <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.mode)}</td>
+                                <td className={`${invCell} text-center`}>{getBatteryModeDisplay(group.battMode!)}</td>
                                 <td className={`${invCell} text-center`}>
                                   {group.chargePowerRate > 0 ? (
                                     <span className="text-green-600 dark:text-green-400 font-medium">{group.chargePowerRate}%</span>
@@ -977,6 +1007,17 @@ const InverterStatusDashboard: React.FC = () => {
                                   )}
                                 </td>
                               </>)}
+                              {isVppPower && (
+                                <td className={`${invCell} text-center`}>
+                                  {group.vppPowerPct !== undefined ? (
+                                    <span className={`font-medium ${group.vppPowerPct > 0 ? 'text-green-600 dark:text-green-400' : group.vppPowerPct < 0 ? 'text-orange-500 dark:text-orange-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                                      {group.vppPowerPct > 0 ? '+' : ''}{group.vppPowerPct}%
+                                    </span>
+                                  ) : (
+                                    <span className="text-gray-300 dark:text-gray-600">—</span>
+                                  )}
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -996,7 +1037,8 @@ const InverterStatusDashboard: React.FC = () => {
       {/* Hardware Schedule Section — platform-aware */}
       {(() => {
         const platform = inverterSchedule?.inverterPlatform ?? inverterStatus?.inverterPlatform ?? 'growatt_server_min';
-        const isSolax = platform === 'solax_modbus_native';
+        const controlModel: ControlModel = inverterSchedule?.controlModel ?? 'tou_register';
+        const isPerPeriodCommand = controlModel !== 'tou_register';
 
         return (
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
@@ -1005,7 +1047,7 @@ const InverterStatusDashboard: React.FC = () => {
                 <div className="flex items-center">
                   <Clock className="h-5 w-5 text-blue-600 mr-2" />
                   <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
-                    {isSolax ? 'VPP Control' : 'Time of Use (TOU) Intervals'}
+                    {isPerPeriodCommand ? (controlModel === 'vpp_power' ? 'VPP Control' : 'Charge/Discharge Periods') : 'Time of Use (TOU) Intervals'}
                   </h3>
                 </div>
                 <span className="text-xs px-2 py-1 rounded-full font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300">
@@ -1019,14 +1061,15 @@ const InverterStatusDashboard: React.FC = () => {
                 </span>
               </div>
 
-              {isSolax ? (
+              {isPerPeriodCommand ? (
                 <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 p-4">
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">Per-period VPP commands</p>
+                  <p className="text-sm font-medium text-blue-800 dark:text-blue-300 mb-1">
+                    {controlModel === 'vpp_power' ? 'Per-period VPP commands' : 'Charge/discharge time periods'}
+                  </p>
                   <p className="text-sm text-blue-700 dark:text-blue-400">
-                    SolaX uses real-time power commands instead of a stored schedule.
-                    Commands are issued at each 15-minute period boundary and kept active
-                    via autorepeat. The strategic intent timeline above shows what the
-                    optimizer has planned.
+                    {controlModel === 'vpp_power'
+                      ? 'This inverter uses real-time power commands instead of a stored schedule. Commands are issued at each 15-minute period boundary and kept active via autorepeat. The strategic intent timeline above shows what the optimizer has planned.'
+                      : 'This inverter uses discrete charge/discharge time slots instead of a mode register. The strategic intent timeline above shows what the optimizer has planned; the schedule table shows the periods actually written to hardware.'}
                   </p>
                 </div>
               ) : (
@@ -1061,7 +1104,7 @@ const InverterStatusDashboard: React.FC = () => {
                           </div>
                         </div>
                         <div className="flex items-center space-x-3">
-                          {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode)}
+                          {!interval.isExpired && !interval.isEmpty && getBatteryModeDisplay(interval.battMode!)}
                           <span className={`px-2 py-1 rounded text-xs font-medium ${
                             interval.isExpired
                               ? 'bg-gray-100 text-gray-400 dark:bg-gray-700 dark:text-gray-500'

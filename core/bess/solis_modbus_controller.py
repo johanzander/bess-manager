@@ -59,6 +59,8 @@ class SolisModbusController(InverterController):
     # window per slot, same limitation as SPH.
     supports_charge_rate_control: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "period_list"
+
     MAX_CHARGE_PERIODS = 6
     MAX_DISCHARGE_PERIODS = 6
 

@@ -49,6 +49,8 @@ class HuaweiController(InverterController):
     supports_charge_rate_control: ClassVar[bool] = False
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "period_list"
+
     MAX_TOU_PERIODS = 14
 
     CHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset({"GRID_CHARGING"})

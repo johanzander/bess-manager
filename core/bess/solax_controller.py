@@ -55,6 +55,8 @@ class SolaxController(InverterController):
     # never a load-following ceiling. See #324.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "vpp_power"
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""
         super().__init__(battery_settings)

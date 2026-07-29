@@ -121,6 +121,18 @@ class InverterController(ABC):
     # silently re-gated by this unrelated change.
     dedupe_register_writes: ClassVar[bool] = True
 
+    # Real hardware control model this platform uses, driving what fields
+    # get_period_settings()/get_detailed_period_groups()/get_all_tou_segments()
+    # attach to each period (see _mode_display_fields()):
+    # - "tou_register": genuine load_first/battery_first/grid_first hardware
+    #   register exists (Growatt MIN, solax_modbus Growatt in TOU mode).
+    # - "vpp_power": no mode register; behavior is (power_pct,
+    #   remote_control) per period (solax_modbus Growatt VPP mode, native
+    #   SolaX).
+    # - "period_list": no per-period mode or power value; behavior is
+    #   discrete charge/discharge time slots (Growatt SPH, Solis, Huawei).
+    CONTROL_MODEL: ClassVar[str] = "tou_register"
+
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
         execute, in kW. Default: Growatt's integer-percent-of-max grid (1%

@@ -45,6 +45,8 @@ class GrowattSphController(InverterController):
     # they don't silently reproduce #324's forced-discharge failure mode.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "period_list"
+
     MAX_CHARGE_PERIODS = 3
     MAX_DISCHARGE_PERIODS = 3
 

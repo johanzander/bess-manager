@@ -544,6 +544,16 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### SolaxController VPP behavior has fallen behind SolaxModbusGrowattController's VPP fixes
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+**Description**: `SolaxController` (native SolaX inverters) and `SolaxModbusGrowattController` in `control_mode="vpp"` (Growatt via solax_modbus) both drive hardware through the same conceptual VPP power + remote-control model, but two Growatt-specific hardware fixes were never ported to SolaX: (1) #355's SOLAR_EXPORT grid-first hold (`block_passive_charging` -- Growatt actively holds the battery so solar bypasses to grid; SolaX still calls `set_solax_vpp_disabled()`, which lets solar passively recharge the battery during SOLAR_EXPORT), and (2) #413's LOAD_SUPPORT remote-control release (Growatt releases control to the inverter's own load-following self-use; SolaX still forces a fixed discharge-rate watt target). `SolaxController`'s own docstring (`solax_controller.py:120-126`) already flags the SOLAR_EXPORT gap as known and unverified on real hardware. These two controllers should probably converge on identical VPP semantics, but doing so changes real SolaX hardware behavior and needs its own hardware validation -- out of scope for the issue #415 display-only fix (`docs/superpowers/specs/2026-07-29-control-model-display-design.md`), which instead surfaces this divergence transparently (each controller's displayed VPP power/remote-control state reflects its own actual, currently-different, behavior).
+
+**Files**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+---
+
 ### Savings history: untested error paths and swallowed fetch failures
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`

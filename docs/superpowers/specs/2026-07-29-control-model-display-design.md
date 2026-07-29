@@ -103,11 +103,27 @@ computation is not. This also satisfies the transparency goal: each
 platform's display reflects what it actually does, divergence included,
 rather than a unified fiction.
 
-`get_period_settings()` (defined once, on the base class — not overridden
-by any subclass) is updated to compute its `batt_mode`/`vpp_power_pct`/
-`vpp_remote_control`/(nothing) fields via a new shared base-class helper,
-`_mode_display_fields(intent, grid_charge, discharge_rate,
-block_passive_charging)`, branching on `self.CONTROL_MODEL`.
+**Second correction**: the Schedule Overview table in issue #415's
+screenshot is *not* fed by `get_all_tou_segments()` at all — it's fed by
+`get_detailed_period_groups()` (`core/bess/inverter_controller.py:635-760`,
+also defined once on the base class, never overridden), which has its own
+independent `mode = self.INTENT_TO_MODE.get(intent, "load_first")` lookup
+(line 673) feeding `backend/api.py`'s `period_groups`/
+`tomorrow_period_groups` (lines 1745-1860), which is what the frontend's
+`PeriodGroup.mode` / `getBatteryModeDisplay(group.mode)` actually
+displays. This is a third, independent place carrying the same static
+lookup, on top of `get_period_settings()` and `get_all_tou_segments()`
+identified originally — and it's the primary one, since it's what issue
+#415's screenshot shows. Being a single un-overridden base-class method
+is good news: fixing it once via `self.CONTROL_MODEL` covers the primary
+table for all six controllers in one place, same as `get_period_settings()`.
+
+`get_period_settings()` and `get_detailed_period_groups()` (both defined
+once, on the base class — neither overridden by any subclass) are updated
+to compute their `batt_mode`/`vpp_power_pct`/`vpp_remote_control`/(nothing)
+fields via a new shared base-class helper, `_mode_display_fields(intent,
+grid_charge, discharge_rate, block_passive_charging)`, branching on
+`self.CONTROL_MODEL`.
 `get_all_tou_segments()` is `@abstractmethod` with six independent
 concrete overrides (one per controller) building fundamentally different
 segment structures (real TOU-register readback for `GrowattMinController`
@@ -136,11 +152,16 @@ from the controller's `CONTROL_MODEL`. Per-period/segment payloads:
 `strategicIntent` is present unconditionally in all three cases (already
 true today).
 
-This affects every endpoint that calls `get_period_settings()` /
-`get_all_tou_segments()`, including the prediction-snapshot comparison
-endpoint (`backend/api.py:2699-2718`, currently `interval["batt_mode"]`
-plain-indexed with no default — must be updated to branch on
-`controlModel` rather than assume presence).
+This affects every endpoint that calls `get_period_settings()`,
+`get_detailed_period_groups()`, or `get_all_tou_segments()` — including
+`/api/inverter/schedule`'s `period_groups`/`tomorrow_period_groups`
+(the primary Schedule Overview data, `backend/api.py:1745-1860`) and the
+prediction-snapshot comparison endpoint (`backend/api.py:2699-2718`,
+currently `interval["batt_mode"]` plain-indexed with no default — must be
+updated to branch on `controlModel` rather than assume presence). Each
+`PeriodGroup` gains the same conditional `vppPowerPct`/`vppRemoteControl`
+fields as per-period payloads, mirroring the `batt_mode`-present/absent
+rule.
 
 ### 3. Frontend
 

@@ -123,7 +123,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         return self.control_mode != "vpp"
 
     @property
-    def CONTROL_MODEL(self) -> str:  # noqa: N802 (matches base ClassVar name)
+    def CONTROL_MODEL(self) -> str:
         """Dual-mode: real TOU register in "tou" mode, VPP power+remote_control
         in "vpp" mode — see _is_tou_control for the underlying capability
         split this mirrors."""

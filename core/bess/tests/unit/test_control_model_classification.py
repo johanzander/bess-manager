@@ -1,7 +1,5 @@
 """CONTROL_MODEL must correctly classify every controller's real hardware model."""
 
-import pytest
-
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.huawei_controller import HuaweiController

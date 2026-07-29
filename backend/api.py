@@ -1537,6 +1537,7 @@ async def get_inverter_status():
         battery_discharge_power = controller.get_battery_discharge_power()
 
         inverter_platform = bess_controller.system.inverter_platform
+        control_model = schedule_manager.CONTROL_MODEL
 
         response = {
             "battery_soc": battery_soc,
@@ -1551,6 +1552,7 @@ async def get_inverter_status():
             "discharge_power_rate": discharge_power_rate,
             "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -1572,6 +1574,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        control_model = schedule_manager.CONTROL_MODEL
         battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
@@ -1764,7 +1767,18 @@ async def get_growatt_detailed_schedule():
                     {
                         "start_time": group["start_time"],
                         "end_time": group["end_time"],
-                        "mode": group["mode"],
+                        **(
+                            {
+                                "vpp_power_pct": group["vpp_power_pct"],
+                                "vpp_remote_control": group["vpp_remote_control"],
+                            }
+                            if "vpp_power_pct" in group
+                            else (
+                                {"batt_mode": group["batt_mode"]}
+                                if "batt_mode" in group
+                                else {}
+                            )
+                        ),
                         "dominant_intent": group["intent"],
                         "intent_counts": {group["intent"]: group["period_count"]},
                         "period_count": group["period_count"],
@@ -1840,7 +1854,20 @@ async def get_growatt_detailed_schedule():
                             {
                                 "start_time": group["start_time"],
                                 "end_time": group["end_time"],
-                                "mode": group["mode"],
+                                **(
+                                    {
+                                        "vpp_power_pct": group["vpp_power_pct"],
+                                        "vpp_remote_control": group[
+                                            "vpp_remote_control"
+                                        ],
+                                    }
+                                    if "vpp_power_pct" in group
+                                    else (
+                                        {"batt_mode": group["batt_mode"]}
+                                        if "batt_mode" in group
+                                        else {}
+                                    )
+                                ),
                                 "dominant_intent": group["intent"],
                                 "intent_counts": {
                                     group["intent"]: group["period_count"]
@@ -1864,6 +1891,7 @@ async def get_growatt_detailed_schedule():
         response = {
             "current_hour": current_hour,
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
             "period_groups": period_groups,

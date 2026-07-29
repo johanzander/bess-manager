@@ -38,6 +38,10 @@ def _make_controller(platform: str) -> MagicMock:
     ctrl.system._controller.get_battery_discharge_power.return_value = 0.0
 
     sm = ctrl.system._inverter_controller
+    # Default CONTROL_MODEL to a real classification string, not an
+    # unconfigured MagicMock attribute (which isn't JSON-serializable and
+    # would 500 every test hitting /api/inverter/status|schedule).
+    sm.CONTROL_MODEL = "tou_register"
     sm.strategic_intents = ["IDLE"] * 96
     sm.get_period_settings.return_value = {
         "batt_mode": "load_first",
@@ -84,6 +88,21 @@ class TestInverterStatus:
         sys.modules["app"].bess_controller = ctrl
         resp = _client.get("/api/growatt/inverter_status")
         assert resp.json()["inverterPlatform"] == platform
+
+
+class TestInverterStatusControlModel:
+    """controlModel must echo the schedule manager's CONTROL_MODEL classification
+    ("tou_register" | "vpp_power" | "period_list") so the frontend can branch
+    display logic instead of inferring TOU-vs-not from the platform string
+    (issue #415)."""
+
+    def test_control_model_is_passed_through(self):
+        ctrl = _make_controller("growatt_server_sph")
+        ctrl.system._inverter_controller.CONTROL_MODEL = "vpp_power"
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/inverter_status")
+        assert resp.status_code == 200
+        assert resp.json()["controlModel"] == "vpp_power"
 
 
 class TestInverterStatusUnavailableBatterySoc:
@@ -136,6 +155,13 @@ class TestDetailedSchedule:
         sys.modules["app"].bess_controller = ctrl
         resp = _client.get("/api/growatt/detailed_schedule")
         assert resp.json()["inverterPlatform"] == "growatt_server_sph"
+
+    def test_control_model_present(self):
+        ctrl = _make_controller("growatt_server_sph")
+        ctrl.system._inverter_controller.CONTROL_MODEL = "vpp_power"
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.json()["controlModel"] == "vpp_power"
 
     def test_tou_intervals_have_segment_id(self):
         ctrl = _make_controller("growatt_server_sph")
@@ -359,3 +385,62 @@ class TestPeriodGroupsNextDaySchedule:
             g for g in groups if g["startTime"] == "00:00" and g["endTime"] == "00:15"
         )
         assert period_0_group["dominantIntent"] == "LOAD_SUPPORT"
+
+
+# ===========================================================================
+# GET /api/growatt/detailed_schedule — period_groups vpp_power field
+# propagation (issue #415)
+# ===========================================================================
+
+
+def _group_per_period_vpp(**kwargs) -> list[dict]:
+    """Fake get_detailed_period_groups for a vpp_power CONTROL_MODEL
+    controller: each group carries vpp_power_pct/vpp_remote_control instead
+    of batt_mode, matching Task 5's conditional _mode_display_fields shape.
+    Mirrors the real method's fallback to self.strategic_intents when
+    intents is None (schedule_store has no latest schedule in this test)."""
+    intents = kwargs.get("intents") or ["IDLE"] * 96
+    return [
+        {
+            "start_time": f"{i // 4:02d}:{(i % 4) * 15:02d}",
+            "end_time": f"{i // 4:02d}:{(i % 4) * 15 + 15:02d}",
+            "vpp_power_pct": 50,
+            "vpp_remote_control": True,
+            "intent": intents[i],
+            "period_count": 1,
+            "duration_minutes": 15,
+            "charge_rate": 100,
+            "discharge_rate": 0,
+            "grid_charge": False,
+            "total_action_kwh": 0.0,
+            "soc_end_pct": None,
+        }
+        for i in range(len(intents))
+    ]
+
+
+class TestPeriodGroupsVppFields:
+    """period_groups entries must carry vppPowerPct/vppRemoteControl (and
+    omit battMode) when the underlying controller is CONTROL_MODEL ==
+    "vpp_power", instead of assuming every controller has a TOU batt_mode
+    (issue #415)."""
+
+    def test_vpp_power_groups_include_vpp_fields_not_batt_mode(self):
+        ctrl = _make_controller("solax_vpp")
+        sm = ctrl.system._inverter_controller
+        sm.CONTROL_MODEL = "vpp_power"
+        sm.strategic_intents = ["IDLE"] * 96
+        sm.get_detailed_period_groups.side_effect = _group_per_period_vpp
+
+        sys.modules["app"].bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+
+        body = resp.json()
+        assert body["controlModel"] == "vpp_power"
+        groups = body["periodGroups"]
+        assert groups
+        for group in groups:
+            assert "vppPowerPct" in group
+            assert "vppRemoteControl" in group
+            assert "battMode" not in group

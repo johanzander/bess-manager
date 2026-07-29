@@ -726,7 +726,6 @@ class InverterController(ABC):
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
@@ -739,12 +738,16 @@ class InverterController(ABC):
 
             _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
             charge_rate = self._compute_charge_rate(intent, control, action_kw)
+            block_passive_charging = control["charge_rate"] == 0
+            mode_fields = self._mode_display_fields(
+                intent, control["grid_charge"], discharge_rate, block_passive_charging
+            )
 
             period_settings.append(
                 {
                     "period": period,
                     "intent": intent,
-                    "mode": mode,
+                    **mode_fields,
                     "grid_charge": control["grid_charge"],
                     "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
@@ -755,10 +758,14 @@ class InverterController(ABC):
         groups = []
         current_group: dict | None = None
 
+        mode_field_keys = ("batt_mode", "vpp_power_pct", "vpp_remote_control")
+
         for ps in period_settings:
             if current_group is not None and (
                 ps["intent"] == current_group["intent"]
-                and ps["mode"] == current_group["mode"]
+                and all(
+                    ps.get(k) == current_group.get(k) for k in mode_field_keys
+                )
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]
@@ -773,7 +780,7 @@ class InverterController(ABC):
                     "start_period": ps["period"],
                     "end_period": ps["period"],
                     "intent": ps["intent"],
-                    "mode": ps["mode"],
+                    **{k: ps[k] for k in mode_field_keys if k in ps},
                     "grid_charge": ps["grid_charge"],
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
@@ -803,7 +810,7 @@ class InverterController(ABC):
                     "start_period": group["start_period"],
                     "end_period": group["end_period"],
                     "intent": group["intent"],
-                    "mode": group["mode"],
+                    **{k: group[k] for k in mode_field_keys if k in group},
                     "grid_charge": group["grid_charge"],
                     "charge_rate": group["charge_rate"],
                     "discharge_rate": group["discharge_rate"],

@@ -644,16 +644,25 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         result = []
         for group in groups:
-            mode = self.INTENT_TO_MODE.get(group["intent"], "load_first")
+            block_passive_charging = (
+                self.INTENT_TO_CONTROL.get(group["intent"], {}).get("charge_rate") == 0
+            )
+            mode_fields = self._mode_display_fields(
+                group["intent"],
+                group["grid_charge"],
+                group["discharge_rate"],
+                block_passive_charging,
+            )
             is_current = group["start_period"] <= current_p <= group["end_period"]
+            is_default_display = mode_fields.get("batt_mode") == "load_first"
             result.append(
                 {
                     "segment_id": len(result) + 1,
                     "start_time": group["start_time"],
                     "end_time": group["end_time"],
-                    "batt_mode": mode,
-                    "enabled": mode != "load_first",
-                    "is_default": mode == "load_first",
+                    **mode_fields,
+                    "enabled": not is_default_display,
+                    "is_default": is_default_display,
                     "is_current": is_current,
                     "strategic_intent": group["intent"],
                 }

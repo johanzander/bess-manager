@@ -71,20 +71,56 @@ Add a classification to `InverterController` with three values:
 `@property` there (`"vpp_power" if self.control_mode == "vpp" else
 "tou_register"`); a plain `ClassVar[str]` on the other five.
 
-`_intent_to_vpp()` currently exists independently in both
-`SolaxModbusGrowattController` and `SolaxController`
-(the latter's docstring notes the former was copied from it). Since both
-now share the `vpp_power` bucket, hoist a single shared implementation
-(base class or small mixin) instead of two copies that can drift —
-confirm at implementation time whether the two are still identical after
-recent fixes (#413) before merging them.
+**Correction from initial draft**: `_intent_to_vpp()` is *not* shared
+between `SolaxModbusGrowattController` and `SolaxController` today, and
+must not be hoisted into one implementation. Verified by reading both:
+`SolaxController._write_period_to_hardware()`
+(`core/bess/solax_controller.py:104-151`) derives its power target from
+`(grid_charge, discharge_rate)` alone, ignoring `block_passive_charging`
+and `strategic_intent` entirely — it never received the #355 SOLAR_EXPORT
+grid-first-hold fix or the #413 LOAD_SUPPORT remote-control-release fix
+that `SolaxModbusGrowattController._intent_to_vpp()`
+(`core/bess/solax_modbus_growatt_controller.py:298-340`) has. SolaX's own
+docstring already flags the SOLAR_EXPORT gap as known and unverified on
+real hardware. These are two inverters with genuinely different actual
+firmware behavior for the same strategic intent today — unifying them
+would either misrepresent SolaX's real (weaker) behavior or silently
+change what gets written to SolaX hardware, both of which violate the
+non-goal of a display-only, hardware-behavior-preserving change. Tracked
+as a separate future TODO item (see TODO.md, "SolaxController VPP
+behavior has fallen behind SolaxModbusGrowattController's VPP fixes").
 
-`get_period_settings()` / `get_all_tou_segments()` move to a single
-shared implementation on the base class, branching on
-`self.CONTROL_MODEL`, replacing each subclass's independent
-lookup-and-stub logic (including the three duplicated hardcoded
-`"load_first"` stubs in `growatt_sph_controller.py`,
-`solis_modbus_controller.py`, and `huawei_controller.py`).
+Instead, each `vpp_power` controller keeps its own method computing
+`(power_pct, remote_control_enabled)` for display, mirroring its own
+actual `_write_period_to_hardware()` logic exactly:
+`SolaxModbusGrowattController` reuses its existing `_intent_to_vpp()`
+unchanged; `SolaxController` gets a new method with the same
+`(power_pct, remote_control_enabled)` shape but SolaX's own (simpler,
+`block_passive_charging`/`strategic_intent`-blind) logic. Both are
+exposed to the frontend through the same `vpp_power_pct` /
+`vpp_remote_control` API field names — the fields are shape-shared, the
+computation is not. This also satisfies the transparency goal: each
+platform's display reflects what it actually does, divergence included,
+rather than a unified fiction.
+
+`get_period_settings()` (defined once, on the base class — not overridden
+by any subclass) is updated to compute its `batt_mode`/`vpp_power_pct`/
+`vpp_remote_control`/(nothing) fields via a new shared base-class helper,
+`_mode_display_fields(intent, grid_charge, discharge_rate,
+block_passive_charging)`, branching on `self.CONTROL_MODEL`.
+`get_all_tou_segments()` is `@abstractmethod` with six independent
+concrete overrides (one per controller) building fundamentally different
+segment structures (real TOU-register readback for `GrowattMinController`
+and `SolaxModbusGrowattController` in `tou` mode; charge/discharge
+period-list grouping for `GrowattSphController`/`SolisModbusController`/
+`HuaweiController`; strategic-intent grouping for the `vpp_power`
+controllers) — these are **not** merged into one shared implementation.
+Each override instead calls the same `_mode_display_fields()` helper at
+the point where it currently sets `batt_mode`, replacing its own
+`INTENT_TO_MODE` lookup or hardcoded `"load_first"` stub. This is the
+"one generic mechanism" the goals call for: a single source of truth for
+what fields a period gets, reused everywhere, without pretending the six
+segment-building implementations were ever going to unify.
 
 ### 2. API contract
 
@@ -173,8 +209,9 @@ prediction-snapshot endpoint (section 2).
   fictional label.
 - CHANGELOG entry under `Unreleased` noting the API shape change.
 
-## Open questions for implementation time
+## Resolved during review
 
-- Confirm whether `_intent_to_vpp()` in `SolaxModbusGrowattController` and
-  `SolaxController` are still identical post-#413, or have diverged enough
-  that hoisting needs reconciling behavior differences first.
+- `_intent_to_vpp()` in `SolaxModbusGrowattController` and
+  `SolaxController` are confirmed **not** identical post-#355/#413 — see
+  the correction in section 1. No open question remains; the design
+  keeps them as separate implementations behind a shared field shape.

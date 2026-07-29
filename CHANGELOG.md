@@ -86,6 +86,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **`BATTERY_EXPORT` classification threshold was 10x coarser than related flow checks** — `classify_strategic_intent`/`infer_intent_from_flows` used a `0.1` kWh threshold instead of `0.01`, misclassifying small export-only discharges as `LOAD_SUPPORT` (a mode that physically cannot export), causing planned-vs-realized cost gaps up to 18.7 SEK on quarter-hourly fixtures. Reconciled to `0.01` everywhere, including the reward function's matching export-credit threshold. ([#253](https://github.com/johanzander/bess-manager/pull/253))
 - **`GRID_CHARGING` charge rate display was stuck at a static 100% in logs and the schedule API** — `get_detailed_period_groups()` (used by the debug log's schedule table and by the API/frontend) read a static `charge_rate=100` for GRID_CHARGING periods instead of the action-derived rate `get_period_settings()` already computed since [#191](https://github.com/johanzander/bess-manager/pull/191), so small top-up charges (e.g. ~1% of max power) were misreported as full-rate 100% in the ASCII debug table. Both call sites now share one `_compute_charge_rate()` helper.
 - **Redundant "Intent transition" log spam on every hourly re-optimization** — `create_schedule()` in both the Growatt MIN and Solax Modbus Growatt controllers re-logged every already-elapsed intent transition for the whole day on each hourly re-plan, dominating debug bundles (~88% of INFO-level log lines). Transition logging now starts from the current period instead of period 0. Also removed a per-run log dump of the static `INTENT_TO_MODE` class constant.
+- Inverter schedule display no longer shows a fictional TOU mode label
+  (Load First/Battery First/Grid First) for VPP-controlled or
+  period-list-controlled installs. Growatt VPP mode in particular no
+  longer mislabels a SOLAR_EXPORT grid-first hold as "Load First" (#415).
+  The Schedule Overview table, Current Mode card, and prediction
+  comparison view now show each platform's actual control behavior
+  (VPP power percent + remote-control state, or nothing, as appropriate)
+  instead.
 
 ### Added
 

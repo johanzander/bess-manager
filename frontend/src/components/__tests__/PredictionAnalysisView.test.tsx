@@ -120,4 +120,33 @@ describe('PredictionAnalysisView', () => {
     expect(screen.getByText(/Battery First/)).toBeInTheDocument();
     expect(screen.queryByText(/VPP Power/i)).not.toBeInTheDocument();
   });
+
+  it('flags a VPP interval as changed when vppPowerPct differs between snapshots', () => {
+    const comparison = {
+      ...baseComparison,
+      growattScheduleA: [
+        { segmentId: 1, startTime: '06:00', endTime: '06:15', enabled: true, power: 50, vppPowerPct: 20, vppRemoteControl: true },
+      ],
+      growattScheduleB: [
+        { segmentId: 1, startTime: '06:00', endTime: '06:15', enabled: true, power: 50, vppPowerPct: 60, vppRemoteControl: true },
+      ],
+    };
+
+    vi.mocked(useSnapshotToSnapshotComparison).mockReturnValue({
+      comparison,
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<PredictionAnalysisView />);
+
+    const changedBadge = screen.getByText('Changed');
+    expect(changedBadge).toBeInTheDocument();
+
+    const intervalCard = changedBadge.closest('div.border.rounded-lg');
+    expect(intervalCard).not.toBeNull();
+    expect(intervalCard).toHaveClass('bg-yellow-50');
+    expect(intervalCard).toHaveClass('border-yellow-300');
+  });
 });

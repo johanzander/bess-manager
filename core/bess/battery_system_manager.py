@@ -202,6 +202,13 @@ class BatterySystemManager:
         self._runtime_failure_tracker = RuntimeFailureTracker()
         self._health_recovery_tracker = HealthRecoveryTracker()
 
+        # Historical-data-incomplete warning dismissal, keyed to the day and
+        # the exact set of missing hours so a new gap (or the same gap
+        # recurring on a later day) still surfaces the banner.
+        self._dismissed_historical_warning_signature: (
+            tuple[str, tuple[int, ...]] | None
+        ) = None
+
         # Inject failure tracker into controller if available
         if self._controller:
             self._controller.failure_tracker = self._runtime_failure_tracker
@@ -3071,6 +3078,32 @@ class BatterySystemManager:
             Number of failures dismissed
         """
         return self._runtime_failure_tracker.dismiss_all()
+
+    def dismiss_historical_data_warning(self, missing_hours: list[int]) -> None:
+        """Dismiss the historical-data-incomplete warning for today.
+
+        Args:
+            missing_hours: The missing hours the warning currently covers
+        """
+        today = time_utils.now().date().isoformat()
+        self._dismissed_historical_warning_signature = (
+            today,
+            tuple(sorted(missing_hours)),
+        )
+
+    def is_historical_data_warning_dismissed(self, missing_hours: list[int]) -> bool:
+        """Check if the historical-data-incomplete warning was dismissed.
+
+        The dismissal only applies to the exact day and set of missing
+        hours it was recorded for; a new gap re-surfaces the warning.
+        """
+        if self._dismissed_historical_warning_signature is None:
+            return False
+        today = time_utils.now().date().isoformat()
+        return self._dismissed_historical_warning_signature == (
+            today,
+            tuple(sorted(missing_hours)),
+        )
 
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""

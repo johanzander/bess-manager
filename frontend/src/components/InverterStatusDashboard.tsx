@@ -15,8 +15,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import api from '../lib/api';
-
-type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
+import { ControlModel } from '../types';
 
 interface InverterStatus {
   batterySoc: number;

@@ -2213,6 +2213,15 @@ async def get_dashboard_health_summary():
         return convert_keys_to_camel_case(error_summary)
 
 
+def _get_missing_historical_hours(bess_controller) -> list[int]:
+    """Compute today's missing historical-data hours up to the current hour."""
+    periods = bess_controller.system.historical_store.get_today_periods()
+    current_hour = time_utils.now().hour
+    current_period = current_hour * 4
+    missing_periods = [i for i in range(current_period) if periods[i] is None]
+    return list({p // 4 for p in missing_periods})
+
+
 @router.get("/api/historical-data-status")
 async def get_historical_data_status():
     """Check if historical data is incomplete and needs attention.
@@ -2233,6 +2242,7 @@ async def get_historical_data_status():
                 "total_completed": 0,
                 "message": "System is starting up.",
                 "timestamp": datetime.now().isoformat(),
+                "dismissed": False,
             }
         )
 
@@ -2253,6 +2263,12 @@ async def get_historical_data_status():
         completed_hours = list({p // 4 for p in completed_periods})
 
         is_incomplete = len(missing_periods) > 0
+        dismissed = (
+            is_incomplete
+            and bess_controller.system.is_historical_data_warning_dismissed(
+                missing_hours
+            )
+        )
 
         status = {
             "is_incomplete": is_incomplete,
@@ -2267,12 +2283,34 @@ async def get_historical_data_status():
                 else "Historical data is complete for today."
             ),
             "timestamp": datetime.now().isoformat(),
+            "dismissed": dismissed,
         }
 
         return convert_keys_to_camel_case(status)
 
     except Exception as e:
         logger.error(f"Error checking historical data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/historical-data-status/dismiss")
+async def dismiss_historical_data_warning():
+    """Dismiss today's historical-data-incomplete warning.
+
+    The dismissal is keyed to today's date and the exact set of missing
+    hours, so a new gap (or the same gap recurring on a later day) still
+    surfaces the banner.
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        missing_hours = _get_missing_historical_hours(bess_controller)
+        bess_controller.system.dismiss_historical_data_warning(missing_hours)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error dismissing historical data warning: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

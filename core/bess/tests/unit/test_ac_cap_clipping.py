@@ -130,7 +130,7 @@ def test_reward_full_battery_loses_clipped_export_credit():
         next_soe = _state_transition(
             full, 0.0, bs, DT, solar_production=1.75, home_consumption=0.15
         )
-        reward, _ = _compute_reward(
+        reward, _, _ = _compute_reward(
             power=0.0,
             soe=full,
             next_soe=next_soe,
@@ -166,7 +166,7 @@ def test_idle_cost_basis_discounts_clipped_absorption():
         # Battery absorbs the full 1.6 kWh surplus in both cases (rate/room
         # are not binding), so the physical transition is identical.
         assert next_soe == pytest.approx(soe + 1.6 * bs.efficiency_charge)
-        _, new_cost_basis = _compute_reward(
+        _, new_cost_basis, _ = _compute_reward(
             power=0.0,
             soe=soe,
             next_soe=next_soe,

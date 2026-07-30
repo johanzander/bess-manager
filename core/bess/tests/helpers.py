@@ -16,6 +16,7 @@ from core.bess.settings import (
     TAX_REDUCTION,
     VAT_MULTIPLIER,
     BatterySettings,
+    HomeSettings,
 )
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
 
@@ -95,6 +96,8 @@ def _scenario_inputs(scenario: dict):
     }
     if "terminal_value_per_kwh" in scenario:
         inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+    if "home" in scenario:
+        inputs["home_settings"] = HomeSettings(**scenario["home"])
     return inputs
 
 

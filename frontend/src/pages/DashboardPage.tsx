@@ -116,14 +116,21 @@ export default function DashboardPage({
     totalCompleted: number;
     message: string;
     timestamp: string;
+    dismissed: boolean;
   }
 
   const [historicalDataStatus, setHistoricalDataStatus] = useState<HistoricalDataStatus | null>(null);
-  const [dismissedHistoricalWarning, setDismissedHistoricalWarning] = useState(false);
 
-  // Handle historical warning dismissal
-  const handleDismissHistoricalWarning = useCallback(() => {
-    setDismissedHistoricalWarning(true);
+  // Handle historical warning dismissal — persisted server-side, keyed to
+  // today's date and the exact missing hours (matches useRuntimeFailures/
+  // useHealthRecoveries: call the API, then optimistically update state).
+  const handleDismissHistoricalWarning = useCallback(async () => {
+    try {
+      await api.post('/api/historical-data-status/dismiss');
+      setHistoricalDataStatus(prev => (prev ? { ...prev, dismissed: true } : prev));
+    } catch (err) {
+      console.error('Failed to dismiss historical data warning:', err);
+    }
   }, []);
 
   // Memoize the fetchData function to avoid recreation on each render
@@ -172,13 +179,9 @@ export default function DashboardPage({
         setHealthSummary(healthResponse.data);
       }
 
-      // Process historical data status
+      // Process historical data status (dismissed state comes from the backend)
       if (historicalResponse?.data) {
         setHistoricalDataStatus(historicalResponse.data);
-        // Reset dismissed warning if data is incomplete
-        if (historicalResponse.data.isIncomplete) {
-          setDismissedHistoricalWarning(false);
-        }
       }
 
       if (settingsResponse?.data) {
@@ -261,7 +264,7 @@ export default function DashboardPage({
       )}
 
       {/* Historical Data Warning Banner */}
-      {historicalDataStatus && historicalDataStatus.isIncomplete && !dismissedHistoricalWarning && !isInitializing && (
+      {historicalDataStatus && historicalDataStatus.isIncomplete && !historicalDataStatus.dismissed && !isInitializing && (
         <div className="bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400 p-4 rounded shadow">
           <div className="flex items-start">
             <div className="flex-shrink-0">

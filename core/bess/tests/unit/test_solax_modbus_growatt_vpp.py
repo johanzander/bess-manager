@@ -29,9 +29,9 @@ def hourly_to_quarterly(
     return quarterly
 
 
-def make_schedule(intents: list[str]) -> DPSchedule:
+def make_schedule(intents: list[str], actions: list[float] | None = None) -> DPSchedule:
     return DPSchedule(
-        actions=[0.0] * len(intents),
+        actions=actions if actions is not None else [0.0] * len(intents),
         state_of_energy=[25.0] * (len(intents) + 1),
         prices=[0.1] * len(intents),
         original_dp_results={"strategic_intent": intents},
@@ -316,7 +316,14 @@ class TestApplyPeriodVpp:
 
 
 class TestWriteScheduleToHardwareVpp:
-    def test_writes_initial_command_only(self, controller, mock_ha):
+    """VPP has no persistent/bulk schedule to push — write_to_hardware is a
+    no-op for power (like SolaxController's), same as its class docstring
+    already claims. The real per-period power command always comes from
+    apply_period via BatterySystemManager._apply_period_schedule, which runs
+    immediately after write_to_hardware in the same update_battery_schedule
+    cycle (#421)."""
+
+    def test_returns_zero_writes_zero_disables(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
@@ -324,27 +331,48 @@ class TestWriteScheduleToHardwareVpp:
             mock_ha, effective_period=8, current_tou=[]
         )
 
-        assert writes == 1
+        assert writes == 0
         assert disables == 0
-        assert mock_ha.calls["tou_segments"] == []
-        assert len(mock_ha.calls["growatt_vpp_periods"]) == 1
 
-    def test_solar_export_initial_write_keeps_remote_control_enabled(
-        self, controller, mock_ha
-    ):
-        """#355: the initial write_to_hardware path must apply the
-        same block_passive_charging distinction as per-period apply_period."""
-        intents = hourly_to_quarterly({2: "SOLAR_EXPORT"})
+    def test_no_vpp_power_command_written(self, controller, mock_ha):
+        """#421: write_to_hardware previously computed power from a
+        hardcoded battery_action_kw=0.0 stub, sending a spurious power=0%
+        command that briefly preceded the correct value written moments
+        later by apply_period. It must not write any VPP power at all."""
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
-        writes, _disables = controller.write_to_hardware(
-            mock_ha, effective_period=8, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
 
-        assert writes == 1
-        period = mock_ha.calls["growatt_vpp_periods"][-1]
-        assert period["remote_control_enabled"] is True
-        assert period["power_pct"] == 0
+        assert mock_ha.calls["growatt_vpp_periods"] == []
+
+    def test_no_vpp_power_command_written_for_real_discharge_action(
+        self, controller, mock_ha
+    ):
+        """Reproduces the exact #421 scenario: a BATTERY_EXPORT period with a
+        real nonzero planned discharge (period 77, -2.48 kWh / -9.90 kW in
+        the reported debug log) must not produce a spurious power=0% write
+        from write_to_hardware — the stub battery_action_kw=0.0 previously
+        made this look like "no action", forcing discharge_rate=0."""
+        intents = hourly_to_quarterly({19: "BATTERY_EXPORT"})
+        actions = [0.0] * 96
+        actions[77] = -2.48
+        controller.apply_intents(make_schedule(intents, actions), current_period=77)
+
+        controller.write_to_hardware(mock_ha, effective_period=77, current_tou=[])
+
+        assert mock_ha.calls["growatt_vpp_periods"] == []
+
+    def test_vpp_status_enabled_via_write_to_hardware(self, controller, mock_ha):
+        """The one-time VPP Status/AC-charging enable sequence is still
+        write_to_hardware's job, per the class docstring."""
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
+
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
 
 
 class TestReadAndInitializeVpp:

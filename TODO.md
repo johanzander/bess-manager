@@ -836,3 +836,23 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 **`backend/app.py` has no `if __name__ == "__main__":` guard around its module-level `BESSController()` construction and `start_in_background()` call** — pre-existing, unrelated to #387, but it's what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing. Worth a guard so `backend/app.py` is import-safe for future tests without workarounds.
 
 ---
+
+## From PR #412 (Huawei EMMA) review — `HuaweiController.sync_soc_limits` should read-compare-write
+
+**`HuaweiController.sync_soc_limits` writes SOC limits unconditionally, deviating from the house pattern on every other controller.** `core/bess/huawei_controller.py` writes `set_charge_stop_soc()` / `set_discharge_stop_soc()` on every sync with a docstring explicitly rationalising the choice ("no read-then-compare, since the underlying HA entities already report their own state via the entity registry and a mismatched write is idempotent"). Every other implemented controller reads first and writes only on mismatch:
+
+| Controller | Behavior |
+|---|---|
+| `GrowattMinController` (`growatt_min_controller.py:1322`) | read-compare-write |
+| `GrowattSphController` (`growatt_sph_controller.py:252`) | read-compare-write |
+| `SolaxController` (`solax_controller.py:173`) | read-compare-write |
+| `SolisModbusController` (`solis_modbus_controller.py:221`) | not implemented (documented gap — no verified write path) |
+| `HuaweiController` (`huawei_controller.py:275`) | **unconditional write — the outlier** |
+
+Surfaced by @valexi7's `HuaweiEmmaController` in [PR #412](https://github.com/johanzander/bess-manager/pull/412), whose `sync_soc_limits` override adds the read-compare-write that the base class should have had — i.e. that override is really a fix to our Huawei path rather than anything EMMA-specific.
+
+**Why it matters:** unnecessary writes on every sync are exactly the class of behavior implicated in [#402](https://github.com/johanzander/bess-manager/issues/402) (unguarded resends contributing to write failures). Huawei is still experimental and has never run in production, so there is no migration concern — change it before it ships to anyone.
+
+**Fix:** mirror `GrowattMinController.sync_soc_limits` — read `get_charge_stop_soc()` / `get_discharge_stop_soc()`, log "verified" and return when both match, otherwise write only the mismatched register(s). Drop the rationalising docstring. Check `core/bess/tests/unit/test_huawei_ha_controller.py` for any test asserting the unconditional write before changing.
+
+---

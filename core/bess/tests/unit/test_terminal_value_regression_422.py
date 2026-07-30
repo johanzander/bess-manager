@@ -110,6 +110,53 @@ def test_fixture_reproduces_zero_exports_with_the_old_full_window_cap():
     )
 
 
+def test_fixed_cap_improves_realized_economics_over_the_buggy_cap():
+    """The fix isn't just a different-looking plan -- it's a strictly better
+    one for this real captured case. Pins the actual optimized cost/savings
+    numbers (not just intent counts) so a future change that keeps
+    BATTERY_EXPORT nonzero but silently regresses the economics gets
+    caught. Buggy cap holds ~10.8 kWh through tomorrow evening instead of
+    selling it (believing it's worth 0.1955 EUR/kWh at the horizon
+    boundary, a price based on today's already-consumed 20:00 peak); the
+    fixed cap correctly values that energy at 0.1430 EUR/kWh -- below
+    tomorrow evening's real ~0.185-0.187 EUR/kWh sell prices -- so exporting
+    clears the bar."""
+    scenario = _load_fixture()
+    inp = _scenario_inputs(scenario)
+    system = _terminal_value_calculator(scenario["battery"])
+
+    buggy_terminal_value = system._calculate_terminal_value(
+        buy_prices=scenario["buy_price"],
+        sell_prices=scenario["sell_price"],
+        optimization_period=OPTIMIZATION_PERIOD,
+    )
+    fixed_terminal_value = system._calculate_terminal_value(
+        buy_prices=scenario["buy_price"],
+        sell_prices=scenario["sell_price"][TODAY_REMAINING:],
+        optimization_period=OPTIMIZATION_PERIOD,
+    )
+
+    buggy_result = optimize_battery_schedule(
+        **inp, terminal_value_per_kwh=buggy_terminal_value
+    )
+    fixed_result = optimize_battery_schedule(
+        **inp, terminal_value_per_kwh=fixed_terminal_value
+    )
+
+    buggy_cost = buggy_result.economic_summary.battery_solar_cost
+    fixed_cost = fixed_result.economic_summary.battery_solar_cost
+
+    assert buggy_cost == pytest.approx(-1.0445, abs=0.01)
+    assert fixed_cost == pytest.approx(-2.8258, abs=0.01)
+    assert fixed_cost < buggy_cost - 1.0, (
+        f"expected the fixed cap to realize meaningfully lower (more "
+        f"negative/profitable) cost than the buggy cap over this real "
+        f"~30h horizon by actually selling the held-back energy instead "
+        f"of banking on a phantom future price; got buggy={buggy_cost:.4f} "
+        f"fixed={fixed_cost:.4f}"
+    )
+
+
 def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
     """#422 fix: scoping the cap to sell prices on the terminal day
     (tomorrow only) restores BATTERY_EXPORT into tomorrow evening's real

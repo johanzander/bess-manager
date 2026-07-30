@@ -115,6 +115,20 @@ python scripts/mock_ha/scenarios/from_debug_log.py <bundle.md>
 writing the RED test — the bundle already contains the exact conditions that
 reproduced the bug.
 
+**If the fix changes optimizer economics or behavior, the fixture from
+`from_debug_log.py --issue <N>` also needs its `expected_results`/
+`expected_behavior` set from the fixed code's output** (`docs/agents/testing.md`
+→ Test Data) — this wires it into `test_scenarios.py::test_all_scenarios`,
+the codebase's existing auto-discovered, always-run regression harness for
+every `*.json` fixture in `core/bess/tests/unit/data/`. Do this instead of
+writing a standalone test file that re-derives `_scenario_inputs` and
+hand-asserts cost numbers — that duplicates a mechanism the codebase already
+has and runs on every test invocation. Verify the pin actually discriminates
+(temporarily feed it the pre-fix/buggy input, confirm it fails) before
+trusting it. Reserve a standalone test file for what that harness genuinely
+can't express: a private method's internal formula, or plan-faithfulness
+(`R == P`) — `test_all_scenarios` never runs the inverter simulator.
+
 ### 6. Quality gate + code review (background)
 
 Every PR must pass both the fast and slow suites, plus code review. This is

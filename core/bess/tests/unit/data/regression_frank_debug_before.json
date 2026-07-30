@@ -498,5 +498,17 @@
     "inverter_ac_power_margin": 0.05,
     "initial_soe": 12.6,
     "initial_cost_basis": 0.037260801124831704
+  },
+  "terminal_value_per_kwh": 0.143013413,
+  "expected_behavior": {
+    "constraints": {
+      "soe_within_bounds": true
+    }
+  },
+  "expected_results": {
+    "base_cost": 7.183056057210499,
+    "battery_solar_cost": -2.8258318688777835,
+    "base_to_battery_solar_savings": 10.008887926088283,
+    "base_to_battery_solar_savings_pct": 139.3402452434038
   }
 }

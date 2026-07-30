@@ -14,6 +14,22 @@ reproduces the real conditions, not an approximation of them.
 optimization_period=74 (~18:45), horizon=118 (22 remaining periods today +
 96 periods tomorrow), so index 22 in the fixture's flat arrays is the
 today/tomorrow boundary.
+
+The permanent economics regression guard for this fixture lives in the
+fixture itself (`terminal_value_per_kwh` + `expected_results`), auto-run by
+`test_scenarios.py::test_all_scenarios` -- not duplicated here. Verified by
+hand that `expected_results` actually discriminates: pinned to the fixed
+cap's economics (battery_solar_cost -2.83 EUR), it fails if the fixture's
+`terminal_value_per_kwh` is swapped back to the buggy cap's value (-1.04
+EUR) -- a >1.7 EUR gap, far outside the harness's round-to-1-decimal
+tolerance. A whole-result `expected_behavior.intents_present` check would
+NOT have caught this bug: today's remainder of this exact horizon already
+has 8 legitimate BATTERY_EXPORT periods regardless of the cap, which masks
+the fact that tomorrow's own plateau has zero -- the bug is specific to a
+sub-range the generic intent-presence check can't scope to. This module
+covers only what the scenario-JSON harness structurally cannot: the private
+cap-formula's own numbers, and control-mapping plan-faithfulness (R == P),
+which `test_all_scenarios` never runs the inverter simulator for.
 """
 
 import json
@@ -82,81 +98,6 @@ def test_fixture_reproduces_the_reported_cap_values():
     assert fixed_terminal_value < buggy_terminal_value
 
 
-def test_fixture_reproduces_zero_exports_with_the_old_full_window_cap():
-    """Replaying Frank's real captured 18:40 run with the OLD (pre-#422)
-    full-remaining-window cap reproduces the reported symptom: zero
-    BATTERY_EXPORT anywhere in tomorrow's plan, despite tomorrow evening
-    having its own profitable sell plateau (~0.185-0.187 EUR/kWh)."""
-    scenario = _load_fixture()
-    inp = _scenario_inputs(scenario)
-    system = _terminal_value_calculator(scenario["battery"])
-
-    buggy_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=scenario["sell_price"],
-        optimization_period=OPTIMIZATION_PERIOD,
-    )
-
-    result = optimize_battery_schedule(
-        **inp, terminal_value_per_kwh=buggy_terminal_value
-    )
-
-    tomorrow_intents = [
-        pd.decision.strategic_intent for pd in result.period_data[TODAY_REMAINING:]
-    ]
-    assert tomorrow_intents.count("BATTERY_EXPORT") == 0, (
-        "expected the real pre-fix data to reproduce zero exports in "
-        f"tomorrow's plan; got {tomorrow_intents.count('BATTERY_EXPORT')}"
-    )
-
-
-def test_fixed_cap_improves_realized_economics_over_the_buggy_cap():
-    """The fix isn't just a different-looking plan -- it's a strictly better
-    one for this real captured case. Pins the actual optimized cost/savings
-    numbers (not just intent counts) so a future change that keeps
-    BATTERY_EXPORT nonzero but silently regresses the economics gets
-    caught. Buggy cap holds ~10.8 kWh through tomorrow evening instead of
-    selling it (believing it's worth 0.1955 EUR/kWh at the horizon
-    boundary, a price based on today's already-consumed 20:00 peak); the
-    fixed cap correctly values that energy at 0.1430 EUR/kWh -- below
-    tomorrow evening's real ~0.185-0.187 EUR/kWh sell prices -- so exporting
-    clears the bar."""
-    scenario = _load_fixture()
-    inp = _scenario_inputs(scenario)
-    system = _terminal_value_calculator(scenario["battery"])
-
-    buggy_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=scenario["sell_price"],
-        optimization_period=OPTIMIZATION_PERIOD,
-    )
-    fixed_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=scenario["sell_price"][TODAY_REMAINING:],
-        optimization_period=OPTIMIZATION_PERIOD,
-    )
-
-    buggy_result = optimize_battery_schedule(
-        **inp, terminal_value_per_kwh=buggy_terminal_value
-    )
-    fixed_result = optimize_battery_schedule(
-        **inp, terminal_value_per_kwh=fixed_terminal_value
-    )
-
-    buggy_cost = buggy_result.economic_summary.battery_solar_cost
-    fixed_cost = fixed_result.economic_summary.battery_solar_cost
-
-    assert buggy_cost == pytest.approx(-1.0445, abs=0.01)
-    assert fixed_cost == pytest.approx(-2.8258, abs=0.01)
-    assert fixed_cost < buggy_cost - 1.0, (
-        f"expected the fixed cap to realize meaningfully lower (more "
-        f"negative/profitable) cost than the buggy cap over this real "
-        f"~30h horizon by actually selling the held-back energy instead "
-        f"of banking on a phantom future price; got buggy={buggy_cost:.4f} "
-        f"fixed={fixed_cost:.4f}"
-    )
-
-
 def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
     """#422 fix: scoping the cap to sell prices on the terminal day
     (tomorrow only) restores BATTERY_EXPORT into tomorrow evening's real
@@ -172,10 +113,13 @@ def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
         sell_prices=scenario["sell_price"][TODAY_REMAINING:],
         optimization_period=OPTIMIZATION_PERIOD,
     )
+    # The fixture pins its own terminal_value_per_kwh (consumed by
+    # test_scenarios.py::test_all_scenarios' expected_results regression
+    # guard) -- cross-check it stays derived from the real formula above,
+    # not hand-edited independently of it.
+    assert inp["terminal_value_per_kwh"] == pytest.approx(fixed_terminal_value)
 
-    result = optimize_battery_schedule(
-        **inp, terminal_value_per_kwh=fixed_terminal_value
-    )
+    result = optimize_battery_schedule(**inp)
 
     tomorrow_intents = [
         pd.decision.strategic_intent for pd in result.period_data[TODAY_REMAINING:]

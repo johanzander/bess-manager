@@ -95,7 +95,7 @@ class TestExportMaterialityRates:
         not commit grid_first at a forced sub-load rate — the period gets
         load_first semantics with rate 100 so firmware can cover load spikes."""
         schedule = make_schedule({84: make_export_energy(0.3, 0.15)})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         grid_charge, discharge_rate, _ = controller.compute_rates_for_period(84, -1.8)
         assert grid_charge is False
@@ -106,7 +106,7 @@ class TestExportMaterialityRates:
         """A genuine arbitrage export (2.29 kWh export vs 0.21 kWh home) keeps
         the existing grid_first behavior and action-scaled rate."""
         schedule = make_schedule({84: make_export_energy(0.21, 2.29)})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         grid_charge, discharge_rate, _ = controller.compute_rates_for_period(84, -2.5)
         assert grid_charge is False
@@ -121,7 +121,7 @@ class TestExportMaterialityRates:
         energy = make_export_energy(0.0, 0.05)
         assert energy.battery_to_grid == pytest.approx(0.05)
         schedule = make_schedule({84: energy})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         assert controller.compute_rates_for_period(84, -0.2)[:2] == (False, 100)
         assert controller.mode_for_period(84) == "load_first"
@@ -134,7 +134,7 @@ class TestExportMaterialityRates:
         by demoting — only export revenue to lose. Observed live in mock-HA
         E2E: a 6 SEK/kWh sell spike against a 0.95 kWh/period house load."""
         schedule = make_schedule({84: make_export_energy(0.95, 0.29)})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         grid_charge, discharge_rate, _ = controller.compute_rates_for_period(84, -4.96)
         assert grid_charge is False
@@ -147,7 +147,7 @@ class TestExportMaterialityRates:
         behavior."""
         schedule = make_schedule({84: make_export_energy(0.3, 0.15)})
         schedule.period_data = []
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         grid_charge, discharge_rate, _ = controller.compute_rates_for_period(84, -1.8)
         assert grid_charge is False
@@ -164,7 +164,7 @@ class TestExportMaterialityRates:
 
         controller = ForcedRateController(battery_settings)
         schedule = make_schedule({84: make_export_energy(0.3, 0.15)})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         grid_charge, discharge_rate, _ = controller.compute_rates_for_period(84, -1.8)
         assert (grid_charge, discharge_rate) == (False, 36)
@@ -176,7 +176,7 @@ class TestIntentModeDecoupling:
 
     def test_period_settings_keep_intent_label_but_demote_hardware(self, controller):
         schedule = make_schedule({84: make_export_energy(0.3, 0.15)})
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         settings = controller.get_period_settings(84)
         assert settings["strategic_intent"] == "BATTERY_EXPORT"
@@ -192,7 +192,7 @@ class TestIntentModeDecoupling:
             82: make_export_energy(0.21, 2.29),  # material
         }
         schedule = make_schedule(export_periods)
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         groups = {
             g["start_period"]: g
@@ -220,7 +220,7 @@ class TestTouSegments:
         schedule = make_schedule(
             {p: make_export_energy(0.3, 0.15) for p in range(80, 88)}
         )
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
         assert self._grid_first_segments(controller) == []
 
     def test_material_block_still_gets_grid_first_segment(self, controller):
@@ -229,7 +229,7 @@ class TestTouSegments:
             {p: make_export_energy(0.21, 2.29) for p in range(84, 88)}
         )
         schedule = make_schedule(export_periods)
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         segments = self._grid_first_segments(controller)
         assert len(segments) == 1

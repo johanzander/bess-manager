@@ -132,9 +132,18 @@ def test_influxdb_connection() -> dict:
                 403: "Flux query language is not enabled in your InfluxDB configuration",
                 404: "InfluxDB API endpoint not found — check the URL",
             }
+            # Include the InfluxDB response body: for unmapped statuses (e.g.
+            # HTTP 500 "failed to initialize execute state: no database", which
+            # is what a wrong bucket/database produces) the body is the only
+            # thing that names the real cause.
+            body = response.text.strip()
             message = status_messages.get(
                 response.status_code,
-                f"InfluxDB returned HTTP {response.status_code}",
+                (
+                    f"InfluxDB returned HTTP {response.status_code}: {body}"
+                    if body
+                    else f"InfluxDB returned HTTP {response.status_code}"
+                ),
             )
             return {
                 "status": "error",
@@ -251,10 +260,22 @@ def get_sensor_data(sensors_list, start_time=None, stop_time=None) -> dict:
             return {"status": "error", "message": "No data found"}
 
         if response.status_code != 200:
-            _LOGGER.error("Error from InfluxDB: %s", response.status_code)
+            # The response body carries the real reason (e.g. a wrong
+            # bucket/database yields HTTP 500 "failed to initialize execute
+            # state: no database"); logging only the status code hid it.
+            body = response.text.strip()
+            _LOGGER.error(
+                "Error from InfluxDB: %s%s",
+                response.status_code,
+                f" — {body}" if body else "",
+            )
             return {
                 "status": "error",
-                "message": f"InfluxDB error: {response.status_code}",
+                "message": (
+                    f"InfluxDB error: {response.status_code}: {body}"
+                    if body
+                    else f"InfluxDB error: {response.status_code}"
+                ),
             }
 
         sensor_readings = parse_influxdb_response(response.text)
@@ -462,10 +483,22 @@ def get_sensor_data_batch(sensors_list, target_date) -> dict:
             return {"status": "error", "message": "No data found"}
 
         if response.status_code != 200:
-            _LOGGER.error("Error from InfluxDB: %s", response.status_code)
+            # The response body carries the real reason (e.g. a wrong
+            # bucket/database yields HTTP 500 "failed to initialize execute
+            # state: no database"); logging only the status code hid it.
+            body = response.text.strip()
+            _LOGGER.error(
+                "Error from InfluxDB: %s%s",
+                response.status_code,
+                f" — {body}" if body else "",
+            )
             return {
                 "status": "error",
-                "message": f"InfluxDB error: {response.status_code}",
+                "message": (
+                    f"InfluxDB error: {response.status_code}: {body}"
+                    if body
+                    else f"InfluxDB error: {response.status_code}"
+                ),
             }
 
         # Log first few lines of response for debugging
@@ -783,10 +816,22 @@ def get_power_sensor_data_batch(power_sensors: list[str], target_date) -> dict:
             return {"status": "error", "message": "No data found"}
 
         if response.status_code != 200:
-            _LOGGER.error("Error from InfluxDB: %s", response.status_code)
+            # The response body carries the real reason (e.g. a wrong
+            # bucket/database yields HTTP 500 "failed to initialize execute
+            # state: no database"); logging only the status code hid it.
+            body = response.text.strip()
+            _LOGGER.error(
+                "Error from InfluxDB: %s%s",
+                response.status_code,
+                f" — {body}" if body else "",
+            )
             return {
                 "status": "error",
-                "message": f"InfluxDB error: {response.status_code}",
+                "message": (
+                    f"InfluxDB error: {response.status_code}: {body}"
+                    if body
+                    else f"InfluxDB error: {response.status_code}"
+                ),
             }
 
         period_data = _parse_power_batch_response(response.text, target_date, local_tz)

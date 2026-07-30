@@ -225,8 +225,19 @@ test.describe('API Contracts: /api/growatt/inverter_status', () => {
     // batteryMode is a real TOU register label only for tou_register
     // platforms -- vpp_power/period_list controllers have no such register,
     // so the backend must not fabricate one (#415).
+    //
+    // For non-tou_register platforms it must always be absent. For
+    // tou_register it is normally present, but /api/growatt/inverter_status
+    // derives it from the DP schedule's strategic intents
+    // (get_period_settings() in core/bess/inverter_controller.py), which
+    // raises until the background startup optimization cycle has produced a
+    // schedule (mirrors the same startup race /api/dashboard guards against
+    // with its "initializing" response). The backend correctly omits the
+    // field rather than fabricating a value in that window, so the field
+    // may legitimately be absent here too if this request lands before the
+    // first schedule is ready.
     if (body.controlModel === 'tou_register') {
-      expect(typeof body.batteryMode).toBe('string');
+      expect(['string', 'undefined']).toContain(typeof body.batteryMode);
     } else {
       expect(body.batteryMode).toBeUndefined();
     }

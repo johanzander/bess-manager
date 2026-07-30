@@ -83,7 +83,7 @@ def _scenario_inputs(scenario: dict):
         buy_price = price_manager.get_buy_prices(raw_prices=base_prices)
         sell_price = price_manager.get_sell_prices(raw_prices=base_prices)
 
-    return {
+    inputs = {
         "buy_price": buy_price,
         "sell_price": sell_price,
         "home_consumption": scenario["home_consumption"],
@@ -93,6 +93,9 @@ def _scenario_inputs(scenario: dict):
         "battery_settings": battery_settings,
         "period_duration_hours": scenario.get("period_duration_hours", 1.0),
     }
+    if "terminal_value_per_kwh" in scenario:
+        inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+    return inputs
 
 
 def run_scenario(scenario: dict):

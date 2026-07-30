@@ -92,7 +92,8 @@ function isIntegrationFound(
     return !!(shared['solar_forecast_today'] || shared['solar_forecast_tomorrow']);
   }
   if (id === 'weather') return !!shared['weather_entity'];
-  if (id === 'consumption_forecast') return !!shared['48h_avg_grid_import'];
+  if (id === 'consumption_average') return !!shared['48h_avg_grid_import'];
+  if (id === 'consumption_forecast_series') return !!shared['consumption_forecast_series'];
   if (id === 'discharge_inhibit') return !!shared['discharge_inhibit'];
   return false;
 }

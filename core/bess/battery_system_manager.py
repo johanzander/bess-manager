@@ -1049,7 +1049,13 @@ class BatterySystemManager:
             hours without complete actual data).
         """
         active_strategy = self.home_settings.consumption_strategy
-        strategy_names = ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        strategy_names = [
+            "sensor",
+            "fixed",
+            "influxdb_7d_avg",
+            "ha_statistics",
+            "ha_consumption_series",
+        ]
         results = []
 
         for name in strategy_names:
@@ -1073,6 +1079,8 @@ class BatterySystemManager:
                     forecast = self._get_influxdb_7d_avg_forecast()
                 elif name == "ha_statistics":
                     forecast = self._get_ha_statistics_forecast()
+                elif name == "ha_consumption_series":
+                    forecast = self.controller.get_consumption_forecast_series()
                 else:
                     continue
 
@@ -1134,6 +1142,12 @@ class BatterySystemManager:
 
         if strategy == "influxdb_7d_avg":
             return self._get_influxdb_7d_avg_forecast()
+
+        if strategy == "ha_consumption_series":
+            # No fallback on failure: this strategy's whole purpose is to let
+            # the user express a shaped load; silently degrading to a flat
+            # profile would hide exactly the thing they configured it for.
+            return self.controller.get_consumption_forecast_series()
 
         if strategy == "ha_statistics":
             # Data-insufficiency or missing-sensor errors are handled the same
@@ -1688,6 +1702,36 @@ class BatterySystemManager:
             logger.error(f"Failed to get battery SOC: {e}")
             return None
 
+    def _extend_consumption_predictions(
+        self, consumption_predictions: list[float], period_count: int
+    ) -> list[float]:
+        """Extend today's consumption predictions to cover `period_count` periods.
+
+        Every strategy except `ha_consumption_series` repeats today's
+        uniform pattern for the tomorrow-spanning periods — fine when the
+        forecast is already flat or a time-of-day profile with no real
+        "tomorrow" data. `ha_consumption_series` has genuine tomorrow data
+        (the same entity's `raw_tomorrow` attribute), so it extends with
+        that instead, mirroring how solar already fetches tomorrow's real
+        forecast rather than repeating today's.
+        """
+        if period_count <= len(consumption_predictions):
+            return consumption_predictions
+
+        if self.home_settings.consumption_strategy == "ha_consumption_series":
+            tomorrow_consumption = (
+                self.controller.get_consumption_forecast_series_tomorrow()
+            )
+        else:
+            tomorrow_consumption = consumption_predictions.copy()
+
+        extended = (consumption_predictions + tomorrow_consumption)[:period_count]
+        logger.info(
+            "Extended consumption predictions to %d periods for tomorrow horizon",
+            len(extended),
+        )
+        return extended
+
     def _fetch_tomorrow_solar_forecast(self) -> list[float]:
         """Fetch tomorrow's solar forecast, falling back to zeros if unavailable."""
         try:
@@ -1734,14 +1778,9 @@ class BatterySystemManager:
             solar_predictions = self.controller.get_solar_forecast()
 
         # --- Extend arrays to match period_count when horizon spans tomorrow ---
-        if period_count > len(consumption_predictions):
-            # Consumption: repeat today's uniform pattern for tomorrow
-            tomorrow_consumption = consumption_predictions.copy()
-            consumption_predictions = consumption_predictions + tomorrow_consumption
-            logger.info(
-                "Extended consumption predictions to %d periods for tomorrow horizon",
-                len(consumption_predictions),
-            )
+        consumption_predictions = self._extend_consumption_predictions(
+            consumption_predictions, period_count
+        )
 
         if period_count > len(solar_predictions):
             if prepare_next_day:

@@ -17,6 +17,7 @@ const STRATEGY_LABELS: Record<string, string> = {
   fixed: 'Fixed Value',
   influxdb_7d_avg: 'InfluxDB 7-day Avg',
   ha_statistics: 'HA Statistics',
+  ha_consumption_series: 'Consumption Forecast Series',
 };
 
 const STRATEGY_COLORS: Record<string, string> = {
@@ -24,6 +25,7 @@ const STRATEGY_COLORS: Record<string, string> = {
   fixed: '#f59e0b',
   influxdb_7d_avg: '#3b82f6',
   ha_statistics: '#8b5cf6',
+  ha_consumption_series: '#14b8a6',
 };
 
 const ACTUAL_COLOR = '#10b981';

@@ -21,6 +21,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
   const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
   const chargeRateSensorConfigured = Boolean(sensors?.['battery_charging_power_rate']);
+  const consumptionSeriesSensorConfigured = Boolean(sensors?.['consumption_forecast_series']);
   return (
     <div className="space-y-3">
       <SectionCard
@@ -34,6 +35,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             { value: 'sensor', label: 'Home Assistant sensor' },
             { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)', disabled: !localLoadSensorConfigured },
             { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
+            { value: 'ha_consumption_series', label: 'Consumption forecast series (HA entity)', disabled: !consumptionSeriesSensorConfigured },
           ],
           form.consumptionStrategy,
           v => onChange({ ...form, consumptionStrategy: v }),
@@ -48,6 +50,12 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
             HA Statistics requires the <strong>Lifetime Load Consumption</strong> sensor to be
             configured in the <strong>Sensors</strong> tab.
+          </p>
+        )}
+        {!consumptionSeriesSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
+            Consumption forecast series requires the <strong>Consumption Forecast Series</strong>{' '}
+            entity to be configured in the <strong>Sensors</strong> tab.
           </p>
         )}
         {form.consumptionStrategy === 'fixed' && (
@@ -77,6 +85,15 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             from the past 7 days. Captures daily patterns (morning/evening peaks, overnight baseline) using
             a trimmed average that filters out outlier spikes like EV charging. No extra integrations needed.
             Configure the load consumption sensor in the <strong>Sensors</strong> tab under Consumption Forecast.
+          </p>
+        )}
+        {form.consumptionStrategy === 'ha_consumption_series' && (
+          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+            Reads a time-series consumption forecast you build yourself in Home Assistant (a template
+            sensor with <code>raw_today</code>/<code>raw_tomorrow</code> attributes, mirroring how price
+            data is consumed). Use this when you can predict a shaped load — a known EV charging session,
+            weather-driven aircon, occupancy — that the statistical strategies above can't represent.
+            Configure the entity in the <strong>Sensors</strong> tab under Consumption Forecast Series.
           </p>
         )}
       </SectionCard>

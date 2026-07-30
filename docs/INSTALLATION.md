@@ -159,10 +159,12 @@ that you have used `homeassistant/autogen` and not just `homeassistant`.
 
 BESS needs a forecast of your home consumption to plan the battery schedule.
 This is selected with the `consumption_strategy` setting in the BESS Manager
-web interface (**Settings → Home**). Four strategies are available.
+web interface (**Settings → Home**). Five strategies are available.
 
 **Recommended: `ha_statistics`.** It is the most accurate option that needs no
-manual sensor setup — see below.
+manual sensor setup — see below. If you can predict a *shaped* load a
+statistical model can't (a known EV session, weather-driven aircon), see
+`ha_consumption_series` instead.
 
 ### Strategy comparison
 
@@ -170,6 +172,7 @@ manual sensor setup — see below.
 |----------|----------|-------------------------|
 | **`ha_statistics`** ✅ recommended | High — real home consumption (incl. solar self-use), time-of-day shaped | Nothing beyond selecting it. Needs the inverter's lifetime load-consumption sensor (auto-discovered) and ~7 days of HA history |
 | `influxdb_7d_avg` | High — same data source, 15-min resolution | Requires an InfluxDB instance (Step 2) and the `local_load_power` sensor |
+| `ha_consumption_series` | Depends entirely on your own HA template/automation — can express a shaped load none of the statistical strategies can | Requires a hand-authored HA entity with `raw_today`/`raw_tomorrow` attributes — see [USER_GUIDE.md](USER_GUIDE.md#strategy-5-ha_consumption_series) for the entity format and an example template |
 | `fixed` | Low — a single flat number, does not adapt | Manually enter a kWh/hour value (`home.default_hourly`) |
 | `sensor` (legacy) | Low — grid-import proxy that ignores solar self-consumption, so it under-estimates load on sunny days | Requires a hand-written template sensor in `configuration.yaml` (see below) |
 

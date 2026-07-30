@@ -300,7 +300,7 @@ For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, V
 
 ### Consumption Prediction
 
-BESS needs a forecast of your home consumption to plan the battery schedule. Four strategies are available, configured via `home.consumption_strategy` in your add-on settings:
+BESS needs a forecast of your home consumption to plan the battery schedule. Five strategies are available, configured via `home.consumption_strategy` in your add-on settings:
 
 #### Strategy 1: `sensor` (default)
 
@@ -343,6 +343,56 @@ Requires the `lifetime_load_consumption` sensor configured in the **Sensors** ta
 - If the sensor is configured but HA has not yet accumulated enough history (fewer than 12 hours of data), BESS automatically **falls back to the fixed profile** and shows a warning on the dashboard. Once HA accumulates sufficient data (typically within 12-24 hours of first configuring the sensor), the system self-heals and the warning auto-dismisses.
 
 This is the recommended strategy for most users — it adapts to your actual usage patterns with no extra integrations or configuration beyond a cumulative load sensor.
+
+#### Strategy 5: `ha_consumption_series`
+
+Reads a **time series you build yourself** in Home Assistant, rather than a statistical model BESS computes internally. Use this when you can predict a *shaped* load — a known EV charging session, a weather-driven aircon block, an occupancy pattern — that the statistical strategies above can't represent: `ha_statistics`'s trimmed mean deliberately discounts one-off spikes, so a genuinely one-off event (this week's EV session, not every week's) never shows up in its forecast.
+
+BESS does not model loads itself — it never modelled solar irradiance either, and it won't start modelling EV sessions or weather now. This strategy is the seam: your own HA automation or template builds the series, and BESS just consumes it, the same way it already consumes an external solar forecast.
+
+**Entity format**: configure one entity (any domain — `sensor`, `input_text`, etc. — as long as it has attributes) in the **Sensors** tab under **Consumption Forecast Series**. That entity must expose `raw_today` and/or `raw_tomorrow` attributes, each a list of records:
+
+```yaml
+raw_today:
+  - {start: "2026-07-30T00:00:00+02:00", value: 0.3}
+  - {start: "2026-07-30T00:15:00+02:00", value: 0.3}
+  # ... one record per period, kWh for that period
+```
+
+This mirrors exactly how BESS already consumes Nord Pool prices (`raw_today`/`raw_tomorrow` on the price entity) — if you've configured Nord Pool, the shape will look familiar. Records may be spaced 15 or 60 minutes apart (a 60-minute record's `value` is the whole hour's kWh; BESS divides it across the four quarter-hour periods). Any other spacing, or a series that's missing, stale (wrong date), malformed, or shorter than the optimization horizon, is a hard failure shown on the dashboard — this strategy never silently falls back to a flat guess, because a silent flat fallback would be exactly the failure mode it exists to avoid.
+
+**Example template** — a flat baseline plus a scheduled EV session, using two `input_datetime` helpers (`input_datetime.ev_session_start` / `input_datetime.ev_session_end`) and an `input_number.ev_charging_power_kw` to mark the known session:
+
+```yaml
+template:
+  - trigger:
+      - trigger: time_pattern
+        minutes: "/15"
+    sensor:
+      - name: "Consumption Forecast Series"
+        unique_id: consumption_forecast_series
+        state: "ok"
+        attributes:
+          raw_today: >
+            {% set ns = namespace(records=[]) %}
+            {% set baseline_kwh = 0.3 %}
+            {% set ev_kwh = 4.0 %}
+            {% set ev_start = states('input_datetime.ev_session_start') %}
+            {% set ev_end = states('input_datetime.ev_session_end') %}
+            {% for i in range(96) %}
+              {% set period_start = today_at("00:00") + timedelta(minutes=15 * i) %}
+              {% set value = ev_kwh if (ev_start and ev_end and
+                    period_start >= as_datetime(ev_start) and
+                    period_start < as_datetime(ev_end))
+                  else baseline_kwh %}
+              {% set ns.records = ns.records + [{"start": period_start.isoformat(), "value": value}] %}
+            {% endfor %}
+            {{ ns.records }}
+```
+
+Replace `baseline_kwh` with a per-hour lookup (e.g. from `ha_statistics`'s own hourly average, or a fixed list) if you want a shaped baseline rather than a flat one — the EV block only needs to be layered on top. `raw_tomorrow` follows the same pattern anchored on `today_at("00:00") + timedelta(days=1)`, needed once the optimization horizon extends past today (BESS fetches it automatically when the plan spans midnight).
+
+**Recommended baseline builders**: EMHASS and similar HA load-forecasting integrations can also produce a `raw_today`/`raw_tomorrow`-shaped entity — BESS doesn't need to know or care what built the series, only that it matches this contract.
 
 #### Comparing Strategies
 

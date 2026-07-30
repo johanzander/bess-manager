@@ -44,6 +44,14 @@ class HAStatisticsUnavailableError(BESSException):
         super().__init__(message or "HA Statistics data is not available")
 
 
+class ConsumptionForecastUnavailableError(BESSException):
+    """Raised when the ha_consumption_series entity is unconfigured, missing,
+    stale, malformed, or provides an unsupported record interval."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(message or "Consumption forecast series is not available")
+
+
 class HistoricalDataUnavailableError(BESSException):
     """Raised when InfluxDB historical energy-flow data is unavailable.
 

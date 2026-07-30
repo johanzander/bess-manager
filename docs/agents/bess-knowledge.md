@@ -491,21 +491,36 @@ is always caused by a specific, identifiable change.
 
 ## Consumption Prediction Strategies
 
-The optimizer needs a consumption forecast.  Four strategies exist:
+The optimizer needs a consumption forecast.  Five strategies exist:
 
-- **ha_statistics** (recommended): Builds a 96-period time-of-day profile
-  from the past 7 days of HA Recorder data, bucketed by hour-of-day.  For
-  each hour it drops only the single highest (and lowest, if ≥5 samples)
+- **ha_statistics** (recommended default): Builds a 96-period time-of-day
+  profile from the past 7 days of HA Recorder data, bucketed by hour-of-day.
+  For each hour it drops only the single highest (and lowest, if ≥5 samples)
   of the 7 daily values before averaging.  This discounts a one-off
   irregular spike (e.g. an unusual EV charging session on one day) but
   does **not** strip out a regular/nightly EV charging habit — if most of
   the 7 samples for an hour are elevated together, the average stays high
   and the forecast correctly bakes that load in.  Higher during evening
-  peaks, lower overnight.
+  peaks, lower overnight.  It is still blind to a load the user knows is
+  *coming* but hasn't happened 5+ times in the past week yet.
 - **influxdb_7d_avg**: Same concept but queries InfluxDB instead of HA.
 - **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
   prediction (same value all day).
 - **fixed**: A single fixed kWh/hour value.  Does not adapt.
+- **ha_consumption_series** (issue #428): Reads a user-authored HA
+  time-series entity — a template sensor with `raw_today`/`raw_tomorrow`
+  attributes of `{start, value}` records, mirroring how price data is
+  consumed (`core/bess/price_manager.py`'s `raw_today`/`raw_tomorrow`
+  pattern). BESS never models loads itself (no EV/weather/occupancy
+  modelling) — this strategy is the seam: the user's own HA automation
+  builds the shaped series (a known EV session, weather-driven aircon,
+  etc.), and BESS just normalizes it onto the DP's quarter-hour grid
+  (`HomeAssistantAPIController.get_consumption_forecast_series`,
+  `core/bess/ha_api_controller.py`). Accepts 15- or 60-minute record
+  spacing; anything else, or a missing/stale/malformed/horizon-short
+  series, is an explicit `ConsumptionForecastUnavailableError` — this
+  strategy never silently falls back to a flat profile, unlike
+  `ha_statistics`'s fixed-value fallback on insufficient data.
 
 
 ## Savings Calculation

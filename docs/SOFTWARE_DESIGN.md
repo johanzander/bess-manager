@@ -438,6 +438,7 @@ The frontend disables UI features based on **sensor presence**, which correlates
 - Fuse protection toggle: disabled when `battery_charging_power_rate` sensor is not configured
 - InfluxDB consumption strategy: disabled when `local_load_power` sensor is not configured
 - HA Statistics strategy: disabled when `lifetime_load_consumption` sensor is not configured
+- Consumption forecast series strategy: disabled when `consumption_forecast_series` sensor is not configured
 
 Sensor-based gating is the right default. A dedicated capabilities API should only be introduced when the frontend needs to gate on something that doesn't map to sensor presence.
 
@@ -549,7 +550,7 @@ Beyond core inverter and price sensors, discovery also detects:
 - **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
 - **Phase currents**: `current_l1`, `current_l2`, `current_l3`
 - **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`
-- **Consumption forecast**: Custom helper sensor for 48-hour average grid import
+- **Consumption average**: Custom helper sensor for 48-hour average grid import (the `sensor` strategy; produces a flat forecast, not a real time series — see `ha_consumption_series` for a shaped-load input)
 
 ### Setup Wizard
 

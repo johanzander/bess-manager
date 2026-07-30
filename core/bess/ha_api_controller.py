@@ -10,12 +10,14 @@ import re
 import ssl
 import time
 import urllib.parse
+from datetime import datetime, timedelta
 from typing import ClassVar
 
 import requests
 import websocket
 
-from .exceptions import SystemConfigurationError
+from . import time_utils
+from .exceptions import ConsumptionForecastUnavailableError, SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
 
 logger = logging.getLogger(__name__)
@@ -235,6 +237,13 @@ class HomeAssistantAPIController:
             "unit": "W",
             "precision": 1,
             "conversion_threshold": 1000,
+        },
+        "get_consumption_forecast_series": {
+            "sensor_key": "consumption_forecast_series",
+            "name": "Consumption Forecast Series",
+            "unit": "list",
+            "precision": 1,
+            "conversion_threshold": None,
         },
         # Solar forecast
         "get_solar_forecast": {
@@ -1255,6 +1264,139 @@ class HomeAssistantAPIController:
 
         # Return 96 quarterly periods (24 hours * 4 quarters per hour)
         return [quarterly_consumption] * 96
+
+    def get_consumption_forecast_series(self) -> list[float]:
+        """Get today's consumption forecast from a user-authored HA time-series entity.
+
+        Mirrors the price-manager entity pattern: one entity, `raw_today` /
+        `raw_tomorrow` attributes holding timestamped {start, value} records
+        (value in kWh for that record's interval). Unlike the flat `sensor`
+        strategy this can express a shaped load (a known EV session, a
+        weather-driven aircon block, etc.) because the user's own HA
+        template — not BESS — builds the series; BESS only normalizes it
+        onto the DP's quarter-hour grid.
+
+        Returns:
+            list[float]: consumption values in kWh per quarter-hour period
+                (92-100 periods depending on DST).
+
+        Raises:
+            ConsumptionForecastUnavailableError: entity not configured,
+                missing, stale, malformed, short of the horizon, or using
+                an unsupported record interval. Never silently degrades to
+                a flat or fixed profile.
+        """
+        return self._parse_consumption_series_for_date(time_utils.today())
+
+    def get_consumption_forecast_series_tomorrow(self) -> list[float]:
+        """Get tomorrow's consumption forecast from the same series entity.
+
+        See `get_consumption_forecast_series` — reads `raw_tomorrow` instead
+        of `raw_today` from the same entity.
+        """
+        tomorrow = time_utils.today() + timedelta(days=1)
+        return self._parse_consumption_series_for_date(tomorrow)
+
+    def _parse_consumption_series_for_date(self, target_date) -> list[float]:
+        """Fetch and normalize the consumption series entity for `target_date`."""
+        sensor_key = "consumption_forecast_series"
+        entity_id = self.sensors.get(sensor_key)
+        if not entity_id:
+            raise ConsumptionForecastUnavailableError(
+                f"Consumption forecast series sensor '{sensor_key}' not configured"
+            )
+
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Get consumption forecast series",
+            category="sensor_read",
+        )
+        if not response or "attributes" not in response:
+            raise ConsumptionForecastUnavailableError(
+                f"No attributes found for consumption forecast series sensor {entity_id}"
+            )
+
+        attributes = response["attributes"]
+        raw_key = "raw_today" if target_date == time_utils.today() else "raw_tomorrow"
+        raw_data = attributes.get(raw_key)
+        if not raw_data:
+            raise ConsumptionForecastUnavailableError(
+                f"No '{raw_key}' data found on consumption forecast series sensor {entity_id}"
+            )
+
+        return self._normalize_consumption_records(raw_data, target_date, entity_id)
+
+    def _normalize_consumption_records(
+        self, raw_data: list, target_date, entity_id: str
+    ) -> list[float]:
+        """Parse timestamped {start, value} records and normalize to quarter-hour periods.
+
+        Accepts 15-minute (native) or 60-minute (upsampled /4) record
+        spacing. Any other interval, a date mismatch, or a malformed record
+        is an explicit failure — never a silent guess at the missing data.
+        """
+        try:
+            entries = sorted(raw_data, key=lambda entry: str(entry.get("start", "")))
+            starts = []
+            for entry in entries:
+                start_str = entry.get("start")
+                if not start_str:
+                    raise ConsumptionForecastUnavailableError(
+                        f"Consumption forecast series entry missing 'start' on {entity_id}"
+                    )
+                if "value" not in entry:
+                    raise ConsumptionForecastUnavailableError(
+                        f"Consumption forecast series entry missing 'value' on {entity_id}"
+                    )
+                if isinstance(start_str, str) and start_str.endswith(
+                    ("+02:00", "+01:00")
+                ):
+                    start_str = start_str[:-6]
+                starts.append(datetime.fromisoformat(start_str))
+        except (ValueError, TypeError) as e:
+            raise ConsumptionForecastUnavailableError(
+                f"Malformed consumption forecast series data on {entity_id}: {e}"
+            ) from e
+
+        if starts[0].date() != target_date:
+            raise ConsumptionForecastUnavailableError(
+                f"Consumption forecast series on {entity_id} is stale: first record "
+                f"is for {starts[0].date()}, expected {target_date}"
+            )
+
+        interval_minutes = (
+            round((starts[1] - starts[0]).total_seconds() / 60)
+            if len(starts) > 1
+            else 15
+        )
+
+        if interval_minutes == 15:
+            periods_per_record = 1
+            divisor = 1.0
+        elif interval_minutes == 60:
+            periods_per_record = 4
+            divisor = 4.0
+        else:
+            raise ConsumptionForecastUnavailableError(
+                f"Consumption forecast series on {entity_id} uses an unsupported "
+                f"record interval of {interval_minutes} minutes (only 15 or 60 "
+                "minute spacing is supported)"
+            )
+
+        periods: list[float] = []
+        for entry in entries:
+            period_value = float(entry["value"]) / divisor
+            periods.extend([period_value] * periods_per_record)
+
+        if not (92 <= len(periods) <= 100):
+            raise ConsumptionForecastUnavailableError(
+                f"Consumption forecast series on {entity_id} has {len(periods)} "
+                f"periods after normalization for {target_date}; expected 92-100 "
+                "(quarter-hour resolution, DST-adjusted)"
+            )
+
+        return periods
 
     def get_ha_config(self) -> dict:
         """Fetch Home Assistant configuration (timezone, location, etc.)."""

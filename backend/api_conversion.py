@@ -96,6 +96,7 @@ PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
         "tax_reduction",
         "spot_multiplier",
         "export_spot_multiplier",
+        "sell_price_equals_buy_price",
     }
 )
 

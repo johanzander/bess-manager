@@ -458,7 +458,7 @@ class GrowattSphController(InverterController):
             is_current = run_start <= current_period <= run_end
             marker = "*" if is_current else " "
 
-            if intent in self.CHARGE_INTENTS:
+            if intent in self._effective_charge_intents():
                 action = "charge"
             elif intent in self.DISCHARGE_INTENTS:
                 action = "discharge"

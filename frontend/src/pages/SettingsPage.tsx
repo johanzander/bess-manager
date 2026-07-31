@@ -41,6 +41,7 @@ const EMPTY_BATTERY: BatteryForm = {
   efficiencyCharge: 97, efficiencyDischarge: 97,
   temperatureDeratingEnabled: false, minActionProfit: 0,
   inverterMaxAcPowerKw: 0, inverterAcPowerMargin: 0.05,
+  externalSolarMode: false,
 };
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'sensor',
@@ -56,6 +57,7 @@ const EMPTY_PRICING: PricingForm = {
   entsoeEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
+  sellPriceEqualsBuyPrice: false,
 };
 const EMPTY_INVERTER: InverterForm = { inverterPlatform: 'growatt_server_min', deviceId: '', controlMode: 'tou' };
 
@@ -173,6 +175,7 @@ const SettingsPage: React.FC = () => {
         minActionProfit: bat_s.minActionProfitThreshold ?? 0,
         inverterMaxAcPowerKw: bat_s.inverterMaxAcPowerKw ?? 0,
         inverterAcPowerMargin: bat_s.inverterAcPowerMargin ?? 0.05,
+        externalSolarMode: bat_s.externalSolarMode ?? false,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
@@ -206,6 +209,7 @@ const SettingsPage: React.FC = () => {
         taxReduction: elec_s.taxReduction ?? 0,
         spotMultiplier: elec_s.spotMultiplier ?? 1.0,
         exportSpotMultiplier: elec_s.exportSpotMultiplier ?? 1.0,
+        sellPriceEqualsBuyPrice: elec_s.sellPriceEqualsBuyPrice ?? false,
       };
       setPricingForm(p);
       savedPricing.current = JSON.stringify(p);
@@ -411,6 +415,7 @@ const SettingsPage: React.FC = () => {
           taxReduction: pricingForm.taxReduction,
           spotMultiplier: pricingForm.spotMultiplier,
           exportSpotMultiplier: pricingForm.exportSpotMultiplier,
+          sellPriceEqualsBuyPrice: pricingForm.sellPriceEqualsBuyPrice,
           useActualPrice: false,
         },
         energyProvider: {
@@ -457,6 +462,7 @@ const SettingsPage: React.FC = () => {
             enabled: batteryForm.temperatureDeratingEnabled,
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
+          externalSolarMode: batteryForm.externalSolarMode,
         },
         growatt: {
           deviceId: inverterForm.deviceId,

@@ -14,6 +14,7 @@ export interface BatteryForm {
   minActionProfit: number;
   inverterMaxAcPowerKw: number;
   inverterAcPowerMargin: number;
+  externalSolarMode: boolean;
 }
 
 interface Props {
@@ -54,6 +55,14 @@ export function BatteryFormSection({
           {numField('Max Charge / Discharge Power', form.maxChargeDischargePowerKw,
             v => onChange({ ...form, maxChargeDischargePowerKw: v }), { unit: 'kW', min: 0, step: 0.1 })}
         </div>
+      </SectionCard>
+
+      <SectionCard
+        title="PV coupling"
+        description="Enable only if your solar panels are wired to a separate inverter (e.g. SolarEdge or microinverters) and the battery inverter has no DC solar input. Surplus solar reaches the battery via the grid, so SOLAR_STORAGE periods must enable AC charging."
+      >
+        {toggle('External solar mode (AC-coupled PV)', form.externalSolarMode,
+          v => onChange({ ...form, externalSolarMode: v }))}
       </SectionCard>
 
       {/* Advanced settings collapsible — hidden in wizard mode since these

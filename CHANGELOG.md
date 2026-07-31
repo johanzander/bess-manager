@@ -4,6 +4,21 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [10.0.0-jvdd.1] - 2026-07-31
+
+Fork build: upstream **10.0.0** plus the two AC-coupled/NL patches this fork carries.
+Both are opt-in switches, default OFF — with them off this build behaves exactly like upstream 10.0.0.
+
+### Added
+
+- **`external_solar_mode`** (Settings → Battery → PV coupling) — AC-coupled PV support. On installs where PV hangs off a separate inverter, the battery inverter has no DC solar input, so `SOLAR_STORAGE` periods left the battery idle. When enabled, `SOLAR_STORAGE` uses `grid_charge=True`, battery mode `battery_first`, and produces a real TOU segment / AC charge period on the Growatt MIN, SPH and solax_modbus paths. ([PR #167](https://github.com/johanzander/bess-manager/pull/167))
+- **`sell_price_equals_buy_price`** (Settings → Pricing → Price Calculation) — net metering support (Dutch *saldering*, in force through 2026). Exported energy offsets imported energy 1:1, so the sell price becomes the full buy price incl. markup, VAT and grid fees instead of `spot + export compensation`. Export Compensation and Export Spot Multiplier are hidden and ignored while enabled.
+
+### Removed
+
+- Fork-local **`vpp_mode`** battery toggle — superseded by upstream 10.0.0's native Growatt VPP control, selectable via **Settings → Inverter → Control Mode = VPP** ([#118](https://github.com/johanzander/bess-manager/issues/118)). The capability is unchanged; only the fork's duplicate toggle is gone.
+- Fork-local SolaxModbus `time.*` TOU begin/end mirror — upstream 10.0.0 writes those entities natively ([#362](https://github.com/johanzander/bess-manager/issues/362), [#181](https://github.com/johanzander/bess-manager/issues/181)).
+
 ## [10.0.0] - 2026-07-30
 
 ### Added
@@ -71,6 +86,54 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **`EXPORT_ARBITRAGE` intent renamed to `BATTERY_EXPORT`** — All references updated across backend, frontend, tests, and documentation. The semantic meaning is unchanged: battery actively discharging to the grid during peak-price windows. (#187)
+
+## [9.6.4-jvdd.7] - 2026-06-27
+
+### Fixed (jvdd fork)
+
+- **Growatt VPP needs a Disabled→Enabled edge to retrigger** — Live-verified on Growatt MID 15KTL3-XH: writing `vpp_status=Enabled` while the entity is already `Enabled` does not retrigger the inverter; the command sits in the buffer and the inverter keeps following its previous state. Only a real Disabled→Enabled transition activates the new command. `set_growatt_vpp` now always pre-arms by writing `vpp_status=Disabled` before the rest of the command, then ends with `Enabled` — guaranteeing an edge on every period boundary.
+
+## [9.6.4-jvdd.6] - 2026-06-27
+
+### Fixed (jvdd fork)
+
+- **`external_solar_mode` and `vpp_mode` toggles reverted on restart** — Settings save (PATCH /api/settings) correctly pushed the toggles through to the live BatterySettings, but the startup path `build_system_settings()` filtered battery_config through `BATTERY_STORE_TO_API`, dropping any key not in that map. Both fork-only fields were silently stripped at boot and `BatterySettings.__init__` fell back to defaults (`False`). The toggle then *looked* On in the UI (loaded from `bess_settings.json`) while runtime was Off — fix-by-toggling-it-was-needed each restart. Added both keys to `BATTERY_STORE_TO_API`; the existing settings_store schema migration already populates them with default `False` on existing installs, so the startup required-field check still passes.
+
+## [9.6.4-jvdd.5] - 2026-06-27
+
+### Fixed (jvdd fork)
+
+- **Growatt VPP commands ignored — `vpp_status` switch never written** — Even after the percent/minutes fix in jvdd.4, the inverter ignored BESS's VPP commands: `power=100%, ac_charging=Enabled` were dutifully written but `select.<*>_vpp_status` stayed at "Disabled" and the inverter kept following its default mode (TOU / self-use). Live-verified that flipping `vpp_status` to Enabled by hand makes the battery immediately charge at 12.4 kW. Fixed: `set_growatt_vpp` now writes `vpp_status=Enabled` as the last step (after power/time/ac_charging are coherent); `set_growatt_vpp_disabled` flips it back to Disabled. Sensor map + `_vpp_available` updated accordingly.
+
+## [9.6.4-jvdd.4] - 2026-06-27
+
+### Fixed (jvdd fork)
+
+- **Growatt VPP writes 500 — wrong unit for `vpp_power` / `vpp_time`** — `number.<*>_vpp_power` accepts a **percentage** of inverter nominal AC power (range −100..100, step 5), not watts. `number.<*>_vpp_time` is **minutes** (range 0..1440, step 5), not seconds. Writing 15000 (= max_charge_power_kw × 1000) returned `500 Internal Server Error` from the integration. Fixed: `set_growatt_vpp` now takes a `power_percent` argument (clamped to ±100, snapped to step 5) and writes `time` in minutes; `_apply_period_vpp` translates intent → ±100 or −discharge_rate (already a percentage).
+
+## [9.6.4-jvdd.3] - 2026-06-27
+
+### Added (jvdd fork — experimental)
+
+- **VPP control mode is now an independent toggle** — previously the VPP fast-path was gated on `external_solar_mode=True`, conflating two orthogonal choices (AC-coupled PV behaviour vs control mechanism). Settings → Battery now has a second toggle "VPP control mode" in its own section. When enabled and the Growatt VPP entities are configured, BESS skips TOU scheduling and writes direct power commands; when disabled (or VPP entities missing), the existing TOU path is used. DC-coupled users can opt into VPP without flipping `external_solar_mode`; AC-coupled users can stay on TOU if they want.
+
+## [9.6.4-jvdd.2] - 2026-06-26
+
+### Added (jvdd fork — experimental)
+
+- **Growatt VPP fast-path for AC-coupled** — When `external_solar_mode=True` and the Growatt VPP entities (`vpp_power`, `vpp_time`, `vpp_allow_ac_charging`) are configured, `SolaxModbusGrowattController` now bypasses TOU scheduling entirely and writes direct power commands via `number.<*>_vpp_power`. The intent → VPP mapping mirrors `SolaxController`. TOU slot 1 is explicitly disabled at startup so a stale slot can't fight the VPP command. DC-coupled installs (`external_solar_mode=False`) keep the TOU path. (upstream issue #118 — Johan's preferred direction; fork-only pending live-test then upstream PR.)
+
+## [9.6.4-jvdd.1] - 2026-06-26
+
+Rebased on upstream v9.6.3 (which merged our PR #180 — the AI Analyst model-ID fix is now upstream and dropped from this fork's diff). Two jvdd-only patches remain:
+
+### Added (jvdd fork)
+
+- **`external_solar_mode`** battery setting for AC-coupled PV setups (upstream PR #167, still open). When enabled, `SOLAR_STORAGE` periods use `grid_charge=True` **and** TOU mode `battery_first` so the inverter actively pulls from the AC side during the planned solar window. The mode override is critical: with only `grid_charge=True` and TOU still in Load First, the Growatt EMS waits for a trigger that on AC-coupled never comes — battery sits idle even when solar surplus is flowing through the meter.
+
+### Fixed (jvdd fork)
+
+- **SolaxModbus + Growatt MID: TOU begin/end writes silently dropped** — on Growatt MID 15KTL3-XH the SolaxModbus integration's `select.*_inverter_time_N_begin/end` entities are permanently `unavailable` and writes get silently dropped, leaving the TOU slot stuck on a stale time window. The inverter then runs default Load First outside that window regardless of BESS's planned mode. After each select-write for begin/end, mirror the value to the parallel `time.*_time_N_begin/end` entity (which works). Mode/active writes go through select.* unchanged. (upstream issue #181)
 
 ## [9.6.3] - 2026-06-25
 

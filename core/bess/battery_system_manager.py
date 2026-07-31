@@ -170,6 +170,7 @@ class BatterySystemManager:
             area=self.price_settings.area,
             spot_multiplier=self.price_settings.spot_multiplier,
             export_spot_multiplier=self.price_settings.export_spot_multiplier,
+            sell_price_equals_buy_price=self.price_settings.sell_price_equals_buy_price,
         )
 
         # Initialize monitors (created in start() if controller available)
@@ -3303,6 +3304,9 @@ class BatterySystemManager:
                 )
                 self._price_manager.export_spot_multiplier = (
                     self.price_settings.export_spot_multiplier
+                )
+                self._price_manager.sell_price_equals_buy_price = (
+                    self.price_settings.sell_price_equals_buy_price
                 )
                 self._price_manager.clear_cache()
 

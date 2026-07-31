@@ -120,6 +120,9 @@ export interface BatterySettings {
   // Inverter AC output cap (solar clipping avoidance); 0 disables
   inverterMaxAcPowerKw: number;     // kW total AC output cap
   inverterAcPowerMargin: number; // 0-1 model-side haircut on the cap
+  
+  // AC-coupled PV: route SOLAR_STORAGE through grid charging
+  externalSolarMode?: boolean;
 
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
@@ -134,6 +137,8 @@ export interface ElectricitySettings {
   vatMultiplier: number;
   additionalCosts: number;
   taxReduction: number;
+  // Net metering (e.g. NL saldering): sell price equals full buy price
+  sellPriceEqualsBuyPrice?: boolean;
   area: string;
 }
 

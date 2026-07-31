@@ -73,6 +73,41 @@ def test_spot_multiplier_defaults_to_no_adjustment():
     assert pm.sell_prices[0] == 1.0 + 0.2
 
 
+def test_sell_price_equals_buy_price_enabled():
+    """Net metering (NL saldering): sell price must equal the full buy price."""
+    mock_source = MockSource([1.0, 2.0])
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.02,
+        vat_multiplier=1.21,
+        additional_costs=0.0248,
+        tax_reduction=0.0248,
+        area="NL",
+        sell_price_equals_buy_price=True,
+    )
+
+    for base, buy, sell in zip([1.0, 2.0], pm.buy_prices, pm.sell_prices, strict=True):
+        assert buy == (base + 0.02) * 1.21 + 0.0248
+        assert sell == buy
+        # tax_reduction must play no role while net metering is on
+        assert sell != base + 0.0248
+
+
+def test_sell_price_equals_buy_price_defaults_off():
+    """Without the flag the sell price keeps the spot + compensation formula."""
+    mock_source = MockSource([1.0])
+    pm = PriceManager(
+        price_source=mock_source,
+        markup_rate=0.02,
+        vat_multiplier=1.21,
+        additional_costs=0.0248,
+        tax_reduction=0.0248,
+        area="NL",
+    )
+
+    assert pm.sell_prices[0] == 1.0 + 0.0248
+
+
 def test_controller_price_fetching():
     """Test price fetching from controller."""
     mock_controller = MagicMock()

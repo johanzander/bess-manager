@@ -388,6 +388,7 @@ class SettingsStore:
             HOUSE_VOLTAGE_V,
             MARKUP_RATE,
             SAFETY_MARGIN_FACTOR,
+            SELL_PRICE_EQUALS_BUY_PRICE,
             SPOT_MULTIPLIER,
             TAX_REDUCTION,
             USE_ACTUAL_PRICE,
@@ -403,6 +404,7 @@ class SettingsStore:
                 "max_discharge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
                 "cycle_cost_per_kwh": BATTERY_CHARGE_CYCLE_COST,
                 "min_action_profit_threshold": BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
+                "external_solar_mode": False,
             },
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
@@ -422,6 +424,7 @@ class SettingsStore:
                 "area": DEFAULT_AREA,
                 "spot_multiplier": SPOT_MULTIPLIER,
                 "export_spot_multiplier": EXPORT_SPOT_MULTIPLIER,
+                "sell_price_equals_buy_price": SELL_PRICE_EQUALS_BUY_PRICE,
                 "use_actual_price": USE_ACTUAL_PRICE,
             },
             "energy_provider": {
@@ -461,6 +464,7 @@ class SettingsStore:
             EXPORT_SPOT_MULTIPLIER,
             INVERTER_AC_POWER_MARGIN,
             INVERTER_MAX_AC_POWER_KW,
+            SELL_PRICE_EQUALS_BUY_PRICE,
             SPOT_MULTIPLIER,
             USE_ACTUAL_PRICE,
         )
@@ -501,6 +505,7 @@ class SettingsStore:
                 ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),
                 ("inverter_max_ac_power_kw", INVERTER_MAX_AC_POWER_KW),
                 ("inverter_ac_power_margin", INVERTER_AC_POWER_MARGIN),
+                ("external_solar_mode", False),
             ):
                 if key not in battery:
                     battery[key] = default
@@ -542,6 +547,7 @@ class SettingsStore:
             for key, default in (
                 ("spot_multiplier", SPOT_MULTIPLIER),
                 ("export_spot_multiplier", EXPORT_SPOT_MULTIPLIER),
+                ("sell_price_equals_buy_price", SELL_PRICE_EQUALS_BUY_PRICE),
                 ("use_actual_price", USE_ACTUAL_PRICE),
             ):
                 if key not in price:

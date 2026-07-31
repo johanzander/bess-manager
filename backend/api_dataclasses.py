@@ -1106,6 +1106,7 @@ class APISetupCompletePayload(BaseModel):
     maxChargeDischargePower: float | None = None
     cycleCost: float | None = None
     minActionProfitThreshold: float | None = None
+    externalSolarMode: bool | None = None
     # Home settings
     currency: str | None = None
     consumption: float | None = None
@@ -1123,6 +1124,7 @@ class APISetupCompletePayload(BaseModel):
     taxReduction: float | None = None
     spotMultiplier: float | None = None
     exportSpotMultiplier: float | None = None
+    sellPriceEqualsBuyPrice: bool | None = None
     # Energy provider
     provider: str | None = None
     # Nordpool HACS entity (required when provider == "nordpool_hacs")

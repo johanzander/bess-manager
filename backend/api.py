@@ -3433,6 +3433,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             "maxSoc": "max_soc",
             "cycleCost": "cycle_cost_per_kwh",
             "minActionProfitThreshold": "min_action_profit_threshold",
+            "externalSolarMode": "external_solar_mode",
         }
         if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
             payload.maxChargeDischargePower is not None
@@ -3473,6 +3474,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             "taxReduction": "tax_reduction",
             "spotMultiplier": "spot_multiplier",
             "exportSpotMultiplier": "export_spot_multiplier",
+            "sellPriceEqualsBuyPrice": "sell_price_equals_buy_price",
         }
         area = payload.area or payload.nordpoolArea
         if any(getattr(payload, f) is not None for f in _PRICE_MAP) or area:
@@ -3583,6 +3585,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "max_discharge_power_kw": payload.maxChargeDischargePower,
                     "cycle_cost_per_kwh": payload.cycleCost,
                     "min_action_profit_threshold": payload.minActionProfitThreshold,
+                    "external_solar_mode": payload.externalSolarMode,
                 }
             )
         if "home" in sections:
@@ -3612,6 +3615,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "tax_reduction": payload.taxReduction,
                     "spot_multiplier": payload.spotMultiplier,
                     "export_spot_multiplier": payload.exportSpotMultiplier,
+                    "sell_price_equals_buy_price": payload.sellPriceEqualsBuyPrice,
                 }
             )
         if live_updates:

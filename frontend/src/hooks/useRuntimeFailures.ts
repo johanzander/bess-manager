@@ -7,8 +7,7 @@ interface RuntimeFailure {
   operation: string;
   category: string;
   error_message: string;
-  error_type: string;
-  retry_count: number;
+  occurrence_count: number;
 }
 
 export const useRuntimeFailures = () => {

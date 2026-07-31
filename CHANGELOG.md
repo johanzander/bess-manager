@@ -4,6 +4,13 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Runtime Errors panel always showed a blank "Error:" line** — the frontend read `error_type`/`retry_count` fields the backend never sent; now shows the real `error_message`/occurrence count. ([#60](https://github.com/johanzander/bess-manager/issues/60))
+- **"Report a Problem" → "File GitHub Issue" silently failed to open a new tab** — `window.open()` was called after an async debug-bundle download, outside the browser's synchronous user-gesture window, so popup blockers silently dropped it. Now opens the tab immediately on click and navigates it once the debug bundle is ready. ([#60](https://github.com/johanzander/bess-manager/issues/60))
+
 ## [10.0.0] - 2026-07-30
 
 ### Added

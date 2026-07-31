@@ -92,11 +92,60 @@ TypeScript interface in the same PR.
 | Hardcoded `"sensor.battery_soc_..."` | `METHOD_SENSOR_MAP` lookup |
 | `except Exception as e: log(e); pass` | Let it propagate |
 | Adding a side effect to a method whose name doesn't cover it (e.g. a schedule-build call inside `_run_health_check()`) | Put the orchestration in the caller; the checked-thing's own method only does what its name says |
+| New constructor parameter + default-fallback to route a shared dependency around an initialization-order problem (e.g. `def __init__(self, ..., tracker=None): self.tracker = tracker or Tracker()`) | Fix the ordering — construct/wire the single existing instance earlier, or expose it, instead of adding a second construction path |
 
-### Worked example: don't smuggle orchestration into a narrowly-named method
+### Worked examples: don't route around a problem instead of fixing it
 
-This is a concrete instance of `rules.md`'s Separation of Concerns principle and the Debugging Protocol's fix-scope-assessment step — read those first; this section exists to make the abstract rule recognizable in real code, not to add a new rule.
+These are concrete instances of `rules.md`'s Debugging Protocol self-review
+step (Phase 2, step 8) — read that first. The point of putting real
+incidents here is not to hand you a list of named patterns to match against;
+the self-review *question* ("does this diff add a workaround next to the
+problem, instead of fixing the problem?") is the actual rule. These two are
+just what it caught this time — the next violation will have a different
+shape, so re-ask the question, don't grep this list.
 
-**Real incident (issue #399, caused by #394):** a fix for "the dashboard stays stuck on 'initializing' after a transient sensor outage" was implemented by adding a schedule-build retry directly inside `BatterySystemManager._run_health_check()` — a method whose entire contract, by name, is "check health and report results." `_run_health_check()` had a second, unrelated caller (`start()`, during hardware startup) that never asked for a schedule-build side effect and was actively harmed by getting one: it fired the process's first hardware write before the startup sequence had read the inverter's actual state, causing unconditional Growatt VPP register writes (flash wear) on every restart. This should have been caught at the fix-scope-assessment step in `rules.md` (the new behavior didn't fit `_run_health_check()`'s existing contract — that alone means "find the right owner," not "it already has the branch I need"). The correct fix — and what issue #399 was resolved with — was to put the retry in the public `refresh_health_check()` wrapper instead, the layer that actually owns "something outside asked for a fresh check, react to what changed." `_run_health_check()` itself was restored to doing only what its name says.
+**Real incident (issue #399, caused by #394) — routing around a lifecycle
+method by adding a second trigger.** A fix for "the dashboard stays stuck on
+'initializing' after a transient sensor outage" was implemented by adding a
+schedule-build retry directly inside `BatterySystemManager._run_health_check()`
+— a method whose entire contract, by name, is "check health and report
+results." `_run_health_check()` had a second, unrelated caller (`start()`,
+during hardware startup) that never asked for a schedule-build side effect
+and was actively harmed by getting one: it fired the process's first
+hardware write before the startup sequence had read the inverter's actual
+state, causing unconditional Growatt VPP register writes (flash wear) on
+every restart. Self-review should have caught this: the new behavior didn't
+fit `_run_health_check()`'s existing contract, so the fix needed a different
+owner, not the convenient branch. The correct fix — what issue #399 shipped
+— was to put the retry in the public `refresh_health_check()` wrapper
+instead, the layer that actually owns "something outside asked for a fresh
+check, react to what changed." `_run_health_check()` itself was restored to
+doing only what its name says.
 
-A violation like this is invisible to tests, because a test written against the same method you just widened will happily assert the widened behavior as if it were the contract — it only surfaces when a *different* caller of that same method, elsewhere in the codebase, unexpectedly gets the bolted-on side effect too. That's why this is a design-time and review-time check, not a testing one.
+A violation like this is invisible to tests, because a test written against
+the same method you just widened will happily assert the widened behavior
+as if it were the contract — it only surfaces when a *different* caller of
+that same method, elsewhere in the codebase, unexpectedly gets the
+bolted-on side effect too. That's why this is a design-time and
+review-time check, not a testing one.
+
+**Real incident (issue #440) — routing around an ordering problem by adding
+a second construction site.** The fix for "timezone silently falls back to
+a hardcoded default when HA's `/api/config` is unreachable at startup" was
+first drafted as: give `BatterySystemManager.__init__` a new
+`runtime_failure_tracker: RuntimeFailureTracker | None = None` parameter,
+construct a `RuntimeFailureTracker` earlier in `app.py` and pass it in,
+falling back to `BatterySystemManager` constructing its own if none is
+given. This looked reasonable — it "solved" the immediate problem (the
+timezone fetch in `app.py` needed a wired `failure_tracker` before
+`BatterySystemManager` itself had constructed one) — but it created two
+possible construction sites for what should always be exactly one tracker
+instance, with a fallback default that exists only to paper over the
+ordering gap. Self-review should have caught this the same way as #399: the
+proposed diff's only new piece (the fallback parameter) existed purely to
+route around a timing problem, not to solve it. The actual root cause was
+simpler — `app.py` called `get_ha_config()` for the timezone *before*
+constructing `BatterySystemManager`, the single place that owns building
+and wiring the `RuntimeFailureTracker`. The fix that shipped was to move the
+timezone fetch to run *after* `BatterySystemManager` construction — no new
+parameter, no second instance, no fallback.

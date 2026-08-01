@@ -98,7 +98,12 @@ implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 
-Invoke `superpowers:using-git-worktrees`.
+`git fetch origin main` first — `using-git-worktrees`' git fallback branches
+from the current local `HEAD`, not `origin/main`, so a stale local checkout
+silently cuts the branch behind main (missed release cuts, changelog
+rewrites, other merged fixes), surfacing later as an avoidable merge
+conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
+branch on `origin/main`.
 
 ### 5. TDD implementation
 

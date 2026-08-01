@@ -1875,6 +1875,16 @@ class BatterySystemManager:
         future price uncertainty beyond that window regardless of where it
         ends (#345).
 
+        `sell_prices` is expected to be scoped by the caller to the terminal
+        boundary's own calendar day, not the full remaining horizon (#422):
+        on a 48h-extended horizon, using the full window lets an
+        already-committed near-term peak (e.g. today's still-upcoming best
+        sell slot) inflate the cap for a later, economically unrelated day's
+        terminal energy, making the DP hold charge through that day's own
+        (lower) export opportunities instead of exporting into them.
+        `buy_prices` is unaffected -- it feeds a median, which is already
+        resistant to a single-period outlier.
+
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
         buy-median terminal value can exceed the best real, known export price
@@ -2053,9 +2063,24 @@ class BatterySystemManager:
             buy_prices = [entry["buyPrice"] for entry in remaining_entries]
             sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
+            # Scope the arbitrage-consistency cap to sell prices on the
+            # terminal boundary's own calendar day (#422): on a 48h-extended
+            # horizon, `sell_prices` above also carries today's still-
+            # remaining periods, and a near-term peak there (an opportunity
+            # the plan's own schedule is already consuming) must not inflate
+            # the cap for a later, economically unrelated day's terminal
+            # energy. Single-day horizons are unaffected -- the terminal day
+            # is the only day present, so this is identical to sell_prices.
+            terminal_date = remaining_entries[-1]["timestamp"][:10]
+            cap_sell_prices = [
+                entry["sellPrice"]
+                for entry in remaining_entries
+                if entry["timestamp"][:10] == terminal_date
+            ]
+
             # Calculate terminal value for end-of-horizon energy valuation
             terminal_value = self._calculate_terminal_value(
-                buy_prices, sell_prices, optimization_period
+                buy_prices, cap_sell_prices, optimization_period
             )
 
             # Get temperature-based charge power limits if derating is enabled.

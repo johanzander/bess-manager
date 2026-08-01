@@ -29,6 +29,26 @@ the `bess-analyst` sub-agent.
   graduation across multiple beta cycles. Use `implement-issue` for
   single-PR bug fixes and small enhancements.
 
+## CI mode (GitHub Actions)
+
+`issue-fix.yml` runs this skill on `claude-code-action` instead of duplicating
+its instructions. The numbered Process below applies verbatim **except** where
+an interactive-session mechanism has a pipeline equivalent, per this table.
+User-level plugins (`superpowers:*`, `code-review`) are not installed on CI
+runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
+
+| Step | CI mode |
+|---|---|
+| 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
+| 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
+| 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
+| 5. TDD | The substance applies verbatim (RED test first, required test shape); there is just no `superpowers:test-driven-development` skill to invoke — follow this section's own rules. |
+| 6. Quality gate + code review | Run inline, no background agent (CI is one throwaway session — the cost-discipline reason to background doesn't exist). The `code-review` plugin is unavailable; the Stage-4 `@claude-bot` PR review covers it. Checks 1–3 (fast suite, slow suite, required-test-shape) still apply. |
+| 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
+| 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
+| 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
+| 10. Hard constraints | Apply verbatim. |
+
 ## Process
 
 ### 1. Fetch & scope

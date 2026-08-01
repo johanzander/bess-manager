@@ -86,7 +86,7 @@ through CLAUDE.md. All stages run on `anthropics/claude-code-action@v1`.
 |-------|---------|----------|------|--------------|
 | 1. Triage | `issues: opened/edited` (auto) | `issue-triage.yml` | ~$0.05 | Classify + label only. Gates on debug log presence. |
 | 2. Analyze | `@claude-bot analyze` (manual) | `issue-analyze.yml` | ~$0.50–2 | Delegates to `bess-analyst` sub-agent, posts root-cause diagnosis. No code changes. |
-| 3. Fix | `@claude-bot fix` (manual) | `issue-fix.yml` | ~$1–4 | Implements minimal fix per Stage 2 plan, runs `quality-check.sh`, opens draft PR. |
+| 3. Fix | `@claude-bot fix` (manual) | `issue-fix.yml` | ~$1–4 | Runs the `implement-issue` skill in CI mode per the Stage 2 plan, opens draft PR. |
 | 4. Review | `@claude-bot` on a PR (manual) | `pr-review.yml` | ~$0.50–2 | Reviews diff against rules and checklist. |
 | 5. Integrate | `@claude-bot integrate` (manual) | `issue-integrate.yml` | ~$2–10 | Drives a new inverter/provider request through the full experimental→stable lifecycle (`feature-lifecycle`), one stage per invocation. |
 

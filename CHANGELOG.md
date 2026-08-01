@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- `HuaweiController.sync_soc_limits` now reads before writing SOC limits, instead of writing unconditionally on every sync. ([#427](https://github.com/johanzander/bess-manager/issues/427))
 - A failed startup timezone fetch now surfaces on the runtime-failures banner instead of silently falling back to `Europe/Stockholm`. ([#440](https://github.com/johanzander/bess-manager/issues/440))
 - The Runtime Errors panel no longer shows a blank "Error:" line; it now shows the real message and occurrence count. ([#60](https://github.com/johanzander/bess-manager/issues/60))
 - "Report a Problem" → "File GitHub Issue" no longer gets silently dropped by popup blockers. ([#60](https://github.com/johanzander/bess-manager/issues/60))

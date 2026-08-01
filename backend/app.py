@@ -142,17 +142,6 @@ class BESSController:
             sensor_config, growatt_device_id, huawei_device_id
         )
 
-        # Set timezone from HA config before any BESS modules use it
-        try:
-            ha_config = self.ha_controller.get_ha_config()
-            ha_timezone = ha_config["time_zone"]
-            from core.bess.time_utils import set_timezone
-
-            set_timezone(ha_timezone)
-            logger.info(f"Timezone set from HA: {ha_timezone}")
-        except Exception as e:
-            logger.warning(f"Could not read timezone from HA, using default: {e}")
-
         # Enable test mode from environment variable OR persisted demo_mode setting.
         # Environment variable takes precedence (for dev/CI use).
         env_test_mode = os.environ.get("HA_TEST_MODE", "false").lower() in (
@@ -180,6 +169,22 @@ class BESSController:
             energy_provider_config=energy_provider_config,
             addon_options=merged,
         )
+
+        # Set timezone from HA config before any BESS modules use it. This
+        # runs after BatterySystemManager construction (above) so that
+        # ha_controller.failure_tracker is already wired to a real
+        # RuntimeFailureTracker — a final-attempt HA API failure here then
+        # surfaces on the existing dashboard banner instead of only being
+        # logged (#440).
+        try:
+            ha_config = self.ha_controller.get_ha_config()
+            ha_timezone = ha_config["time_zone"]
+            from core.bess.time_utils import set_timezone
+
+            set_timezone(ha_timezone)
+            logger.info(f"Timezone set from HA: {ha_timezone}")
+        except Exception as e:
+            logger.warning(f"Could not read timezone from HA, using default: {e}")
 
         # Create scheduler with increased misfire grace time to avoid unnecessary warnings
         self.scheduler = BackgroundScheduler(

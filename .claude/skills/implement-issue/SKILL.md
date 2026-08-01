@@ -209,8 +209,12 @@ not satisfied by re-stating that `quality-check.sh` passed.
 
 Add a `CHANGELOG.md` entry under `## [Unreleased]` (create that heading at
 the top if it's not already there), in the matching `### Added` / `### Changed`
-/ `### Fixed` subsection, following the existing entries' style (bold summary
-line, link to the issue/PR). This is a normal part of the PR, not a release
+/ `### Fixed` subsection — one line, per `docs/agents/workflow.md`'s CHANGELOG
+Format (bold lead-in, issue/PR link, ~25-word cap; no root cause or
+file/function names — that's the PR description's job, not the changelog's).
+Match existing entries' *format* only, never their *length* — several past
+entries are multi-sentence root-cause essays; do not use those as a length
+precedent. This is a normal part of the PR, not a release
 step — per `docs/superpowers/specs/2026-07-09-release-workflow-design.md`,
 `Unreleased` entries accumulate as each PR merges; the release skill only
 ever renames or copies that section, it never authors it. Skipping this here

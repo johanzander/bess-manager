@@ -119,10 +119,22 @@ build checklist.
 
 ### Fixed
 
-- Short description.
+- Short description. ([#123](https://github.com/johanzander/bess-manager/issues/123))
 ```
 
-One line per change. No implementation details. Match existing style.
+**One line per change, hard limit ~25 words after the bold lead-in. No root
+cause, no file/function names, no "confirmed via debug bundle" narrative —
+that belongs in the PR description, not the changelog.** Bad (an actual past
+entry, do not reproduce this): *"Terminal-value arbitrage cap used an
+already-committed near-term sell price, causing large spurious swings...
+`_calculate_terminal_value`'s arbitrage-consistency cap (`sell_cap =
+max(sell_prices) * efficiency_discharge - cycle_cost`) used `max()` over the
+*entire* remaining horizon..."* (150+ words). Good: *"Fixed a terminal-value
+bug that caused spurious swings in tomorrow's export plan."*
+
+Match existing entries' **format** (bold lead, trailing issue/PR link) —
+never their **length**. Many existing entries are far too long; that history
+is not the style to match.
 
 ## Labels
 

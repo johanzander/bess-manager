@@ -66,12 +66,28 @@ export default function ReportProblemModal({
   const handleFileIssue = async () => {
     setActiveAction('issue');
     setError(null);
+    // Open the tab synchronously, in the same tick as the click, so browser
+    // popup blockers see it as a direct response to a user gesture. Opening
+    // it after the download below (an async network request) awaits would
+    // fall outside that window and get silently blocked. We can't pass the
+    // 'noopener' feature here — browsers return null from window.open when
+    // it's set, so we'd lose the handle needed to navigate the tab once the
+    // URL is ready. Instead we sever window.opener manually right after.
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.opener = null;
+    }
     try {
       const filename = await downloadDebugBundle();
       const url = buildIssueUrl({ title, description }, filename);
-      window.open(url, '_blank', 'noopener,noreferrer');
+      if (!tab) {
+        setError('Your browser blocked the popup. Please allow popups for this site and try again.');
+        return;
+      }
+      tab.location.href = url;
       setResult({ filename, issueFiled: true });
     } catch (e) {
+      tab?.close();
       setError(
         e instanceof Error
           ? e.message

@@ -29,6 +29,26 @@ the `bess-analyst` sub-agent.
   graduation across multiple beta cycles. Use `implement-issue` for
   single-PR bug fixes and small enhancements.
 
+## CI mode (GitHub Actions)
+
+`issue-fix.yml` runs this skill on `claude-code-action` instead of duplicating
+its instructions. The numbered Process below applies verbatim **except** where
+an interactive-session mechanism has a pipeline equivalent, per this table.
+User-level plugins (`superpowers:*`, `code-review`) are not installed on CI
+runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
+
+| Step | CI mode |
+|---|---|
+| 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
+| 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
+| 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
+| 5. TDD | The substance applies verbatim (RED test first, required test shape); there is just no `superpowers:test-driven-development` skill to invoke — follow this section's own rules. |
+| 6. Quality gate + code review | Run inline, no background agent (CI is one throwaway session — the cost-discipline reason to background doesn't exist). The `code-review` plugin is unavailable; the Stage-4 `@claude-bot` PR review covers it. Checks 1–3 (fast suite, slow suite, required-test-shape) still apply. |
+| 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
+| 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
+| 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
+| 10. Hard constraints | Apply verbatim. |
+
 ## Process
 
 ### 1. Fetch & scope
@@ -61,7 +81,13 @@ with `## Root cause` / `## Evidence` / `## Proposed fix` sections (label
 ### 3. Confirm gate
 
 Present the root cause, proposed fix, AND its scope assessment per
-`docs/agents/rules.md`'s Debugging Protocol step 8: does the fix stay within
+`docs/agents/rules.md`'s Debugging Protocol step 8. That includes the
+**workaround check**: state explicitly that the diff adds nothing — no
+parameter, flag, default-fallback, second construction site, extra trigger
+or branch — whose only job is to route around an ordering/timing/dependency
+problem instead of fixing it. If you can't state that confidently, dispatch
+a fresh `Plan`/general-purpose agent to critique the design before
+presenting anything. Then the scope category: does the fix stay within
 the target method's existing contract (local), does it need a different/new
 owner (structural), or does it have multiple plausible owners worth a second
 opinion? State which, explicitly — don't let the user infer it from the diff
@@ -72,7 +98,12 @@ implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 
-Invoke `superpowers:using-git-worktrees`.
+`git fetch origin main` first — `using-git-worktrees`' git fallback branches
+from the current local `HEAD`, not `origin/main`, so a stale local checkout
+silently cuts the branch behind main (missed release cuts, changelog
+rewrites, other merged fixes), surfacing later as an avoidable merge
+conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
+branch on `origin/main`.
 
 ### 5. TDD implementation
 
@@ -178,8 +209,12 @@ not satisfied by re-stating that `quality-check.sh` passed.
 
 Add a `CHANGELOG.md` entry under `## [Unreleased]` (create that heading at
 the top if it's not already there), in the matching `### Added` / `### Changed`
-/ `### Fixed` subsection, following the existing entries' style (bold summary
-line, link to the issue/PR). This is a normal part of the PR, not a release
+/ `### Fixed` subsection — one line, per `docs/agents/workflow.md`'s CHANGELOG
+Format (bold lead-in, issue/PR link, ~25-word cap; no root cause or
+file/function names — that's the PR description's job, not the changelog's).
+Match existing entries' *format* only, never their *length* — several past
+entries are multi-sentence root-cause essays; do not use those as a length
+precedent. This is a normal part of the PR, not a release
 step — per `docs/superpowers/specs/2026-07-09-release-workflow-design.md`,
 `Unreleased` entries accumulate as each PR merges; the release skill only
 ever renames or copies that section, it never authors it. Skipping this here

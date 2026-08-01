@@ -8,7 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- **`ha_consumption_series` consumption forecast strategy** — a new strategy that reads a user-authored Home Assistant time-series entity (`raw_today`/`raw_tomorrow` attributes of timestamped `{start, value}` records, mirroring how price data is already consumed) instead of a statistical model computed inside BESS. BESS still does not model loads itself — EV sessions, weather-driven aircon, occupancy — the user's own HA template or automation builds the shaped series, and BESS just normalizes it (15- or 60-minute record spacing) onto the DP's quarter-hour grid via `HomeAssistantAPIController.get_consumption_forecast_series`. A missing, stale, malformed, or horizon-short series is an explicit `ConsumptionForecastUnavailableError`, never a silent fallback to a flat profile. Renamed the existing scalar `sensor` strategy's UI category from "Consumption Forecast" to "Consumption Average (48h Rolling)" since it was never a real forecast — see [USER_GUIDE.md](docs/USER_GUIDE.md#strategy-5-ha_consumption_series) for the entity format and an example template. ([#428](https://github.com/johanzander/bess-manager/issues/428))
+- New `ha_consumption_series` consumption-forecast strategy reading a user-authored Home Assistant time-series entity. ([#428](https://github.com/johanzander/bess-manager/issues/428))
+
+### Fixed
+
+- A failed startup timezone fetch now surfaces on the runtime-failures banner instead of silently falling back to `Europe/Stockholm`. ([#440](https://github.com/johanzander/bess-manager/issues/440))
 
 ## [10.0.0] - 2026-07-30
 

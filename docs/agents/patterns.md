@@ -92,11 +92,24 @@ TypeScript interface in the same PR.
 | Hardcoded `"sensor.battery_soc_..."` | `METHOD_SENSOR_MAP` lookup |
 | `except Exception as e: log(e); pass` | Let it propagate |
 | Adding a side effect to a method whose name doesn't cover it (e.g. a schedule-build call inside `_run_health_check()`) | Put the orchestration in the caller; the checked-thing's own method only does what its name says |
+| Fallback-constructed dependency to dodge init order (`tracker=None` → `tracker or Tracker()`) | Fix the ordering — one construction site per object |
 
-### Worked example: don't smuggle orchestration into a narrowly-named method
+### Don't route around a problem instead of fixing it
 
-This is a concrete instance of `rules.md`'s Separation of Concerns principle and the Debugging Protocol's fix-scope-assessment step — read those first; this section exists to make the abstract rule recognizable in real code, not to add a new rule.
+The rule is the *question* in `rules.md`'s Debugging Protocol step 8 —
+"does this diff add anything whose only job is to route around a problem
+instead of fixing it?" — not this list. The next violation will have a new
+shape; re-ask the question, don't grep for these.
 
-**Real incident (issue #399, caused by #394):** a fix for "the dashboard stays stuck on 'initializing' after a transient sensor outage" was implemented by adding a schedule-build retry directly inside `BatterySystemManager._run_health_check()` — a method whose entire contract, by name, is "check health and report results." `_run_health_check()` had a second, unrelated caller (`start()`, during hardware startup) that never asked for a schedule-build side effect and was actively harmed by getting one: it fired the process's first hardware write before the startup sequence had read the inverter's actual state, causing unconditional Growatt VPP register writes (flash wear) on every restart. This should have been caught at the fix-scope-assessment step in `rules.md` (the new behavior didn't fit `_run_health_check()`'s existing contract — that alone means "find the right owner," not "it already has the branch I need"). The correct fix — and what issue #399 was resolved with — was to put the retry in the public `refresh_health_check()` wrapper instead, the layer that actually owns "something outside asked for a fresh check, react to what changed." `_run_health_check()` itself was restored to doing only what its name says.
-
-A violation like this is invisible to tests, because a test written against the same method you just widened will happily assert the widened behavior as if it were the contract — it only surfaces when a *different* caller of that same method, elsewhere in the codebase, unexpectedly gets the bolted-on side effect too. That's why this is a design-time and review-time check, not a testing one.
+- **Issue #399 (second trigger):** a schedule-build retry was bolted into
+  `_run_health_check()` (contract: check and report). Its *other* caller,
+  `start()`, then fired hardware writes on every restart. Shipped fix: retry
+  in the public `refresh_health_check()` wrapper; the checked method restored
+  to doing only what its name says. Tests can't catch this — a test against
+  the widened method asserts the widened behavior as if it were the contract.
+- **Issue #440 (second construction site):** first draft added
+  `runtime_failure_tracker: ... | None = None` to
+  `BatterySystemManager.__init__` with a fallback self-construction — two
+  construction sites papering over an ordering gap (`app.py` fetched the
+  timezone *before* constructing the manager, which owns the tracker).
+  Shipped fix: move the fetch after construction — no parameter, no fallback.

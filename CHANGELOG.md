@@ -8,8 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- **Runtime Errors panel always showed a blank "Error:" line** — the frontend read `error_type`/`retry_count` fields the backend never sent; now shows the real `error_message`/occurrence count. ([#60](https://github.com/johanzander/bess-manager/issues/60))
-- **"Report a Problem" → "File GitHub Issue" silently failed to open a new tab** — `window.open()` was called after an async debug-bundle download, outside the browser's synchronous user-gesture window, so popup blockers silently dropped it. Now opens the tab immediately on click and navigates it once the debug bundle is ready. ([#60](https://github.com/johanzander/bess-manager/issues/60))
+- A failed startup timezone fetch now surfaces on the runtime-failures banner instead of silently falling back to `Europe/Stockholm`. ([#440](https://github.com/johanzander/bess-manager/issues/440))
+- The Runtime Errors panel no longer shows a blank "Error:" line; it now shows the real message and occurrence count. ([#60](https://github.com/johanzander/bess-manager/issues/60))
+- "Report a Problem" → "File GitHub Issue" no longer gets silently dropped by popup blockers. ([#60](https://github.com/johanzander/bess-manager/issues/60))
 
 ## [10.0.0] - 2026-07-30
 

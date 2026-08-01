@@ -140,6 +140,7 @@ of `analyzed`.
 - Do not revert intentional linter changes or simplifications without explicit instruction
 - After editing, list every file and symbol changed so the user can confirm nothing unrelated was touched
 - Never add speculative fallbacks, defensive error handling, or "robustness" improvements beyond what was asked
+- Never add a parameter, flag, default-fallback, second construction site, or extra trigger whose only job is to route around an ordering/timing/dependency problem — fix that problem directly (reorder, or reuse/expose what already exists); see `docs/agents/rules.md` Debugging Protocol step 8
 
 ## Cost Discipline
 

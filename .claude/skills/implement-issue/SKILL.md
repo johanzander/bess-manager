@@ -61,7 +61,13 @@ with `## Root cause` / `## Evidence` / `## Proposed fix` sections (label
 ### 3. Confirm gate
 
 Present the root cause, proposed fix, AND its scope assessment per
-`docs/agents/rules.md`'s Debugging Protocol step 8: does the fix stay within
+`docs/agents/rules.md`'s Debugging Protocol step 8. That includes the
+**workaround check**: state explicitly that the diff adds nothing — no
+parameter, flag, default-fallback, second construction site, extra trigger
+or branch — whose only job is to route around an ordering/timing/dependency
+problem instead of fixing it. If you can't state that confidently, dispatch
+a fresh `Plan`/general-purpose agent to critique the design before
+presenting anything. Then the scope category: does the fix stay within
 the target method's existing contract (local), does it need a different/new
 owner (structural), or does it have multiple plausible owners worth a second
 opinion? State which, explicitly — don't let the user infer it from the diff

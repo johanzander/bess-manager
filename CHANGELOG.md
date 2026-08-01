@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))
+- A failed startup timezone fetch now surfaces on the runtime-failures banner instead of silently falling back to `Europe/Stockholm`. ([#440](https://github.com/johanzander/bess-manager/issues/440))
 
 ## [10.0.0] - 2026-07-30
 

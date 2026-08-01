@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- **A failed startup timezone fetch fell back to `Europe/Stockholm` for the process's entire lifetime with no visible warning** — `BESSController.__init__` fetched the HA-configured timezone (`get_ha_config()`) before constructing `BatterySystemManager`, which is the only place that wires `ha_controller.failure_tracker` to a real `RuntimeFailureTracker`. If the fetch's retries were exhausted before the tracker existed, the failure was silently dropped instead of being recorded — the only trace was a log line, invisible to any non-Stockholm-timezone user whose process then ran on the wrong clock for its entire lifetime. The fetch now runs after `BatterySystemManager` construction, so a final-attempt failure surfaces on the existing dashboard runtime-failures banner like any other HA API failure. ([#440](https://github.com/johanzander/bess-manager/issues/440))
+- A failed startup timezone fetch now surfaces on the runtime-failures banner instead of silently falling back to `Europe/Stockholm`. ([#440](https://github.com/johanzander/bess-manager/issues/440))
 
 ## [10.0.0] - 2026-07-30
 

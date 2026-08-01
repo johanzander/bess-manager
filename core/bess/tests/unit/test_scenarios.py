@@ -127,6 +127,7 @@ def test_all_scenarios(scenario_name):
         initial_soe=battery["initial_soe"],
         battery_settings=battery_settings,
         period_duration_hours=period_duration_hours,
+        terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
     )
 
     # Validate results using new data structures

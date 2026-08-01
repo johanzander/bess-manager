@@ -62,8 +62,11 @@ def _set_discharge_action(bsm: BatterySystemManager, period: int, kwh: float) ->
 
 class TestApplyDischargeInhibitRoutesThroughVppPath:
     def test_inhibit_suppresses_the_actual_vpp_command(self):
+        # BATTERY_EXPORT, not LOAD_SUPPORT: #413 made LOAD_SUPPORT release VPP
+        # control entirely (no forced rate to suppress), so it no longer
+        # exercises this routing path. BATTERY_EXPORT still forces a rate.
         bsm, controller = _make_vpp_bsm(inhibit_active=False)
-        _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_intent(bsm, PERIOD, "BATTERY_EXPORT")
         _set_discharge_action(bsm, PERIOD, -3.75)  # -15 kW -> 100%
         bsm._apply_period_schedule(PERIOD)
         assert controller.calls["growatt_vpp_periods"][-1]["power_pct"] == -100
@@ -73,17 +76,17 @@ class TestApplyDischargeInhibitRoutesThroughVppPath:
 
         vpp_call = controller.calls["growatt_vpp_periods"][-1]
         assert vpp_call["power_pct"] == 0
-        # LOAD_SUPPORT blocks passive charging (INTENT_TO_CONTROL charge_rate=0,
-        # same as BATTERY_EXPORT) -- an inhibited discharge should hold the
-        # battery (grid first), not fall back to self-use and let solar
-        # recharge it mid-inhibit. Fixed alongside #355 (see
+        # BATTERY_EXPORT blocks passive charging (INTENT_TO_CONTROL charge_rate=0)
+        # -- an inhibited discharge should hold the battery (grid first), not
+        # fall back to self-use and let solar recharge it mid-inhibit. Fixed
+        # alongside #355 (see
         # docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md) --
         # this was the same class of bug on the discharge-inhibit path.
         assert vpp_call["remote_control_enabled"] is True
 
     def test_inhibit_release_restores_the_actual_vpp_command(self):
         bsm, controller = _make_vpp_bsm(inhibit_active=True)
-        _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_intent(bsm, PERIOD, "BATTERY_EXPORT")
         _set_discharge_action(bsm, PERIOD, -3.75)  # -15 kW -> 100%
         bsm._apply_period_schedule(PERIOD)  # inhibited: desired=100, applied=0
 
@@ -93,3 +96,15 @@ class TestApplyDischargeInhibitRoutesThroughVppPath:
         vpp_call = controller.calls["growatt_vpp_periods"][-1]
         assert vpp_call["power_pct"] == -100
         assert vpp_call["remote_control_enabled"] is True
+
+    def test_load_support_stays_released_regardless_of_inhibit(self):
+        """#413: LOAD_SUPPORT releases VPP control outright, so toggling
+        discharge inhibit must not re-enable remote control for it."""
+        bsm, controller = _make_vpp_bsm(inhibit_active=False)
+        _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -15 kW -> 100%
+        bsm._apply_period_schedule(PERIOD)
+
+        vpp_call = controller.calls["growatt_vpp_periods"][-1]
+        assert vpp_call["power_pct"] == 0
+        assert vpp_call["remote_control_enabled"] is False

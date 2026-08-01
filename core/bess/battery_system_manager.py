@@ -183,6 +183,7 @@ class BatterySystemManager:
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
         self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
         self._desired_block_passive_charging: bool = False  # alongside the rate above
+        self._desired_strategic_intent: str = ""  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Consumption forecast cache. Only used for the 'influxdb_7d_avg'
@@ -206,6 +207,13 @@ class BatterySystemManager:
 
         self._runtime_failure_tracker = RuntimeFailureTracker()
         self._health_recovery_tracker = HealthRecoveryTracker()
+
+        # Historical-data-incomplete warning dismissal, keyed to the day and
+        # the exact set of missing hours so a new gap (or the same gap
+        # recurring on a later day) still surfaces the banner.
+        self._dismissed_historical_warning_signature: (
+            tuple[str, tuple[int, ...]] | None
+        ) = None
 
         # Inject failure tracker into controller if available
         if self._controller:
@@ -1891,6 +1899,16 @@ class BatterySystemManager:
         future price uncertainty beyond that window regardless of where it
         ends (#345).
 
+        `sell_prices` is expected to be scoped by the caller to the terminal
+        boundary's own calendar day, not the full remaining horizon (#422):
+        on a 48h-extended horizon, using the full window lets an
+        already-committed near-term peak (e.g. today's still-upcoming best
+        sell slot) inflate the cap for a later, economically unrelated day's
+        terminal energy, making the DP hold charge through that day's own
+        (lower) export opportunities instead of exporting into them.
+        `buy_prices` is unaffected -- it feeds a median, which is already
+        resistant to a single-period outlier.
+
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
         buy-median terminal value can exceed the best real, known export price
@@ -2069,9 +2087,24 @@ class BatterySystemManager:
             buy_prices = [entry["buyPrice"] for entry in remaining_entries]
             sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
+            # Scope the arbitrage-consistency cap to sell prices on the
+            # terminal boundary's own calendar day (#422): on a 48h-extended
+            # horizon, `sell_prices` above also carries today's still-
+            # remaining periods, and a near-term peak there (an opportunity
+            # the plan's own schedule is already consuming) must not inflate
+            # the cap for a later, economically unrelated day's terminal
+            # energy. Single-day horizons are unaffected -- the terminal day
+            # is the only day present, so this is identical to sell_prices.
+            terminal_date = remaining_entries[-1]["timestamp"][:10]
+            cap_sell_prices = [
+                entry["sellPrice"]
+                for entry in remaining_entries
+                if entry["timestamp"][:10] == terminal_date
+            ]
+
             # Calculate terminal value for end-of-horizon energy valuation
             terminal_value = self._calculate_terminal_value(
-                buy_prices, sell_prices, optimization_period
+                buy_prices, cap_sell_prices, optimization_period
             )
 
             # Get temperature-based charge power limits if derating is enabled.
@@ -2611,6 +2644,7 @@ class BatterySystemManager:
         self._desired_discharge_rate = discharge_rate
         self._desired_grid_charge = grid_charge
         self._desired_block_passive_charging = block_passive_charging
+        self._desired_strategic_intent = strategic_intent
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -2649,7 +2683,11 @@ class BatterySystemManager:
         # full TOU schedule on the next hourly cycle).  This retry targets the
         # per-period write at finer granularity within the 15-min window.
         success, error_msg = self._inverter_controller.apply_period(
-            self.controller, grid_charge, discharge_rate, block_passive_charging
+            self.controller,
+            grid_charge,
+            discharge_rate,
+            block_passive_charging,
+            strategic_intent,
         )
 
         if not success:
@@ -2664,7 +2702,11 @@ class BatterySystemManager:
                 error=Exception(error_msg),
             )
             self._schedule_period_retry(
-                period, grid_charge, discharge_rate, block_passive_charging
+                period,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
         else:
             self._last_applied_discharge_rate = discharge_rate
@@ -2683,6 +2725,7 @@ class BatterySystemManager:
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool = False,
+        strategic_intent: str = "",
         attempt: int = 1,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
@@ -2714,7 +2757,11 @@ class BatterySystemManager:
                 max_attempts + 1,
             )
             success, error_msg = self._inverter_controller.apply_period(
-                self.controller, grid_charge, discharge_rate, block_passive_charging
+                self.controller,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -2732,6 +2779,7 @@ class BatterySystemManager:
                         grid_charge,
                         discharge_rate,
                         block_passive_charging,
+                        strategic_intent,
                         attempt + 1,
                     )
                 else:
@@ -3080,6 +3128,32 @@ class BatterySystemManager:
         """
         return self._runtime_failure_tracker.dismiss_all()
 
+    def dismiss_historical_data_warning(self, missing_hours: list[int]) -> None:
+        """Dismiss the historical-data-incomplete warning for today.
+
+        Args:
+            missing_hours: The missing hours the warning currently covers
+        """
+        today = time_utils.now().date().isoformat()
+        self._dismissed_historical_warning_signature = (
+            today,
+            tuple(sorted(missing_hours)),
+        )
+
+    def is_historical_data_warning_dismissed(self, missing_hours: list[int]) -> bool:
+        """Check if the historical-data-incomplete warning was dismissed.
+
+        The dismissal only applies to the exact day and set of missing
+        hours it was recorded for; a new gap re-surfaces the warning.
+        """
+        if self._dismissed_historical_warning_signature is None:
+            return False
+        today = time_utils.now().date().isoformat()
+        return self._dismissed_historical_warning_signature == (
+            today,
+            tuple(sorted(missing_hours)),
+        )
+
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""
         try:
@@ -3188,6 +3262,7 @@ class BatterySystemManager:
             self._desired_grid_charge,
             target_rate,
             self._desired_block_passive_charging,
+            self._desired_strategic_intent,
         )
         self._last_applied_discharge_rate = target_rate
 

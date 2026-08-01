@@ -65,19 +65,32 @@ horizon's end is valued at:
 
     terminal_value = median(buy_prices) * efficiency_discharge - cycle_cost
 
-where `buy_prices`/`sell_prices` are already truncated to whatever the
-current horizon is, capped at `max(sell_prices) * efficiency_discharge -
-cycle_cost` — an **arbitrage-consistency cap** that prevents the estimate
-from exceeding what could actually be realized by selling right now at the
-best available price (`core/bess/battery_system_manager.py:1841-1921`,
-`_calculate_terminal_value`; see issues #126/#244/#246/#345). This is the
-mechanism to check first for "why didn't the battery discharge everything
-right before midnight" or "why does it hold charge near the end of the
-horizon" — it applies at both the today-only and today+tomorrow boundary,
-so this remains the first thing to check even after tomorrow's prices have
-arrived (until #345, it was incorrectly zeroed in that case; see the #345/
-#126 threads for the "tonight's export moves a day later" symptom this was
-suspected of, and ultimately ruled out for a specific bundle).
+where `buy_prices` is the median over the full remaining horizon, capped at
+`max(sell_prices) * efficiency_discharge - cycle_cost` — an
+**arbitrage-consistency cap** that prevents the estimate from exceeding what
+could actually be realized by selling at the best available price
+(`core/bess/battery_system_manager.py:1841-1921`, `_calculate_terminal_value`;
+see issues #126/#244/#246/#345). This is the mechanism to check first for
+"why didn't the battery discharge everything right before midnight" or "why
+does it hold charge near the end of the horizon" — it applies at both the
+today-only and today+tomorrow boundary, so this remains the first thing to
+check even after tomorrow's prices have arrived (until #345, it was
+incorrectly zeroed in that case; see the #345/#126 threads for the "tonight's
+export moves a day later" symptom this was suspected of, and ultimately
+ruled out for a specific bundle).
+
+Unlike `buy_prices`, the `sell_prices` fed into the cap are **not** the full
+remaining-horizon window — the caller (`_run_optimization`,
+`battery_system_manager.py:~2050-2075`) scopes them to periods on the
+terminal boundary's own calendar day only (issue #422). On a 48h-extended
+horizon, using the full window let an already-committed near-term peak
+(e.g. today's still-upcoming best sell slot) inflate the cap for tomorrow's
+terminal boundary, making the DP hold charge through all of tomorrow's own
+(lower but still profitable) export opportunities instead of exporting into
+them — this was the actual mechanism behind the long-reported #126 "tonight
+exports, tomorrow evening doesn't" symptom. `buy_prices` is unaffected by
+this scoping — a median is already resistant to a single-period outlier, so
+only the cap's `max()` needed the day boundary.
 
 The cap is skipped entirely on a fixed/flat export tariff (`max(sell_prices)
 == min(sell_prices)`, e.g. UK Octopus Outgoing Fixed) — there, every period

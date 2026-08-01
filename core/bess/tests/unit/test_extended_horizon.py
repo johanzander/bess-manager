@@ -482,6 +482,114 @@ class TestCalculateTerminalValue:
         assert fixed_final_soe > zeroed_final_soe
 
 
+class TwoDayDirectSellMockSource(MockSource):
+    """Distinct buy/sell prices per calendar day, with direct (unmarked-up)
+    sell prices -- lets a test set today's and tomorrow's sell-price peaks
+    independently, the way Octopus-style sources with a separate export
+    tariff already do (`get_sell_prices_for_date`)."""
+
+    def __init__(
+        self,
+        today_buy: list[float],
+        today_sell: list[float],
+        tomorrow_buy: list[float],
+        tomorrow_sell: list[float],
+    ) -> None:
+        super().__init__(today_buy)
+        self._today_buy = today_buy
+        self._today_sell = today_sell
+        self._tomorrow_buy = tomorrow_buy
+        self._tomorrow_sell = tomorrow_sell
+
+    @property
+    def prices_are_final(self) -> bool:
+        return True
+
+    def get_prices_for_date(self, target_date: date) -> list:
+        if target_date == time_utils.today():
+            return self._today_buy
+        return self._tomorrow_buy
+
+    def get_sell_prices_for_date(self, target_date: date) -> list[float] | None:
+        if target_date == time_utils.today():
+            return self._today_sell
+        return self._tomorrow_sell
+
+
+class TestTerminalValueCapExcludesCommittedPeriods:
+    """#422: the arbitrage-consistency cap must not let an already-committed
+    near-term price (today's own still-upcoming peak) inflate the terminal
+    value for a later, unrelated day's horizon boundary."""
+
+    def test_tomorrow_evening_exports_despite_lower_peak_than_today(self):
+        """Reproduces the #126/#422 symptom (Frank-Leysen): today has a
+        higher still-upcoming sell peak (1.00) than tomorrow's own evening
+        peak (0.75). With the bug, the cap uses today's peak, producing a
+        terminal value (0.915/kWh) that exceeds tomorrow evening's own
+        achievable export profit, so the DP holds charge through the whole
+        evening instead of exporting -- exactly zero BATTERY_EXPORT periods
+        during a 24-period plateau that is otherwise clearly profitable to
+        export into. The fix scopes the cap to periods on the terminal
+        boundary's own calendar day (tomorrow), producing a lower, correct
+        terminal value (~0.677/kWh) that lets the DP export at that plateau.
+        """
+        n = 96
+        today_buy = [1.5] * n
+        today_sell = [0.1] * n
+        today_sell[80] = 1.0  # still-upcoming near-term peak (20:00)
+
+        tomorrow_buy = [1.5] * n
+        tomorrow_sell = [0.1] * n
+        plateau_start, plateau_end = 68, 92
+        for i in range(plateau_start, plateau_end):
+            tomorrow_sell[i] = 0.75  # tomorrow's own (lower) evening peak
+
+        source = TwoDayDirectSellMockSource(
+            today_buy, today_sell, tomorrow_buy, tomorrow_sell
+        )
+        controller = MockHomeAssistantController()
+        controller.settings["battery_soc"] = 95
+        controller.consumption_forecast = [0.0] * n  # isolate export decisions
+        system = _make_system(source, controller)
+        system.battery_settings.cycle_cost_per_kwh = 0.035
+
+        optimization_period = 75  # ~18:45 today, before the near-term peak
+
+        prices, price_entries = system._get_price_data(prepare_next_day=False)
+        assert prices is not None
+        assert price_entries is not None
+
+        result_data = system._gather_optimization_data(
+            period=optimization_period,
+            current_soc=95.0,
+            prepare_next_day=False,
+            period_count=len(prices),
+        )
+        assert result_data is not None
+        opt_period, optimization_data = result_data
+
+        result = system._run_optimization(
+            opt_period, optimization_data, prices, price_entries, False
+        )
+        assert result is not None
+
+        plateau_indices = range(
+            n + plateau_start - optimization_period,
+            n + plateau_end - optimization_period,
+        )
+        plateau_intents = [
+            result.period_data[i].decision.strategic_intent for i in plateau_indices
+        ]
+        export_count = plateau_intents.count("BATTERY_EXPORT")
+
+        assert export_count > 0, (
+            "Expected the DP to export during tomorrow evening's own "
+            f"profitable sell plateau; got zero exports (intents: {plateau_intents}). "
+            "This means today's still-upcoming peak is inflating the terminal "
+            "value cap and suppressing tomorrow's own export opportunity (#422)."
+        )
+
+
 class TestPrepareNextDayTimestamps:
     """Timestamps in the next-day schedule must land on tomorrow's date (issue #155)."""
 

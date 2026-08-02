@@ -102,3 +102,50 @@ test.describe('Settings Page', () => {
     await expect(page.getByText('Diagnostics').first()).toBeVisible({ timeout: 10_000 });
   });
 });
+
+test.describe('Inverter service domain override', () => {
+  // The vendor service domain (huawei_solar / growatt_server) used to be
+  // hardcoded, which forced a compatible integration under a different domain
+  // name to become a whole new BESS platform (PR #412). It is now an override
+  // on the inverter section, editable per install.
+  //
+  // The inverter form renders on the Integrations tab but is saved by the
+  // Battery tab's Save button (isDirty.battery covers inverterForm) — the
+  // spec follows that existing flow deliberately.
+
+  const serviceDomainInput = (page: import('@playwright/test').Page) =>
+    page.locator('label').filter({ hasText: /Service domain/i }).locator('input');
+
+  test('shows the platform default as placeholder, not a value', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    const input = serviceDomainInput(page);
+    await expect(input).toBeVisible();
+    // Empty override — the effective domain is shown as a placeholder so an
+    // untouched install stays on the platform default.
+    await expect(input).toHaveValue('');
+    await expect(input).toHaveAttribute('placeholder', 'growatt_server');
+  });
+
+  test('override persists across a reload', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    await serviceDomainInput(page).fill('my_growatt_bridge');
+
+    await page.getByRole('button', { name: 'Battery', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+
+    await page.reload();
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+    await expect(serviceDomainInput(page)).toHaveValue('my_growatt_bridge');
+
+    // Restore the default so later tests see an unmodified install.
+    await serviceDomainInput(page).fill('');
+    await page.getByRole('button', { name: 'Battery', exact: true }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+  });
+});

@@ -354,6 +354,7 @@ const SetupWizardPage: React.FC = () => {
         // Inverter
         inverterPlatform: inverterForm.inverterPlatform,
         inverterControlMode: inverterForm.controlMode ?? 'tou',
+        inverterServiceDomain: inverterForm.serviceDomain ?? '',
         // Control mode
         demoMode: controlMode === 'demo',
       });

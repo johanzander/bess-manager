@@ -227,33 +227,49 @@ class HuaweiController(InverterController):
         time_of_use_luna2000 only when drifted, then writes the full
         period list (always a full rewrite — no differential update).
 
+        The whole gate is skipped when no working-mode entity is mapped.
+        Installs behind an energy manager (Huawei EMMA, PR #412) expose no
+        LUNA2000 working-mode select — the manager owns the mode itself.
+        Skipping it also skips the LG RESU family check below, so BESS is
+        trusting the operator's platform choice there; that is logged here
+        and surfaced by check_health rather than passing unremarked.
+
         Raises:
             SystemConfigurationError: If the connected battery does not
                 expose 'time_of_use_luna2000' as a working-mode option
                 (i.e. it's an LG RESU battery, not supported).
         """
-        available_modes = controller.get_huawei_working_mode_options()
-        if available_modes and WORKING_MODE_TOU not in available_modes:
-            raise SystemConfigurationError(
-                "Connected Huawei battery does not support "
-                f"'{WORKING_MODE_TOU}' (available modes: {available_modes}). "
-                "Only LUNA2000 batteries are supported — LG RESU is not."
-            )
-
         writes = 0
+        has_working_mode = controller.is_sensor_configured("huawei_working_mode")
 
-        current_mode = controller.get_huawei_working_mode()
-        if current_mode != WORKING_MODE_TOU:
+        if not has_working_mode:
             logger.info(
-                "HUAWEI HARDWARE: working mode is %r, setting to %r",
-                current_mode,
-                WORKING_MODE_TOU,
+                "HUAWEI HARDWARE: no working mode entity mapped — skipping the "
+                "working-mode gate and the LUNA2000/LG RESU battery family "
+                "check. Expected on EMMA-managed installs, where the energy "
+                "manager owns the battery working mode."
             )
-            try:
-                controller.set_huawei_working_mode(WORKING_MODE_TOU)
-                writes += 1
-            except Exception as e:
-                logger.error("FAILED: set_huawei_working_mode: %s", e)
+        else:
+            available_modes = controller.get_huawei_working_mode_options()
+            if available_modes and WORKING_MODE_TOU not in available_modes:
+                raise SystemConfigurationError(
+                    "Connected Huawei battery does not support "
+                    f"'{WORKING_MODE_TOU}' (available modes: {available_modes}). "
+                    "Only LUNA2000 batteries are supported — LG RESU is not."
+                )
+
+            current_mode = controller.get_huawei_working_mode()
+            if current_mode != WORKING_MODE_TOU:
+                logger.info(
+                    "HUAWEI HARDWARE: working mode is %r, setting to %r",
+                    current_mode,
+                    WORKING_MODE_TOU,
+                )
+                try:
+                    controller.set_huawei_working_mode(WORKING_MODE_TOU)
+                    writes += 1
+                except Exception as e:
+                    logger.error("FAILED: set_huawei_working_mode: %s", e)
 
         has_charge_period = any(p["flag"] == "+" for p in self._periods)
         try:
@@ -440,6 +456,34 @@ class HuaweiController(InverterController):
 
     def check_health(self, controller) -> list:
         """Check Huawei battery control capabilities via the working-mode entity."""
+        if not controller.is_sensor_configured("huawei_working_mode"):
+            # Supported configuration (EMMA-managed install), but worth
+            # surfacing: without this entity BESS cannot verify the battery
+            # is LUNA2000 rather than LG RESU before writing LUNA2000-format
+            # TOU periods, and it never sets the working mode itself.
+            return [
+                {
+                    "name": "Battery Control (Huawei LUNA2000)",
+                    "description": (
+                        "Controls Huawei battery TOU schedule via set_tou_periods"
+                    ),
+                    "required": True,
+                    "status": "WARNING",
+                    "checks": [
+                        {
+                            "component": "Huawei working mode (select)",
+                            "status": "WARNING",
+                            "message": (
+                                "Not mapped — working-mode writes and the "
+                                "LUNA2000/LG RESU battery family check are "
+                                "skipped. Expected on EMMA-managed installs."
+                            ),
+                        }
+                    ],
+                    "last_run": datetime.now().isoformat(),
+                }
+            ]
+
         try:
             mode = controller.get_huawei_working_mode()
             if mode is not None:

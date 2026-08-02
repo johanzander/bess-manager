@@ -518,6 +518,31 @@ class TestSetupComplete:
         assert call_args["inverter"]["platform"] == "huawei_solar_luna2000"
         assert call_args["inverter"]["device_id"] == "huawei-dev-456"
 
+    def test_service_domain_override_persisted(self, complete_controller):
+        """An install whose integration exposes the vendor services under its
+        own domain (e.g. huawei_emma_management, PR #412) configures that
+        here rather than needing a separate inverter platform."""
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                inverterServiceDomain="huawei_emma_management",
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["service_domain"] == "huawei_emma_management"
+
+    def test_malformed_service_domain_rejected(self, complete_controller):
+        """The value is interpolated into /api/services/<domain>/<service>."""
+        resp = _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                inverterServiceDomain="switch.some_entity",
+            ),
+        )
+        assert resp.status_code == 422
+
     def test_growatt_inverter_type_not_written(self, complete_controller):
         """Setup should not write legacy growatt.inverter_type for any platform."""
         # Clear pre-existing legacy field to verify setup doesn't add it

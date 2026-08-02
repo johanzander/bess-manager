@@ -406,6 +406,14 @@ The system supports multiple inverter platforms, each with a dedicated controlle
 
 The active platform is stored in `inverter.platform`. Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass. No restart is required.
 
+#### Vendor service domain
+
+Two platforms make service calls into a *vendor* integration domain rather than driving entities: Growatt cloud (`update_time_segment`, `write/read_ac_charge_times`, `write/read_ac_discharge_times`) and Huawei (`set_tou_periods`). Every other service call BESS makes infers its domain from the entity_id prefix — `number` vs `input_number`, `switch` vs `select` — but these target a *device*, so there is no prefix to read.
+
+That domain is configuration, not a platform constant. `SettingsStore.get_service_domain()` resolves it: `inverter.service_domain` when set, otherwise the platform's entry in `PLATFORM_SERVICE_DOMAIN` (`growatt_server`, `huawei_solar`, or `""` for the modbus platforms, which make no vendor calls). The resolved value is held on `HomeAssistantAPIController.service_domain` and re-synced by `BESSController.refresh_service_domain()` whenever the inverter section changes.
+
+This is what lets an integration that exposes the same services under its own domain name work as a *configuration* of an existing platform instead of requiring a new one — see PR #412 (Huawei EMMA via `huawei_emma_management`, where the EMMA dials out over TLS because a third party owns the Modbus socket). It carries no compatibility guarantee: the payload format is still the platform's (`HH:MM-HH:MM/<days>/<+|->` for Huawei), and an integration claiming the domain must implement those services with the same signatures.
+
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
 ### Platform Capabilities

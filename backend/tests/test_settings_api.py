@@ -143,6 +143,16 @@ class TestGetSettings:
         assert battery["maxSoeKwh"] == pytest.approx(28.5)
         assert battery["reservedCapacity"] == pytest.approx(3.0)
 
+    def test_resolved_service_domain_exposed(self, mock_controller):
+        """The UI shows the platform default as a placeholder for the
+        inverter.service_domain override — it reads the resolved value from
+        the API rather than duplicating PLATFORM_SERVICE_DOMAIN client-side."""
+        mock_controller.settings_store.get_service_domain.return_value = (
+            "growatt_server"
+        )
+        resp = _client.get("/api/settings")
+        assert resp.json()["inverter"]["resolvedServiceDomain"] == "growatt_server"
+
     def test_sensors_come_from_store(self, mock_controller):
         """Sensor values are returned from the per-platform store structure."""
         mock_controller.settings_store.data["sensors"]["growatt_server_min"] = {
@@ -272,6 +282,40 @@ class TestPatchSettingsInverter:
             },
         )
         mock_controller.system.switch_control_mode.assert_not_called()
+
+
+class TestPatchSettingsServiceDomain:
+    """inverter.service_domain overrides which HA integration domain vendor
+    service calls target (PR #412). It must persist, and the live controller
+    must pick it up without a restart — otherwise BESS keeps writing TOU
+    periods to the previous integration until the process is restarted."""
+
+    def test_service_domain_persisted(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "serviceDomain": "huawei_emma_management",
+                }
+            },
+        )
+        assert (
+            mock_controller.settings_store.data["inverter"]["service_domain"]
+            == "huawei_emma_management"
+        )
+
+    def test_live_controller_refreshed(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "serviceDomain": "huawei_emma_management",
+                }
+            },
+        )
+        mock_controller.refresh_service_domain.assert_called()
 
 
 class TestPatchSettingsCamelToSnake:

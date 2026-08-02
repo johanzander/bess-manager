@@ -15,6 +15,42 @@ export interface InverterForm {
   /** Growatt-via-solax_modbus control strategy. GEN4 default "tou"; GEN3 is
    * always "vpp" server-side regardless of this value. */
   controlMode?: 'tou' | 'vpp';
+  /** Override for the HA integration domain vendor service calls target
+   * (set_tou_periods, update_time_segment). Empty = the platform's standard
+   * domain; set it for an integration exposing the same services under its
+   * own domain name. */
+  serviceDomain?: string;
+  /** Domain currently in effect, computed server-side — display only. */
+  resolvedServiceDomain?: string;
+}
+
+/** Service-domain override input, shown for the platforms that make vendor
+ * service calls at all (Growatt cloud and Huawei). Every other platform
+ * drives entities directly, where the domain comes from the entity_id. */
+function ServiceDomainField({
+  inverterForm,
+  onInverterChange,
+}: {
+  inverterForm: InverterForm;
+  onInverterChange: (f: InverterForm) => void;
+}) {
+  return (
+    <label className="block mt-3">
+      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Service domain</span>
+      <input
+        type="text"
+        value={inverterForm.serviceDomain ?? ''}
+        placeholder={inverterForm.resolvedServiceDomain || 'integration default'}
+        onChange={e => onInverterChange({ ...inverterForm, serviceDomain: e.target.value })}
+        className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
+        Leave empty unless another integration provides the same services under
+        its own domain — then enter that domain (e.g. a bridge exposing
+        <span className="font-mono"> set_tou_periods</span>).
+      </span>
+    </label>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -383,6 +419,8 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
                   />
                 </label>
+
+                <ServiceDomainField inverterForm={inverterForm} onInverterChange={onInverterChange} />
               </TabsContent>
 
               <TabsContent value="modbus">
@@ -485,6 +523,8 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
                   />
                 </label>
+
+                <ServiceDomainField inverterForm={inverterForm} onInverterChange={onInverterChange} />
               </TabsContent>
             </Tabs>
           );

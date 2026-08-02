@@ -182,6 +182,75 @@ class TestWriteSchedule:
         ha.set_grid_charge.assert_called_once_with(False)
 
 
+class TestWorkingModeGateIsConditional:
+    """Installs behind an energy manager (e.g. Huawei EMMA, PR #412) expose no
+    LUNA2000 working-mode select. The gate must be skipped when the entity
+    isn't mapped, rather than raising out of write_to_hardware — but skipping
+    it also skips the LG-RESU family check, so it is logged, not silent."""
+
+    def test_write_proceeds_when_working_mode_entity_unmapped(
+        self, controller: HuaweiController
+    ) -> None:
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = False
+        controller.write_to_hardware(ha, 0, [])
+        ha.get_huawei_working_mode_options.assert_not_called()
+        ha.get_huawei_working_mode.assert_not_called()
+        ha.set_huawei_working_mode.assert_not_called()
+        ha.write_huawei_tou_periods.assert_called_once()
+
+    def test_family_check_skip_is_logged(
+        self, controller: HuaweiController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        controller.apply_intents(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = False
+        with caplog.at_level("INFO", logger="core.bess.huawei_controller"):
+            controller.write_to_hardware(ha, 0, [])
+        assert any(
+            "working mode" in r.message.lower() for r in caplog.records
+        ), "skipping the working-mode gate must be logged, not silent"
+
+    def test_gate_still_runs_when_working_mode_entity_mapped(
+        self, controller: HuaweiController
+    ) -> None:
+        controller.apply_intents(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = True
+        ha.get_huawei_working_mode_options.return_value = [
+            "maximise_self_consumption",
+            "time_of_use_luna2000",
+        ]
+        ha.get_huawei_working_mode.return_value = "maximise_self_consumption"
+        controller.write_to_hardware(ha, 0, [])
+        ha.set_huawei_working_mode.assert_called_once_with("time_of_use_luna2000")
+
+
+class TestCheckHealthWithoutWorkingMode:
+    def test_unmapped_working_mode_reports_warning_not_error(
+        self, controller: HuaweiController
+    ) -> None:
+        """An EMMA-managed install has no working-mode select to read; that is
+        a configuration state, not a hardware fault."""
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = False
+        result = controller.check_health(ha)
+        assert result[0]["status"] == "WARNING"
+        assert result[0]["checks"][0]["status"] == "WARNING"
+        ha.get_huawei_working_mode.assert_not_called()
+
+    def test_mapped_working_mode_still_reports_ok(
+        self, controller: HuaweiController
+    ) -> None:
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = True
+        ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        result = controller.check_health(ha)
+        assert result[0]["status"] == "OK"
+
+
 class TestSyncSocLimits:
     def test_no_write_when_hardware_already_matches_config(
         self, controller: HuaweiController

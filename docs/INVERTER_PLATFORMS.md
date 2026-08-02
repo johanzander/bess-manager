@@ -424,6 +424,23 @@ The service call is gated by a preflight check verifying the battery model via
 explicitly not supported (they use a price-bidding TOU format incompatible with
 BESS's optimization model).
 
+**When no working-mode entity is mapped**, that whole gate is skipped: BESS
+neither sets the working mode nor verifies the battery family, and logs both.
+This is the expected shape for an install behind an energy manager (EMMA),
+where the manager owns the mode. The health check reports WARNING rather than
+OK for such an install, since BESS is then trusting the operator's platform
+choice instead of checking it.
+
+**Compatible integrations under another domain.** The `set_tou_periods` call
+targets whichever HA integration domain `inverter.service_domain` resolves to
+(default `huawei_solar`). An integration exposing the same service with the
+same `(device_id, periods: str)` signature — e.g.
+[`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
+for EMMA installs where a third party owns the Modbus TCP socket — works as a
+configuration of this platform rather than a new one. Discovery only matches
+`huawei_solar`, so such an install maps its entities and device_id by hand in
+Settings. Experimental: not validated against real hardware by the maintainer.
+
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.
 Periods without an explicit flag (SOLAR_STORAGE, SOLAR_EXPORT, IDLE) use the

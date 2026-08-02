@@ -189,6 +189,15 @@ async def get_settings():
         battery["reserved_capacity"] = battery["min_soe_kwh"]
         data["battery"] = battery
 
+        # Enrich the inverter section with the domain vendor service calls
+        # actually go to, so the UI can show the platform default as a
+        # placeholder without duplicating PLATFORM_SERVICE_DOMAIN client-side.
+        inverter = data.get("inverter", {})
+        inverter["resolved_service_domain"] = (
+            bess_controller.settings_store.get_service_domain()
+        )
+        data["inverter"] = inverter
+
         # Return the full per-platform sensors structure from the store.
         # Also include a flat "activeSensors" view for backwards compatibility.
         data.pop("sensors", None)
@@ -306,6 +315,14 @@ async def patch_settings(updates: dict):
                     )
 
             elif store_key == "inverter":
+                # device_id here is the Huawei battery device (the Growatt
+                # cloud device_id lives in the growatt section above). Apply
+                # it live for the same reason that branch does — otherwise an
+                # edit in Settings only takes effect after a restart.
+                if "device_id" in section:
+                    bess_controller.ha_controller.huawei_device_id = section[
+                        "device_id"
+                    ]
                 platform = section.get("platform")
                 if platform:
                     bess_controller.system.switch_inverter_platform(platform)
@@ -332,6 +349,7 @@ async def patch_settings(updates: dict):
         # a platform switch) can change which sensors are active — refresh
         # unconditionally rather than only on a "sensors" key match.
         bess_controller.refresh_active_sensors()
+        bess_controller.refresh_service_domain()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -3521,6 +3539,8 @@ async def setup_complete(payload: APISetupCompletePayload):
             inv_section["platform"] = _platform
             if payload.inverterControlMode is not None:
                 inv_section["control_mode"] = payload.inverterControlMode
+            if payload.inverterServiceDomain is not None:
+                inv_section["service_domain"] = payload.inverterServiceDomain
             if payload.huaweiDeviceId:
                 inv_section["device_id"] = payload.huaweiDeviceId
             sections["inverter"] = inv_section
@@ -3561,6 +3581,7 @@ async def setup_complete(payload: APISetupCompletePayload):
         # payload.sensors: an inverter platform switch above also changes
         # which per-platform sensor sub-dict is active.
         bess_controller.refresh_active_sensors()
+        bess_controller.refresh_service_domain()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:

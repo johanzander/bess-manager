@@ -212,10 +212,17 @@ const SettingsPage: React.FC = () => {
 
       const invNew = s.inverter ?? {};
       const uiType = invNew.platform ?? 'growatt_server_min';
+      // The Huawei battery device_id lives on the inverter section; every
+      // other platform's device_id is the Growatt cloud one. Loading the
+      // wrong one leaves the field blank on a Huawei install and a save
+      // then cross-writes it into the other platform's section.
+      const isHuawei = uiType === 'huawei_solar_luna2000';
       const inv: InverterForm = {
         inverterPlatform: uiType,
-        deviceId: growatt_s.deviceId ?? '',
+        deviceId: (isHuawei ? invNew.deviceId : growatt_s.deviceId) ?? '',
         controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
+        serviceDomain: (invNew.serviceDomain as string | undefined) ?? '',
+        resolvedServiceDomain: (invNew.resolvedServiceDomain as string | undefined) ?? '',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
@@ -458,12 +465,16 @@ const SettingsPage: React.FC = () => {
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
         },
-        growatt: {
-          deviceId: inverterForm.deviceId,
-        },
+        ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? {}
+          : { growatt: { deviceId: inverterForm.deviceId } }),
         inverter: {
           platform: inverterForm.inverterPlatform,
           controlMode: inverterForm.controlMode ?? 'tou',
+          serviceDomain: inverterForm.serviceDomain ?? '',
+          ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+            ? { deviceId: inverterForm.deviceId }
+            : {}),
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);

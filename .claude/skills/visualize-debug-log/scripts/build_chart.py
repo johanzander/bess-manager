@@ -295,9 +295,17 @@ def build_summary(rows: list[dict], battery_settings: dict) -> dict:
     return {
         "cycle_cost": battery_settings.get("cycle_cost_per_kwh", 0.0),
         "capacity": battery_settings.get("total_capacity", 0.0),
+        # actual_cost/savings use grid_cost (wear-free import_cost -
+        # export_revenue), the same basis as the dashboard's "Net Grid Cost"
+        # tile and APISavingsBucket.netSavings (backend/api_dataclasses.py:
+        # 121-124) -- and reuse each row's already-computed view.net_savings
+        # rather than a second ad hoc formula. hourly_savings (dropped here)
+        # is a different metric entirely: solar_only_cost - hourly_cost, i.e.
+        # the battery's own contribution vs. a solar-only baseline, not total
+        # savings vs. grid-only.
         "grid_only_cost": sum(r["grid_only_cost"] for r in rows),
-        "actual_cost": sum(r["hourly_cost"] for r in rows),
-        "savings": sum(r["hourly_savings"] for r in rows),
+        "actual_cost": sum(r["grid_cost"] for r in rows),
+        "savings": sum(r["view"]["net_savings"] for r in rows),
         "n_actual": sum(1 for r in rows if r["source"] == "actual"),
         "n_forecast": sum(1 for r in rows if r["source"] == "forecast"),
     }

@@ -38,7 +38,7 @@ const oreOf = (v) => Math.round(v * 100);
 const savingsPct = SUMMARY.grid_only_cost ? (SUMMARY.savings / SUMMARY.grid_only_cost) * 100 : 0;
 stats.innerHTML = `
   <div class="stat"><div class="label">Grid-only cost</div><div class="value">${SUMMARY.grid_only_cost.toFixed(2)} SEK</div><div class="sub">baseline, no solar/battery</div></div>
-  <div class="stat"><div class="label">Actual cost</div><div class="value">${SUMMARY.actual_cost.toFixed(2)} SEK</div><div class="sub">with solar + battery</div></div>
+  <div class="stat"><div class="label">Actual cost</div><div class="value">${SUMMARY.actual_cost.toFixed(2)} SEK</div><div class="sub">with solar + battery (net grid cost, wear-free)</div></div>
   <div class="stat margin ${SUMMARY.savings >= 0 ? 'positive' : ''}"><div class="label">Savings</div><div class="value">${SUMMARY.savings >= 0 ? '+' : ''}${SUMMARY.savings.toFixed(2)} SEK</div><div class="sub">${savingsPct.toFixed(0)}% of grid-only cost</div></div>
   <div class="stat"><div class="label">Cycle cost</div><div class="value">${oreOf(CYCLE_COST)} öre/kWh</div><div class="sub">config: cycle_cost_per_kwh</div></div>
   <div class="stat"><div class="label">Battery capacity</div><div class="value">${SUMMARY.capacity} kWh</div><div class="sub">${SUMMARY.n_actual} actual + ${SUMMARY.n_forecast} forecast periods</div></div>

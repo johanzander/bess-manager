@@ -134,7 +134,9 @@ test.describe('Inverter service domain override', () => {
 
     await serviceDomainInput(page).fill('my_growatt_bridge');
 
-    await page.getByRole('button', { name: 'Battery', exact: true }).click();
+    // The tab button is renamed to "Battery Unsaved changes" once the form is
+    // dirty, so this cannot match on the exact label.
+    await page.getByRole('button', { name: /^Battery( Unsaved changes)?$/ }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
 
@@ -144,7 +146,7 @@ test.describe('Inverter service domain override', () => {
 
     // Restore the default so later tests see an unmodified install.
     await serviceDomainInput(page).fill('');
-    await page.getByRole('button', { name: 'Battery', exact: true }).click();
+    await page.getByRole('button', { name: /^Battery( Unsaved changes)?$/ }).click();
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });

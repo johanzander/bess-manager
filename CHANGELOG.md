@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **"Min Action Profit" setting** — the DP optimizer stopped reading it when the profitability gate was replaced by pure backward induction (v10.0.0), but the field stayed in Settings → Battery and the setup wizard, still describing behaviour ("the optimizer skips cycles where the expected gain is below this value") that no longer happened. Removed from the UI, the settings schema, and the API. Existing configs are migrated automatically; no action needed.
+
 ## [10.0.1] - 2026-08-02
 
 ### Fixed

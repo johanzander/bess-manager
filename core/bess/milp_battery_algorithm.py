@@ -10,9 +10,11 @@ DP's SOE-grid snap noise mis-picks between financially near-tied windows
 
 This module is the feasibility spike
 (docs/superpowers/specs/2026-08-03-milp-spike-450.py) generalized into a
-reusable function. It is NOT yet feature complete -- see the spec's "Key
-design decisions for the build phase" for what's still missing:
-per-period charge caps (temperature derating).
+reusable function covering the pivot spec's full "Key design decisions
+for the build phase" semantics list. Remaining build items (highspy
+dependency swap, production wiring into dp_schedule.py/
+battery_system_manager.py) are integration/packaging, not new model
+semantics.
 
 Negative sell prices (spec point 3): the spike assumed buy > sell > 0 and
 relied on that spread alone to keep import/export exclusive, which is
@@ -72,6 +74,7 @@ def solve_milp_schedule(
     terminal_value_per_kwh: float = 0.0,
     integer_rates: bool = False,
     compute_shadow_price: bool = False,
+    max_charge_power_per_period: list[float] | None = None,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
 
@@ -116,6 +119,13 @@ def solve_milp_schedule(
     SOE_STEP_KWH)`), and returns None (no shadow price) when the anchor is
     below `min_soe_kwh + SOE_STEP_KWH / 2`, matching the DP's own guard
     (a backward difference below the grid's first point is undefined).
+
+    `max_charge_power_per_period`: per-period charge power cap (kW),
+    typically from temperature derating. When provided, the STORE/IDLE
+    charge rate for period t is capped at
+    `min(battery["max_charge_power_kw"], max_charge_power_per_period[t])`
+    instead of the flat battery-wide rate -- matches
+    dp_battery_algorithm.py's own per-period clamp.
     """
     buy = np.asarray(buy_price, dtype=float)
     sell = np.asarray(sell_price, dtype=float)
@@ -129,7 +139,14 @@ def solve_milp_schedule(
     eta_c = battery["efficiency_charge"]
     eta_d = battery["efficiency_discharge"]
     wear = battery["cycle_cost_per_kwh"]
-    rate_throughput_kwh = battery["max_charge_power_kw"] * dt
+    if max_charge_power_per_period is not None:
+        charge_power_kw = np.minimum(
+            battery["max_charge_power_kw"],
+            np.asarray(max_charge_power_per_period, dtype=float),
+        )
+    else:
+        charge_power_kw = np.full(horizon, battery["max_charge_power_kw"])
+    rate_throughput_kwh = charge_power_kw * dt  # per-period array
     discharge_step_kwh = battery["max_discharge_power_kw"] / 100 * dt
     ac_cap_kwh = (
         battery["inverter_max_ac_power_kw"]
@@ -195,16 +212,17 @@ def solve_milp_schedule(
     # Below-floor tolerance (#233): if initial_soe starts below min_soe_kwh
     # (common after a restart or deep discharge), don't fabricate a jump
     # to the floor -- only require reaching it as fast as physically
-    # reachable. store_rate_m is STORE mode's per-period charge cap and an
-    # upper bound on ANY mode's charge rate (IDLE can
-    # only charge from solar, which is <= the same cap), so
-    # e0 + t*store_rate_m is a safe (non-tight, always-valid) bound on how
-    # much SOE could possibly have risen by period t regardless of price.
-    # When initial_soe >= min_soe_kwh this reduces to the flat e_min floor
+    # reachable. store_rate_m (per-period, since max_charge_power_per_period
+    # can vary the rate by period) is STORE mode's per-period charge cap
+    # and an upper bound on ANY mode's charge rate (IDLE can only charge
+    # from solar, which is <= the same cap), so e0 + cumsum(store_rate_m)
+    # up to period t is a safe (non-tight, always-valid) bound on how much
+    # SOE could possibly have risen by period t regardless of price. When
+    # initial_soe >= min_soe_kwh this reduces to the flat e_min floor
     # unconditionally (reachable_from_start >= e0 >= e_min already), so
     # there's no behavior change for the normal case.
     store_rate_m = rate_throughput_kwh * eta_c
-    reachable_from_start = e0 + np.arange(1, horizon + 1) * store_rate_m
+    reachable_from_start = e0 + np.cumsum(store_rate_m)
     soe_floor = np.minimum(e_min, reachable_from_start)
     lb[e[1:]] = soe_floor
     lb[e[0]] = ub[e[0]] = e0
@@ -269,13 +287,13 @@ def solve_milp_schedule(
         )
 
         # STORE: store_kwh = min(rate_throughput*eta_c, e_max - e[t]) if active.
-        con([(store_kwh[t], 1), (mode_store[t], -store_rate_m)], -np.inf, 0)
+        con([(store_kwh[t], 1), (mode_store[t], -store_rate_m[t])], -np.inf, 0)
         con([(store_kwh[t], 1), (e[t], 1)], -np.inf, e_max)
         con(
             [
                 (store_kwh[t], 1),
-                (store_active[t], store_rate_m),
-                (mode_store[t], -store_rate_m),
+                (store_active[t], store_rate_m[t]),
+                (mode_store[t], -store_rate_m[t]),
             ],
             0.0,
             np.inf,
@@ -308,7 +326,7 @@ def solve_milp_schedule(
             surplus[t] - surplus_m,
             np.inf,
         )
-        rate_m = rate_throughput_kwh
+        rate_m = rate_throughput_kwh[t]
         con(
             [
                 (solar_to_battery_kwh[t], 1),

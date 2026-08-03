@@ -9,10 +9,10 @@ pinned against the exact-PWL reference implementation
 Scope so far: modes/SOE/self-throttle/wear/terminal-value core (slice 1),
 negative-sell-price export-credit fix (slice 2), two-stage integer-rate
 re-integerization (slice 3), below-floor tolerance (slice 4, #233),
-current-period shadow price (slice 5), AC-cap clipping (slice 6). Still
-missing: per-period charge caps -- see
-docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the
-full remaining build list.
+current-period shadow price (slice 5), AC-cap clipping (slice 6),
+per-period charge caps (slice 7). Remaining build items (highspy
+dependency, production wiring) are integration/packaging, not new model
+semantics -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md.
 """
 
 import json
@@ -316,3 +316,43 @@ def test_ac_cap_clips_solar_above_the_inverter_limit():
     assert result.exp == pytest.approx([1.0, 1.0], abs=1e-6)  # capped, not 2.0
     assert result.credited_exp == pytest.approx([1.0, 1.0], abs=1e-6)
     assert result.cost == pytest.approx(-0.4, abs=1e-6)  # -1.0 * 0.2 * 2
+
+
+def test_per_period_charge_cap_derates_the_store_rate():
+    """max_charge_power_per_period (typically temperature derating) must
+    cap the STORE/IDLE charge rate for that period below the battery's
+    flat max_charge_power_kw, matching dp_battery_algorithm.py's own
+    per-period clamp -- not silently ignored."""
+    battery = {
+        "initial_soe": 2.0,
+        "min_soe_kwh": 2.0,
+        "max_soe_kwh": 20.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.0,
+        "max_charge_power_kw": 10,
+        "max_discharge_power_kw": 10,
+        "inverter_max_ac_power_kw": 11,
+        "inverter_ac_power_margin": 0,
+    }
+    kwargs = {
+        "buy_price": [0.1] * 4,
+        "sell_price": [0.05] * 4,
+        "home_consumption": [0.0] * 4,
+        "solar_production": [0.0] * 4,
+        "battery": battery,
+        "dt": 0.25,
+        "terminal_value_per_kwh": 1.0,  # incentivize charging so the cap binds
+    }
+
+    capped = solve_milp_schedule(
+        **kwargs, max_charge_power_per_period=[1.0, 1.0, 1.0, 1.0]
+    )
+    uncapped = solve_milp_schedule(**kwargs)
+
+    assert capped.status == "optimal"
+    derated_rate_kwh = 1.0 * 0.25 * 0.97  # capped kW * dt * eta_c
+    expected_soe = 2.0 + derated_rate_kwh * np.arange(5)
+    assert capped.soe == pytest.approx(expected_soe, abs=1e-6)
+    # Uncapped charges far more per period at the same incentive.
+    assert uncapped.soe[1] - uncapped.soe[0] > capped.soe[1] - capped.soe[0]

@@ -8,8 +8,8 @@ pinned against the exact-PWL reference implementation
 
 Scope so far: modes/SOE/self-throttle/wear/terminal-value core (slice 1),
 negative-sell-price export-credit fix (slice 2), two-stage integer-rate
-re-integerization (slice 3). Still missing: LP-dual shadow prices,
-below-floor tolerance (#233), AC-cap clipping, per-period charge caps --
+re-integerization (slice 3), below-floor tolerance (slice 4, #233). Still
+missing: LP-dual shadow prices, AC-cap clipping, per-period charge caps --
 see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the
 full remaining build list.
 """
@@ -191,3 +191,38 @@ def test_integer_rates_matches_pwl_reference_within_known_tolerance():
 
     pwl_reference_cost = sc["expected_results"]["battery_solar_cost"]
     assert result.cost == pytest.approx(pwl_reference_cost, abs=2e-4)
+
+
+def test_below_floor_start_recovers_gradually_without_fabricated_jump():
+    """initial_soe below min_soe_kwh is common after a restart or deep
+    discharge (#233). The model must not require an instant jump to the
+    floor -- it must recover as fast as physically reachable and stay
+    feasible in the meantime. A charge rate too slow to reach the floor
+    within the horizon must still solve (reaching as far as reachable),
+    not report infeasible."""
+    battery = {
+        "initial_soe": 1.0,  # below min_soe_kwh
+        "min_soe_kwh": 2.0,
+        "max_soe_kwh": 20.0,
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.4,
+        "max_charge_power_kw": 1.0,  # slow: can't reach the floor in 4 periods
+        "max_discharge_power_kw": 10,
+        "inverter_max_ac_power_kw": 11,
+        "inverter_ac_power_margin": 0,
+    }
+    result = solve_milp_schedule(
+        buy_price=[0.5] * 4,
+        sell_price=[0.2] * 4,
+        home_consumption=[0.0] * 4,
+        solar_production=[0.0] * 4,
+        battery=battery,
+        dt=0.25,
+    )
+
+    assert result.status == "optimal"
+    store_rate_kwh = 1.0 * 0.25 * 0.97  # max_charge_power_kw * dt * eta_c
+    expected_soe = 1.0 + store_rate_kwh * np.arange(5)
+    assert result.soe == pytest.approx(expected_soe, abs=1e-6)
+    assert result.soe[-1] < 2.0  # never fabricated a jump to the floor

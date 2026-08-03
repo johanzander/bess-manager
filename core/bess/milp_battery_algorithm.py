@@ -178,8 +178,22 @@ def solve_milp_schedule(
 
     lb = np.zeros(n_vars)
     ub = np.full(n_vars, np.inf)
-    lb[e] = e_min
     ub[e] = e_max
+    # Below-floor tolerance (#233): if initial_soe starts below min_soe_kwh
+    # (common after a restart or deep discharge), don't fabricate a jump
+    # to the floor -- only require reaching it as fast as physically
+    # reachable. store_rate_m is STORE mode's per-period charge cap and an
+    # upper bound on ANY mode's charge rate (IDLE can
+    # only charge from solar, which is <= the same cap), so
+    # e0 + t*store_rate_m is a safe (non-tight, always-valid) bound on how
+    # much SOE could possibly have risen by period t regardless of price.
+    # When initial_soe >= min_soe_kwh this reduces to the flat e_min floor
+    # unconditionally (reachable_from_start >= e0 >= e_min already), so
+    # there's no behavior change for the normal case.
+    store_rate_m = rate_throughput_kwh * eta_c
+    reachable_from_start = e0 + np.arange(1, horizon + 1) * store_rate_m
+    soe_floor = np.minimum(e_min, reachable_from_start)
+    lb[e[1:]] = soe_floor
     lb[e[0]] = ub[e[0]] = e0
     ub[store_kwh] = rate_throughput_kwh * eta_c
     ub[solar_to_battery_kwh] = np.maximum(surplus, 0)
@@ -206,7 +220,15 @@ def solve_milp_schedule(
         rlb.append(lo)
         rub.append(hi)
 
-    capacity_span = e_max - e_min
+    # Big-M for the STORE/IDLE capacity-branch min() encoding below. Using
+    # capacity_span (e_max - e_min) here implicitly assumes e[t] >= e_min
+    # always -- when a below-floor start (#233 above) pushes e[t] below
+    # e_min, that M is too small to make the inactive branch's slack
+    # non-binding, producing a spurious infeasibility even though a
+    # feasible schedule exists (found via a below-floor scenario that
+    # returned status="infeasible" with no real infeasibility). Sized
+    # against the true minimum reachable e[t] instead.
+    soe_force_big_m = e_max - min(e0, e_min)
     for t in range(horizon):
         con(
             [
@@ -233,7 +255,6 @@ def solve_milp_schedule(
         )
 
         # STORE: store_kwh = min(rate_throughput*eta_c, e_max - e[t]) if active.
-        store_rate_m = rate_throughput_kwh * eta_c
         con([(store_kwh[t], 1), (mode_store[t], -store_rate_m)], -np.inf, 0)
         con([(store_kwh[t], 1), (e[t], 1)], -np.inf, e_max)
         con(
@@ -249,10 +270,10 @@ def solve_milp_schedule(
             [
                 (store_kwh[t], 1),
                 (e[t], 1),
-                (store_active[t], -capacity_span),
-                (mode_store[t], -capacity_span),
+                (store_active[t], -soe_force_big_m),
+                (mode_store[t], -soe_force_big_m),
             ],
-            e_max - 2 * capacity_span,
+            e_max - 2 * soe_force_big_m,
             np.inf,
         )
 
@@ -302,10 +323,10 @@ def solve_milp_schedule(
             [
                 (idle_kwh[t], 1),
                 (e[t], 1),
-                (idle_active[t], -capacity_span),
-                (mode_idle[t], -capacity_span),
+                (idle_active[t], -soe_force_big_m),
+                (mode_idle[t], -soe_force_big_m),
             ],
-            e_max - 2 * capacity_span,
+            e_max - 2 * soe_force_big_m,
             np.inf,
         )
 
@@ -316,10 +337,20 @@ def solve_milp_schedule(
             0,
             np.inf,
         )
+        # e[t] >= min_soe_kwh + discharge_amount when discharging, gated by
+        # mode_discharge -- ungated (as inherited from the spike, which
+        # never exercised a below-floor start) this silently re-imposes
+        # the hard e_min floor on every period regardless of mode,
+        # conflicting with the below-floor relaxation above whenever
+        # discharge_pct is legitimately 0.
         con(
-            [(discharge_pct[t], discharge_step_kwh / eta_d), (e[t], -1)],
+            [
+                (discharge_pct[t], discharge_step_kwh / eta_d),
+                (e[t], -1),
+                (mode_discharge[t], e_max),
+            ],
             -np.inf,
-            -e_min,
+            e_max - e_min,
         )
         con(
             [(discharge_pct[t], discharge_step_kwh)],

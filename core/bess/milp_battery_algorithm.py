@@ -11,21 +11,24 @@ DP's SOE-grid snap noise mis-picks between financially near-tied windows
 This module is the feasibility spike
 (docs/superpowers/specs/2026-08-03-milp-spike-450.py) generalized into a
 reusable function covering the pivot spec's full "Key design decisions
-for the build phase" semantics list. Remaining build items (highspy
-dependency swap, production wiring into dp_schedule.py/
-battery_system_manager.py) are integration/packaging, not new model
-semantics.
+for the build phase" semantics list, and wired into production as
+dp_battery_algorithm.py's optimize_battery_schedule.
 
 Negative sell prices (spec point 3): the spike assumed buy > sell > 0 and
-relied on that spread alone to keep import/export exclusive, which is
-still required here (see the NotImplementedError below) -- but the actual
-bug the spec flagged was different: the self-throttle export-credit
-mechanism (#240) let the solver zero out `credited_exp` for *any* export
-outside DISCHARGE mode when sell < 0, dodging a cost it cannot physically
-avoid (forced solar-surplus export has no curtailment option in this
-system). Fixed by pinning credited_exp == exp whenever mode_discharge is
-not active; self-throttle's below-threshold zero-credit stays
-DISCHARGE-mode-only, per its actual hardware semantics.
+relied on that spread alone to keep import/export exclusive -- true when
+the price spread is positive, but real price data (fed in via production
+wiring) can have buy <= sell in some periods (negative-price events,
+narrow/inverted spreads), where that argument breaks. Import/export
+exclusivity is now enforced structurally via an explicit binary
+(import_active), not economically, matching how dp_battery_algorithm.py's
+own _ac_flows guarantees it via a min() rather than a price assumption.
+Separately, the self-throttle export-credit mechanism (#240) let the
+solver zero out `credited_exp` for *any* export outside DISCHARGE mode
+when sell < 0, dodging a cost it cannot physically avoid (forced
+solar-surplus export has no curtailment option in this system). Fixed by
+pinning credited_exp == exp whenever mode_discharge is not active;
+self-throttle's below-threshold zero-credit stays DISCHARGE-mode-only,
+per its actual hardware semantics.
 """
 
 from dataclasses import dataclass
@@ -203,18 +206,26 @@ def solve_milp_schedule(
         charge_power_kw = np.full(horizon, battery["max_charge_power_kw"])
     rate_throughput_kwh = charge_power_kw * dt  # per-period array
     discharge_step_kwh = battery["max_discharge_power_kw"] / 100 * dt
-    ac_cap_kwh = (
-        battery["inverter_max_ac_power_kw"]
-        * (1 - battery["inverter_ac_power_margin"])
-        * dt
-    )
-
-    if not (buy > sell).all():
-        raise NotImplementedError(
-            "solve_milp_schedule requires buy > sell in every period -- "
-            "without that spread, the import/export split has no unique "
-            "LP optimum (unbounded degeneracy), which is out of scope"
+    # inverter_max_ac_power_kw <= 0 is a sentinel meaning the AC cap is
+    # DISABLED (matches dp_battery_algorithm.py's _effective_ac_cap_kwh,
+    # which returns None in that case) -- NOT a literal zero-kWh cap.
+    # Modeled as a large-but-finite value (rather than np.inf, which would
+    # break the sparse constraint matrix's arithmetic) comfortably above
+    # any physically possible flow for this problem.
+    if battery["inverter_max_ac_power_kw"] <= 0.0:
+        ac_cap_kwh = 10 * (
+            float(np.max(cons))
+            + float(np.max(solar))
+            + battery["max_discharge_power_kw"] * dt
+            + 1.0
         )
+    else:
+        ac_cap_kwh = (
+            battery["inverter_max_ac_power_kw"]
+            * (1 - battery["inverter_ac_power_margin"])
+            * dt
+        )
+
     surplus = np.maximum(0.0, solar - cons)
     idle_charge_kwh = np.minimum(surplus, rate_throughput_kwh) * eta_c
     ac_headroom_kwh = np.maximum(0.0, ac_cap_kwh - np.minimum(solar, ac_cap_kwh))
@@ -244,6 +255,7 @@ def solve_milp_schedule(
     idle_active = var("idle_active", horizon)
     throttled = var("throttled", horizon)
     ac_cap_active = var("ac_cap_active", horizon)
+    import_active = var("import_active", horizon)
     n_vars = len(names)
 
     integrality = np.zeros(n_vars)
@@ -257,6 +269,7 @@ def solve_milp_schedule(
         idle_active,
         throttled,
         ac_cap_active,
+        import_active,
     )
     for g in binary_groups:
         integrality[g] = 1
@@ -497,6 +510,25 @@ def solve_milp_schedule(
             -cons[t],
         )
 
+        # Import/export exclusivity, enforced STRUCTURALLY (a binary),
+        # not economically. Earlier slices relied on buy > sell alone to
+        # make simultaneous import+export unprofitable in the LP
+        # relaxation -- true when the price spread is positive, but real
+        # price data can have buy <= sell in some periods (negative-price
+        # events, narrow/inverted spreads), where that argument breaks
+        # and the solver could "round-trip" energy through import+export
+        # for a fabricated profit. dp_battery_algorithm.py's own
+        # _ac_flows never has this problem because grid_imported/
+        # grid_exported are computed from home_served = min(ac_output,
+        # home_consumption), which makes one of them exactly zero by
+        # construction -- matched here with an explicit binary instead.
+        con([(imp[t], 1), (import_active[t], -50)], -np.inf, 0)
+        con(
+            [(exp[t], 1), (import_active[t], _EXPORT_BIG_M_KWH)],
+            -np.inf,
+            _EXPORT_BIG_M_KWH,
+        )
+
         # Export credit: full, except self-throttled below threshold in
         # DISCHARGE mode (#240). Outside DISCHARGE mode, credited_exp must
         # equal exp exactly -- self-throttle is a DISCHARGE-mode-only
@@ -677,6 +709,9 @@ def solve_milp_schedule(
             fixed = np.round(result.x[ac_cap_active[t]])
             lb3[ac_cap_active[t]] = fixed
             ub3[ac_cap_active[t]] = fixed
+            fixed = np.round(result.x[import_active[t]])
+            lb3[import_active[t]] = fixed
+            ub3[import_active[t]] = fixed
         # Free e[0] -- pinned via an explicit equality row instead (below)
         # so its dual is reachable through .eqlin.marginals like every
         # other period, rather than needing separate bound-dual handling.

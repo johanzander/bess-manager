@@ -69,6 +69,7 @@ from core.bess.dp_constants import (
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
+from core.bess.milp_battery_algorithm import solve_milp_schedule
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -1750,60 +1751,104 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
-    # Step 1: Run DP to compute the value-to-go array V. Step 2 recomputes
-    # each replay action directly from V (interpolated at the true
-    # continuous SoE) rather than looking up a grid-snapped policy table.
-    V = _run_dynamic_programming(
-        horizon=horizon,
+    # Step 1: Solve the MILP for the globally optimal, hardware-executable
+    # schedule (#450 pivot -- replaces the DP backward induction, which
+    # could mis-pick between financially near-tied windows under SOE-grid
+    # discretization noise). See
+    # docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md and
+    # core/bess/milp_battery_algorithm.py.
+    battery_dict = {
+        "initial_soe": initial_soe,
+        "min_soe_kwh": battery_settings.min_soe_kwh,
+        "max_soe_kwh": battery_settings.max_soe_kwh,
+        "efficiency_charge": battery_settings.efficiency_charge,
+        "efficiency_discharge": battery_settings.efficiency_discharge,
+        "cycle_cost_per_kwh": battery_settings.cycle_cost_per_kwh,
+        "max_charge_power_kw": battery_settings.max_charge_power_kw,
+        "max_discharge_power_kw": battery_settings.max_discharge_power_kw,
+        "inverter_max_ac_power_kw": battery_settings.inverter_max_ac_power_kw,
+        "inverter_ac_power_margin": battery_settings.inverter_ac_power_margin,
+    }
+    milp_result = solve_milp_schedule(
         buy_price=buy_price,
         sell_price=sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
-        initial_soe=initial_soe,
-        battery_settings=battery_settings,
-        initial_cost_basis=initial_cost_basis,
+        battery=battery_dict,
         dt=dt,
         terminal_value_per_kwh=terminal_value_per_kwh,
-        currency=currency,
+        integer_rates=True,
+        compute_shadow_price_array=True,
         max_charge_power_per_period=max_charge_power_per_period,
         self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-        discharge_resolution_kw=discharge_resolution_kw,
     )
-
-    # Step 2: Reconstruct the optimal path with continuous SoE propagation.
-    # The old approach read period_data from stored_period_data[(t, i)], which
-    # reported grid-snapped SoE values (battery_soe_end = soe_levels[next_i]).
-    # Here we carry the exact floating-point SoE forward each period so the
-    # reported trajectory matches what the simulator will produce (R == P).
-    hourly_results = []
-    current_soe = initial_soe
-    current_cost_basis = initial_cost_basis
-    _, power_levels = _discretize_state_action_space(battery_settings)
-
-    for t in range(horizon):
-        # Recompute the action directly at the true continuous SoE using the
-        # already-known V[t+1, :] (linearly interpolated) as the continuation
-        # value -- the same reward+max(V) logic as the backward pass, applied
-        # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, _ = _best_action_at_continuous_state(
-            soe=current_soe,
-            t=t,
-            V_next=V[t + 1],
-            power_levels=power_levels,
-            home_consumption=home_consumption,
-            battery_settings=battery_settings,
-            dt=dt,
-            solar_production=solar_production,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            cost_basis=current_cost_basis,
-            max_charge_power_per_period=max_charge_power_per_period,
-            discharge_resolution_kw=discharge_resolution_kw,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    if milp_result.status != "optimal":
+        raise RuntimeError(
+            f"MILP battery schedule optimization failed: status={milp_result.status}"
         )
 
+    def _milp_action_power(t: int) -> float:
+        """Translate the MILP's mode+discharge_pct decision for period t
+        into dp_battery_algorithm.py's power-based action convention: a
+        single signed float where positive=STORE (physics are binary --
+        any positive value charges at rate_throughput, see #203),
+        negative=DISCHARGE at that exact rate, and zero=IDLE/BYPASS
+        (both collapse to the same power=0 case downstream, distinguished
+        by the SOE delta via _idle_battery_flows)."""
+        mode = milp_result.mode[t]
+        if mode == "STORE":
+            return battery_settings.max_charge_power_kw
+        if mode == "DISCHARGE":
+            return (
+                -(milp_result.discharge_pct[t] / 100.0)
+                * battery_settings.max_discharge_power_kw
+            )
+        return 0.0
+
+    # Step 2: Replay the MILP's own SOE trajectory through the SAME
+    # reward/period-data machinery the DP itself uses (_compute_reward,
+    # _build_period_data) -- this reuses the DP's already-validated cost
+    # basis (FIFO), wear cost, AC-flow, and self-throttle accounting
+    # unchanged; only WHICH action is chosen each period comes from the
+    # MILP now, not backward induction.
+    rewards = []
+    cost_basis_after: list[float] = []
+    cost_basis_walk = initial_cost_basis
+    soe_walk = initial_soe
+    for t in range(horizon):
+        next_soe = float(milp_result.soe[t + 1])
+        reward, cost_basis_walk = _compute_reward(
+            power=_milp_action_power(t),
+            soe=soe_walk,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            cost_basis=cost_basis_walk,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        )
+        rewards.append(reward)
+        cost_basis_after.append(cost_basis_walk)
+        soe_walk = next_soe
+
+    # continuation_value (#353): the sum of every later period's reward,
+    # the same quantity the DP's own V[t+1] represents for its chosen
+    # path, just computed directly from the already-solved schedule
+    # instead of a value-to-go table.
+    remaining_reward_from = [0.0] * (horizon + 1)
+    for t in range(horizon - 1, -1, -1):
+        remaining_reward_from[t] = rewards[t] + remaining_reward_from[t + 1]
+
+    hourly_results = []
+    current_soe = initial_soe
+    for t in range(horizon):
+        next_soe = float(milp_result.soe[t + 1])
         period_data = _build_period_data(
-            power=action,
+            power=_milp_action_power(t),
             soe=current_soe,
             next_soe=next_soe,
             period=t,
@@ -1813,41 +1858,13 @@ def optimize_battery_schedule(
             buy_price=buy_price,
             sell_price=sell_price,
             solar_production=solar_production[t],
-            new_cost_basis=new_cost_basis,
+            new_cost_basis=cost_basis_after[t],
             currency=currency,
-            # Same continuation-value term _best_action_at_continuous_state
-            # added internally to choose this action (dp_battery_algorithm.py
-            # _best_action_at_continuous_state's `value = reward +
-            # _interpolate_value(...)`), reported here as future_value (#353)
-            # instead of being discarded.
-            continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
+            continuation_value=remaining_reward_from[t + 1],
         )
-
-        # Shadow price = marginal opportunity value of stored energy, as a
-        # backward difference over SOE_STEP_KWH -- deliberately NOT the
-        # PWL's infinitesimal slope. The exact discrete-action V is locally
-        # staircase-like at micro scales (a marginal 1e-6 kWh cannot be
-        # monetized by any integer-percent action, so dV/dSoE at h->0 is
-        # ~0 near capacity where the actionable-increment marginal value is
-        # the sell price). The 0.05 kWh window matches both the previous
-        # grid implementation's definition and what the intra-period
-        # discharge gates were validated against.
-        max_anchor = battery_settings.max_soe_kwh
-        anchor = battery_settings.min_soe_kwh + SOE_STEP_KWH * round(
-            (min(current_soe, max_anchor) - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-        )
-        if anchor >= battery_settings.min_soe_kwh + SOE_STEP_KWH / 2:
-            period_data.decision.shadow_price = float(
-                (
-                    _interpolate_value(V[t], anchor, battery_settings)
-                    - _interpolate_value(V[t], anchor - SOE_STEP_KWH, battery_settings)
-                )
-                / SOE_STEP_KWH
-            )
-
+        period_data.decision.shadow_price = float(milp_result.shadow_prices[t])
         hourly_results.append(period_data)
         current_soe = next_soe
-        current_cost_basis = new_cost_basis
 
     # Step 3: Calculate economic summary directly from PeriodData
     total_base_cost = sum(

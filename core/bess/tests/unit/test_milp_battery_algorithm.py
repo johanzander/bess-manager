@@ -21,8 +21,10 @@ import os
 import numpy as np
 import pytest
 
+from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.dp_constants import SOE_STEP_KWH
 from core.bess.milp_battery_algorithm import solve_milp_schedule
+from core.bess.settings import BatterySettings
 
 _FIXTURE = os.path.join(
     os.path.dirname(__file__), "data", "regression_2026_08_02_043728.json"
@@ -132,9 +134,26 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     auxiliary piecewise-linear branch-select binaries (store_active,
     s2b_active, idle_active, throttled) -- fixing those too was measured
     to cost ~3.8 ore/day extra on this fixture versus a full joint-integer
-    solve (confirmed by running the joint solve directly: -5.998460244,
-    matching the pivot spec's cited table value), because they must be
-    free to re-adapt once rates are forced onto the integer lattice."""
+    solve, because they must be free to re-adapt once rates are forced
+    onto the integer lattice.
+
+    Expected value note: an earlier version of this test pinned
+    -5.998460244, the joint-integer optimum WITHOUT the import/export
+    exclusivity binary (added later, production wiring phase) -- that
+    number relied on an unphysical loophole (simultaneous tiny import AND
+    self-throttled export in the same period, impossible on real
+    hardware; dp_battery_algorithm.py's own _ac_flows prevents this
+    structurally via min()). Once closed, the true hardware-realizable
+    optimum for THIS internal MILP objective is -5.984652... -- verified
+    NOT to be a regression: the wired production path
+    (dp_battery_algorithm.py's optimize_battery_schedule, which replays
+    this module's chosen actions through the DP's own trusted
+    _compute_reward/_build_period_data rather than trusting this
+    module's own objective formula) reproduces the PWL reference cost
+    EXACTLY on this fixture -- see
+    test_integer_rates_matches_pwl_reference_within_known_tolerance,
+    which now tests the wired path directly instead of this internal
+    number."""
     sc = _load_fixture()
     kwargs = {
         "buy_price": sc["buy_price"],
@@ -155,12 +174,12 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     ), integer.discharge_pct
 
     # Hardware-executable rates can only be worse (higher cost) than the
-    # continuous relaxation's, and should be close to the joint-integer
-    # optimum (-5.998460244, verified by running the joint solve directly)
-    # -- not just "not wildly worse" (that looser bound previously masked
-    # a ~3.8 ore/day regression from over-fixing stage-2 binaries).
+    # continuous relaxation's, and should be close to the true (exclusivity-
+    # honest) joint-integer optimum -- not just "not wildly worse" (that
+    # looser bound previously masked a ~3.8 ore/day regression from
+    # over-fixing stage-2 binaries).
     assert integer.cost >= continuous.cost - 1e-6
-    assert integer.cost == pytest.approx(-5.998460244, abs=1e-3)
+    assert integer.cost == pytest.approx(-5.98465229237481, abs=1e-3)
 
     # Same window: the SOE trajectory shouldn't shift to a different mode
     # sequence just because rates were re-integerized.
@@ -169,30 +188,49 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
 
 
 def test_integer_rates_matches_pwl_reference_within_known_tolerance():
-    """Cross-checks the MILP core's hardware-executable optimum against
-    the exact-PWL DP reference implementation's own pinned cost for this
-    fixture (core/bess/dp_battery_algorithm.py via
-    optimize_battery_schedule, same fixture's expected_results.
-    battery_solar_cost -- the value core/bess/tests/unit/test_scenarios.py
-    validates the current production DP against). A small residual gap is
-    expected and was flagged by the pivot spec as needing reconciling
-    (point 6, "likely a small feasibility-rule mismatch, e.g. charge-
-    candidate classification floor") -- this test pins that gap at its
-    currently measured size so a regression (the gap silently widening)
-    gets caught, without claiming the gap is fully explained yet."""
+    """Cross-checks the WIRED PRODUCTION PATH (dp_battery_algorithm.py's
+    optimize_battery_schedule, which replays this module's chosen actions
+    through the DP's own trusted _compute_reward/_build_period_data)
+    against the exact-PWL DP reference implementation's own pinned cost
+    for this fixture (expected_results.battery_solar_cost -- the value
+    core/bess/tests/unit/test_scenarios.py validates the production DP
+    against).
+
+    Deliberately NOT testing solve_milp_schedule's own internal objective
+    value here: that number uses this module's own cost formula (which
+    legitimately differs in some edge cases, e.g. self-throttled discharge
+    periods, from the DP's _compute_reward -- verified not to matter,
+    since production never trusts this module's internal cost, only its
+    chosen actions). Testing the wired path is what actually matters for
+    the "no regression vs the DP" acceptance bar."""
     sc = _load_fixture()
-    result = solve_milp_schedule(
+    battery_settings = BatterySettings(
+        total_capacity=sc["battery"]["max_soe_kwh"],
+        min_soc=sc["battery"]["min_soe_kwh"] / sc["battery"]["max_soe_kwh"] * 100,
+        max_soc=100.0,
+        max_charge_power_kw=sc["battery"]["max_charge_power_kw"],
+        max_discharge_power_kw=sc["battery"]["max_discharge_power_kw"],
+        cycle_cost_per_kwh=sc["battery"]["cycle_cost_per_kwh"],
+        efficiency_charge=sc["battery"]["efficiency_charge"],
+        efficiency_discharge=sc["battery"]["efficiency_discharge"],
+        inverter_max_ac_power_kw=sc["battery"]["inverter_max_ac_power_kw"],
+        inverter_ac_power_margin=sc["battery"]["inverter_ac_power_margin"],
+    )
+    result = optimize_battery_schedule(
         buy_price=sc["buy_price"],
         sell_price=sc["sell_price"],
         home_consumption=sc["home_consumption"],
+        battery_settings=battery_settings,
         solar_production=sc["solar_production"],
-        battery=sc["battery"],
-        dt=sc["period_duration_hours"],
-        integer_rates=True,
+        initial_soe=sc["battery"]["initial_soe"],
+        initial_cost_basis=sc["battery"]["initial_cost_basis"],
+        period_duration_hours=sc["period_duration_hours"],
     )
 
     pwl_reference_cost = sc["expected_results"]["battery_solar_cost"]
-    assert result.cost == pytest.approx(pwl_reference_cost, abs=2e-4)
+    assert result.economic_summary.battery_solar_cost == pytest.approx(
+        pwl_reference_cost, abs=1e-6
+    )
 
 
 def test_below_floor_start_recovers_gradually_without_fabricated_jump():
@@ -421,3 +459,44 @@ def test_mode_array_reports_the_chosen_hardware_disposition_per_period():
         "IDLE",
         "BYPASS",
     ]
+
+
+def test_ac_cap_disabled_sentinel_does_not_block_discharge():
+    """inverter_max_ac_power_kw <= 0 means the AC cap is DISABLED (matches
+    dp_battery_algorithm.py's _effective_ac_cap_kwh, which returns None in
+    that case), NOT a literal zero-kWh cap. Found via a real regression:
+    treating it as a literal zero silently gave ac_headroom_kwh=0 for
+    every period, blocking ALL discharge permanently regardless of price
+    -- the model quietly fell back to grid-only behavior (cost equal to
+    base_cost) instead of exploiting an obviously profitable arbitrage
+    opportunity."""
+    battery = {
+        "initial_soe": 15.0,  # plenty of stored energy available
+        "min_soe_kwh": 3.0,
+        "max_soe_kwh": 30.0,
+        "efficiency_charge": 0.95,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.4,
+        "max_charge_power_kw": 6.0,
+        "max_discharge_power_kw": 6.0,
+        "inverter_max_ac_power_kw": 0.0,
+        "inverter_ac_power_margin": 0.0,
+    }
+    result = solve_milp_schedule(
+        buy_price=[0.9, 0.9, 0.9, 0.9],
+        sell_price=[0.1, 0.1, 0.1, 0.1],
+        home_consumption=[1.0, 1.0, 1.0, 1.0],  # expensive import to avoid
+        solar_production=[0.0, 0.0, 0.0, 0.0],
+        battery=battery,
+        dt=0.25,
+        terminal_value_per_kwh=0.0,
+        integer_rates=True,
+    )
+
+    assert result.status == "optimal"
+    # Stored energy is cheaper than 0.9/kWh import -- discharge should
+    # cover consumption rather than importing at that price, which the
+    # pre-fix zero-headroom bug made structurally impossible.
+    assert (result.discharge_pct > 0).any()
+    grid_only_cost = sum(0.9 * c for c in [1.0, 1.0, 1.0, 1.0])
+    assert result.cost < grid_only_cost

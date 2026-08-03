@@ -10,12 +10,9 @@ DP's SOE-grid snap noise mis-picks between financially near-tied windows
 
 This module is the feasibility spike
 (docs/superpowers/specs/2026-08-03-milp-spike-450.py) generalized into a
-reusable function plus a terminal-value term and negative-sell-price
-handling. It is NOT yet feature complete -- see the spec's "Key design
-decisions for the build phase" for what's still missing: two-stage
-integer-rate re-integerization (this slice solves continuous discharge
-rates only), LP-dual shadow prices, below-floor tolerance (#233), AC-cap
-clipping under negative prices, and per-period charge caps.
+reusable function. It is NOT yet feature complete -- see the spec's "Key
+design decisions for the build phase" for what's still missing: AC-cap
+clipping under negative prices and per-period charge caps.
 
 Negative sell prices (spec point 3): the spike assumed buy > sell > 0 and
 relied on that spread alone to keep import/export exclusive, which is
@@ -34,6 +31,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy import sparse
 from scipy.optimize import Bounds, LinearConstraint, milp
+
+from core.bess.dp_constants import SOE_STEP_KWH
 
 # Self-throttle (#240): export below this threshold in DISCHARGE mode is not
 # credited -- see BATTERY_EXPORT_THRESHOLD_KWH in dp_battery_algorithm.py.
@@ -60,6 +59,7 @@ class MilpScheduleResult:
     exp: np.ndarray = None  # length horizon, AC export (kWh, raw)
     credited_exp: np.ndarray = None  # length horizon, export actually priced
     discharge_pct: np.ndarray = None  # length horizon, discharge rate (%)
+    shadow_price: float | None = None  # marginal value of the current SOE
 
 
 def solve_milp_schedule(
@@ -71,6 +71,7 @@ def solve_milp_schedule(
     dt: float,
     terminal_value_per_kwh: float = 0.0,
     integer_rates: bool = False,
+    compute_shadow_price: bool = False,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
 
@@ -99,6 +100,22 @@ def solve_milp_schedule(
     on 192 periods (2.0s) -- joint solving alone isn't tractable at that
     horizon (hit the 120s limit without proving optimality), so two-stage
     is load-bearing at production horizons, not just an optimization.
+
+    `compute_shadow_price`: requires integer_rates=True. Marginal value of
+    the CURRENT period's SOE only (not the full per-period array the DP
+    produces -- see dp_battery_algorithm.py's `period_data.decision.
+    shadow_price`, computed per period from the DP's value-to-go function
+    V[t]). Computed as a direct backward finite difference matching that
+    definition exactly -- deliberately NOT an LP dual, even though the
+    pivot spec's point 2 suggests LP duals (binaries fixed, one linprog
+    solve) as a cheaper implementation: getting the dual's sign/
+    formulation subtly wrong in a financial decision path is a worse risk
+    than the extra ~2 re-solves this costs. Snaps initial_soe to the same
+    SOE_STEP_KWH-aligned anchor the DP uses before differencing (`anchor
+    = min_soe_kwh + SOE_STEP_KWH * round((initial_soe - min_soe_kwh) /
+    SOE_STEP_KWH)`), and returns None (no shadow price) when the anchor is
+    below `min_soe_kwh + SOE_STEP_KWH / 2`, matching the DP's own guard
+    (a backward difference below the grid's first point is undefined).
     """
     buy = np.asarray(buy_price, dtype=float)
     sell = np.asarray(sell_price, dtype=float)
@@ -468,6 +485,38 @@ def solve_milp_schedule(
             )
         result = stage2
 
+    shadow_price = None
+    if compute_shadow_price:
+        if not integer_rates:
+            raise NotImplementedError(
+                "compute_shadow_price requires integer_rates=True -- "
+                "shadow price is defined against the hardware-executable "
+                "schedule, matching the DP's own definition"
+            )
+        anchor = e_min + SOE_STEP_KWH * round((e0 - e_min) / SOE_STEP_KWH)
+        if anchor >= e_min + SOE_STEP_KWH / 2:
+            cost_at = solve_milp_schedule(
+                buy_price,
+                sell_price,
+                home_consumption,
+                solar_production,
+                {**battery, "initial_soe": anchor},
+                dt,
+                terminal_value_per_kwh,
+                integer_rates=True,
+            ).cost
+            cost_below = solve_milp_schedule(
+                buy_price,
+                sell_price,
+                home_consumption,
+                solar_production,
+                {**battery, "initial_soe": anchor - SOE_STEP_KWH},
+                dt,
+                terminal_value_per_kwh,
+                integer_rates=True,
+            ).cost
+            shadow_price = (cost_below - cost_at) / SOE_STEP_KWH
+
     return MilpScheduleResult(
         status="optimal",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
@@ -476,4 +525,5 @@ def solve_milp_schedule(
         exp=result.x[exp],
         credited_exp=result.x[credited_exp],
         discharge_pct=result.x[discharge_pct],
+        shadow_price=shadow_price,
     )

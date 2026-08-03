@@ -20,6 +20,7 @@ import os
 import numpy as np
 import pytest
 
+from core.bess.dp_constants import SOE_STEP_KWH
 from core.bess.milp_battery_algorithm import solve_milp_schedule
 
 _FIXTURE = os.path.join(
@@ -226,3 +227,59 @@ def test_below_floor_start_recovers_gradually_without_fabricated_jump():
     expected_soe = 1.0 + store_rate_kwh * np.arange(5)
     assert result.soe == pytest.approx(expected_soe, abs=1e-6)
     assert result.soe[-1] < 2.0  # never fabricated a jump to the floor
+
+
+def test_shadow_price_matches_backward_finite_difference_definition():
+    """shadow_price must be the exact backward finite difference the DP's
+    own shadow_price uses (dp_battery_algorithm.py, SOE_STEP_KWH window),
+    not an LP dual or any other approximation -- computed directly here
+    against two independent re-solves at the anchor and anchor-STEP."""
+    sc = _load_fixture()
+    battery = {**sc["battery"], "initial_soe": 10.0}  # well above the floor
+    kwargs = {
+        "buy_price": sc["buy_price"],
+        "sell_price": sc["sell_price"],
+        "home_consumption": sc["home_consumption"],
+        "solar_production": sc["solar_production"],
+        "battery": battery,
+        "dt": sc["period_duration_hours"],
+    }
+
+    result = solve_milp_schedule(
+        **kwargs, integer_rates=True, compute_shadow_price=True
+    )
+    assert result.shadow_price is not None
+
+    e_min = battery["min_soe_kwh"]
+    anchor = e_min + SOE_STEP_KWH * round((10.0 - e_min) / SOE_STEP_KWH)
+    cost_at = solve_milp_schedule(
+        **{**kwargs, "battery": {**battery, "initial_soe": anchor}},
+        integer_rates=True,
+    ).cost
+    cost_below = solve_milp_schedule(
+        **{
+            **kwargs,
+            "battery": {**battery, "initial_soe": anchor - SOE_STEP_KWH},
+        },
+        integer_rates=True,
+    ).cost
+    expected = (cost_below - cost_at) / SOE_STEP_KWH
+    assert result.shadow_price == pytest.approx(expected, abs=1e-6)
+
+
+def test_shadow_price_is_none_near_the_floor():
+    """Matches the DP's own guard: a backward difference below the grid's
+    first point (min_soe_kwh + SOE_STEP_KWH/2) is undefined, not zero."""
+    sc = _load_fixture()
+    battery = {**sc["battery"], "initial_soe": sc["battery"]["min_soe_kwh"]}
+    result = solve_milp_schedule(
+        buy_price=sc["buy_price"],
+        sell_price=sc["sell_price"],
+        home_consumption=sc["home_consumption"],
+        solar_production=sc["solar_production"],
+        battery=battery,
+        dt=sc["period_duration_hours"],
+        integer_rates=True,
+        compute_shadow_price=True,
+    )
+    assert result.shadow_price is None

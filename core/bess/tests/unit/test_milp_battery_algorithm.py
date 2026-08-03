@@ -164,3 +164,30 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     # sequence just because rates were re-integerized.
     assert integer.soe[35] == pytest.approx(continuous.soe[35], abs=1e-2)
     assert integer.soe[38] == pytest.approx(continuous.soe[38], abs=1e-2)
+
+
+def test_integer_rates_matches_pwl_reference_within_known_tolerance():
+    """Cross-checks the MILP core's hardware-executable optimum against
+    the exact-PWL DP reference implementation's own pinned cost for this
+    fixture (core/bess/dp_battery_algorithm.py via
+    optimize_battery_schedule, same fixture's expected_results.
+    battery_solar_cost -- the value core/bess/tests/unit/test_scenarios.py
+    validates the current production DP against). A small residual gap is
+    expected and was flagged by the pivot spec as needing reconciling
+    (point 6, "likely a small feasibility-rule mismatch, e.g. charge-
+    candidate classification floor") -- this test pins that gap at its
+    currently measured size so a regression (the gap silently widening)
+    gets caught, without claiming the gap is fully explained yet."""
+    sc = _load_fixture()
+    result = solve_milp_schedule(
+        buy_price=sc["buy_price"],
+        sell_price=sc["sell_price"],
+        home_consumption=sc["home_consumption"],
+        solar_production=sc["solar_production"],
+        battery=sc["battery"],
+        dt=sc["period_duration_hours"],
+        integer_rates=True,
+    )
+
+    pwl_reference_cost = sc["expected_results"]["battery_solar_cost"]
+    assert result.cost == pytest.approx(pwl_reference_cost, abs=2e-4)

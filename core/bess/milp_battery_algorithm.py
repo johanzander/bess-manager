@@ -10,13 +10,23 @@ DP's SOE-grid snap noise mis-picks between financially near-tied windows
 
 This module is the feasibility spike
 (docs/superpowers/specs/2026-08-03-milp-spike-450.py) generalized into a
-reusable function plus a terminal-value term. It is NOT yet feature
-complete -- see the spec's "Key design decisions for the build phase" for
-what's still missing: two-stage integer-rate re-integerization (this slice
-solves continuous discharge rates only), a forced-export binary for
-negative sell prices (this slice asserts buy > sell > 0, matching the
-spike), LP-dual shadow prices, below-floor tolerance (#233), AC-cap
+reusable function plus a terminal-value term and negative-sell-price
+handling. It is NOT yet feature complete -- see the spec's "Key design
+decisions for the build phase" for what's still missing: two-stage
+integer-rate re-integerization (this slice solves continuous discharge
+rates only), LP-dual shadow prices, below-floor tolerance (#233), AC-cap
 clipping under negative prices, and per-period charge caps.
+
+Negative sell prices (spec point 3): the spike assumed buy > sell > 0 and
+relied on that spread alone to keep import/export exclusive, which is
+still required here (see the NotImplementedError below) -- but the actual
+bug the spec flagged was different: the self-throttle export-credit
+mechanism (#240) let the solver zero out `credited_exp` for *any* export
+outside DISCHARGE mode when sell < 0, dodging a cost it cannot physically
+avoid (forced solar-surplus export has no curtailment option in this
+system). Fixed by pinning credited_exp == exp whenever mode_discharge is
+not active; self-throttle's below-threshold zero-credit stays
+DISCHARGE-mode-only, per its actual hardware semantics.
 """
 
 from dataclasses import dataclass
@@ -46,6 +56,9 @@ class MilpScheduleResult:
     status: str
     cost: float
     soe: np.ndarray  # length horizon + 1, SOE at each period boundary
+    imp: np.ndarray = None  # length horizon, AC import (kWh)
+    exp: np.ndarray = None  # length horizon, AC export (kWh, raw)
+    credited_exp: np.ndarray = None  # length horizon, export actually priced
 
 
 def solve_milp_schedule(
@@ -85,11 +98,11 @@ def solve_milp_schedule(
         * dt
     )
 
-    if not (buy > sell).all() or not (sell > 0).all():
+    if not (buy > sell).all():
         raise NotImplementedError(
-            "solve_milp_schedule requires buy > sell > 0 in every period "
-            "(slice 1 scope) -- negative-sell forced-export binary is a "
-            "deferred build-phase item, see the pivot spec point 3"
+            "solve_milp_schedule requires buy > sell in every period -- "
+            "without that spread, the import/export split has no unique "
+            "LP optimum (unbounded degeneracy), which is out of scope"
         )
     if not (solar <= ac_cap_kwh).all():
         raise NotImplementedError(
@@ -306,8 +319,22 @@ def solve_milp_schedule(
         )
 
         # Export credit: full, except self-throttled below threshold in
-        # DISCHARGE mode (#240).
+        # DISCHARGE mode (#240). Outside DISCHARGE mode, credited_exp must
+        # equal exp exactly -- self-throttle is a DISCHARGE-mode-only
+        # hardware quirk, and export forced by the AC balance (solar
+        # surplus that can't be stored) is always a real, priced
+        # transaction, even at a negative sell price. Without this floor
+        # the solver can zero out credited_exp for free whenever sell < 0.
         con([(credited_exp[t], 1), (exp[t], -1)], -np.inf, 0)
+        con(
+            [
+                (credited_exp[t], 1),
+                (exp[t], -1),
+                (mode_discharge[t], _EXPORT_BIG_M_KWH),
+            ],
+            0,
+            np.inf,
+        )
         con(
             [
                 (credited_exp[t], 1),
@@ -353,4 +380,7 @@ def solve_milp_schedule(
         status="optimal",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
         soe=result.x[e],
+        imp=result.x[imp],
+        exp=result.x[exp],
+        credited_exp=result.x[credited_exp],
     )

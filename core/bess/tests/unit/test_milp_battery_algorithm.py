@@ -75,3 +75,43 @@ def test_terminal_value_reduces_reported_cost():
     credited = solve_milp_schedule(**kwargs, terminal_value_per_kwh=1.0)
 
     assert credited.cost < baseline.cost
+
+
+def test_negative_sell_price_export_is_not_free():
+    """A period with forced solar-surplus export (battery at fixed zero
+    capacity, so only BYPASS is feasible) at a NEGATIVE sell price must
+    still cost sell_price * exported_kwh -- the self-throttle export-credit
+    mechanism (#240) is a DISCHARGE-mode-only hardware quirk and must not
+    let the model zero out the cost of export it cannot avoid in any other
+    mode. Reproduces the pivot spec's point 3 (spike's buy>sell>0 shortcut
+    is unsafe to reuse as-is)."""
+    battery = {
+        "initial_soe": 5.0,
+        "min_soe_kwh": 5.0,
+        "max_soe_kwh": 5.0,  # zero usable capacity: only BYPASS is feasible
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.4,
+        "max_charge_power_kw": 10,
+        "max_discharge_power_kw": 10,
+        "inverter_max_ac_power_kw": 11,
+        "inverter_ac_power_margin": 0,
+    }
+    result = solve_milp_schedule(
+        buy_price=[0.5, 0.5],
+        sell_price=[-0.2, -0.2],
+        home_consumption=[0.0, 0.0],
+        solar_production=[2.0, 2.0],
+        battery=battery,
+        dt=0.25,
+    )
+
+    assert result.status == "optimal"
+    assert (result.exp > 1.0).all()  # solar surplus forced out as export
+    # credited_exp must track raw export exactly outside DISCHARGE mode --
+    # no free credited_exp=0 loophole to dodge the negative-price cost.
+    assert result.credited_exp == pytest.approx(result.exp, abs=1e-6)
+    expected_cost = sum(
+        -sell * exp for sell, exp in zip([-0.2, -0.2], result.exp, strict=True)
+    )
+    assert result.cost == pytest.approx(expected_cost, abs=1e-6)

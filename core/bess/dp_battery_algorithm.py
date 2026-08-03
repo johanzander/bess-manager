@@ -88,6 +88,36 @@ logger = logging.getLogger(__name__)
 # Algorithm parameters. SOE_STEP_KWH/POWER_STEP_KW live in dp_constants.py
 # (shared with decision_intelligence.py -- see that module's docstring for why).
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
+
+# Piecewise-linear value-function representation (#450). The backward pass
+# represents each V[t] as an adaptive breakpoint list instead of a uniform
+# SOE grid, refined until the representation is within PWL_EPS_REFINE (SEK)
+# of the true value function per period and pruned of breakpoints whose
+# removal changes V by less than PWL_EPS_PRUNE. Total certified error over a
+# 192-period horizon is bounded by 192 * (refine + prune) ~ 4e-4 SEK -- two
+# orders of magnitude below the ~1e-2 SEK near-tie differentials this exists
+# to resolve (#450's reported case: 0.0124 SEK). Tightening these further
+# buys no better decisions: the exact discrete-action V carries a geometric
+# cascade of real micro-kinks (winner-switches between adjacent
+# integer-percent discharge levels), so breakpoint counts saturate rather
+# than shrink (measured: ~10k at 1e-5 and 1e-6 alike).
+PWL_EPS_REFINE = 1e-6
+PWL_EPS_PRUNE = 1e-6
+PWL_MAX_REFINE_ITERS = 100
+# Intervals narrower than this are accepted without probing. Must sit at
+# float-resolution scale, NOT at "small error" scale: V contains near-cliff
+# features (steep ramps from feasibility boundaries propagating through
+# action shifts) whose height is independent of their width, so a coarser
+# floor abandons refinement exactly where the function moves fastest
+# (measured: an 8e-3 SEK under-read inside a 1.3e-5-wide interval).
+PWL_MIN_PROBE_WIDTH_KWH = 2e-9
+# Kinks in V[t+1] with a slope change at least this large (SEK/kWh) get
+# their preimages seeded under every discharge shift (see the
+# seed-construction comment in _run_dynamic_programming); smaller kinks'
+# shifted images have value amplitudes below the refinement tolerance and
+# are left to probing. PWL_MAX_KINK_SEEDS caps the count as a guard.
+PWL_KINK_SEED_MIN_SLOPE = 1e-3
+PWL_MAX_KINK_SEEDS = 500
 # Matches decision_intelligence.classify_strategic_intent's own
 # battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
 # in sync: the DP's own reward search must value a discharge's export
@@ -855,6 +885,144 @@ def print_optimization_results(results, buy_prices, sell_prices):
     logger.info("\n".join(output))
 
 
+def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):
+    """Drop interior breakpoints whose removal changes the PWL function by
+    at most `eps` (collinearity within tolerance). Non-adjacent removals per
+    pass so each removal's error stays measured against surviving points."""
+    while len(xs) > 2:
+        x0, x1, x2 = xs[:-2], xs[1:-1], xs[2:]
+        v0, v1, v2 = vs[:-2], vs[1:-1], vs[2:]
+        frac = (x1 - x0) / (x2 - x0)
+        chord = v0 + frac * (v2 - v0)
+        removable = np.abs(v1 - chord) <= eps
+        if not removable.any():
+            break
+        keep = np.ones(len(xs), dtype=bool)
+        last_removed = -2
+        for i in np.nonzero(removable)[0]:
+            idx = i + 1
+            if idx - last_removed >= 2:
+                keep[idx] = False
+                last_removed = idx
+        xs, vs = xs[keep], vs[keep]
+    return xs, vs
+
+
+def _backward_discharge_levels(
+    battery_settings: BatterySettings,
+    discharge_resolution_kw: float | None,
+) -> np.ndarray:
+    """Discharge power levels (kW, positive) for the backward pass: the same
+    hardware-true integer-percent grid `_discharge_candidates` enumerates at
+    replay, including its classification-threshold floor. Using one action
+    set in both passes is what makes the replayed schedule achieve exactly
+    the value the backward pass promised (no snap/interpolation residual for
+    replay to fall short of)."""
+    rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+    max_pct = int(np.floor(battery_settings.max_discharge_power_kw / rate_step + 1e-9))
+    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    return np.array([pct * rate_step for pct in range(min_pct, max_pct + 1)])
+
+
+def _candidate_values_at(
+    X: np.ndarray,
+    t: int,
+    V_next: tuple[np.ndarray, np.ndarray],
+    power_row: np.ndarray,
+    horizon_inputs,
+    battery_settings: BatterySettings,
+    dt: float,
+    period_max_charge: float | None,
+    self_throttle_export_threshold_kwh: float,
+) -> np.ndarray:
+    """Best achievable value at each SOE in `X` for period `t`: max over the
+    shared action set (IDLE, STORE, discharge grid) plus the
+    SOLAR_EXPORT-below-max bypass (#313), with V[t+1] evaluated exactly at
+    each candidate's true (continuous) next_soe -- no state snapping."""
+    buy_price, sell_price, home_consumption, solar_production = horizon_inputs
+    min_soe = battery_settings.min_soe_kwh
+    max_soe = battery_settings.max_soe_kwh
+    soe_col = X.reshape(-1, 1)
+
+    is_charge = power_row > POWER_TOLERANCE_KW
+    is_discharge = power_row < -POWER_TOLERANCE_KW
+
+    next_soe = _state_transition_grid(
+        soe_col,
+        power_row,
+        battery_settings,
+        dt,
+        solar_production=solar_production[t],
+        home_consumption=home_consumption[t],
+    )
+    reward = _compute_reward_grid(
+        power_row,
+        soe_col,
+        next_soe,
+        home_consumption=home_consumption[t],
+        battery_settings=battery_settings,
+        dt=dt,
+        current_buy_price=buy_price[t],
+        current_sell_price=sell_price[t],
+        solar_production=solar_production[t],
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    )
+
+    # STORE feasibility: the same rule replay's _charge_candidate applies
+    # (binary store physics -- one representative positive power stands in
+    # for every feasible charge action).
+    max_charge_power = (max_soe - soe_col) / dt / battery_settings.efficiency_charge
+    if period_max_charge is not None:
+        max_charge_power = np.minimum(max_charge_power, period_max_charge)
+    feasible = ~is_charge | (max_charge_power > POWER_CLASSIFICATION_THRESHOLD_KW)
+
+    max_discharge_power = (
+        (soe_col - min_soe) / dt * battery_settings.efficiency_discharge
+    )
+    feasible &= ~is_discharge | (np.abs(power_row) <= max_discharge_power)
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    if ac_cap_kwh is not None:
+        # Battery discharge shares the inverter's AC stage with PV
+        # conversion — only the headroom the (possibly clipped) solar
+        # leaves is deliverable.
+        ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar_production[t], ac_cap_kwh))
+        feasible &= ~is_discharge | (np.abs(power_row) * dt <= ac_headroom_kwh)
+    feasible &= (next_soe >= min_soe) & (next_soe <= max_soe)
+
+    value = reward + _pwl_eval_array(V_next, next_soe)
+    value = np.where(feasible, value, -np.inf)
+
+    # SOLAR_EXPORT-below-max candidate (#313): soe held exactly unchanged
+    # (next_soe == soe), solar surplus exports directly instead of passively
+    # charging. Reusing _compute_reward_grid with next_soe == soe already
+    # produces the correct economics (see _idle_battery_flows: zero SOE
+    # delta -> battery_charged=0, so grid_exported reflects the full
+    # surplus). With the AC cap set, this candidate is also what defers
+    # charging to preserve headroom for above-cap solar.
+    zeros_col = np.zeros_like(soe_col)
+    reward_bypass = _compute_reward_grid(
+        zeros_col,
+        soe_col,
+        soe_col,
+        home_consumption=home_consumption[t],
+        battery_settings=battery_settings,
+        dt=dt,
+        current_buy_price=buy_price[t],
+        current_sell_price=sell_price[t],
+        solar_production=solar_production[t],
+        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+    )
+    value_bypass = reward_bypass + _pwl_eval_array(V_next, soe_col)
+
+    # IDLE and bypass are always feasible with finite reward, so the max
+    # over actions can never remain -inf.
+    return np.maximum(value.max(axis=1), value_bypass.reshape(-1))
+
+
 def _run_dynamic_programming(
     horizon: int,
     buy_price: list[float],
@@ -869,19 +1037,38 @@ def _run_dynamic_programming(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
-) -> np.ndarray:
+    discharge_resolution_kw: float | None = None,
+) -> list[tuple[np.ndarray, np.ndarray]]:
     """
-    Run backward induction DP to compute optimal battery control policy.
+    Run backward induction DP, representing each V[t] as an adaptive
+    piecewise-linear function of continuous SOE (#450) instead of a
+    uniform-grid table.
+
+    Returns a list of `horizon + 1` PWL rows, each an `(xs, vs)` breakpoint
+    pair evaluable via `_interpolate_value`.
+
+    Why not a grid: the true V's kinks live on the data-dependent reachable
+    lattice (initial_soe plus sums of charge/discharge increments), not on
+    any uniform grid. A grid table read by ANY scheme must therefore choose
+    between rounding noise (nearest-snap: up to SOE_STEP_KWH/2 x shadow
+    price per lookup, enough to flip genuinely near-tied decisions -- the
+    #450 bug) and one-signed chord bias (linear interpolation of a concave
+    V systematically underestimates it between grid points, compounding
+    across every backward step -- the failure mode that broke 19 fixtures
+    when tried). Representing V by its own breakpoints eliminates the
+    tradeoff: every candidate's continuation value is evaluated at its true
+    continuous next_soe.
+
+    The representation is epsilon-certified, not literally exact: intervals
+    are refined until the PWL row is within PWL_EPS_REFINE of the true
+    value function (probed at two asymmetric points per interval) and
+    pruned at PWL_EPS_PRUNE. See the constants' comment block for the
+    error budget and why tighter tolerances buy nothing.
 
     Also considers, at every state, a distinct SOLAR_EXPORT-below-max
     candidate (#313) -- battery SOE held exactly unchanged (no passive
     charge) while this period's own solar surplus exports directly -- as an
-    alternative to IDLE's forced full passive charge. Without this, IDLE's
-    mandatory charge conflates "let solar bypass the battery" with "how much
-    room to keep" into one decision, forcing a genuinely necessary
-    headroom-creating action into whichever period first needs the room
-    even when a better-priced, side-effect-free slot for it existed earlier
-    in the same horizon. See
+    alternative to IDLE's forced full passive charge. See
     docs/superpowers/specs/2026-07-16-issue-313-root-cause-investigation.md.
     """
 
@@ -891,42 +1078,25 @@ def _run_dynamic_programming(
     if initial_soe is None:
         initial_soe = battery_settings.min_soe_kwh
 
-    # Discretize state and action spaces
-    soe_levels, power_levels = _discretize_state_action_space(battery_settings)
+    min_soe = battery_settings.min_soe_kwh
+    max_soe = battery_settings.max_soe_kwh
+    horizon_inputs = (buy_price, sell_price, home_consumption, solar_production)
 
-    V = np.zeros((horizon + 1, len(soe_levels)))
+    # Action set: IDLE + one representative STORE power (binary store
+    # physics) + the replay-aligned integer-percent discharge grid.
+    discharge_levels = _backward_discharge_levels(
+        battery_settings, discharge_resolution_kw
+    )
+    power_row = np.concatenate([[0.0, POWER_STEP_KW], -discharge_levels]).reshape(1, -1)
 
-    # Terminal value: assign value to usable energy remaining at end of horizon
-    if terminal_value_per_kwh > 0.0:
-        for i, soe in enumerate(soe_levels):
-            usable_energy = soe - battery_settings.min_soe_kwh
-            V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
+    # Terminal value: linear in usable energy above the floor.
+    V: list[tuple[np.ndarray, np.ndarray] | None] = [None] * (horizon + 1)
+    xs_T = np.array([min_soe, max_soe])
+    V[horizon] = (xs_T, terminal_value_per_kwh * (xs_T - min_soe))
 
-    min_soe_kwh = battery_settings.min_soe_kwh
-    max_soe_kwh = battery_settings.max_soe_kwh
-    n_states = len(soe_levels)
-
-    # (S, 1) and (1, A) broadcast columns/rows for the vectorized state x
-    # action grid -- same discretized values _run_dynamic_programming's
-    # scalar loop iterated over, just evaluated all at once per period.
-    soe_col = soe_levels.reshape(-1, 1)
-    power_row = power_levels.reshape(1, -1)
-
-    is_discharge = power_row < -POWER_TOLERANCE_KW
-    is_charge = power_row > POWER_TOLERANCE_KW
-
-    # Charging feasibility depends only on soe (not on the period), so the
-    # non-derating part of the mask is period-invariant and can be
-    # precomputed once instead of recomputed every backward-induction step.
-    available_capacity = max_soe_kwh - soe_col
-    max_charge_power = available_capacity / dt / battery_settings.efficiency_charge
-    charge_feasible_base = ~is_charge | (power_row <= max_charge_power)
-
-    available_energy = soe_col - min_soe_kwh
-    max_discharge_power = available_energy / dt * battery_settings.efficiency_discharge
-    discharge_feasible = ~is_discharge | (np.abs(power_row) <= max_discharge_power)
-
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    rate_throughput = battery_settings.max_charge_power_kw * dt
+    seed_grid = np.arange(min_soe, max_soe + 4 * SOE_STEP_KWH, 4 * SOE_STEP_KWH)
+    e_d = discharge_levels * dt / battery_settings.efficiency_discharge
 
     # Backward induction
     for t in reversed(range(horizon)):
@@ -935,109 +1105,196 @@ def _run_dynamic_programming(
             if max_charge_power_per_period is not None
             else None
         )
-        if period_max_charge is not None:
-            charge_feasible = charge_feasible_base & (
-                ~is_charge | (power_row <= period_max_charge)
-            )
+        xs_next = V[t + 1][0]
+
+        # Seed breakpoints: V[t+1]'s breakpoints and their preimages under
+        # the translation-like actions (bypass: identity; STORE/IDLE: shift
+        # by the charge increment), the transition/reward kinks (room/rate/
+        # surplus crossovers near capacity), each discharge level's
+        # feasibility onset, and a SOE_STEP_KWH safety-net grid. Kinks whose
+        # preimages this misses (e.g. under the 99 discharge shifts) are
+        # found by the probe-refinement loop below.
+        surplus = max(0.0, solar_production[t] - home_consumption[t])
+        c_store = rate_throughput * battery_settings.efficiency_charge
+        c_idle = min(surplus, rate_throughput) * battery_settings.efficiency_charge
+        # Preimages of V[t+1]'s significant kinks under every action shift.
+        # A kink pair narrower than a probe interval forms a value "bump"
+        # the probe loop can one-shot-miss (certification samples a single
+        # interior point per interval); seeding the shifted positions of
+        # the largest slope changes makes those bumps representable by
+        # construction instead of by luck. Bounded to the top
+        # PWL_MAX_KINK_SEEDS kinks so the seed set stays O(kinks x levels).
+        vs_next = V[t + 1][1]
+        if len(xs_next) > 2:
+            slopes = np.diff(vs_next) / np.diff(xs_next)
+            kink_mag = np.abs(np.diff(slopes))
+            significant = kink_mag >= PWL_KINK_SEED_MIN_SLOPE
+            if significant.sum() > PWL_MAX_KINK_SEEDS:
+                cutoff = np.partition(kink_mag, -PWL_MAX_KINK_SEEDS)[
+                    -PWL_MAX_KINK_SEEDS
+                ]
+                significant = kink_mag >= cutoff
+            sig = xs_next[1:-1][significant]
         else:
-            charge_feasible = charge_feasible_base
+            sig = xs_next
+        seeds = [
+            xs_next,
+            xs_next - c_store,
+            seed_grid,
+            min_soe + e_d,
+            # Left companions: a feasibility onset is a jump-like feature;
+            # a point just below it pins the lower branch so the cliff is
+            # represented by a steep two-point segment instead of being
+            # interpolated away.
+            min_soe + e_d - 2e-9,
+            (sig[None, :] + e_d[:, None]).ravel(),
+            np.array(
+                [
+                    max_soe - c_store,
+                    max_soe - surplus * battery_settings.efficiency_charge,
+                    max_soe - c_idle,
+                ]
+            ),
+        ]
+        if c_idle > 0.0:
+            seeds.append(xs_next - c_idle)
+        X = np.unique(np.clip(np.concatenate(seeds), min_soe, max_soe))
+        X = X[np.concatenate([[True], np.diff(X) > 1e-9])]
 
-        feasible = charge_feasible & discharge_feasible
-        if ac_cap_kwh is not None:
-            # Battery discharge shares the inverter's AC stage with PV
-            # conversion — only the headroom the (possibly clipped) solar
-            # leaves is deliverable.
-            ac_headroom_kwh = max(
-                0.0, ac_cap_kwh - min(solar_production[t], ac_cap_kwh)
+        def eval_at(
+            points: np.ndarray,
+            _t: int = t,
+            _V_next: tuple[np.ndarray, np.ndarray] = V[t + 1],
+            _period_max_charge: float | None = period_max_charge,
+        ) -> np.ndarray:
+            return _candidate_values_at(
+                points,
+                _t,
+                _V_next,
+                power_row,
+                horizon_inputs,
+                battery_settings,
+                dt,
+                _period_max_charge,
+                self_throttle_export_threshold_kwh,
             )
-            feasible &= ~is_discharge | (np.abs(power_row) * dt <= ac_headroom_kwh)
 
-        next_soe = _state_transition_grid(
-            soe_col,
-            power_row,
-            battery_settings,
-            dt,
-            solar_production=solar_production[t],
-            home_consumption=home_consumption[t],
-        )
-        feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
+        VX = eval_at(X)
 
-        reward = _compute_reward_grid(
-            power_row,
-            soe_col,
-            next_soe,
-            home_consumption=home_consumption[t],
-            battery_settings=battery_settings,
-            dt=dt,
-            current_buy_price=buy_price[t],
-            current_sell_price=sell_price[t],
-            solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-        )
+        # Probe-refinement: one asymmetric (golden-ratio) probe per dirty
+        # interval; insert only probes where the true value deviates from
+        # the current chord by more than PWL_EPS_REFINE. Each point is
+        # evaluated exactly once (existing points' values never change
+        # within a period), and an interval whose probe sits on the chord
+        # is marked clean and never re-probed; inserting a point splits an
+        # interval into two dirty children. Robustness against features a
+        # single interior probe could miss comes from the seeds above:
+        # significant-kink preimages and feasibility-onset companions make
+        # bumps and cliffs representable by construction, so probing only
+        # has to certify the smooth remainder.
+        dirty = np.diff(X) > PWL_MIN_PROBE_WIDTH_KWH
+        for _ in range(PWL_MAX_REFINE_ITERS):
+            if not dirty.any():
+                break
+            idx = np.nonzero(dirty)[0]
+            x0, x1 = X[idx], X[idx + 1]
+            # One asymmetric probe per interval (the golden-ratio offset):
+            # a hidden kink whose chord happens to pass exactly through
+            # this interior point is a measure-zero coincidence, and the
+            # kink would still be caught from the neighboring interval
+            # after any adjacent split.
+            probes = x0 + 0.381966 * (x1 - x0)
+            pv = eval_at(probes)
+            lin = VX[idx] + 0.381966 * (VX[idx + 1] - VX[idx])
+            deviation = np.abs(pv - lin)
+            interval_bad = deviation > PWL_EPS_REFINE
+            # Certified intervals: probe on the chord -> clean.
+            dirty[idx[~interval_bad]] = False
+            if not interval_bad.any():
+                break
+            split_idx = idx[interval_bad]
+            new_x = probes[interval_bad]
+            new_v = pv[interval_bad]
+            deviation = deviation[interval_bad]
+            # Steep features (near-cliffs) bisect painfully slowly one
+            # probe at a time -- ~25 rounds to pin a jump from 0.05 kWh
+            # down to the probe-width floor, and each round costs a full
+            # python/numpy pass. When the probe deviation is far above
+            # tolerance, add a geometric point pair hugging the interval's
+            # ends so the containing interval shrinks by ~1e3 per round
+            # instead of ~2.6.
+            steep = deviation > PWL_EPS_REFINE * 1e3
+            if steep.any():
+                s_idx = split_idx[steep]
+                sw = X[s_idx + 1] - X[s_idx]
+                extra_x = np.concatenate(
+                    [X[s_idx] + sw * 1e-3, X[s_idx + 1] - sw * 1e-3]
+                )
+                extra_v = eval_at(extra_x)
+                new_x = np.concatenate([new_x, extra_x])
+                new_v = np.concatenate([new_v, extra_v])
+                split_idx = np.concatenate([split_idx, s_idx, s_idx])
+            order = np.lexsort((new_x, split_idx))
+            new_x, new_v, split_idx = new_x[order], new_v[order], split_idx[order]
+            n_old = len(dirty)
+            X = np.insert(X, split_idx + 1, new_x)
+            VX = np.insert(VX, split_idx + 1, new_v)
+            # Rebuild the dirty map: old interval k shifts right by the
+            # number of points inserted into intervals before it; an
+            # interval that received m inserts becomes m+1 children, all
+            # dirty.
+            counts = np.bincount(split_idx, minlength=n_old)
+            prefix = np.concatenate([[0], np.cumsum(counts)[:-1]])
+            new_left = np.arange(n_old) + prefix
+            new_dirty = np.zeros(len(X) - 1, dtype=bool)
+            new_dirty[new_left] = dirty
+            was_split = counts > 0
+            child_parents = np.repeat(new_left[was_split], counts[was_split] + 1)
+            child_offsets = np.concatenate(
+                [np.arange(c + 1) for c in counts[was_split]]
+            )
+            new_dirty[child_parents + child_offsets] = True
+            dirty = new_dirty & (np.diff(X) > PWL_MIN_PROBE_WIDTH_KWH)
 
-        next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
-        next_i = np.clip(next_i, 0, n_states - 1)
-
-        value = reward + V[t + 1][next_i]
-        value = np.where(feasible, value, -np.inf)
-
-        # IDLE is always a feasible, finite-reward action (no physical
-        # constraint check applies to it, and _compute_reward_grid never
-        # returns -inf), so the max over actions can never remain -inf here.
-        V[t, :] = np.max(value, axis=1)
-
-        # SOLAR_EXPORT-below-max candidate (#313): soe held exactly
-        # unchanged (next_soe == soe, same grid index), solar surplus
-        # exports directly instead of passively charging. Reusing
-        # _compute_reward_grid with next_soe == soe already produces the
-        # correct economics (see _idle_battery_flows: zero SOE delta ->
-        # battery_charged=0, so grid_exported reflects the full surplus) --
-        # the same reward shape IDLE gets when the battery happens to be
-        # full, just made reachable below max_soe too. One extra
-        # O(n_states) column, not O(n_states x n_actions).
-        # With the AC cap set, this candidate is also what defers charging
-        # to preserve headroom for above-cap solar: ac_flows_grid caps the
-        # exported surplus and the DP weighs the clipped remainder against
-        # the value of keeping the room (no separate HOLD action needed).
-        zeros_col = np.zeros_like(soe_col)
-        reward_bypass = _compute_reward_grid(
-            zeros_col,
-            soe_col,
-            soe_col,
-            home_consumption=home_consumption[t],
-            battery_settings=battery_settings,
-            dt=dt,
-            current_buy_price=buy_price[t],
-            current_sell_price=sell_price[t],
-            solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-        )
-        value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
-        V[t, :] = np.maximum(V[t, :], value_bypass)
+        V[t] = _pwl_prune(X, VX, PWL_EPS_PRUNE)
 
     return V
 
 
-def _interpolate_value(
-    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
-) -> float:
-    """Linearly interpolate a value-function row (V[t, :]) at a continuous
-    SoE, rather than snapping to the nearest discretized grid point.
+def _pwl_eval_array(
+    V_row: tuple[np.ndarray, np.ndarray], soe: np.ndarray
+) -> np.ndarray:
+    """Evaluate a PWL value-function row `(xs, vs)` at an array of SOE
+    values. Between breakpoints this is exact (the representation IS
+    piecewise linear); below the first breakpoint the first segment's
+    gradient is extrapolated -- see `_interpolate_value`'s #336 note."""
+    xs, vs = V_row
+    result = np.interp(soe, xs, vs)
+    if len(xs) > 1:
+        first_slope = (vs[1] - vs[0]) / (xs[1] - xs[0])
+        result = np.where(soe < xs[0], vs[0] + (soe - xs[0]) * first_slope, result)
+    return result
 
-    `V_row` has no grid points below `min_soe_kwh` (#233's below-floor
+
+def _interpolate_value(
+    V_row: tuple[np.ndarray, np.ndarray],
+    soe: float,
+    battery_settings: BatterySettings,
+) -> float:
+    """Evaluate a PWL value-function row `(xs, vs)` at a continuous SoE.
+
+    With the #450 PWL representation this is exact between breakpoints --
+    the interpolate-vs-snap tension of the old uniform-grid table (each
+    correct in a different regime, see the 2026-07-12 design doc) no longer
+    exists, because the breakpoints are the function's own kinks.
+
+    The row has no breakpoints below `min_soe_kwh` (#233's below-floor
     tolerance lets `soe` itself go below it). Clamping those states to
-    `V_row[0]` made every below-floor state look identically worthless,
+    `vs[0]` made every below-floor state look identically worthless,
     masking real differences in how close each was to the floor (#336).
-    Extrapolate the V_row[0]->V_row[1] gradient instead."""
-    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
-    if idx < 0.0:
-        gradient = V_row[1] - V_row[0] if len(V_row) > 1 else 0.0
-        return V_row[0] + idx * gradient
-    idx = min(idx, len(V_row) - 1)
-    lo = int(idx)
-    hi = min(lo + 1, len(V_row) - 1)
-    frac = idx - lo
-    return V_row[lo] * (1 - frac) + V_row[hi] * frac
+    Extrapolate the first segment's gradient instead. `battery_settings`
+    is retained for call-site compatibility."""
+    return float(_pwl_eval_array(V_row, np.asarray(soe)))
 
 
 def _discharge_candidates(
@@ -1151,7 +1408,7 @@ def _charge_candidate(
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
-    V_next: np.ndarray,
+    V_next: tuple[np.ndarray, np.ndarray],
     power_levels: np.ndarray,
     home_consumption: list[float],
     battery_settings: BatterySettings,
@@ -1510,6 +1767,7 @@ def optimize_battery_schedule(
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
         self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        discharge_resolution_kw=discharge_resolution_kw,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -1520,11 +1778,6 @@ def optimize_battery_schedule(
     hourly_results = []
     current_soe = initial_soe
     current_cost_basis = initial_cost_basis
-    soe_levels = np.arange(
-        battery_settings.min_soe_kwh,
-        battery_settings.max_soe_kwh + SOE_STEP_KWH,
-        SOE_STEP_KWH,
-    )
     _, power_levels = _discretize_state_action_space(battery_settings)
 
     for t in range(horizon):
@@ -1570,16 +1823,26 @@ def optimize_battery_schedule(
             continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
         )
 
-        # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
-        # by backward difference at the nearest grid level i (the kWh we
-        # would remove by discharging). Unchanged from the previous
-        # implementation -- this task only changes action selection, not
-        # shadow_price reporting.
-        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-        i = min(max(0, i), len(soe_levels) - 1)
-        if i > 0:
+        # Shadow price = marginal opportunity value of stored energy, as a
+        # backward difference over SOE_STEP_KWH -- deliberately NOT the
+        # PWL's infinitesimal slope. The exact discrete-action V is locally
+        # staircase-like at micro scales (a marginal 1e-6 kWh cannot be
+        # monetized by any integer-percent action, so dV/dSoE at h->0 is
+        # ~0 near capacity where the actionable-increment marginal value is
+        # the sell price). The 0.05 kWh window matches both the previous
+        # grid implementation's definition and what the intra-period
+        # discharge gates were validated against.
+        max_anchor = battery_settings.max_soe_kwh
+        anchor = battery_settings.min_soe_kwh + SOE_STEP_KWH * round(
+            (min(current_soe, max_anchor) - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+        )
+        if anchor >= battery_settings.min_soe_kwh + SOE_STEP_KWH / 2:
             period_data.decision.shadow_price = float(
-                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
+                (
+                    _interpolate_value(V[t], anchor, battery_settings)
+                    - _interpolate_value(V[t], anchor - SOE_STEP_KWH, battery_settings)
+                )
+                / SOE_STEP_KWH
             )
 
         hourly_results.append(period_data)

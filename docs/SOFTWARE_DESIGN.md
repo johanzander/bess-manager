@@ -78,11 +78,11 @@ def start() -> None
 
 **Algorithm Flow**:
 
-1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.1 kWh / 0.2 kW)
-2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle) at each (period, SOE) cell
-3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value from the resulting SOE state
+1. **State/action representation** (#450): battery state of energy (SOE) is treated as **continuous** — each period's value-to-go is stored as an adaptive piecewise-linear function of SOE, refined to an ε-certified tolerance (~1e-6 SEK/period), not sampled on a uniform grid. Actions remain genuinely **discrete**: the hardware's integer-percent discharge rates (1% of max discharge power) plus binary STORE / IDLE / solar-bypass modes — the same action set the replay step enumerates, so the plan achieves exactly the value the backward pass promised. (An earlier design discretized SOE into 0.05 kWh grid steps and snapped every continuation lookup to the nearest grid point; the snap noise could flip genuinely near-tied decisions — see issue #450.)
+2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle/bypass) against the next period's value function
+3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value at the exact resulting SOE
 4. **Policy Extraction**: Forward-simulate from the initial SOE, following the optimal action at each step to produce the final schedule
-5. **All-IDLE Safety Net**: Unconditionally compute an all-IDLE schedule and swap it in only if its cost is cheaper than the optimized schedule's — a plain O(1) comparison, not a configurable/horizon-scaled threshold. This catches numerical residual from SOE discretization; it is not an economic profitability gate. (An earlier threshold-based gate was removed in the "Bellman-optimality guardrail removal" refactor — the DP's backward induction already finds the Bellman-optimal schedule, so an extra economic veto was redundant. See `core/bess/dp_battery_algorithm.py:1514-1536`.)
+5. **All-IDLE Safety Net**: Unconditionally compute an all-IDLE schedule and swap it in only if its cost is cheaper than the optimized schedule's — a plain O(1) comparison, not a configurable/horizon-scaled threshold. This catches numerical residual from the value function's ε-tolerance; it is not an economic profitability gate. (An earlier threshold-based gate was removed in the "Bellman-optimality guardrail removal" refactor — the DP's backward induction already finds the Bellman-optimal schedule, so an extra economic veto was redundant. See `core/bess/dp_battery_algorithm.py`.)
 
 **Inputs**:
 

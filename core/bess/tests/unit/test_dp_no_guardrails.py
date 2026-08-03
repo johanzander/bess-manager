@@ -117,11 +117,12 @@ def test_run_dynamic_programming_returns_one_value():
         solar_production=[0.0, 0.0, 0.0],
         initial_soe=5.0,
     )
-    import numpy as np
-
-    assert isinstance(
-        result, np.ndarray
-    ), f"expected a bare V array, got {type(result)}"
+    # #450: V is a list of per-period PWL rows (xs, vs) -- still a single
+    # bare value structure with horizon + 1 entries, no policy table.
+    assert isinstance(result, list), f"expected a bare V list, got {type(result)}"
+    assert len(result) == 4
+    xs, vs = result[0]
+    assert len(xs) == len(vs)
 
 
 def test_small_export_only_discharge_classified_as_battery_export():

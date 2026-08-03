@@ -131,17 +131,24 @@ in the "Bellman-optimality guardrail removal" refactor (commit
 `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`)
 because the DP's backward induction already finds the Bellman-optimal
 schedule, making an extra economic gate redundant. What remains is a
-numerical safety net for SOE-discretization residual, not an economic
-judgment call. The fallback still passively absorbs any solar surplus into
+numerical safety net for the value function's ε-tolerance residual (#450
+replaced the SOE grid with an ε-certified piecewise-linear representation),
+not an economic judgment call. The fallback still passively absorbs any solar surplus into
 available battery room and pays wear cost on it, but never discharges to
 recoup that cost, so it isn't automatically better than what it would
 replace.
 
 **Shadow price (marginal value of stored energy)**: The backward induction
-builds a value-to-go for every (period, SOE-level) state — the best achievable
-result from that point onward.  The **shadow price** of a period is the slope
-of that value across SOE: *how much one extra kWh of stored energy is worth,
-in SEK, given the optimal future use of it*.  It is **not** the cost basis
+builds a value-to-go per period as a piecewise-linear function of continuous
+SOE (#450) — the best achievable result from that point onward.  The **shadow
+price** of a period is a backward difference of that value over a 0.05 kWh
+window (`SOE_STEP_KWH`): *how much one extra actionable increment of stored
+energy is worth, in SEK per kWh, given the optimal future use of it*.  It is
+deliberately a finite difference, not the infinitesimal slope — with a
+discrete (integer-percent) action set the exact value function is locally
+staircase-like at micro scales (a marginal 1e-6 kWh cannot be monetized by
+any executable action), so only the actionable-increment difference is
+economically meaningful.  It is **not** the cost basis
 (what the energy cost to store — a sunk cost).  It is the forward-looking
 **opportunity value**, and it automatically accounts for everything the
 optimizer can do with that kWh later: avoid a future expensive grid purchase,

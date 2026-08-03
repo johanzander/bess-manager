@@ -25,13 +25,16 @@ one must stay far smaller than any real grid step regardless of resolution,
 so it is not derived from POWER_STEP_KW and is not defined here).
 """
 
-# State space: State of Energy grid resolution (kWh). Matched to
-# POWER_STEP_KW * 0.25h (the quarterly-period reachable-state increment, the
-# production resolution -- see battery_system_manager.py) so V is sampled
-# only at states a single action can actually reach; a finer SOE_STEP_KWH
-# than that makes shadow_price's backward-difference report jagged/incorrect
-# values at intermediate grid points that aren't independently reachable
-# (verified empirically during the #275 Option B investigation).
+# SOE increment (kWh). Since #450 the DP no longer discretizes state on
+# this grid -- the value function is an epsilon-certified piecewise-linear
+# function of continuous SOE. SOE_STEP_KWH survives as (a) the backward
+# difference window for shadow_price reporting (the smallest actionable
+# energy increment a marginal-value question is meaningful over -- the
+# exact discrete-action V is locally staircase-like, so an infinitesimal
+# slope would read ~0 where the actionable marginal value is the sell
+# price), and (b) the safety-net seed-grid spacing for the PWL refinement.
+# It remains POWER_STEP_KW * 0.25h, the quarterly-period reachable-state
+# increment the shadow-price consumers were validated against.
 SOE_STEP_KWH = 0.05
 
 # Action space: power grid resolution (kW).

@@ -26,6 +26,32 @@
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
+### **Plan B for #450: MILP reformulation of the battery optimizer**
+
+**Impact**: Medium | **Effort**: High | **Dependencies**: `core/bess/dp_battery_algorithm.py`, new solver dependency (`scipy`/HiGHS)
+
+**Description**: Fallback / long-term alternative to the ε-certified PWL DP shipped for #450.
+Deterministic day-ahead battery arbitrage with linear prices, efficiencies, wear cost, AC
+cap and terminal value is the textbook MILP: per-period mode binaries (STORE / IDLE-passive /
+bypass / discharge), a binary for the room-vs-surplus clamp equality that IDLE's forced
+passive charge imposes, a binary for the self-throttle export cutoff, and integer-percent
+discharge rates. ~4 binaries × 192 periods solves in well under a second with HiGHS
+(`scipy.optimize.milp` — scipy is NOT currently a dependency, this adds one). Exact optimum
+with no state discretization anywhere; LP duals (binaries fixed) give exact shadow prices;
+intents and cost basis derive post-hoc from solved flows exactly as `classify_strategic_intent`
+already works from flows.
+
+**When to pick this up**: if the PWL DP's breakpoint growth or runtime becomes a problem on
+future features (multi-battery, network constraints, longer horizons), or if a rewrite is
+wanted anyway. Every DP-adjacent semantic (#233 below-floor tolerance, #240 self-throttle,
+#313 bypass, #353 future_value) must be re-derived as MILP constraints and re-validated
+against the pinned fixture suite — this is why it is the plan B, not the shipped fix.
+
+**Analysis**: issue #450 (2026-08-03 prototype investigation; the PWL premise test and this
+MILP assessment were validated/scoped together).
+
+---
+
 ### **Add SolaX Modbus inverter support**
 
 **Impact**: High | **Effort**: High | **Dependencies**: Inverter abstraction layer, `GrowattScheduleManager`

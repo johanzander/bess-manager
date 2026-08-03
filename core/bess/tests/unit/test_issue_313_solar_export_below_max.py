@@ -58,8 +58,9 @@ def test_best_action_prefers_solar_bypass_when_stored_energy_has_no_future_value
         efficiency_discharge=1.0,
         cycle_cost_per_kwh=0.0,
     )
-    soe_levels, power_levels = _discretize_state_action_space(bs)
-    v_next = np.zeros(len(soe_levels))
+    _, power_levels = _discretize_state_action_space(bs)
+    # #450: V rows are PWL (xs, vs) pairs; flat zero everywhere.
+    v_next = (np.array([bs.min_soe_kwh, bs.max_soe_kwh]), np.zeros(2))
 
     soe = bs.min_soe_kwh  # 2.0 -- nothing available to discharge
     home_consumption = [0.0]

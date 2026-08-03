@@ -79,7 +79,7 @@ def _total_value(
     _, best_next_soe, _, best_reward = _best_action_at_continuous_state(
         soe=soe,
         t=t,
-        V_next=V[t + 1, :],
+        V_next=V[t + 1],
         power_levels=power_levels,
         home_consumption=home_consumption,
         battery_settings=battery_settings,
@@ -90,9 +90,40 @@ def _total_value(
         cost_basis=0.0,
         max_charge_power_per_period=None,
     )
-    return best_reward + _interpolate_value(
-        V[t + 1, :], best_next_soe, battery_settings
+    return best_reward + _interpolate_value(V[t + 1], best_next_soe, battery_settings)
+
+
+def _total_value_at_resolution(
+    soe,
+    t,
+    V,
+    battery_settings,
+    dt,
+    home_consumption,
+    solar_production,
+    buy_prices,
+    sell_prices,
+    discharge_resolution_kw,
+):
+    """_total_value with the discharge candidate grid coarsened -- the
+    old-production action resolution the breakpoint search must beat."""
+    _, power_levels = _discretize_state_action_space(battery_settings)
+    _, best_next_soe, _, best_reward = _best_action_at_continuous_state(
+        soe=soe,
+        t=t,
+        V_next=V[t + 1],
+        power_levels=power_levels,
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar_production,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+        discharge_resolution_kw=discharge_resolution_kw,
     )
+    return best_reward + _interpolate_value(V[t + 1], best_next_soe, battery_settings)
 
 
 def test_off_grid_discharge_closes_interpolation_gap_case_1():
@@ -127,11 +158,33 @@ def test_off_grid_discharge_closes_interpolation_gap_case_1():
         buy_prices,
         sell_prices,
     )
-    assert value >= -118.65, (
-        f"expected breakpoint search to recover the true optimum "
-        f"(~-118.641847), got {value} -- still stuck near the old grid-search "
-        f"value (-118.675085)"
+    # #450 note: the historical absolute pin (>= -118.65, from the design
+    # doc's dense scan) was measured against the old uniform-grid V table,
+    # whose nearest-snap lookups can overstate continuation values (snapping
+    # up teleports in free energy) -- that number is not reachable under the
+    # exact PWL V. The representation-independent property this test exists
+    # for is that the continuous breakpoint search recovers MORE value at an
+    # off-grid state than a coarse POWER_STEP_KW-grid action search, and
+    # that its claim is internally consistent with V itself.
+    coarse = _total_value_at_resolution(
+        soe,
+        t,
+        V,
+        battery_settings,
+        dt,
+        home_consumption,
+        solar_production,
+        buy_prices,
+        sell_prices,
+        discharge_resolution_kw=0.2,
     )
+    assert value >= coarse - 1e-9, (
+        f"breakpoint search ({value}) must not lose to the coarse "
+        f"0.2 kW-grid action search ({coarse})"
+    )
+    assert value == pytest.approx(
+        _interpolate_value(V[t], soe, battery_settings), abs=1e-4
+    ), "one-step Bellman recompute must agree with the exact PWL V"
 
 
 def test_off_grid_discharge_matches_hardware_constrained_optimum_case_2():
@@ -167,10 +220,32 @@ def test_off_grid_discharge_matches_hardware_constrained_optimum_case_2():
         buy_prices,
         sell_prices,
     )
-    assert value == pytest.approx(-37.863850, abs=1e-6), (
-        f"expected the hardware-constrained optimum (-37.863850, the best "
-        f"achievable integer-percent rate), got {value}"
+    # #450 note: same reasoning as case_1 -- the old absolute pin
+    # (-37.863850) embedded the old grid table's continuation values. The
+    # invariants that survive the representation change: the chosen rate is
+    # still the hardware-constrained 50% (3.0 kW), and the value is
+    # internally consistent with the exact PWL V.
+    _, power_levels = _discretize_state_action_space(battery_settings)
+    best_action, _, _, _ = _best_action_at_continuous_state(
+        soe=soe,
+        t=t,
+        V_next=V[t + 1],
+        power_levels=power_levels,
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar_production,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
     )
+    assert best_action == pytest.approx(
+        -3.0, abs=1e-9
+    ), f"expected the hardware-constrained 50% rate (-3.0 kW), got {best_action}"
+    assert value == pytest.approx(
+        _interpolate_value(V[t], soe, battery_settings), abs=1e-4
+    ), "one-step Bellman recompute must agree with the exact PWL V"
 
 
 def test_discharge_candidates_are_hardware_representable():
@@ -358,9 +433,14 @@ def test_interpolate_value_extrapolates_below_min_soe():
     settings = make_battery_settings(
         total_capacity=20.0, min_soc=11.0
     )  # min_soe_kwh = 2.2
-    step = 0.05  # SOE_STEP_KWH
-    # V_row has a gradient of 1.0 value/kWh between the first two grid points
-    V_row = np.array([2.0, 2.0 + step, 4.0, 6.0])
+    step = 0.05
+    # V_row is a PWL (xs, vs) pair with a gradient of 1.0 value/kWh on its
+    # first segment (#450 representation change; same #336 semantics).
+    min_soe = settings.min_soe_kwh
+    V_row = (
+        np.array([min_soe, min_soe + step, min_soe + 2 * step, min_soe + 3 * step]),
+        np.array([2.0, 2.0 + step, 4.0, 6.0]),
+    )
 
     soe_one_step_below_floor = settings.min_soe_kwh - step
     value = _interpolate_value(V_row, soe_one_step_below_floor, settings)

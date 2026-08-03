@@ -4,7 +4,7 @@ These tests exercise orchestration methods that do NOT require the DP optimizer,
 using MockHomeAssistantController from conftest.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -284,8 +284,11 @@ class TestHandleSpecialCases:
 
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
         system._consumption_predictions = [1.0] * 96
-        system._solar_predictions = [0.0] * 96
-        with patch.object(system, "_fetch_predictions") as mock_fetch:
+        with (
+            patch.object(system, "get_current_daily_view"),
+            patch.object(system.daily_view_store, "save_day"),
+            patch.object(system, "_fetch_predictions") as mock_fetch,
+        ):
             system._handle_special_cases(
                 period=0, prepare_next_day=True, is_first_run=False
             )
@@ -872,6 +875,82 @@ class TestAddTimestampsToPeriodData:
             assert pd.timestamp.date() == expected_date
 
 
+class TestConsumptionForecastFreshness:
+    """Issue #395: the quarterly job (every 15 min) never refreshed the
+    consumption forecast after startup/23:55 - _gather_optimization_data
+    cached it forever (truthiness check, no expiry), so it could go stale
+    for up to ~24h. Solar is unaffected: it's fetched live every call via
+    controller.get_solar_forecast().
+
+    The refresh policy is strategy-aware, not a blanket timer: 'sensor' and
+    'fixed' read a cheap, continuously-updating source, so they refetch
+    every quarterly cycle (matching solar). 'influxdb_7d_avg' and
+    'ha_statistics' average a window of full calendar days ending at
+    today's midnight, so their value is provably unchanged intraday - they
+    only need to refetch once the date rolls over.
+    """
+
+    def test_sensor_strategy_refetches_every_call(self, system):
+        system.home_settings.consumption_strategy = "sensor"
+        # Pre-populate the cache as if a fetch just happened - it must not
+        # be reused, since 'sensor' has no intraday cache.
+        system._consumption_predictions = [1.0] * 96
+        system._consumption_predictions_date = date(2026, 7, 27)
+
+        with (
+            patch.object(
+                system, "_get_consumption_forecast", return_value=[2.0] * 96
+            ) as mock_fetch,
+            patch("core.bess.time_utils.datetime") as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 27, 8, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=32, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][40] == 2.0
+            assert mock_fetch.call_count == 1
+
+            # Next quarterly tick, same day: still refetches.
+            _, data = system._gather_optimization_data(
+                period=33, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert mock_fetch.call_count == 2
+
+    def test_influxdb_7d_avg_strategy_caches_until_date_rollover(self, system):
+        system.home_settings.consumption_strategy = "influxdb_7d_avg"
+        system._consumption_predictions = [1.0] * 96
+        system._consumption_predictions_date = date(2026, 7, 27)
+
+        with (
+            patch.object(
+                system, "_get_consumption_forecast", return_value=[2.0] * 96
+            ) as mock_fetch,
+            patch("core.bess.time_utils.datetime") as mock_datetime,
+        ):
+            # Same day, later quarterly tick: the 7-day window can't have
+            # changed, so the cache must be reused.
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 27, 20, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=80, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][85] == 1.0
+            assert mock_fetch.call_count == 0
+
+            # Past midnight: the 7-day window has shifted, must refetch.
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 28, 0, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=0, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][5] == 2.0
+            assert mock_fetch.call_count == 1
+
+
 class TestNotApplyBranchRefreshesCurrentSchedule:
     """Regression for issue #369 finding 1.
 
@@ -981,7 +1060,9 @@ class TestLoadTodayFromDisk:
         )
         system.daily_view_store.save_day(view)
 
-        system._load_today_from_disk(current_period=2)
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+            system._load_today_from_disk(current_period=2)
 
         assert system.historical_store.get_period(0) is not None
         assert system.historical_store.get_period(1) is not None

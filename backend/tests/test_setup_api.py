@@ -838,7 +838,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -872,7 +871,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -906,7 +904,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -937,7 +934,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -969,7 +965,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -1025,7 +1020,6 @@ class TestDiscoverPricingDefaults:
     def _integrations(self, **overrides) -> dict:
         base = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,

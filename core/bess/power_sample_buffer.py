@@ -30,10 +30,11 @@ class PowerSampleBuffer:
         bucket = self._samples.pop(period, None)
         if not bucket:
             return None
+        # No `if values` guard: `record` appends on the same call that creates
+        # the list, so a flow present in the bucket always has >=1 sample.
         return {
             flow_name: (sum(values) / len(values)) * 0.25 / 1000.0
             for flow_name, values in bucket.items()
-            if values
         }
 
     def _prune(self, current_period: int) -> None:

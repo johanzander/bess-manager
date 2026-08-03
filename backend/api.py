@@ -3197,14 +3197,19 @@ def _pricing_defaults_for_discovery(integrations: dict) -> dict:
 async def run_setup_discovery():
     """Run auto-discovery of inverter and pricing integrations.
 
-    Uses the HA entity registry (platform field) for robust integration
-    detection, then maps entity suffixes to BESS sensor keys.  When the
-    entity registry is unavailable (e.g. older HA Core versions without
-    WebSocket support), uses states-based prefix matching instead.
+    Inverter platforms are detected from the HA entity registry alone —
+    the ``platform`` field to identify the integration, then ``unique_id``
+    suffixes to map its entities onto BESS sensor keys.  Neither changes
+    when a user renames an entity, so there is no entity_id pattern
+    matching in this path.
+
+    ``/api/states`` is still read, but only for things the registry does
+    not carry: the HACS Nordpool area, Octopus/ENTSO-e price entities, and
+    phase-current sensors.
 
     Returns:
         dict: Discovery results including found sensors, missing sensors, and
-              integration metadata (device_sn, nordpool_area)
+              integration metadata (nordpool_area)
     """
     from app import bess_controller
 
@@ -3340,7 +3345,6 @@ async def run_setup_discovery():
         result = convert_keys_to_camel_case(
             {
                 "growatt_found": integrations["growatt_found"],
-                "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
                 "huawei_device_id": integrations.get("huawei_device_id"),
                 "solax_found": integrations["solax_found"],

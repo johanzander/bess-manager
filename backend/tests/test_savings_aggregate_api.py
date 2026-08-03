@@ -307,3 +307,42 @@ class TestClearHistory:
         assert resp.status_code == 200
         assert resp.json()["dayCount"] == 0
         assert store.list_available_dates() == []
+
+
+class TestUnderlyingErrorsReturn500:
+    """All three routes wrap their body in try/except -> HTTPException(500).
+
+    Without these, the wrappers are unexercised: a store that raises would be
+    indistinguishable from one that returns an empty result.
+    """
+
+    def _controller_with_failing_store(self) -> MagicMock:
+        store = MagicMock()
+        store.list_available_dates.side_effect = OSError("disk on fire")
+        store.get_disk_usage.side_effect = OSError("disk on fire")
+        store.clear_all.side_effect = OSError("disk on fire")
+        return _make_started_controller(store)
+
+    def test_aggregate_returns_500_when_store_raises(self):
+        sys.modules["app"].bess_controller = self._controller_with_failing_store()
+
+        resp = _client.get("/api/savings/aggregate?period=week&count=1")
+
+        assert resp.status_code == 500
+        assert "disk on fire" in resp.json()["detail"]
+
+    def test_disk_usage_returns_500_when_store_raises(self):
+        sys.modules["app"].bess_controller = self._controller_with_failing_store()
+
+        resp = _client.get("/api/savings/history/disk-usage")
+
+        assert resp.status_code == 500
+        assert "disk on fire" in resp.json()["detail"]
+
+    def test_clear_history_returns_500_when_store_raises(self):
+        sys.modules["app"].bess_controller = self._controller_with_failing_store()
+
+        resp = _client.delete("/api/savings/history")
+
+        assert resp.status_code == 500
+        assert "disk on fire" in resp.json()["detail"]

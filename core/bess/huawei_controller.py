@@ -49,6 +49,8 @@ class HuaweiController(InverterController):
     supports_charge_rate_control: ClassVar[bool] = False
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "period_list"
+
     MAX_TOU_PERIODS = 14
 
     CHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset({"GRID_CHARGING"})
@@ -181,7 +183,6 @@ class HuaweiController(InverterController):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "battery_first" if p["flag"] == "+" else "grid_first",
                     "enabled": True,
                     "is_default": False,
                     "strategic_intent": (
@@ -364,7 +365,6 @@ class HuaweiController(InverterController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }

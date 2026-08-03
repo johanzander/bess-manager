@@ -1515,14 +1515,24 @@ async def get_inverter_status():
 
         battery_settings = bess_controller.system.battery_settings
 
-        # Get current battery mode from schedule for current hour
-        current_battery_mode = "load_first"  # Default
+        # Get current battery mode from schedule for current hour. Only
+        # tou_register controllers actually have a batt_mode register;
+        # vpp_power controllers surface vpp_power_pct/vpp_remote_control
+        # instead, and period_list controllers have neither -- mirrors
+        # _mode_display_fields()'s contract (see get_period_settings()).
+        current_mode_fields: dict = {}
         try:
             now = time_utils.now()
             schedule_manager = bess_controller.system._inverter_controller
             current_period = now.hour * 4 + now.minute // 15
             period_settings = schedule_manager.get_period_settings(current_period)
-            current_battery_mode = period_settings.get("batt_mode", "load_first")
+            if "batt_mode" in period_settings:
+                current_mode_fields = {"battery_mode": period_settings["batt_mode"]}
+            elif "vpp_power_pct" in period_settings:
+                current_mode_fields = {
+                    "vpp_power_pct": period_settings["vpp_power_pct"],
+                    "vpp_remote_control": period_settings["vpp_remote_control"],
+                }
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
@@ -1537,13 +1547,14 @@ async def get_inverter_status():
         battery_discharge_power = controller.get_battery_discharge_power()
 
         inverter_platform = bess_controller.system.inverter_platform
+        control_model = schedule_manager.CONTROL_MODEL
 
         response = {
             "battery_soc": battery_soc,
             "battery_soe": battery_soe,
             "battery_charge_power": battery_charge_power,
             "battery_discharge_power": battery_discharge_power,
-            "battery_mode": current_battery_mode,
+            **current_mode_fields,
             "grid_charge_enabled": grid_charge_enabled,
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
@@ -1551,6 +1562,7 @@ async def get_inverter_status():
             "discharge_power_rate": discharge_power_rate,
             "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -1572,6 +1584,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        control_model = schedule_manager.CONTROL_MODEL
         battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
@@ -1604,10 +1617,11 @@ async def get_growatt_detailed_schedule():
                 hourly_settings = _get_hourly_settings_from_periods(
                     schedule_manager, hour
                 )
-                battery_mode = hourly_settings.get("batt_mode", "load_first")
-                mode_distribution[battery_mode] = (
-                    mode_distribution.get(battery_mode, 0) + 1
-                )
+                battery_mode = hourly_settings.get("batt_mode")
+                if battery_mode is not None:
+                    mode_distribution[battery_mode] = (
+                        mode_distribution.get(battery_mode, 0) + 1
+                    )
 
                 strategic_intent = hourly_settings.get("strategic_intent", "IDLE")
 
@@ -1644,8 +1658,21 @@ async def get_growatt_detailed_schedule():
                     {
                         "hour": hour,
                         "mode": "idle",
-                        "batt_mode": battery_mode,
-                        "batteryMode": battery_mode,
+                        **(
+                            {"batt_mode": battery_mode, "batteryMode": battery_mode}
+                            if battery_mode is not None
+                            else {}
+                        ),
+                        **(
+                            {
+                                "vpp_power_pct": hourly_settings["vpp_power_pct"],
+                                "vpp_remote_control": hourly_settings[
+                                    "vpp_remote_control"
+                                ],
+                            }
+                            if "vpp_power_pct" in hourly_settings
+                            else {}
+                        ),
                         "grid_charge": hourly_settings.get("grid_charge", False),
                         "discharge_rate": hourly_settings.get("discharge_rate", 100),
                         "dischargePowerRate": hourly_settings.get(
@@ -1675,8 +1702,14 @@ async def get_growatt_detailed_schedule():
                     {
                         "hour": hour,
                         "mode": "idle",
-                        "batt_mode": "load_first",
-                        "batteryMode": "load_first",  # Add alias for frontend compatibility
+                        **(
+                            {
+                                "batt_mode": "load_first",
+                                "batteryMode": "load_first",  # Add alias for frontend compatibility
+                            }
+                            if control_model == "tou_register"
+                            else {}
+                        ),
                         "grid_charge": False,
                         "discharge_rate": 100,
                         "dischargePowerRate": 100,  # Add alias
@@ -1764,7 +1797,18 @@ async def get_growatt_detailed_schedule():
                     {
                         "start_time": group["start_time"],
                         "end_time": group["end_time"],
-                        "mode": group["mode"],
+                        **(
+                            {
+                                "vpp_power_pct": group["vpp_power_pct"],
+                                "vpp_remote_control": group["vpp_remote_control"],
+                            }
+                            if "vpp_power_pct" in group
+                            else (
+                                {"batt_mode": group["batt_mode"]}
+                                if "batt_mode" in group
+                                else {}
+                            )
+                        ),
                         "dominant_intent": group["intent"],
                         "intent_counts": {group["intent"]: group["period_count"]},
                         "period_count": group["period_count"],
@@ -1840,7 +1884,20 @@ async def get_growatt_detailed_schedule():
                             {
                                 "start_time": group["start_time"],
                                 "end_time": group["end_time"],
-                                "mode": group["mode"],
+                                **(
+                                    {
+                                        "vpp_power_pct": group["vpp_power_pct"],
+                                        "vpp_remote_control": group[
+                                            "vpp_remote_control"
+                                        ],
+                                    }
+                                    if "vpp_power_pct" in group
+                                    else (
+                                        {"batt_mode": group["batt_mode"]}
+                                        if "batt_mode" in group
+                                        else {}
+                                    )
+                                ),
                                 "dominant_intent": group["intent"],
                                 "intent_counts": {
                                     group["intent"]: group["period_count"]
@@ -1864,6 +1921,7 @@ async def get_growatt_detailed_schedule():
         response = {
             "current_hour": current_hour,
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
             "period_groups": period_groups,
@@ -2727,6 +2785,16 @@ async def compare_two_snapshots(
             }
             period_comparisons.append(comparison)
 
+        def _interval_display_fields(interval: dict) -> dict:
+            if "vpp_power_pct" in interval:
+                return {
+                    "vpp_power_pct": interval["vpp_power_pct"],
+                    "vpp_remote_control": interval["vpp_remote_control"],
+                }
+            if "batt_mode" in interval:
+                return {"batt_mode": interval["batt_mode"]}
+            return {}
+
         # Build response
         response = {
             "snapshotAPeriod": period_a,
@@ -2737,7 +2805,7 @@ async def compare_two_snapshots(
             "growattScheduleA": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),
@@ -2747,7 +2815,7 @@ async def compare_two_snapshots(
             "growattScheduleB": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),

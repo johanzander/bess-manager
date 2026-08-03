@@ -124,7 +124,15 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     registers). integer_rates=True must fix the continuous solve's mode
     choice and re-solve with discharge_pct restricted to integers, without
     changing which window/mode sequence was chosen -- only the discharge
-    rate resolution."""
+    rate resolution.
+
+    Stage 2 must only fix the four hardware-mode binaries, not the
+    auxiliary piecewise-linear branch-select binaries (store_active,
+    s2b_active, idle_active, throttled) -- fixing those too was measured
+    to cost ~3.8 ore/day extra on this fixture versus a full joint-integer
+    solve (confirmed by running the joint solve directly: -5.998460244,
+    matching the pivot spec's cited table value), because they must be
+    free to re-adapt once rates are forced onto the integer lattice."""
     sc = _load_fixture()
     kwargs = {
         "buy_price": sc["buy_price"],
@@ -145,10 +153,12 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     ), integer.discharge_pct
 
     # Hardware-executable rates can only be worse (higher cost) than the
-    # continuous relaxation's, per the pivot spec's feasibility-spike table
-    # (~3 ore/day for this fixture) -- never better, and not wildly worse.
+    # continuous relaxation's, and should be close to the joint-integer
+    # optimum (-5.998460244, verified by running the joint solve directly)
+    # -- not just "not wildly worse" (that looser bound previously masked
+    # a ~3.8 ore/day regression from over-fixing stage-2 binaries).
     assert integer.cost >= continuous.cost - 1e-6
-    assert integer.cost < continuous.cost + 0.5
+    assert integer.cost == pytest.approx(-5.998460244, abs=1e-3)
 
     # Same window: the SOE trajectory shouldn't shift to a different mode
     # sequence just because rates were re-integerized.

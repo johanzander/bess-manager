@@ -83,11 +83,22 @@ def solve_milp_schedule(
     `integer_rates`: hardware discharge rate is a percent register (#282),
     not a continuous kW value -- continuous rates aren't executable as-is.
     When True, this solves the fast continuous relaxation first, then fixes
-    every mode/active binary to its solved value and re-solves the much
-    smaller remaining MIP (only discharge_pct integer) to the
-    hardware-executable optimum, per the pivot spec's two-stage design
-    (re-solving with binaries fixed rather than round-and-repair, since
-    the small fixed-mode MIP is cheap and exact).
+    only the four hardware-mode binaries (mode_store/idle/bypass/discharge)
+    to their solved values and re-solves the remaining MIP (auxiliary
+    branch-select binaries + discharge_pct, now integer) to the
+    hardware-executable optimum, per the pivot spec's two-stage design.
+    Fixing the auxiliary piecewise-linear branch-select binaries
+    (store_active/s2b_active/idle_active/throttled) too, not just the mode
+    binaries, was tried first and measured to cost ~3.8 ore/day extra on
+    the #450 fixture versus the true joint-integer optimum -- those
+    encode "which branch of a min()" given the mode, and must stay free to
+    re-adapt once rates are forced onto the integer lattice, or stage 2
+    silently ships a suboptimal schedule. Verified: mode-only fixing
+    reproduces the joint-integer solve's cost to ~1e-9 on 78 periods
+    (0.78s) and near-matches a 120s-time-limited (non-optimal) joint solve
+    on 192 periods (2.0s) -- joint solving alone isn't tractable at that
+    horizon (hit the 120s limit without proving optimality), so two-stage
+    is load-bearing at production horizons, not just an optimization.
     """
     buy = np.asarray(buy_price, dtype=float)
     sell = np.asarray(sell_price, dtype=float)
@@ -393,7 +404,17 @@ def solve_milp_schedule(
         # integer) to the hardware-executable optimum.
         lb2 = lb.copy()
         ub2 = ub.copy()
-        for g in binary_groups:
+        # Fix only the four hardware-mode binaries -- the structural
+        # window/mode-sequence decision the continuous relaxation gets
+        # right. Leave the auxiliary piecewise-linear branch-select
+        # binaries (store_active, s2b_active, idle_active, throttled) and
+        # discharge_pct free: those encode "which branch of a min()" given
+        # the mode, and must be free to re-adapt once rates are forced
+        # onto the integer lattice, or stage 2 loses meaningfully more
+        # than integer rounding alone costs (measured ~3.8 ore/day on the
+        # #450 fixture when they were fixed too).
+        mode_binaries = (mode_store, mode_idle, mode_bypass, mode_discharge)
+        for g in mode_binaries:
             fixed = np.round(result.x[g])
             lb2[g] = fixed
             ub2[g] = fixed

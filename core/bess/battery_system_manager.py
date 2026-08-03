@@ -186,6 +186,11 @@ class BatterySystemManager:
         self._desired_strategic_intent: str = ""  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
+        # Export-limit curtailment state (#269) — tracks whether the hardware
+        # is currently curtailed so release can fire even on a period whose
+        # own plan doesn't call for export (see _apply_period_schedule).
+        self._export_limit_curtailed: bool = False
+
         # Consumption forecast cache. Only used for the 'influxdb_7d_avg'
         # and 'ha_statistics' strategies, whose value is a window of full
         # calendar days ending at today's midnight and so provably can't
@@ -2156,6 +2161,18 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
+            # Capability-aware, not just the raw user setting (#459 review):
+            # planning for curtailment on a platform that can't actually do
+            # it makes outcomes worse than leaving the feature off (see
+            # optimize_battery_schedule's export_curtailment_active
+            # docstring). Entity misconfiguration on a supported platform is
+            # a separate, self-correcting case surfaced by the runtime
+            # failure banner in _apply_period_schedule, not checked here.
+            export_curtailment_active = (
+                self.battery_settings.export_curtailment_enabled
+                and self._inverter_controller is not None
+                and self._inverter_controller.supports_export_limit_control
+            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2170,6 +2187,7 @@ class BatterySystemManager:
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                export_curtailment_active=export_curtailment_active,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -2677,15 +2695,44 @@ class BatterySystemManager:
         # charging at its rate limit while the surplus above that rate
         # exports). No-op on platforms without supports_export_limit_control
         # via InverterController.apply_export_limit's base implementation.
+        #
+        # The write is skipped only when there's genuinely nothing to assert:
+        # no export this period AND the hardware isn't currently curtailed.
+        # Any exporting period actively (re)asserts the correct state either
+        # way, and _export_limit_curtailed additionally forces a release on
+        # a later *non*-exporting period that would otherwise leave an
+        # earlier curtailment stuck on with no further write to clear it.
+        #
+        # A write failure here (e.g. an unconfigured entity) must not take
+        # down the rest of this period's hardware apply below.
         if self.battery_settings.export_curtailment_enabled:
             target_timestamp = time_utils.period_index_to_timestamp(period)
             period_data = self.schedule_store.get_period_data_at(target_timestamp)
-            if period_data is not None and period_data.energy.grid_exported > 0:
-                curtail = (
-                    period_data.economic.sell_price
+            if period_data is not None and (
+                period_data.energy.grid_exported > 0 or self._export_limit_curtailed
+            ):
+                should_curtail = (
+                    period_data.energy.grid_exported > 0
+                    and period_data.economic.sell_price
                     < self.battery_settings.export_curtailment_price_floor
                 )
-                self._inverter_controller.apply_export_limit(self.controller, curtail)
+                try:
+                    self._inverter_controller.apply_export_limit(
+                        self.controller, should_curtail
+                    )
+                    self._export_limit_curtailed = should_curtail
+                    self._runtime_failure_tracker.dismiss_by_category(
+                        "export_limit_curtailment"
+                    )
+                except Exception as e:
+                    self._runtime_failure_tracker.dismiss_by_category(
+                        "export_limit_curtailment"
+                    )
+                    self._runtime_failure_tracker.record_failure(
+                        category="export_limit_curtailment",
+                        operation=f"Period {period}: apply export-limit curtailment",
+                        error=e,
+                    )
 
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.

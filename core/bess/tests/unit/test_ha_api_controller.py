@@ -322,6 +322,37 @@ class TestSetOperations:
             assert mock.call_args[0][:2] == ("number", "set_value")
 
 
+class TestSetGrowattExportLimit:
+    """Export-limit curtailment writes (registers 122/123, #269)."""
+
+    @pytest.fixture
+    def export_ctrl(self, ctrl):
+        ctrl.sensors["growatt_export_limit_mode"] = "select.limit_grid_export"
+        ctrl.sensors["growatt_export_limit_value"] = "number.grid_export_limit"
+        return ctrl
+
+    def test_curtail_writes_meter_1_and_zero_percent(self, export_ctrl):
+        with patch.object(export_ctrl, "_service_call_with_retry") as mock:
+            export_ctrl.set_growatt_export_limit(curtail=True)
+            calls = mock.call_args_list
+            assert ("select", "select_option") in [c[0] for c in calls]
+            assert ("number", "set_value") in [c[0] for c in calls]
+            select_call = next(c for c in calls if c[0] == ("select", "select_option"))
+            assert select_call[1]["option"] == "Meter 1"
+            number_call = next(c for c in calls if c[0] == ("number", "set_value"))
+            assert number_call[1]["value"] == 0
+
+    def test_release_writes_disabled(self, export_ctrl):
+        with patch.object(export_ctrl, "_service_call_with_retry") as mock:
+            export_ctrl.set_growatt_export_limit(curtail=False)
+            select_call = next(
+                c for c in mock.call_args_list if c[0] == ("select", "select_option")
+            )
+            assert select_call[1]["option"] == "Disabled"
+            # Release does not touch the percentage register — only the mode.
+            assert ("number", "set_value") not in [c[0] for c in mock.call_args_list]
+
+
 class TestSetTouSegmentViaEntities:
     """Regression test for #362: begin/end must use time.set_value, not
     select.select_option, when the resolved entity is HA domain `time.*`

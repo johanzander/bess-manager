@@ -84,6 +84,12 @@ class InverterController(ABC):
     # TOU schedule writes (SPH, SolaX native).
     supports_charge_rate_control: ClassVar[bool] = True
 
+    # Whether the platform can curtail PV export via a hardware export-limit
+    # register (issue #269), requiring a grid CT/smart meter. False by
+    # default -- most platforms' HA integrations don't expose this control
+    # at all (e.g. growatt_server exposes no export-limit service/entity).
+    supports_export_limit_control: ClassVar[bool] = False
+
     # ── SM-Period-lists scheduling model ────────────────────────────────────
     # Subclasses that build separate charge/discharge period lists (Growatt
     # SPH, Solis via solis_modbus) must override these with the strategic
@@ -545,6 +551,20 @@ class InverterController(ABC):
         return self._write_period_to_hardware(
             controller, grid_charge, discharge_rate, block_passive_charging
         )
+
+    def apply_export_limit(self, controller, curtail: bool) -> None:  # noqa: B027
+        """Enable/disable PV export curtailment for this period (issue #269).
+
+        No-op by default -- only platforms with supports_export_limit_control
+        True override this. Callers should check the capability flag before
+        relying on this doing anything; the no-op exists so BSM can call it
+        unconditionally without a per-platform branch.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            curtail: True to curtail export (write 0%/Meter mode), False to
+                release it back to normal (Disabled).
+        """
 
     def get_period_settings(self, period: int) -> dict:
         """Get control settings for a specific 15-minute period.

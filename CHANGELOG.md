@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Optional PV export-limit curtailment on negative sell prices** — when enabled and a period is exporting at a sell price below a configurable floor, Growatt GEN2/GEN3/GEN4 hardware (via solax_modbus, with a grid CT/smart meter) now throttles PV production at the panel instead of paying to export. Off by default. ([#269](https://github.com/johanzander/bess-manager/issues/269))
+
 ### Fixed
 
 - **A silently dropped quarterly schedule-update tick permanently lost a period's actuals with no trace it ever happened** — the missed tick is now logged and surfaced as a runtime failure. ([#403](https://github.com/johanzander/bess-manager/issues/403))

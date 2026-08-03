@@ -1493,13 +1493,31 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
+    # Reward-facing sell price only (#269): when export curtailment is
+    # enabled, periods priced below the curtailment floor get an effective
+    # sell price of 0.0 for the DP's own reward/action-selection calculation
+    # only -- backward induction propagates a later period's reward into
+    # every earlier period's decision via the continuation value, so leaving
+    # this unfixed would make the DP refuse a genuinely profitable earlier
+    # action just to avoid a loss that curtailment neutralizes in reality.
+    # The real sell_price list (unchanged) is still what gets reported on
+    # PeriodData.economic.sell_price below and fed to _build_period_data --
+    # BSM's execution-time curtailment trigger reads that field directly, and
+    # the displayed plan should show the honest physics-only cost, not the
+    # actuation override.
+    if battery_settings.export_curtailment_enabled:
+        floor = battery_settings.export_curtailment_price_floor
+        reward_sell_price = [0.0 if p < floor else p for p in sell_price]
+    else:
+        reward_sell_price = sell_price
+
     # Step 1: Run DP to compute the value-to-go array V. Step 2 recomputes
     # each replay action directly from V (interpolated at the true
     # continuous SoE) rather than looking up a grid-snapped policy table.
     V = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
-        sell_price=sell_price,
+        sell_price=reward_sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
         initial_soe=initial_soe,
@@ -1542,7 +1560,7 @@ def optimize_battery_schedule(
             dt=dt,
             solar_production=solar_production,
             buy_price=buy_price,
-            sell_price=sell_price,
+            sell_price=reward_sell_price,
             cost_basis=current_cost_basis,
             max_charge_power_per_period=max_charge_power_per_period,
             discharge_resolution_kw=discharge_resolution_kw,

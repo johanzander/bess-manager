@@ -2615,6 +2615,24 @@ class BatterySystemManager:
                         ),
                     )
 
+        # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
+        # decision — curtail whenever this period is exporting at a sell
+        # price below the configured floor, regardless of strategic_intent
+        # (the reporting evidence showed the "battery full" case classifies
+        # as SOLAR_STORAGE, not SOLAR_EXPORT, since the battery is still
+        # charging at its rate limit while the surplus above that rate
+        # exports). No-op on platforms without supports_export_limit_control
+        # via InverterController.apply_export_limit's base implementation.
+        if self.battery_settings.export_curtailment_enabled:
+            target_timestamp = time_utils.period_index_to_timestamp(period)
+            period_data = self.schedule_store.get_period_data_at(target_timestamp)
+            if period_data is not None and period_data.energy.grid_exported > 0:
+                curtail = (
+                    period_data.economic.sell_price
+                    < self.battery_settings.export_curtailment_price_floor
+                )
+                self._inverter_controller.apply_export_limit(self.controller, curtail)
+
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate

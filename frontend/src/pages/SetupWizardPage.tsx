@@ -54,6 +54,8 @@ const SetupWizardPage: React.FC = () => {
     temperatureDeratingEnabled: false,
     inverterMaxAcPowerKw: 0,
     inverterAcPowerMargin: 0.05,
+    exportCurtailmentEnabled: false,
+    exportCurtailmentPriceFloor: 0,
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({

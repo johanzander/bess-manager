@@ -304,6 +304,13 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'growatt_vpp_power', label: 'VPP Power', required: false },
         ],
       },
+      {
+        name: 'Export Limit Curtailment (optional — requires a grid CT/smart meter)',
+        sensors: [
+          { key: 'growatt_export_limit_mode', label: 'Limit Grid Export', required: false },
+          { key: 'growatt_export_limit_value', label: 'Grid Export Limit', required: false },
+        ],
+      },
     ],
   },
   {
@@ -358,6 +365,13 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'growatt_vpp_allow_ac_charging', label: 'VPP Allow AC Charging', required: true },
           { key: 'growatt_vpp_time', label: 'VPP Time (Fallback Timer)', required: true },
           { key: 'growatt_vpp_power', label: 'VPP Power', required: true },
+        ],
+      },
+      {
+        name: 'Export Limit Curtailment (optional — requires a grid CT/smart meter)',
+        sensors: [
+          { key: 'growatt_export_limit_mode', label: 'Limit Grid Export', required: false },
+          { key: 'growatt_export_limit_value', label: 'Grid Export Limit', required: false },
         ],
       },
     ],

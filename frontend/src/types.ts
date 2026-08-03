@@ -121,6 +121,11 @@ export interface BatterySettings {
   inverterMaxAcPowerKw: number;     // kW total AC output cap
   inverterAcPowerMargin: number; // 0-1 model-side haircut on the cap
 
+  // PV export-limit curtailment (issue #269) — opt-in, requires a grid
+  // CT/smart meter and a platform with export-limit register support.
+  exportCurtailmentEnabled: boolean;
+  exportCurtailmentPriceFloor: number; // SEK/kWh — curtail below this sell price
+
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
   consumptionStrategy: string;  // "sensor", "fixed", or "influxdb_7d_avg"

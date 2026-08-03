@@ -13,6 +13,8 @@ export interface BatteryForm {
   temperatureDeratingEnabled: boolean;
   inverterMaxAcPowerKw: number;
   inverterAcPowerMargin: number;
+  exportCurtailmentEnabled: boolean;
+  exportCurtailmentPriceFloor: number;
 }
 
 interface Props {
@@ -105,6 +107,22 @@ export function BatteryFormSection({
               the midday peak. Requires per-period charge-rate control (Growatt MIN).
               The margin is a model-side haircut on the cap that compensates for hourly
               forecasts hiding short peaks; it never changes what is written to hardware.
+            </p>
+            {toggle('Curtail PV export at negative price', form.exportCurtailmentEnabled,
+              v => onChange({ ...form, exportCurtailmentEnabled: v }))}
+            {form.exportCurtailmentEnabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {numField('Curtailment Price Floor', form.exportCurtailmentPriceFloor,
+                  v => onChange({ ...form, exportCurtailmentPriceFloor: v }),
+                  { unit: `${currency || 'currency'}/kWh`, step: 0.01 })}
+              </div>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Requires a grid CT/smart meter and hardware support (currently Growatt
+              GEN2/GEN3/GEN4 via solax_modbus only). When the sell price drops below the
+              floor and the inverter is still exporting, the export-limit register throttles
+              PV production at the panel instead of paying to export. Unsupported platforms
+              ignore this setting.
             </p>
             {toggle('Enable temperature derating', form.temperatureDeratingEnabled,
               v => onChange({ ...form, temperatureDeratingEnabled: v }))}

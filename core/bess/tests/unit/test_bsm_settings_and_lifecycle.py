@@ -1060,7 +1060,9 @@ class TestLoadTodayFromDisk:
         )
         system.daily_view_store.save_day(view)
 
-        system._load_today_from_disk(current_period=2)
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+            system._load_today_from_disk(current_period=2)
 
         assert system.historical_store.get_period(0) is not None
         assert system.historical_store.get_period(1) is not None

@@ -90,18 +90,18 @@
     "max_discharge_power_kw": 6.0
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 60.9,
-    "battery_solar_cost": -14.78558,
-    "base_to_battery_solar_savings": 75.68558,
-    "base_to_battery_solar_savings_pct": 124.27845,
-    "total_charged": 28.4,
-    "total_discharged": 25.6
+    "base_cost": 120.7353,
+    "battery_solar_cost": 13.17025,
+    "base_to_battery_solar_savings": 107.56505,
+    "base_to_battery_solar_savings_pct": 89.0916,
+    "total_charged": 20.8,
+    "total_discharged": 18.72
   },
   "expected_behavior": {
     "description": "Summer day: abundant solar, mostly idle with some grid charging and export",

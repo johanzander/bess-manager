@@ -201,18 +201,18 @@
     "initial_soe": 9.6
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 94.44272,
-    "battery_solar_cost": -24.79695,
-    "base_to_battery_solar_savings": 119.23967,
-    "base_to_battery_solar_savings_pct": 126.25608,
-    "total_charged": 27.826913,
-    "total_discharged": 31.9125
+    "base_cost": 167.06269,
+    "battery_solar_cost": 27.97222,
+    "base_to_battery_solar_savings": 139.09047,
+    "base_to_battery_solar_savings_pct": 83.2565,
+    "total_charged": 18.917352,
+    "total_discharged": 23.7
   },
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-24, with solar, price spread 1.89 SEK",

@@ -90,18 +90,18 @@
     "max_discharge_power_kw": 6.0
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 127.94548,
-    "battery_solar_cost": 48.14663113573408,
-    "base_to_battery_solar_savings": 79.79884886426592,
-    "base_to_battery_solar_savings_pct": 62.36941614839846,
-    "total_charged": 46.3712,
-    "total_discharged": 41.8
+    "base_cost": 268.88225,
+    "battery_solar_cost": 134.04053,
+    "base_to_battery_solar_savings": 134.84172,
+    "base_to_battery_solar_savings_pct": 50.149,
+    "total_charged": 42.3,
+    "total_discharged": 38.16
   },
   "expected_behavior": {
     "description": "High price spread with solar: grid-charge at lows, export arbitrage at peaks",

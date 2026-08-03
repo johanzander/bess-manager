@@ -30,18 +30,18 @@
     "max_discharge_power_kw": 2.0
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 2.11,
-    "battery_solar_cost": -0.614,
-    "base_to_battery_solar_savings": 2.724,
-    "base_to_battery_solar_savings_pct": 129.099526,
+    "base_cost": 6.6533,
+    "battery_solar_cost": -0.54768,
+    "base_to_battery_solar_savings": 7.20098,
+    "base_to_battery_solar_savings_pct": 108.2316,
     "total_charged": 0.0,
-    "total_discharged": 2.66
+    "total_discharged": 2.7
   },
   "expected_behavior": {
     "description": "Short horizon high spread with solar: charge and export",

@@ -728,6 +728,28 @@ Additionally, `device_sn` is extracted, returned in the API response as `deviceS
 
 ---
 
+### Sunset the legacy `growatt.inverter_type` config key
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `settings_store.py`, `battery_system_manager.py`, `api.py`
+
+**Description**: `inverter.platform` has been the source of truth since the multi-platform work, and `_migrate_schema()` rewrites `growatt.inverter_type` → `inverter.platform` on every load. The legacy key nonetheless survives in three live code paths, each of which has to keep re-deriving what the migration already settled:
+
+- `SettingsStore._bootstrap_defaults()` still seeds `growatt: {"inverter_type": ""}` into fresh installs, so new users get a key that exists only for backwards compatibility with themselves.
+- `BatterySystemManager._resolve_initial_platform()` falls back to it at startup, via a second platform map (`_INVERTER_TYPE_TO_PLATFORM`) that duplicates `UI_TYPE_TO_PLATFORM` in `api_conversion.py`.
+- `PATCH /api/settings` accepts `growatt.inverterType` and switches the live platform from it. That path is not reachable from the current frontend, and it was the source of a real bug in #451: it switched the controller without persisting `inverter.platform`, so anything resolving from the store (the vendor service domain) kept addressing the previous platform's integration until a restart.
+
+That third case is the argument for removing it rather than maintaining it — a legacy path no UI exercises is one nothing regression-tests either, so it silently drifts out of step with whatever the current path learns to do.
+
+**What to remove**:
+- `inverter_type` from `_bootstrap_defaults()`'s `growatt` section
+- The `growatt.inverter_type` fallback in `_resolve_initial_platform()`, and `_INVERTER_TYPE_TO_PLATFORM` with it
+- The `inverterType` branch in `patch_settings`'s `growatt` handler
+- Keep `_migrate_schema()`'s rewrite — it is what makes removal safe for installs predating `inverter.platform`, and it should outlive the rest by at least one release
+
+**Files**: `core/bess/settings_store.py` (`_bootstrap_defaults`, `_migrate_schema`), `core/bess/battery_system_manager.py` (`_resolve_initial_platform`), `backend/api.py` (`patch_settings`), `core/bess/tests/unit/test_fresh_install_startup.py`, `core/bess/tests/unit/test_bsm_settings_and_lifecycle.py`
+
+---
+
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.

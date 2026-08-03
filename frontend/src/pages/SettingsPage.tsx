@@ -214,10 +214,17 @@ const SettingsPage: React.FC = () => {
 
       const invNew = s.inverter ?? {};
       const uiType = invNew.platform ?? 'growatt_server_min';
+      // The Huawei battery device_id lives on the inverter section; every
+      // other platform's device_id is the Growatt cloud one. Loading the
+      // wrong one leaves the field blank on a Huawei install and a save
+      // then cross-writes it into the other platform's section.
+      const isHuawei = uiType === 'huawei_solar_luna2000';
       const inv: InverterForm = {
         inverterPlatform: uiType,
-        deviceId: growatt_s.deviceId ?? '',
+        deviceId: (isHuawei ? invNew.deviceId : growatt_s.deviceId) ?? '',
         controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
+        serviceDomain: (invNew.serviceDomain as string | undefined) ?? '',
+        resolvedServiceDomain: (invNew.resolvedServiceDomain as string | undefined) ?? '',
       };
       setInverterForm(inv);
       savedInverter.current = JSON.stringify(inv);
@@ -442,7 +449,7 @@ const SettingsPage: React.FC = () => {
   const saveBattery = async () => {
     setSaving(true);
     try {
-      await api.patch('/api/settings', {
+      const saved = await api.patch('/api/settings', {
         battery: {
           totalCapacity: batteryForm.totalCapacity,
           minSoc: batteryForm.minSoc,
@@ -461,16 +468,29 @@ const SettingsPage: React.FC = () => {
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
         },
-        growatt: {
-          deviceId: inverterForm.deviceId,
-        },
+        ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? {}
+          : { growatt: { deviceId: inverterForm.deviceId } }),
         inverter: {
           platform: inverterForm.inverterPlatform,
           controlMode: inverterForm.controlMode ?? 'tou',
+          serviceDomain: inverterForm.serviceDomain ?? '',
+          ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+            ? { deviceId: inverterForm.deviceId }
+            : {}),
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);
-      savedInverter.current = JSON.stringify(inverterForm);
+      // The effective domain is computed server-side and changes when the
+      // platform or override does — take it from the save response rather
+      // than leaving the placeholder showing the value fetched at page load.
+      const resolved = (saved as { inverter?: { resolvedServiceDomain?: string } })
+        ?.inverter?.resolvedServiceDomain;
+      const updatedInverter = resolved === undefined
+        ? inverterForm
+        : { ...inverterForm, resolvedServiceDomain: resolved };
+      setInverterForm(updatedInverter);
+      savedInverter.current = JSON.stringify(updatedInverter);
       setToast({ type: 'success', message: 'Battery settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });

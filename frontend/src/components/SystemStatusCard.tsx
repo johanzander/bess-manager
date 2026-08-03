@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import api from '../lib/api';
 import { useDashboardData } from '../hooks/useDashboardData';
-import { FormattedValue } from '../types';
+import { FormattedValue, ControlModel } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
 import { getIntent } from '../utils/intent';
 import { 
@@ -253,11 +253,14 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       console.warn('BACKEND ISSUE: Missing or invalid hourlyData array in dashboardData');
     }
 
-    // Get actual battery mode from inverter status (not schedule)
-    if (!inverterData.batteryMode) {
+    // Get actual battery mode from inverter status (not schedule) -- only
+    // meaningful for tou_register installs; vpp_power/period_list have no
+    // mode register, see docs/superpowers/specs/2026-07-29-control-model-display-design.md.
+    const controlModel: ControlModel = inverterData.controlModel ?? 'tou_register';
+    if (controlModel === 'tou_register' && !inverterData.batteryMode) {
       throw new Error('MISSING DATA: inverterData.batteryMode is required but missing');
     }
-    const actualBatteryMode = inverterData.batteryMode;
+    const actualBatteryMode = controlModel === 'tou_register' ? inverterData.batteryMode : undefined;
 
     // Check for missing keys in hourly data
     if (currentHourData && currentHourData.batteryAction === undefined) {
@@ -463,7 +466,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           unit: "kWh",
           icon: Zap
         },
-        {
+        ...(statusData.batteryStatus?.batteryMode ? [{
           label: "Battery Mode",
           value: (() => {
             const mode = statusData.batteryStatus.batteryMode?.toLowerCase() ?? '';
@@ -476,7 +479,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           })(),
           unit: "",
           icon: Battery
-        }
+        }] : [])
       ]
     },
     {

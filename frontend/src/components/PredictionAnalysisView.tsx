@@ -10,9 +10,33 @@ interface GrowattInterval {
   startTime: string;
   endTime: string;
   enabled: boolean;
-  battMode: string;
+  battMode?: string;
+  vppPowerPct?: number;
+  vppRemoteControl?: boolean;
   power: number;
   acChargeEnabled?: boolean;
+}
+
+function renderModeCell(interval: GrowattInterval, comparedTo?: GrowattInterval): { label: string; changed: boolean } {
+  if (interval.vppPowerPct !== undefined) {
+    const changed = comparedTo !== undefined && (
+      comparedTo.vppPowerPct !== interval.vppPowerPct ||
+      comparedTo.vppRemoteControl !== interval.vppRemoteControl
+    );
+    const sign = interval.vppPowerPct > 0 ? '+' : '';
+    return {
+      label: `⚡ VPP Power: ${sign}${interval.vppPowerPct}% (${interval.vppRemoteControl ? 'remote' : 'self-use'})`,
+      changed,
+    };
+  }
+  if (interval.battMode !== undefined) {
+    const changed = comparedTo !== undefined && comparedTo.battMode !== interval.battMode;
+    return {
+      label: interval.battMode === 'battery_first' ? '⚡ Battery First' : '🏠 Load First',
+      changed,
+    };
+  }
+  return { label: '—', changed: false };
 }
 
 const PredictionAnalysisView: React.FC = () => {
@@ -666,7 +690,7 @@ const PredictionAnalysisView: React.FC = () => {
                           <div className="flex justify-between">
                             <span className="text-gray-600 dark:text-gray-400">Mode:</span>
                             <span className="font-medium text-gray-900 dark:text-white">
-                              {interval.battMode === 'battery_first' ? '⚡ Battery First' : '🏠 Load First'}
+                              {renderModeCell(interval).label}
                             </span>
                           </div>
                           <div className="flex justify-between">
@@ -707,8 +731,9 @@ const PredictionAnalysisView: React.FC = () => {
                       const matchingA = comparison.growattScheduleA?.find(
                         (a: GrowattInterval) => a.startTime === interval.startTime && a.endTime === interval.endTime
                       );
+                      const modeCell = renderModeCell(interval, matchingA);
                       const hasChanges = matchingA && (
-                        matchingA.battMode !== interval.battMode ||
+                        modeCell.changed ||
                         matchingA.power !== interval.power ||
                         matchingA.enabled !== interval.enabled ||
                         matchingA.acChargeEnabled !== interval.acChargeEnabled
@@ -746,11 +771,11 @@ const PredictionAnalysisView: React.FC = () => {
                             <div className="flex justify-between">
                               <span className="text-gray-600 dark:text-gray-400">Mode:</span>
                               <span className={`font-medium ${
-                                matchingA && matchingA.battMode !== interval.battMode
+                                modeCell.changed
                                   ? 'text-yellow-700 dark:text-yellow-300'
                                   : 'text-gray-900 dark:text-white'
                               }`}>
-                                {interval.battMode === 'battery_first' ? '⚡ Battery First' : '🏠 Load First'}
+                                {modeCell.label}
                               </span>
                             </div>
                             <div className="flex justify-between">

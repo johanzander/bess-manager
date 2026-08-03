@@ -507,6 +507,16 @@ The optimizer needs a consumption forecast.  Four strategies exist:
   prediction (same value all day).
 - **fixed**: A single fixed kWh/hour value.  Does not adapt.
 
+**Refresh cadence** (issue #395): the quarterly optimization job (every 15
+min) refreshes the consumption forecast on a strategy-aware basis, not just
+at startup/23:55.  `sensor` and `fixed` refetch every quarterly cycle — cheap
+and, for `sensor`, actually intraday-moving.  `ha_statistics` and
+`influxdb_7d_avg` average a window of full calendar days ending at today's
+midnight, so that value is provably unchanged until the date rolls over —
+they're cached and only refetched once the date changes, not on a clock
+timer.  Solar has no cache at all: it's fetched live from the HA forecast
+sensor on every quarterly run.
+
 
 ## Savings Calculation
 

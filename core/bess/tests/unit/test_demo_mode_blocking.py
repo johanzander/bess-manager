@@ -17,6 +17,7 @@ def controller():
     ctrl = HomeAssistantAPIController(
         ha_url="http://localhost:8123",
         token="test-token",
+        service_domain="growatt_server",
     )
     ctrl.test_mode = True
     return ctrl

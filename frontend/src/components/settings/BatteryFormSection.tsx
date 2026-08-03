@@ -66,7 +66,7 @@ export function BatteryFormSection({
           <div>
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Advanced settings</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Cycle cost, profit threshold, efficiency factors and temperature derating
+              Cycle cost, efficiency factors and temperature derating
             </p>
           </div>
           {effOpen

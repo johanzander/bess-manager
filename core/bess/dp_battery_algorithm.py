@@ -1305,7 +1305,8 @@ def _create_idle_schedule(
     """
     Create an all-IDLE schedule where battery passively charges from excess solar.
 
-    Used as fallback when optimization doesn't meet minimum profit threshold.
+    Used by the all-IDLE safety net, which swaps this in only when it is
+    strictly cheaper than the DP's own schedule (there is no profit gate).
     Excess solar charges the battery up to capacity; only overflow exports to grid.
     """
     period_data_list = []

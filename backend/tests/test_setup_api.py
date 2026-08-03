@@ -43,7 +43,6 @@ _PRE_EXISTING_STORE: dict = {
         "max_charge_power_kw": 5.0,
         "max_discharge_power_kw": 5.0,
         "cycle_cost_per_kwh": 0.3,
-        "min_action_profit_threshold": 0.0,
         "efficiency_charge": 0.97,
         "efficiency_discharge": 0.95,
         "temperature_derating": {"enabled": False, "weather_entity": ""},
@@ -135,7 +134,6 @@ def _full_wizard_payload(**overrides) -> dict:
         "maxSoc": 95.0,
         "maxChargeDischargePower": 15.0,
         "cycleCost": 0.50,
-        "minActionProfitThreshold": 8.0,
         "currency": "SEK",
         "consumption": 3.5,
         "consumptionStrategy": "sensor",
@@ -347,7 +345,6 @@ class TestSetupComplete:
         assert bat["max_charge_power_kw"] == 15.0
         assert bat["max_discharge_power_kw"] == 15.0
         assert bat["cycle_cost_per_kwh"] == 0.50
-        assert bat["min_action_profit_threshold"] == 8.0
 
     def test_battery_preserves_keys_not_in_wizard(self, complete_controller):
         """Keys like efficiency_charge and temperature_derating must survive."""
@@ -841,7 +838,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -875,7 +871,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -909,7 +904,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -940,7 +934,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -972,7 +965,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -1028,7 +1020,6 @@ class TestDiscoverPricingDefaults:
     def _integrations(self, **overrides) -> dict:
         base = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,

@@ -8,8 +8,7 @@ interface RuntimeFailure {
   operation: string;
   category: string;
   error_message: string;
-  error_type: string;
-  retry_count: number;
+  occurrence_count: number;
 }
 
 interface RuntimeFailureAlertsProps {
@@ -98,9 +97,9 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
 
                 <div className="text-sm text-gray-600 mb-2">
                   <div>Time: {formatTimestamp(failure.timestamp)}</div>
-                  <div>Error: {failure.error_type}</div>
-                  {failure.retry_count > 0 && (
-                    <div>Retries: {failure.retry_count}</div>
+                  <div>Error: {failure.error_message}</div>
+                  {failure.occurrence_count > 1 && (
+                    <div>Occurrences: {failure.occurrence_count}</div>
                   )}
                 </div>
 
@@ -119,7 +118,7 @@ export const RuntimeFailureAlerts: React.FC<RuntimeFailureAlertsProps> = ({
                   onClick={() =>
                     openReportProblem({
                       title: `Runtime error: ${failure.operation}`,
-                      description: `Operation: ${failure.operation}\nCategory: ${failure.category}\nError type: ${failure.error_type}\nTime: ${formatTimestamp(failure.timestamp)}\n\n${failure.error_message}`,
+                      description: `Operation: ${failure.operation}\nCategory: ${failure.category}\nTime: ${formatTimestamp(failure.timestamp)}\n\n${failure.error_message}`,
                     })
                   }
                   className="flex items-center gap-1 text-gray-600 hover:text-blue-700 p-1 text-xs"

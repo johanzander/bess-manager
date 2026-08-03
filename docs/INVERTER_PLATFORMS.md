@@ -79,27 +79,42 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 
 ### Bring-your-own integration
 
-If your inverter is already one of the platforms above but you reach it
-through a different HA integration than the one BESS expects — a bridge,
-a fork, a self-hosted alternative — you can point BESS at it without
-waiting for a new platform, as long as it matches that platform's
-coordinate (same scheduling model, same control primitives):
+BESS reaches your inverter through whatever Home Assistant integration you
+have installed. It is not bound to the specific integration named in the
+table above — that column records what the platform was built against, not
+a requirement. If the usual integration can't reach your hardware, or you
+run a different one that talks to it, BESS can be pointed at that instead.
 
-- **TX-Cloud / TX-Vendor-service** (Growatt Cloud, Huawei) — your
-  integration needs to expose the same service call with the same
-  signature, under its own domain. Set `inverter.service_domain` to that
-  domain and map its entities by hand in Settings — auto-discovery only
-  recognizes the two known domains (`growatt_server`, `huawei_solar`). See
-  the Growatt Cloud and Huawei LUNA2000 sections below for the exact call
-  signatures and a real-world example.
-- **TX-Modbus** (Growatt Local, SolaX, Solis) — control is already plain
-  `number`/`select`/`switch` entity writes, so any integration exposing
-  the right entities works; map them by hand in Settings if auto-discovery
-  doesn't recognize your integration's domain.
+**The case this exists for — Huawei behind an EMMA energy manager.** Where
+a third party owns the Modbus TCP socket, [`wlcrs/huawei_solar`](https://github.com/wlcrs/huawei_solar)
+cannot connect to the inverter at all.
+[`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
+gets there through EMMA and exposes the same `set_tou_periods` service
+under its own domain, so BESS drives such an install as an ordinary
+`huawei_solar_luna2000` platform with one setting changed.
 
-If your inverter doesn't match any platform above at all — a different
-scheduling model or transport — that's not something you can configure;
-open an issue describing what it needs.
+What has to line up:
+
+- **The vendor service call.** Growatt Cloud and Huawei are the only
+  platforms with one (see Axis 1). Your integration must expose that same
+  service, with the same signature, under its own domain — set
+  `inverter.service_domain` to that domain. The exact signatures are in the
+  Growatt Cloud and Huawei LUNA2000 sections below. TX-Modbus platforms
+  (Growatt Local, SolaX, Solis) have no vendor service at all: control
+  there is plain `number`/`select`/`switch` entity writes, so only the
+  entities below matter.
+- **The entities.** Auto-discovery only recognizes the integration domains
+  in the table above, so map the sensors — and, for Huawei, the battery
+  Device ID — by hand under Settings → Integrations & Sensors.
+- **Optional entities may legitimately be missing.** Huawei's working-mode
+  select is the example: EMMA owns the mode, so nothing maps it. BESS then
+  skips both the mode write and the LUNA2000-vs-LG-RESU battery check, logs
+  that it did, and the health check reports WARNING rather than OK.
+
+BESS cannot test against an integration it doesn't ship support for, so any
+such setup is experimental by definition. If your inverter has no matching
+platform at all — a scheduling model BESS doesn't implement — configuration
+can't bridge that; open an issue describing what it needs.
 
 ## How BESS Controls Each Platform
 
@@ -422,13 +437,10 @@ where the manager owns the mode. The health check reports WARNING rather than
 OK for such an install, since BESS is then trusting the operator's platform
 choice instead of checking it.
 
-**Compatible integrations under another domain.** See "Bring-your-own
-integration" above for the general contract. This platform's `set_tou_periods`
-call targets whichever domain `inverter.service_domain` resolves to (default
-`huawei_solar`); the tested real-world case is
-[`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
-for EMMA installs where a third party owns the Modbus TCP socket.
-Experimental: not validated against real hardware by the maintainer.
+**Compatible integrations under another domain.** This `set_tou_periods` call
+targets whichever domain `inverter.service_domain` resolves to (default
+`huawei_solar`) — see "Bring-your-own integration" above for when and how to
+change it.
 
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.

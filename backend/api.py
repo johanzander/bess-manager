@@ -3500,7 +3500,6 @@ async def setup_complete(payload: APISetupCompletePayload):
             "minSoc": "min_soc",
             "maxSoc": "max_soc",
             "cycleCost": "cycle_cost_per_kwh",
-            "minActionProfitThreshold": "min_action_profit_threshold",
         }
         if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
             payload.maxChargeDischargePower is not None
@@ -3650,7 +3649,6 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "max_charge_power_kw": payload.maxChargeDischargePower,
                     "max_discharge_power_kw": payload.maxChargeDischargePower,
                     "cycle_cost_per_kwh": payload.cycleCost,
-                    "min_action_profit_threshold": payload.minActionProfitThreshold,
                 }
             )
         if "home" in sections:

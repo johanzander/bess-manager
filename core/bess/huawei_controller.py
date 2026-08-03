@@ -274,23 +274,35 @@ class HuaweiController(InverterController):
         return writes, 0
 
     def sync_soc_limits(self, controller) -> None:
-        """Sync SOC limits from config to inverter hardware.
+        """Sync SOC limits from config to inverter hardware via entity writes.
 
-        Writes storage_charging_cutoff_capacity / storage_grid_charge_cutoff_state_of_charge
-        directly via number.set_value — no read-then-compare, since the
-        underlying HA entities already report their own state via the
-        entity registry and a mismatched write is idempotent.
+        Reads current charge/discharge stop SOC from the inverter and writes
+        back only if they differ from the configured max_soc / min_soc.
         """
         configured_max_soc = int(self.battery_settings.max_soc)
         configured_min_soc = int(self.battery_settings.min_soc)
 
-        controller.set_charge_stop_soc(configured_max_soc)
-        controller.set_discharge_stop_soc(configured_min_soc)
-        logger.info(
-            "Huawei SOC limits synced: charge_stop=%d%%, discharge_stop=%d%%",
-            configured_max_soc,
-            configured_min_soc,
-        )
+        actual_max_soc = controller.get_charge_stop_soc()
+        actual_min_soc = controller.get_discharge_stop_soc()
+
+        if (
+            actual_max_soc == configured_max_soc
+            and actual_min_soc == configured_min_soc
+        ):
+            logger.info(
+                "Huawei SOC limits verified: charge_stop=%d%%, discharge_stop=%d%%",
+                actual_max_soc,
+                actual_min_soc,
+            )
+            return
+
+        if actual_max_soc != configured_max_soc:
+            controller.set_charge_stop_soc(configured_max_soc)
+            logger.info("Set Huawei charge_stop_soc to %d%%", configured_max_soc)
+
+        if actual_min_soc != configured_min_soc:
+            controller.set_discharge_stop_soc(configured_min_soc)
+            logger.info("Set Huawei discharge_stop_soc to %d%%", configured_min_soc)
 
     def initialize_hardware(self, controller) -> None:
         self.sync_soc_limits(controller)

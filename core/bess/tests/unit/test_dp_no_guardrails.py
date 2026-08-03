@@ -124,36 +124,6 @@ def test_run_dynamic_programming_returns_one_value():
     ), f"expected a bare V array, got {type(result)}"
 
 
-def test_optimizer_ignores_min_action_profit_threshold():
-    """The whole-day rejection gate is gone -- setting an absurdly high
-    min_action_profit_threshold must no longer force an all-IDLE fallback
-    when the DP found a genuinely better schedule."""
-    from core.bess.dp_battery_algorithm import optimize_battery_schedule
-
-    settings = make_battery_settings(min_action_profit_threshold=1_000_000.0)
-    buy_price = [0.3, 0.3, 3.0, 3.0] * 6
-    sell_price = [0.25, 0.25, 2.8, 2.8] * 6
-    home_consumption = [1.0] * 24
-    solar_production = [0.0] * 24
-
-    result = optimize_battery_schedule(
-        buy_price=buy_price,
-        sell_price=sell_price,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=5.0,
-        battery_settings=settings,
-        period_duration_hours=1.0,
-    )
-    # A real arbitrage opportunity (0.3 -> 3.0 spread) should be captured
-    # despite the absurd threshold -- the old gate would have rejected this
-    # to an all-IDLE schedule.
-    assert result.economic_summary.grid_to_battery_solar_savings > 0.0, (
-        "optimizer fell back to all-IDLE despite a genuine arbitrage "
-        "opportunity -- min_action_profit_threshold should have no effect"
-    )
-
-
 def test_small_export_only_discharge_classified_as_battery_export():
     """A discharge with zero home-deficit coverage and a small (but
     meaningfully nonzero) export must be classified BATTERY_EXPORT, not

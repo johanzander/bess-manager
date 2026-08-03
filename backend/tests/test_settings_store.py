@@ -424,6 +424,25 @@ class TestSchemaMigration:
         store.load({})
         return store
 
+    def test_obsolete_min_action_profit_threshold_is_stripped(
+        self, tmp_path, monkeypatch
+    ):
+        """Existing installs carry the key on disk. Startup already survives it
+        (build_system_settings filters to BATTERY_MODEL_ATTRS), but the store
+        file is user-visible, so the dead key should not persist there."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {"battery": {"total_capacity": 15.0, "min_action_profit_threshold": 8.0}},
+        )
+        battery = store.get_section("battery")
+        assert "min_action_profit_threshold" not in battery
+
+        # And the stripped section must still construct real BatterySettings.
+        from core.bess.settings import BatterySettings
+
+        BatterySettings().update(**battery)
+
     def test_home_consumption_renamed_to_default_hourly(self, tmp_path, monkeypatch):
         """Old field 'consumption' must be renamed to 'default_hourly' on load."""
         store = self._store_with_data(
@@ -486,7 +505,6 @@ class TestSchemaMigration:
         battery = store.get_section("battery")
         for field in (
             "cycle_cost_per_kwh",
-            "min_action_profit_threshold",
             "charging_power_rate",
             "efficiency_charge",
             "efficiency_discharge",

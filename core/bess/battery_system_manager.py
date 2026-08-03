@@ -3104,6 +3104,23 @@ class BatterySystemManager:
         """
         return self._runtime_failure_tracker.dismiss_all()
 
+    def record_scheduler_misfire(self, job_id: str, scheduled_run_time) -> None:
+        """Record a scheduler job whose fire time was missed (dropped, not run).
+
+        APScheduler's default coalesce behavior silently drops a misfired run
+        with no log line (issue #403) — this makes it visible via the same
+        runtime-failure banner used for hardware-write failures.
+        """
+        run_time_str = scheduled_run_time.strftime("%H:%M")
+        self._runtime_failure_tracker.record_failure(
+            category="scheduler_misfire",
+            operation=(
+                f"Scheduled job '{job_id}' missed its {run_time_str} run "
+                f"(previous run still busy) and was dropped"
+            ),
+            error=Exception(f"Job '{job_id}' misfire at {run_time_str}"),
+        )
+
     def dismiss_historical_data_warning(self, missing_hours: list[int]) -> None:
         """Dismiss the historical-data-incomplete warning for today.
 

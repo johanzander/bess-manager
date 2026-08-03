@@ -38,7 +38,6 @@ BATTERY_REQUIRED_FIELDS: frozenset[str] = frozenset(
         "cycle_cost_per_kwh",
         "max_charge_power_kw",
         "max_discharge_power_kw",
-        "min_action_profit_threshold",
     }
 )
 

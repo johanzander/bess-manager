@@ -11,7 +11,6 @@ export interface BatteryForm {
   efficiencyCharge: number;
   efficiencyDischarge: number;
   temperatureDeratingEnabled: boolean;
-  minActionProfit: number;
   inverterMaxAcPowerKw: number;
   inverterAcPowerMargin: number;
 }
@@ -67,7 +66,7 @@ export function BatteryFormSection({
           <div>
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Advanced settings</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Cycle cost, profit threshold, efficiency factors and temperature derating
+              Cycle cost, efficiency factors and temperature derating
             </p>
           </div>
           {effOpen
@@ -83,13 +82,6 @@ export function BatteryFormSection({
               Represents battery wear — a small cost added to every kWh cycled. Used by the optimizer
               to decide whether a charge/discharge cycle is worth doing given the price spread. A higher
               value makes cycles less attractive and reduces unnecessary wear.
-            </p>
-            {numField('Min Action Profit', form.minActionProfit,
-              v => onChange({ ...form, minActionProfit: v }),
-              { unit: `${currency} — skip cycles below this gain`, min: 0, step: 0.1 })}
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Minimum profit threshold for a charge/discharge action. The optimizer skips cycles where
-              the expected gain is below this value, reducing unnecessary wear from marginal trades.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {numField('Charge Efficiency', form.efficiencyCharge,

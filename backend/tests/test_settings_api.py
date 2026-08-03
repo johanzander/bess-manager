@@ -318,6 +318,52 @@ class TestPatchSettingsServiceDomain:
         mock_controller.refresh_service_domain.assert_called()
 
 
+class TestPatchSettingsServiceDomainValidation:
+    """The Settings UI edits this field via PATCH, not the wizard payload, so
+    the pydantic validator on APISetupCompletePayload never sees it. The value
+    is interpolated into /api/services/<domain>/<service> — a slash silently
+    retargets the request path."""
+
+    @pytest.mark.parametrize("bad", ["switch.foo", "my bridge", "a/b", "UPPER", "1abc"])
+    def test_malformed_domain_rejected(self, mock_controller, bad):
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {"platform": "huawei_solar_luna2000", "serviceDomain": bad}
+            },
+        )
+        assert resp.status_code == 422, f"accepted malformed domain {bad!r}"
+
+    def test_empty_domain_accepted_as_reset_to_default(self, mock_controller):
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {"platform": "huawei_solar_luna2000", "serviceDomain": ""}
+            },
+        )
+        assert resp.status_code == 200
+
+
+class TestPatchSettingsLegacyInverterType:
+    """The legacy growatt.inverter_type path switches the live platform. It
+    must also persist inverter.platform, since that is what the service
+    domain resolves from — otherwise vendor calls address the old platform's
+    integration (or fail outright) until a restart runs the migration."""
+
+    def test_platform_persisted_alongside_live_switch(self, mock_controller):
+        # The endpoint validates inverter_type against the real map; the
+        # MagicMock's __contains__ would otherwise reject everything.
+        mock_controller.system._INVERTER_TYPE_TO_PLATFORM = {
+            "MIN": "growatt_server_min",
+            "SPH": "growatt_server_sph",
+        }
+        _client.patch("/api/settings", json={"growatt": {"inverterType": "SPH"}})
+        assert (
+            mock_controller.settings_store.data["inverter"]["platform"]
+            == "growatt_server_sph"
+        )
+
+
 class TestPatchSettingsCamelToSnake:
     """camelCase field names from the frontend must be written as snake_case in the store."""
 

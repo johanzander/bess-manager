@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 WORKING_MODE_TOU = "time_of_use_luna2000"
 
+# The integration this platform normally drives. An install pointing
+# inverter.service_domain elsewhere is declaring a compatible integration
+# (e.g. an EMMA behind its own TLS bridge, PR #412), which is what makes an
+# absent working-mode select expected rather than a misconfiguration.
+DEFAULT_SERVICE_DOMAIN = "huawei_solar"
+
 # "1234567" sets all seven day-slots via _parse_days_effective's
 # `int(day) % 7` indexing (order-independent, presence-only) — verified
 # against wlcrs/huawei_solar services.py. BESS always schedules every day
@@ -457,10 +463,35 @@ class HuaweiController(InverterController):
     def check_health(self, controller) -> list:
         """Check Huawei battery control capabilities via the working-mode entity."""
         if not controller.is_sensor_configured("huawei_working_mode"):
-            # Supported configuration (EMMA-managed install), but worth
-            # surfacing: without this entity BESS cannot verify the battery
-            # is LUNA2000 rather than LG RESU before writing LUNA2000-format
-            # TOU periods, and it never sets the working mode itself.
+            # A missing working-mode entity means two different things, and
+            # the configured service domain is what separates them — declared
+            # configuration, not a probe of the hardware.
+            #
+            # On an install driving a compatible integration under its own
+            # domain, the energy manager (EMMA) owns the mode and its absence
+            # is the expected shape. On a stock huawei_solar install it is a
+            # misconfiguration with real consequences: BESS writes TOU periods
+            # the battery never acts on, because nothing puts it into
+            # time_of_use_luna2000. That must not read as a warning.
+            is_managed_install = (
+                getattr(controller, "service_domain", "") or ""
+            ) != DEFAULT_SERVICE_DOMAIN
+            status = "WARNING" if is_managed_install else "ERROR"
+            message = (
+                (
+                    "Not mapped — working-mode writes and the LUNA2000/LG RESU "
+                    "battery family check are skipped. Expected on "
+                    "EMMA-managed installs."
+                )
+                if is_managed_install
+                else (
+                    "Not mapped — BESS cannot set the battery to "
+                    f"'{WORKING_MODE_TOU}', so written TOU periods will have no "
+                    "effect. Map the working-mode select in Settings, or set "
+                    "the inverter service domain if this battery is managed by "
+                    "an energy manager that owns the mode."
+                )
+            )
             return [
                 {
                     "name": "Battery Control (Huawei LUNA2000)",
@@ -468,16 +499,12 @@ class HuaweiController(InverterController):
                         "Controls Huawei battery TOU schedule via set_tou_periods"
                     ),
                     "required": True,
-                    "status": "WARNING",
+                    "status": status,
                     "checks": [
                         {
                             "component": "Huawei working mode (select)",
-                            "status": "WARNING",
-                            "message": (
-                                "Not mapped — working-mode writes and the "
-                                "LUNA2000/LG RESU battery family check are "
-                                "skipped. Expected on EMMA-managed installs."
-                            ),
+                            "status": status,
+                            "message": message,
                         }
                     ],
                     "last_run": datetime.now().isoformat(),

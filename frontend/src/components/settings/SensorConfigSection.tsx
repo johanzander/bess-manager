@@ -273,26 +273,40 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
     ? discovery.huaweiFound
     : Boolean((sensors.huawei_solar_luna2000 ?? {})['huawei_working_mode']);
 
+  /** Select a platform, dropping any settings that belong to the previous one.
+   *
+   * deviceId is a single shared form field but names a different thing per
+   * platform (a Growatt cloud serial vs the Huawei battery's HA device_id),
+   * and each is persisted to its own settings section. Carrying a value
+   * across a switch writes one platform's ID into the other's section, where
+   * it is applied to the live controller and addresses a device that does not
+   * exist. serviceDomain is platform-specific for the same reason. */
+  const selectPlatform = (newType: string) => {
+    const changed = newType !== inverterForm.inverterPlatform;
+    onInverterChange({
+      ...inverterForm,
+      inverterPlatform: newType,
+      ...(changed ? { deviceId: '', serviceDomain: '' } : {}),
+    });
+    onChange({ ...sensors, platform: newType });
+  };
+
   const handleIntegrationChange = (integration: 'cloud' | 'modbus' | 'solis' | 'huawei') => {
     if (integration === 'cloud') {
       const newType = 'growatt_server_min';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
     } else if (integration === 'solis') {
       const newType = 'solis_modbus';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
     } else if (integration === 'huawei') {
       const newType = 'huawei_solar_luna2000';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
     } else {
       // Default to solax_modbus_growatt_min if Growatt TOU detected, otherwise native
       const newType = growattModbusDetected ? 'solax_modbus_growatt_min'
         : growattModbusGen3Detected ? 'solax_modbus_growatt_sph'
         : 'solax_modbus_native';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
     }
   };
 
@@ -393,8 +407,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                         key={opt.value}
                         type="button"
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
-                          onChange({ ...sensors, platform: opt.value });
+                          selectPlatform(opt.value);
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                           selected
@@ -438,8 +451,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                         type="button"
                         disabled={disabled}
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
-                          onChange({ ...sensors, platform: opt.value });
+                          selectPlatform(opt.value);
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                           disabled

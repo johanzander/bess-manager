@@ -297,3 +297,35 @@ class TestEvaluateIntentsHuawei:
             make_schedule_mock(make_intents({18: "BATTERY_EXPORT"}))
         )
         assert differ is True
+
+
+class TestWorkingModeAbsenceSeverity:
+    """An unmapped working-mode entity means two different things.
+
+    On an install driving a compatible integration under its own service
+    domain (EMMA behind huawei_emma_management), the energy manager owns the
+    mode and its absence is the expected shape. On a stock huawei_solar
+    install it is a misconfiguration: BESS would write TOU periods the
+    battery never acts on, because nothing puts it into time_of_use_luna2000.
+
+    The configured service domain is what separates the two — declared
+    configuration, not a probe of the hardware.
+    """
+
+    def test_stock_huawei_solar_install_reports_error(
+        self, controller: HuaweiController
+    ) -> None:
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = False
+        ha.service_domain = "huawei_solar"
+        result = controller.check_health(ha)
+        assert result[0]["status"] == "ERROR"
+
+    def test_custom_service_domain_install_reports_warning(
+        self, controller: HuaweiController
+    ) -> None:
+        ha = MagicMock()
+        ha.is_sensor_configured.return_value = False
+        ha.service_domain = "huawei_emma_management"
+        result = controller.check_health(ha)
+        assert result[0]["status"] == "WARNING"

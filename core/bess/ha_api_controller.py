@@ -1111,9 +1111,12 @@ class HomeAssistantAPIController:
         """
         if not self.service_domain:
             raise SystemConfigurationError(
-                "No inverter service domain configured. Run the setup wizard "
-                "to select an inverter platform, or set the service domain "
-                "override in Settings."
+                component="inverter service domain",
+                message=(
+                    "No inverter service domain configured. Run the setup "
+                    "wizard to select an inverter platform, or set the "
+                    "service domain override in Settings."
+                ),
             )
         return self.service_domain
 

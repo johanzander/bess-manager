@@ -20,6 +20,7 @@ from api_conversion import (
 )
 from api_dataclasses import (
     _ENTITY_ID_RE,
+    _HA_DOMAIN_RE,
     APIConsumptionForecastComparison,
     APIDashboardHourlyData,
     APIDashboardResponse,
@@ -251,6 +252,16 @@ async def patch_settings(updates: dict):
                                 detail=f"Invalid entity ID format: {value!r}",
                             )
 
+            if store_key == "inverter":
+                domain = snake_data.get("service_domain")
+                if domain and not _HA_DOMAIN_RE.match(domain):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Invalid Home Assistant integration domain: {domain!r}"
+                        ),
+                    )
+
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
             # nordpool_official.config_entry_id) do not erase sibling keys.
@@ -310,9 +321,15 @@ async def patch_settings(updates: dict):
                             detail=f"Unknown inverter_type '{inverter_type}', "
                             f"expected one of {list(platform_map)}",
                         )
-                    bess_controller.system.switch_inverter_platform(
-                        platform_map[inverter_type]
-                    )
+                    new_platform = platform_map[inverter_type]
+                    bess_controller.system.switch_inverter_platform(new_platform)
+                    # Persist it as well: the vendor service domain resolves
+                    # from inverter.platform, so switching the live controller
+                    # without writing the store leaves service calls addressing
+                    # the previous platform's integration until a restart.
+                    inv = bess_controller.settings_store.get_section("inverter")
+                    inv["platform"] = new_platform
+                    bess_controller.settings_store.save_section("inverter", inv)
 
             elif store_key == "inverter":
                 # device_id here is the Huawei battery device (the Growatt

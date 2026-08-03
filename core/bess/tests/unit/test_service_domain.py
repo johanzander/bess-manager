@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.settings_store import PLATFORM_SERVICE_DOMAIN, SettingsStore
 
@@ -191,6 +192,24 @@ class TestSafeReadAllowlistFollowsConfiguredDomain:
                 "my_growatt_bridge", "update_time_segment", None, device_id="growatt-1"
             )
             assert mock_request.call_args[1]["category"] == "inverter_control"
+
+
+class TestUnconfiguredDomainError:
+    def test_error_message_is_not_mangled_into_the_component_slot(self) -> None:
+        """SystemConfigurationError's first positional arg is ``component``,
+        which it interpolates as "Configuration error in <component>" —
+        passing the sentence positionally produces a garbled message."""
+        ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local",
+            token="tok",
+            sensor_config={},
+            huawei_device_id="dev-1",
+            service_domain="",
+        )
+        with pytest.raises(SystemConfigurationError) as exc:
+            ctrl.write_huawei_tou_periods("06:00-08:00/1234567/+")
+        assert not str(exc.value).startswith("Configuration error in No ")
+        assert "No inverter service domain configured" in str(exc.value)
 
 
 class TestSensorConfiguredPredicate:

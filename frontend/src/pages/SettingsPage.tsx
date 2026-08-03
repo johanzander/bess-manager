@@ -447,7 +447,7 @@ const SettingsPage: React.FC = () => {
   const saveBattery = async () => {
     setSaving(true);
     try {
-      await api.patch('/api/settings', {
+      const saved = await api.patch('/api/settings', {
         battery: {
           totalCapacity: batteryForm.totalCapacity,
           minSoc: batteryForm.minSoc,
@@ -478,7 +478,16 @@ const SettingsPage: React.FC = () => {
         },
       });
       savedBattery.current = JSON.stringify(batteryForm);
-      savedInverter.current = JSON.stringify(inverterForm);
+      // The effective domain is computed server-side and changes when the
+      // platform or override does — take it from the save response rather
+      // than leaving the placeholder showing the value fetched at page load.
+      const resolved = (saved as { inverter?: { resolvedServiceDomain?: string } })
+        ?.inverter?.resolvedServiceDomain;
+      const updatedInverter = resolved === undefined
+        ? inverterForm
+        : { ...inverterForm, resolvedServiceDomain: resolved };
+      setInverterForm(updatedInverter);
+      savedInverter.current = JSON.stringify(updatedInverter);
       setToast({ type: 'success', message: 'Battery settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });

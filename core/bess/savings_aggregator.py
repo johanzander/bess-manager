@@ -150,9 +150,10 @@ def build_buckets(
     `load_day(day: date) -> DailyView | None` (duck-typed to DailyViewStore).
 
     `today_view`, if given, is used only for `period="day"` and only for the
-    bucket whose single date equals `today` and has no persisted snapshot yet
-    (i.e. today, before the 23:55 rollover writes it to the store). It never
-    overrides a persisted snapshot.
+    bucket whose single date equals `today` and has no persisted snapshot
+    (i.e. today, which is deliberately excluded from the store's listing by
+    design — see DailyViewStore.list_available_dates()). It never overrides
+    a persisted snapshot.
     """
     if period not in VALID_PERIODS:
         raise ValueError(f"Unknown period type: {period!r}")

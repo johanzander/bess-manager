@@ -2543,7 +2543,6 @@ class HomeAssistantAPIController:
 
     def discover_ha_metadata(
         self,
-        device_sn: str | None,
         entity_registry: list[dict] | None = None,
     ) -> dict:
         """Discover HA-internal IDs via the WebSocket API.
@@ -2554,7 +2553,6 @@ class HomeAssistantAPIController:
         - Huawei battery device_id (HA device registry ID for service calls)
 
         Args:
-            device_sn: Growatt device serial number to match, or None
             entity_registry: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
@@ -2576,12 +2574,11 @@ class HomeAssistantAPIController:
         )
 
         return self._parse_ha_metadata(
-            device_sn, config_entries_result, devices_result, entity_registry_result
+            config_entries_result, devices_result, entity_registry_result
         )
 
     def _parse_ha_metadata(
         self,
-        device_sn: str | None,
         config_entries_result: list[dict],
         devices_result: list[dict],
         entity_registry_result: list[dict],
@@ -2644,28 +2641,15 @@ class HomeAssistantAPIController:
                 growatt_config_entry_id = entry["entry_id"]
                 break
 
-        # Find growatt device_id from device registry.
-        # Primary: match by config_entry belonging to growatt_server
-        # Fallback: match by identifiers containing the device SN
+        # Find growatt device_id from device registry by matching the
+        # config_entry belonging to growatt_server.  Real HA devices always
+        # carry `config_entries`, so no identifier/serial-number fallback is
+        # needed.
         growatt_device_id: str | None = None
         if growatt_config_entry_id:
             for device in devices_result:
                 if growatt_config_entry_id in device.get("config_entries", []):
                     growatt_device_id = device["id"]
-                    break
-
-        if not growatt_device_id and device_sn:
-            sn_upper = device_sn.upper()
-            for device in devices_result:
-                for ident in device.get("identifiers", []):
-                    if (
-                        isinstance(ident, (list, tuple))
-                        and len(ident) == 2
-                        and str(ident[1]).upper() == sn_upper
-                    ):
-                        growatt_device_id = device["id"]
-                        break
-                if growatt_device_id:
                     break
 
         # Find huawei_solar config_entry_id, then the *battery* device
@@ -2818,7 +2802,7 @@ class HomeAssistantAPIController:
 
         Returns:
             Tuple of (result_dict, states) where result_dict has keys:
-            growatt_found, device_sn, growatt_device_id,
+            growatt_found, growatt_device_id,
             huawei_found, huawei_device_id,
             nordpool_found, nordpool_area, nordpool_config_entry_id,
             octopus_found, detected_inverter_platforms,
@@ -2827,7 +2811,6 @@ class HomeAssistantAPIController:
         """
         result: dict = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "solis_found": False,
@@ -2873,13 +2856,8 @@ class HomeAssistantAPIController:
         result["solis_found"] = inverter_detected.get("solis", False)
         result["huawei_found"] = inverter_detected.get("huawei", False)
 
-        # ── States: Growatt device SN, Nordpool area ─────────────────────
+        # ── States: Nordpool area ────────────────────────────────────────
         states = self._fetch_all_states()
-
-        device_sn = self._extract_growatt_device_sn(states)
-        if device_sn:
-            result["growatt_found"] = True
-            result["device_sn"] = device_sn
 
         for state in states:
             entity_id = str(state.get("entity_id", "")).lower()
@@ -2905,9 +2883,7 @@ class HomeAssistantAPIController:
 
         # ── Parse config entries + device registry ────────────────────────
         try:
-            metadata = self._parse_ha_metadata(
-                device_sn, config_entries, devices, registry
-            )
+            metadata = self._parse_ha_metadata(config_entries, devices, registry)
             result["growatt_device_id"] = metadata["growatt_device_id"]
             result["huawei_device_id"] = metadata.get("huawei_device_id")
             result["nordpool_config_entry_id"] = metadata["nordpool_config_entry_id"]
@@ -2979,42 +2955,6 @@ class HomeAssistantAPIController:
         )
         if match:
             return match.group(1).upper()
-        return None
-
-    def _extract_growatt_device_sn(self, states: list[dict]) -> str | None:
-        """Extract Growatt device serial number from entity IDs.
-
-        HA builds entity IDs from the slugified translation name, not the sensor key.
-        The SOC sensor (key="tlx_statement_of_charge") is used as the anchor because
-        it is present on all MIN/TLX inverters and has a stable, distinctive name.
-
-        The translation name was corrected at some point, producing two possible suffixes:
-          sensor.<sn>_statement_of_charge_soc  (old name: "Statement of Charge SOC")
-          sensor.<sn>_state_of_charge_soc      (current name: "State of charge (SoC)")
-
-        Both are handled: "_statement_of_charge" is a substring of the old suffix,
-        and "_state_of_charge_soc" matches the current suffix.
-
-        Assumes the serial number does not contain underscores (consistent with
-        Growatt alphanumeric SN format, e.g. "rkm0d7n04x").
-
-        Args:
-            states: List of state dicts from /api/states
-
-        Returns:
-            Device serial number string, or None if no Growatt entities found
-        """
-        for state in states:
-            entity_id = str(state.get("entity_id", ""))
-            if not entity_id.startswith(("sensor.", "number.", "switch.")):
-                continue
-            if (
-                "_statement_of_charge" in entity_id
-                or "_state_of_charge_soc" in entity_id
-            ):
-                object_id = entity_id.split(".", 1)[1]
-                return object_id.split("_", 1)[0]
-
         return None
 
     def discover_current_sensors(self, states: list[dict]) -> dict[str, str]:

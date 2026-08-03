@@ -1,6 +1,6 @@
 {
   "name": "CI Wizard: Hans issue #105 — HACS Nordpool SE2 + Growatt Cloud MIN (no ac_charge) + SolaX Modbus",
-  "description": "Reproduces issue #105: (1) HACS Nordpool device identifier 'nordpool_kwh_se2_sek_2_10_025' caused currency=NOK (fixed). (2) Growatt Cloud config entry is loaded but produces no growatt_server entity registry entries (entities come via MQTT instead), so MIN/SPH detection falls back to SPH. Known limitation — inverter_type must be set manually in wizard.",
+  "description": "Reproduces issue #105: HACS Nordpool device identifier 'nordpool_kwh_se2_sek_2_10_025' caused currency=NOK (fixed). This fixture's entity_registry deliberately contains only the nordpool and solax_modbus entries its assertions need; it has no growatt_server entries despite a loaded growatt_server config entry, so Growatt is correctly not detected. It is not a model of a real Growatt install.",
   "mock_time": "@2026-05-24 12:35:00",
   "timezone": "Europe/Stockholm",
   "sensors": {
@@ -362,7 +362,7 @@
     ]
   },
   "expected_discovery": {
-    "growatt_found": true,
+    "growatt_found": false,
     "solax_found": true,
     "nordpool_found": true,
     "nordpool_area": "SE2",
@@ -372,7 +372,7 @@
     "currency": "SEK",
     "vat_multiplier": 1.25,
     "detected_platform": "solax_modbus_native",
-    "_comment_inverter_type": "SPH is wrong (user has MIN) and detected_platform is solax not growatt — because growatt_server produces no entity registry entries (entities come via MQTT). Detection cannot distinguish MIN/SPH without growatt_server entities. User must select inverter type manually in wizard."
+    "_comment_inverter_type": "detected_platform is solax, not growatt: discovery matches on the entity registry platform + unique_id, and this fixture has no growatt_server registry entries. A real growatt_server install always does — every Growatt sensor BESS maps is matched by unique_id through the registry — so this file must not be used as evidence about Growatt Cloud behaviour."
   },
   "inverter_platform": "growatt_server_min"
 }

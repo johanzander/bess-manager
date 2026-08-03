@@ -275,7 +275,7 @@ All settings are available under the **Settings** page in the top navigation. Th
 
 - **Integrations** — Inverter platform selection and sensor entity IDs for each integration
 - **Electricity Pricing** — Nordpool/Octopus provider, price area, VAT, markup, additional costs, tax reduction
-- **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
+- **Battery** — Capacity, power limits, SOC range, cycle cost
 - **Home** — Consumption, currency, fuse size, voltage, phase count, safety margin
 - **System** — Demo mode, AI analyst, diagnostics and debug export
 
@@ -383,11 +383,11 @@ electricity_price:
   tax_reduction: 0.0           # Adjust if you receive SEG payments
 ```
 
-**3. Set cycle_cost and min_action_profit_threshold in GBP** (see notes below).
+**3. Set cycle_cost in GBP** (see notes below).
 
 ### ⚠️ Important Configuration Notes
 
-> **CRITICAL:** Set `cycle_cost` and `min_action_profit_threshold` in **your local currency** for correct operation.
+> **CRITICAL:** Set `cycle_cost` in **your local currency** for correct operation.
 
 **Understanding `cycle_cost`:**
 
@@ -438,17 +438,6 @@ The Min/Max SOC limits you set in **Settings → Battery** are the master values
 - **Optional adjustment**: Use more conservative limits if you want to reduce battery wear (e.g. 15–90% = 75% DoD)
 
 The DoD is already factored into the warranty cycle count, so you don't need to manually adjust the `cycle_cost` calculation based on DoD.
-
-**Understanding `min_action_profit_threshold`:**
-
-This setting controls when the battery should be used. The optimization algorithm will **NOT** charge or discharge the battery if the expected profit is below this threshold.
-
-- **Purpose:** Prevents unnecessary battery wear for small gains
-- **Impact:** Higher values = fewer but more profitable battery actions
-- **Recommended values:**
-  - 0.10-0.20 EUR
-- **Too low:** Battery cycles frequently for minimal benefit, increases wear
-- **Too high:** Battery rarely used, missing optimization opportunities
 
 ## Step 5: Start the Add-on
 

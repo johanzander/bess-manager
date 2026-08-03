@@ -410,7 +410,6 @@ class SettingsStore:
             BATTERY_CHARGE_CYCLE_COST,
             BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
             BATTERY_MAX_SOC,
-            BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             BATTERY_MIN_SOC,
             BATTERY_STORAGE_SIZE_KWH,
             DEFAULT_AREA,
@@ -435,7 +434,6 @@ class SettingsStore:
                 "max_charge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
                 "max_discharge_power_kw": BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW,
                 "cycle_cost_per_kwh": BATTERY_CHARGE_CYCLE_COST,
-                "min_action_profit_threshold": BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             },
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
@@ -495,7 +493,6 @@ class SettingsStore:
             BATTERY_DEFAULT_CHARGING_POWER_RATE,
             BATTERY_EFFICIENCY_CHARGE,
             BATTERY_EFFICIENCY_DISCHARGE,
-            BATTERY_MIN_ACTION_PROFIT_THRESHOLD,
             EXPORT_SPOT_MULTIPLIER,
             INVERTER_AC_POWER_MARGIN,
             INVERTER_MAX_AC_POWER_KW,
@@ -530,10 +527,25 @@ class SettingsStore:
                 )
                 changed = True
 
+            # Drop: min_action_profit_threshold.  The DP's profit-threshold
+            # gate was removed in the Bellman-optimality guardrail refactor,
+            # and the field is gone from BatterySettings.
+            #
+            # Not load-bearing for startup: build_system_settings() filters the
+            # battery section to BATTERY_MODEL_ATTRS (derived from the
+            # dataclass), so a leftover key is dropped there and never reaches
+            # BatterySettings.update().  This strip is hygiene — bess_settings.json
+            # is user-visible and hand-editable, and a key that silently does
+            # nothing invites someone to tune it.
+            if battery.pop("min_action_profit_threshold", None) is not None:
+                logger.info(
+                    "Schema migration: removed obsolete battery.min_action_profit_threshold"
+                )
+                changed = True
+
             # Add missing fields with defaults
             for key, default in (
                 ("cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST),
-                ("min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD),
                 ("charging_power_rate", BATTERY_DEFAULT_CHARGING_POWER_RATE),
                 ("efficiency_charge", BATTERY_EFFICIENCY_CHARGE),
                 ("efficiency_discharge", BATTERY_EFFICIENCY_DISCHARGE),

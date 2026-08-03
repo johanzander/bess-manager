@@ -42,7 +42,6 @@ _DEFAULT_STORE: dict = {
         "cycle_cost_per_kwh": 0.5,
         "max_charge_power_kw": 15.0,
         "max_discharge_power_kw": 15.0,
-        "min_action_profit_threshold": 0.0,
         "charging_power_rate": 100,
         "efficiency_charge": 0.97,
         "efficiency_discharge": 0.97,

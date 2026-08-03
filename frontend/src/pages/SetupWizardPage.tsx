@@ -52,7 +52,6 @@ const SetupWizardPage: React.FC = () => {
     efficiencyCharge: 97,
     efficiencyDischarge: 97,
     temperatureDeratingEnabled: false,
-    minActionProfit: 8.0,
     inverterMaxAcPowerKw: 0,
     inverterAcPowerMargin: 0.05,
   });
@@ -235,7 +234,6 @@ const SetupWizardPage: React.FC = () => {
         maxSoc:                   bat.maxSoc                   ?? f.maxSoc,
         maxChargeDischargePowerKw: bat.maxChargePowerKw        ?? f.maxChargeDischargePowerKw,
         cycleCostPerKwh:          bat.cycleCostPerKwh          ?? f.cycleCostPerKwh,
-        minActionProfit:          bat.minActionProfitThreshold ?? f.minActionProfit,
         efficiencyCharge:         bat.efficiencyCharge         ?? f.efficiencyCharge,
         efficiencyDischarge:      bat.efficiencyDischarge      ?? f.efficiencyDischarge,
         temperatureDeratingEnabled: bat.temperatureDeratingEnabled ?? f.temperatureDeratingEnabled,
@@ -323,7 +321,6 @@ const SetupWizardPage: React.FC = () => {
         maxSoc: batteryForm.maxSoc,
         maxChargeDischargePower: batteryForm.maxChargeDischargePowerKw,
         cycleCost: batteryForm.cycleCostPerKwh,
-        minActionProfitThreshold: batteryForm.minActionProfit,
         // Home
         currency: pricingForm.currency,
         consumption: homeForm.consumption,

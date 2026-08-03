@@ -121,6 +121,18 @@ class InverterController(ABC):
     # silently re-gated by this unrelated change.
     dedupe_register_writes: ClassVar[bool] = True
 
+    # Real hardware control model this platform uses, driving what fields
+    # get_period_settings()/get_detailed_period_groups()/get_all_tou_segments()
+    # attach to each period (see _mode_display_fields()):
+    # - "tou_register": genuine load_first/battery_first/grid_first hardware
+    #   register exists (Growatt MIN, solax_modbus Growatt in TOU mode).
+    # - "vpp_power": no mode register; behavior is (power_pct,
+    #   remote_control) per period (solax_modbus Growatt VPP mode, native
+    #   SolaX).
+    # - "period_list": no per-period mode or power value; behavior is
+    #   discrete charge/discharge time slots (Growatt SPH, Solis, Huawei).
+    CONTROL_MODEL: ClassVar[str] = "tou_register"
+
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
         execute, in kW. Default: Growatt's integer-percent-of-max grid (1%
@@ -355,7 +367,6 @@ class InverterController(ABC):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "battery_first",
                     "enabled": p.get("enabled", True),
                     "is_default": is_default,
                     "strategic_intent": charge_intent,
@@ -366,7 +377,6 @@ class InverterController(ABC):
                 {
                     "start_time": p["start_time"],
                     "end_time": p["end_time"],
-                    "batt_mode": "grid_first",
                     "enabled": p.get("enabled", True),
                     "is_default": is_default,
                     "strategic_intent": discharge_intent,
@@ -564,7 +574,6 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        mode = self.INTENT_TO_MODE[intent]
 
         if (
             self.current_schedule is not None
@@ -575,7 +584,7 @@ class InverterController(ABC):
             num_periods = len(self.current_schedule.actions)
             period_duration_hours = 24.0 / num_periods
             battery_action_kw = battery_action_kwh / period_duration_hours
-            grid_charge, discharge_rate, _block_passive_charging = (
+            grid_charge, discharge_rate, block_passive_charging = (
                 self.compute_rates_for_period(period, battery_action_kw)
             )
             charge_rate = self._compute_charge_rate(
@@ -586,14 +595,61 @@ class InverterController(ABC):
             grid_charge = control["grid_charge"]
             charge_rate = control["charge_rate"]
             discharge_rate = control["discharge_rate"]
+            block_passive_charging = control["charge_rate"] == 0
 
         return {
             "grid_charge": grid_charge,
             "charge_rate": charge_rate,
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
-            "batt_mode": mode,
+            **self._mode_display_fields(
+                intent, grid_charge, discharge_rate, block_passive_charging
+            ),
         }
+
+    def _mode_display_fields(
+        self,
+        intent: str,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool,
+    ) -> dict:
+        """Single source of truth for what mode-related fields a period
+        gets, branching on CONTROL_MODEL. Never fabricates a label the
+        hardware doesn't back — see design spec
+        docs/superpowers/specs/2026-07-29-control-model-display-design.md.
+
+        vpp_power controllers each keep their own power-computation method
+        (SolaxModbusGrowattController._intent_to_vpp,
+        SolaxController._vpp_display_state) rather than sharing one --
+        their real hardware behavior has diverged (design spec section 1
+        correction).
+
+        Returns:
+            {"batt_mode": str} for tou_register.
+            {"vpp_power_pct": int, "vpp_remote_control": bool} for vpp_power.
+            {} for period_list.
+        """
+        if self.CONTROL_MODEL == "tou_register":
+            return {"batt_mode": self.INTENT_TO_MODE[intent]}
+
+        if self.CONTROL_MODEL == "vpp_power":
+            # Every vpp_power controller must implement _vpp_display_state()
+            # with this unified signature (SolaxController,
+            # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
+            # subclass-private method name.
+            power_pct, remote_control = self._vpp_display_state(
+                grid_charge, discharge_rate, block_passive_charging, intent
+            )
+            return {
+                "vpp_power_pct": power_pct,
+                "vpp_remote_control": remote_control,
+            }
+
+        if self.CONTROL_MODEL == "period_list":
+            return {}
+
+        raise ValueError(f"Unknown CONTROL_MODEL: {self.CONTROL_MODEL!r}")
 
     def get_strategic_intent_summary(self) -> dict:
         """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
@@ -670,7 +726,6 @@ class InverterController(ABC):
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
@@ -683,12 +738,16 @@ class InverterController(ABC):
 
             _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
             charge_rate = self._compute_charge_rate(intent, control, action_kw)
+            block_passive_charging = control["charge_rate"] == 0
+            mode_fields = self._mode_display_fields(
+                intent, control["grid_charge"], discharge_rate, block_passive_charging
+            )
 
             period_settings.append(
                 {
                     "period": period,
                     "intent": intent,
-                    "mode": mode,
+                    **mode_fields,
                     "grid_charge": control["grid_charge"],
                     "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
@@ -699,10 +758,12 @@ class InverterController(ABC):
         groups = []
         current_group: dict | None = None
 
+        mode_field_keys = ("batt_mode", "vpp_power_pct", "vpp_remote_control")
+
         for ps in period_settings:
             if current_group is not None and (
                 ps["intent"] == current_group["intent"]
-                and ps["mode"] == current_group["mode"]
+                and all(ps.get(k) == current_group.get(k) for k in mode_field_keys)
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]
@@ -717,7 +778,7 @@ class InverterController(ABC):
                     "start_period": ps["period"],
                     "end_period": ps["period"],
                     "intent": ps["intent"],
-                    "mode": ps["mode"],
+                    **{k: ps[k] for k in mode_field_keys if k in ps},
                     "grid_charge": ps["grid_charge"],
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
@@ -747,7 +808,7 @@ class InverterController(ABC):
                     "start_period": group["start_period"],
                     "end_period": group["end_period"],
                     "intent": group["intent"],
-                    "mode": group["mode"],
+                    **{k: group[k] for k in mode_field_keys if k in group},
                     "grid_charge": group["grid_charge"],
                     "charge_rate": group["charge_rate"],
                     "discharge_rate": group["discharge_rate"],

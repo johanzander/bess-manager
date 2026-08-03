@@ -16,7 +16,6 @@
     "max_charge_power_kw": 5,
     "max_discharge_power_kw": 5,
     "cycle_cost_per_kwh": 0.4,
-    "min_action_profit_threshold": 0,
     "charging_power_rate": 40,
     "efficiency_charge": 0.97,
     "efficiency_discharge": 0.95,

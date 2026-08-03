@@ -59,7 +59,6 @@ function ServiceDomainField({
 
 export interface DiscoveryResult {
   growattFound: boolean;
-  deviceSn: string | null;
   growattDeviceId: string | null;
   solaxFound: boolean;
   solaxHasGrowattTou: boolean;

@@ -14,6 +14,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 - Editing the Huawei battery Device ID in Settings now saves to the inverter section and applies without a restart, instead of being written to the Growatt section.
+### Fixed
+
+- The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))
+- Inverter schedule display no longer shows a fictional TOU mode label for VPP/period-list-controlled installs. ([#415](https://github.com/johanzander/bess-manager/issues/415))
+- **A silently dropped quarterly schedule-update tick permanently lost a period's actuals with no trace it ever happened** — the missed tick is now logged and surfaced as a runtime failure. ([#403](https://github.com/johanzander/bess-manager/issues/403))
+
+### Removed
+
+- **"Min Action Profit" setting** — the DP optimizer stopped reading it when the profitability gate was replaced by pure backward induction (v10.0.0), but the field stayed in Settings → Battery and the setup wizard, still describing behaviour ("the optimizer skips cycles where the expected gain is below this value") that no longer happened. Removed from the UI, the settings schema, and the API. Existing configs are migrated automatically; no action needed.
+
+### Fixed
+
+- The "Enable Live Control" pre-flight dialog showed a green check for optional components that were genuinely failing (e.g. a misconfigured InfluxDB), not just ones left unconfigured. Those now show an amber warning — they still never block enabling live control.
+- Settings → Savings History silently displayed "0 days recorded" when the disk-usage request failed, and swallowed errors when clearing the history. Both now surface the actual error.
 
 ## [10.0.1] - 2026-08-02
 

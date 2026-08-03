@@ -395,3 +395,29 @@ def test_shadow_price_array_covers_every_period_and_is_sane():
     lo = min(sc["sell_price"]) * 0.5
     hi = max(sc["buy_price"]) * 1.5
     assert np.all((result.shadow_prices >= lo) & (result.shadow_prices <= hi))
+
+
+def test_mode_array_reports_the_chosen_hardware_disposition_per_period():
+    """Production wiring needs to know WHICH mode was chosen each period
+    (not just discharge_pct/soe) to translate into the DP's power-based
+    action convention (STORE/DISCHARGE map to a signed power; IDLE/BYPASS
+    both map to power=0, distinguished downstream by the SOE delta)."""
+    sc = _load_fixture()
+    result = solve_milp_schedule(
+        buy_price=sc["buy_price"],
+        sell_price=sc["sell_price"],
+        home_consumption=sc["home_consumption"],
+        solar_production=sc["solar_production"],
+        battery=sc["battery"],
+        dt=sc["period_duration_hours"],
+        integer_rates=True,
+    )
+
+    assert list(result.mode[33:39]) == [
+        "BYPASS",
+        "BYPASS",
+        "IDLE",
+        "IDLE",
+        "IDLE",
+        "BYPASS",
+    ]

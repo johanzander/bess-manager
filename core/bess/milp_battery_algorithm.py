@@ -61,6 +61,7 @@ class MilpScheduleResult:
     exp: np.ndarray = None  # length horizon, AC export (kWh, raw)
     credited_exp: np.ndarray = None  # length horizon, export actually priced
     discharge_pct: np.ndarray = None  # length horizon, discharge rate (%)
+    mode: np.ndarray = None  # length horizon, "STORE"/"IDLE"/"BYPASS"/"DISCHARGE"
     shadow_price: float | None = None  # marginal value of the current SOE
     shadow_prices: np.ndarray = None  # length horizon, per-period LP-dual shadow price
 
@@ -699,6 +700,12 @@ def solve_milp_schedule(
         for t in range(1, horizon):
             shadow_prices[t] = -marginals[eq_position[soe_recursion_rows[t - 1]]]
 
+    mode = np.full(horizon, "", dtype=object)
+    mode[np.round(result.x[mode_store]).astype(bool)] = "STORE"
+    mode[np.round(result.x[mode_idle]).astype(bool)] = "IDLE"
+    mode[np.round(result.x[mode_bypass]).astype(bool)] = "BYPASS"
+    mode[np.round(result.x[mode_discharge]).astype(bool)] = "DISCHARGE"
+
     return MilpScheduleResult(
         status="optimal",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
@@ -707,6 +714,7 @@ def solve_milp_schedule(
         exp=result.x[exp],
         credited_exp=result.x[credited_exp],
         discharge_pct=result.x[discharge_pct],
+        mode=mode,
         shadow_price=shadow_price,
         shadow_prices=shadow_prices,
     )

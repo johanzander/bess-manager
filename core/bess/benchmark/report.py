@@ -54,7 +54,7 @@ def print_report(benchmark_results: list[BenchmarkResult], title: str = "") -> N
 
     # Column headers
     variant_header = "  ".join(
-        f"{'Threshold':>9}  {'Savings':>8}  {'Decision':>8}" for _ in variant_names
+        f"{'Savings':>8}  {'Decision':>8}" for _ in variant_names
     )
     print(
         f"{'Scenario':<{col_scenario}}  {'Start':>{col_start}}  {'Rem':>{col_horizon}}"
@@ -62,9 +62,7 @@ def print_report(benchmark_results: list[BenchmarkResult], title: str = "") -> N
     )
 
     # Variant sub-headers
-    variant_subheader = "  ".join(
-        f"  [{name:>7}]  {'':>8}  {'':>8}" for name in variant_names
-    )
+    variant_subheader = "  ".join(f"  [{name:>7}]  {'':>8}" for name in variant_names)
     print(
         f"{'':>{col_scenario}}  {'':>{col_start}}  {'':>{col_horizon}}"
         f"  {variant_subheader}"
@@ -83,7 +81,6 @@ def print_report(benchmark_results: list[BenchmarkResult], title: str = "") -> N
         change = _change_label(r.variant_results, variant_names)
 
         variant_cols = "  ".join(
-            f"  {r.variant_results[n].effective_threshold:>9.2f}"
             f"  {r.variant_results[n].savings:>8.2f}"
             f"  {_decision(r.variant_results[n].active):>8}"
             for n in variant_names

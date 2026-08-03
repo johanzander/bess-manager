@@ -56,7 +56,6 @@ class VariantResult:
 
     savings: float
     active: bool  # False means the IDLE fallback was triggered
-    effective_threshold: float
     total_charged: float
     total_discharged: float
 
@@ -203,17 +202,15 @@ def run_benchmark(
             variant_results[variant.name] = VariantResult(
                 savings=opt.economic_summary.grid_to_battery_solar_savings,
                 active=_is_active(opt.period_data),
-                effective_threshold=settings.min_action_profit_threshold,
                 total_charged=opt.economic_summary.total_charged,
                 total_discharged=opt.economic_summary.total_discharged,
             )
 
             logger.debug(
-                "  [%s] start=%d remaining=%d threshold=%.2f savings=%.2f active=%s",
+                "  [%s] start=%d remaining=%d savings=%.2f active=%s",
                 variant.name,
                 start,
                 remaining,
-                settings.min_action_profit_threshold,
                 opt.economic_summary.grid_to_battery_solar_savings,
                 variant_results[variant.name].active,
             )

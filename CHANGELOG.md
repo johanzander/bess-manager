@@ -9,9 +9,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Added
 
 - **Optional PV export-limit curtailment on negative sell prices** — when enabled and a period is exporting at a sell price below a configurable floor, Growatt GEN2/GEN3/GEN4 hardware (via solax_modbus, with a grid CT/smart meter) now throttles PV production at the panel instead of paying to export. Off by default. ([#269](https://github.com/johanzander/bess-manager/issues/269))
+- **Inverter service domain is now configurable** — a compatible integration exposing the same TOU services under its own domain works as a setting instead of needing a new BESS platform. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 
 ### Fixed
 
+- Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))
+- Editing the Huawei battery Device ID in Settings now saves to the inverter section and applies without a restart, instead of being written to the Growatt section.
+### Fixed
+
+- The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))
+- Inverter schedule display no longer shows a fictional TOU mode label for VPP/period-list-controlled installs. ([#415](https://github.com/johanzander/bess-manager/issues/415))
 - **A silently dropped quarterly schedule-update tick permanently lost a period's actuals with no trace it ever happened** — the missed tick is now logged and surfaced as a runtime failure. ([#403](https://github.com/johanzander/bess-manager/issues/403))
 
 ### Removed

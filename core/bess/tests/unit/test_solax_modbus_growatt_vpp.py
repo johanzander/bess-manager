@@ -484,3 +484,17 @@ class TestVppInitDoesNotTouchTou:
         controller.initialize_hardware(mock_ha)
 
         assert mock_ha.calls["tou_segments"] == []
+
+
+class TestGetAllTouSegmentsVppMode:
+    def test_get_all_tou_segments_vpp_mode_solar_export_has_no_batt_mode(
+        self, controller
+    ):
+        controller.strategic_intents = ["SOLAR_EXPORT"] * 96
+        controller.current_schedule = None
+        segments = controller.get_all_tou_segments()
+        assert len(segments) >= 1
+        segment = segments[0]
+        assert "batt_mode" not in segment
+        assert segment["vpp_power_pct"] == 0
+        assert segment["vpp_remote_control"] is True

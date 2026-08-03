@@ -16,6 +16,7 @@ from dataclasses import asdict
 from datetime import date
 from pathlib import Path
 
+from . import time_utils
 from .daily_view_builder import DailyView
 from .prediction_snapshot import _daily_view_from_dict
 
@@ -29,6 +30,9 @@ class DailyViewStore:
 
     def __init__(self, persist_dir: Path = PERSIST_DIR):
         self._persist_dir = persist_dir
+
+    def _is_today(self, path: Path) -> bool:
+        return path.stem == time_utils.today().isoformat()
 
     def save_day(self, view: DailyView) -> None:
         """Persist the given day's full view, overwriting any existing file for that date."""
@@ -58,24 +62,31 @@ class DailyViewStore:
             return None
 
     def list_available_dates(self) -> list[str]:
-        """Return ISO dates that have a saved snapshot, sorted ascending."""
+        """Return ISO dates that have a saved snapshot, sorted ascending.
+
+        Excludes today — today's file is a live write-through cache, not a
+        completed day's history entry.
+        """
         if not self._persist_dir.exists():
             return []
-        return sorted(p.stem for p in self._persist_dir.glob("*.json"))
+        return sorted(
+            p.stem for p in self._persist_dir.glob("*.json") if not self._is_today(p)
+        )
 
     def get_disk_usage(self) -> dict:
-        """Return {"day_count": int, "total_bytes": int} for the saved snapshots."""
+        """Return {"day_count": int, "total_bytes": int} for saved snapshots, excluding today."""
         if not self._persist_dir.exists():
             return {"day_count": 0, "total_bytes": 0}
-        files = list(self._persist_dir.glob("*.json"))
+        files = [f for f in self._persist_dir.glob("*.json") if not self._is_today(f)]
         return {
             "day_count": len(files),
             "total_bytes": sum(f.stat().st_size for f in files),
         }
 
     def clear_all(self) -> None:
-        """Delete every saved snapshot."""
+        """Delete every saved snapshot except today's."""
         if not self._persist_dir.exists():
             return
         for f in self._persist_dir.glob("*.json"):
-            f.unlink()
+            if not self._is_today(f):
+                f.unlink()

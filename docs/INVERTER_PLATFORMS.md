@@ -21,14 +21,19 @@ communication.
 > (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
 > time slots). BESS detects the generation automatically from entity markers.
 
+> **Why `solis_modbus` and not `solax_modbus` for Solis:** `solax_modbus`
+> (the `wills106` project) advertises multi-brand support but does **not**
+> support Solis inverters in practice, so
+> [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus) — a
+> separate, dedicated integration domain — is the only viable local-Modbus
+> option for Solis.
+
 ## Inverter Integration Patterns
 
 Inverter control is **not** a single flat list of patterns — it is **two
-orthogonal axes** plus a shared vocabulary of control primitives. (This mirrors
-how cross-inverter optimizers like Predbat abstract ~20 brands: a *transport*
-capability set × a *common control vocabulary*, not a per-brand enumeration.)
-Adding a new inverter means placing it on both axes and listing which primitives
-it supports — that determines which existing controller to model on and how much
+orthogonal axes** plus a shared vocabulary of control primitives. Adding a new
+inverter means placing it on both axes and listing which primitives it
+supports — that determines which existing controller to model on and how much
 is new.
 
 ### Axis 1 — Transport (how commands reach the inverter)
@@ -50,7 +55,7 @@ serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
 | **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
 | **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud), Huawei LUNA2000 (local) |
 | **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
-| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP, Growatt VPP (GEN3+GEN4, experimental) |
 
 ### Common control primitives (the shared vocabulary)
 
@@ -72,43 +77,44 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
 | `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
 
-### Worked examples for new inverters
+### Bring-your-own integration
 
-- **Solis** (issue #130) — **implemented** as `solis_modbus`: TX-Modbus ×
-  SM-Period-lists, via the dedicated
-  [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
-  integration (its own domain, not multiplexed through `wills106/homeassistant-
-  solax-modbus`). This supersedes the earlier note below (kept for history)
-  that considered `solis_modbus` "redundant with `solax_modbus`'s local niche"
-  — in practice `solax_modbus` (the `wills106` project) does **not** support
-  Solis inverters at all, so `solis_modbus` was the only viable local-Modbus
-  option. See "Solis — solis_modbus" below for the full write-up, including
-  which unique_ids were verified against the real integration source and
-  which control entities were intentionally left unwired (no global SOC-limit
-  write path yet). Ships **experimental** — not yet validated against a real
-  Solis installation; based on SA7BNT's research and initial implementation
-  in bess-manager-beta PR #51.
+BESS reaches your inverter through whatever Home Assistant integration you
+have installed. It is not bound to the specific integration named in the
+table above — that column records what the platform was built against, not
+a requirement. If the usual integration can't reach your hardware, or you
+run a different one that talks to it, BESS can be pointed at that instead.
 
-  *(Historical note, superseded above):* Solis has several HA integrations
-  across both transports — `solis-cloud-control` (TX-Cloud, SolisCloud
-  Control API) would be the cloud alternative if a future contributor wants
-  it; `solis-sensor` (monitoring-only, no control) was ruled out as strictly
-  worse than `solis_modbus`.
-- **Huawei LUNA2000** — persistent charge/discharge TOU period lists via the
-  `huawei_solar` integration, shipping with full schedule control and
-  auto-discovery. See **"How BESS Controls Huawei LUNA2000"** section below.
+**The case this exists for — Huawei behind an EMMA energy manager.** Where
+a third party owns the Modbus TCP socket, [`wlcrs/huawei_solar`](https://github.com/wlcrs/huawei_solar)
+cannot connect to the inverter at all.
+[`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
+gets there through EMMA and exposes the same `set_tou_periods` service
+under its own domain, so BESS drives such an install as an ordinary
+`huawei_solar_luna2000` platform with one setting changed.
 
-> **Both axes new?** A coordinate that needs a **new transport AND a new
-> scheduling model** is the expensive case. The safe interim for any new inverter
-> is **monitoring-only** (detection + sensors, no schedule control), as Growatt
-> GEN3 currently is.
+What has to line up:
 
-> **Note on the controller ABC:** `InverterController`'s method names are
-> TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
-> `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
-> Growatt register interface. SM-Ephemeral inverters (SolaX today)
-> implement these by synthesizing "segments." It works; renaming to neutral terms
-> is an optional future cleanup, not a prerequisite.
+- **The vendor service call.** Growatt Cloud and Huawei are the only
+  platforms with one (see Axis 1). Your integration must expose that same
+  service, with the same signature, under its own domain — set
+  `inverter.service_domain` to that domain. The exact signatures are in the
+  Growatt Cloud and Huawei LUNA2000 sections below. TX-Modbus platforms
+  (Growatt Local, SolaX, Solis) have no vendor service at all: control
+  there is plain `number`/`select`/`switch` entity writes, so only the
+  entities below matter.
+- **The entities.** Auto-discovery only recognizes the integration domains
+  in the table above, so map the sensors — and, for Huawei, the battery
+  Device ID — by hand under Settings → Integrations & Sensors.
+- **Optional entities may legitimately be missing.** Huawei's working-mode
+  select is the example: EMMA owns the mode, so nothing maps it. BESS then
+  skips both the mode write and the LUNA2000-vs-LG-RESU battery check, logs
+  that it did, and the health check reports WARNING rather than OK.
+
+BESS cannot test against an integration it doesn't ship support for, so any
+such setup is experimental by definition. If your inverter has no matching
+platform at all — a scheduling model BESS doesn't implement — configuration
+can't bridge that; open an issue describing what it needs.
 
 ## How BESS Controls Each Platform
 
@@ -452,6 +458,18 @@ The service call is gated by a preflight check verifying the battery model via
 `get_huawei_working_mode_options()` — **LUNA2000 only**; LG RESU batteries are
 explicitly not supported (they use a price-bidding TOU format incompatible with
 BESS's optimization model).
+
+**When no working-mode entity is mapped**, that whole gate is skipped: BESS
+neither sets the working mode nor verifies the battery family, and logs both.
+This is the expected shape for an install behind an energy manager (EMMA),
+where the manager owns the mode. The health check reports WARNING rather than
+OK for such an install, since BESS is then trusting the operator's platform
+choice instead of checking it.
+
+**Compatible integrations under another domain.** This `set_tou_periods` call
+targets whichever domain `inverter.service_domain` resolves to (default
+`huawei_solar`) — see "Bring-your-own integration" above for when and how to
+change it.
 
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.

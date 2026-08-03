@@ -142,6 +142,16 @@ class TestGetSettings:
         assert battery["maxSoeKwh"] == pytest.approx(28.5)
         assert battery["reservedCapacity"] == pytest.approx(3.0)
 
+    def test_resolved_service_domain_exposed(self, mock_controller):
+        """The UI shows the platform default as a placeholder for the
+        inverter.service_domain override — it reads the resolved value from
+        the API rather than duplicating PLATFORM_SERVICE_DOMAIN client-side."""
+        mock_controller.settings_store.get_service_domain.return_value = (
+            "growatt_server"
+        )
+        resp = _client.get("/api/settings")
+        assert resp.json()["inverter"]["resolvedServiceDomain"] == "growatt_server"
+
     def test_sensors_come_from_store(self, mock_controller):
         """Sensor values are returned from the per-platform store structure."""
         mock_controller.settings_store.data["sensors"]["growatt_server_min"] = {
@@ -271,6 +281,86 @@ class TestPatchSettingsInverter:
             },
         )
         mock_controller.system.switch_control_mode.assert_not_called()
+
+
+class TestPatchSettingsServiceDomain:
+    """inverter.service_domain overrides which HA integration domain vendor
+    service calls target (PR #412). It must persist, and the live controller
+    must pick it up without a restart — otherwise BESS keeps writing TOU
+    periods to the previous integration until the process is restarted."""
+
+    def test_service_domain_persisted(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "serviceDomain": "huawei_emma_management",
+                }
+            },
+        )
+        assert (
+            mock_controller.settings_store.data["inverter"]["service_domain"]
+            == "huawei_emma_management"
+        )
+
+    def test_live_controller_refreshed(self, mock_controller):
+        _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "serviceDomain": "huawei_emma_management",
+                }
+            },
+        )
+        mock_controller.refresh_service_domain.assert_called()
+
+
+class TestPatchSettingsServiceDomainValidation:
+    """The Settings UI edits this field via PATCH, not the wizard payload, so
+    the pydantic validator on APISetupCompletePayload never sees it. The value
+    is interpolated into /api/services/<domain>/<service> — a slash silently
+    retargets the request path."""
+
+    @pytest.mark.parametrize("bad", ["switch.foo", "my bridge", "a/b", "UPPER", "1abc"])
+    def test_malformed_domain_rejected(self, mock_controller, bad):
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {"platform": "huawei_solar_luna2000", "serviceDomain": bad}
+            },
+        )
+        assert resp.status_code == 422, f"accepted malformed domain {bad!r}"
+
+    def test_empty_domain_accepted_as_reset_to_default(self, mock_controller):
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {"platform": "huawei_solar_luna2000", "serviceDomain": ""}
+            },
+        )
+        assert resp.status_code == 200
+
+
+class TestPatchSettingsLegacyInverterType:
+    """The legacy growatt.inverter_type path switches the live platform. It
+    must also persist inverter.platform, since that is what the service
+    domain resolves from — otherwise vendor calls address the old platform's
+    integration (or fail outright) until a restart runs the migration."""
+
+    def test_platform_persisted_alongside_live_switch(self, mock_controller):
+        # The endpoint validates inverter_type against the real map; the
+        # MagicMock's __contains__ would otherwise reject everything.
+        mock_controller.system._INVERTER_TYPE_TO_PLATFORM = {
+            "MIN": "growatt_server_min",
+            "SPH": "growatt_server_sph",
+        }
+        _client.patch("/api/settings", json={"growatt": {"inverterType": "SPH"}})
+        assert (
+            mock_controller.settings_store.data["inverter"]["platform"]
+            == "growatt_server_sph"
+        )
 
 
 class TestPatchSettingsCamelToSnake:

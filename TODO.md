@@ -534,6 +534,25 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### SolaxController VPP behavior has fallen behind SolaxModbusGrowattController's VPP fixes
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+**Description**: `SolaxController` (native SolaX inverters) and `SolaxModbusGrowattController` in `control_mode="vpp"` (Growatt via solax_modbus) both drive hardware through the same conceptual VPP power + remote-control model, but two Growatt-specific hardware fixes were never ported to SolaX: (1) #355's SOLAR_EXPORT grid-first hold (`block_passive_charging` -- Growatt actively holds the battery so solar bypasses to grid; SolaX still calls `set_solax_vpp_disabled()`, which lets solar passively recharge the battery during SOLAR_EXPORT), and (2) #413's LOAD_SUPPORT remote-control release (Growatt releases control to the inverter's own load-following self-use; SolaX still forces a fixed discharge-rate watt target). `SolaxController`'s own docstring (`solax_controller.py:120-126`) already flags the SOLAR_EXPORT gap as known and unverified on real hardware. These two controllers should probably converge on identical VPP semantics, but doing so changes real SolaX hardware behavior and needs its own hardware validation -- out of scope for the issue #415 display-only fix (`docs/superpowers/specs/2026-07-29-control-model-display-design.md`), which instead surfaces this divergence transparently (each controller's displayed VPP power/remote-control state reflects its own actual, currently-different, behavior).
+
+**Files**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+---
+
+### Savings history: untested error paths and swallowed fetch failures
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
+
+**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+
+---
 
 ### Move inverter-specific logic out of BatterySystemManager
 
@@ -639,6 +658,46 @@ These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, 
 Both are called sequentially from `run_setup_discovery()` in `api.py`. They serve different stages (platform identification vs sensor mapping), but having two heuristics for the same question is fragile — they could theoretically disagree. Consolidate by deriving the platform list from the suffix map match results instead of the separate `has_tlx` check.
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
+
+### Remove device_id discovery fallbacks and dead `device_sn` code
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
+
+**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
+
+Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
+
+**What to remove**:
+- `_extract_growatt_device_sn()` method
+- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
+- `device_sn` from discovery result dict and API response
+- `deviceSn` from frontend `DiscoveryResult` type
+
+**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
+
+---
+
+### Sunset the legacy `growatt.inverter_type` config key
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `settings_store.py`, `battery_system_manager.py`, `api.py`
+
+**Description**: `inverter.platform` has been the source of truth since the multi-platform work, and `_migrate_schema()` rewrites `growatt.inverter_type` → `inverter.platform` on every load. The legacy key nonetheless survives in three live code paths, each of which has to keep re-deriving what the migration already settled:
+
+- `SettingsStore._bootstrap_defaults()` still seeds `growatt: {"inverter_type": ""}` into fresh installs, so new users get a key that exists only for backwards compatibility with themselves.
+- `BatterySystemManager._resolve_initial_platform()` falls back to it at startup, via a second platform map (`_INVERTER_TYPE_TO_PLATFORM`) that duplicates `UI_TYPE_TO_PLATFORM` in `api_conversion.py`.
+- `PATCH /api/settings` accepts `growatt.inverterType` and switches the live platform from it. That path is not reachable from the current frontend, and it was the source of a real bug in #451: it switched the controller without persisting `inverter.platform`, so anything resolving from the store (the vendor service domain) kept addressing the previous platform's integration until a restart.
+
+That third case is the argument for removing it rather than maintaining it — a legacy path no UI exercises is one nothing regression-tests either, so it silently drifts out of step with whatever the current path learns to do.
+
+**What to remove**:
+- `inverter_type` from `_bootstrap_defaults()`'s `growatt` section
+- The `growatt.inverter_type` fallback in `_resolve_initial_platform()`, and `_INVERTER_TYPE_TO_PLATFORM` with it
+- The `inverterType` branch in `patch_settings`'s `growatt` handler
+- Keep `_migrate_schema()`'s rewrite — it is what makes removal safe for installs predating `inverter.platform`, and it should outlive the rest by at least one release
+
+**Files**: `core/bess/settings_store.py` (`_bootstrap_defaults`, `_migrate_schema`), `core/bess/battery_system_manager.py` (`_resolve_initial_platform`), `backend/api.py` (`patch_settings`), `core/bess/tests/unit/test_fresh_install_startup.py`, `core/bess/tests/unit/test_bsm_settings_and_lifecycle.py`
+
+---
 
 ### Other Technical Debt
 

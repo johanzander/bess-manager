@@ -39,6 +39,7 @@ def ctrl():
             "grid_charge": "switch.grid_charge",
             "discharge_inhibit": "binary_sensor.discharge_inhibit",
         },
+        service_domain="growatt_server",
     )
     c.max_attempts = 1
     c.retry_base_delay = 0

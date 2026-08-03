@@ -182,6 +182,28 @@ class TestWriteSchedule:
         ha.set_grid_charge.assert_called_once_with(False)
 
 
+class TestSyncSocLimits:
+    def test_no_write_when_hardware_already_matches_config(
+        self, controller: HuaweiController
+    ) -> None:
+        ha = MagicMock()
+        ha.get_charge_stop_soc.return_value = 95
+        ha.get_discharge_stop_soc.return_value = 15
+        controller.sync_soc_limits(ha)
+        ha.set_charge_stop_soc.assert_not_called()
+        ha.set_discharge_stop_soc.assert_not_called()
+
+    def test_writes_only_mismatched_register(
+        self, controller: HuaweiController
+    ) -> None:
+        ha = MagicMock()
+        ha.get_charge_stop_soc.return_value = 90
+        ha.get_discharge_stop_soc.return_value = 15
+        controller.sync_soc_limits(ha)
+        ha.set_charge_stop_soc.assert_called_once_with(95)
+        ha.set_discharge_stop_soc.assert_not_called()
+
+
 class TestActiveTouIntervals:
     def test_active_tou_intervals_returns_all(
         self, controller: HuaweiController

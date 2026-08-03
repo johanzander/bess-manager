@@ -1105,7 +1105,6 @@ class APISetupCompletePayload(BaseModel):
     maxSoc: float | None = None
     maxChargeDischargePower: float | None = None
     cycleCost: float | None = None
-    minActionProfitThreshold: float | None = None
     # Home settings
     currency: str | None = None
     consumption: float | None = None

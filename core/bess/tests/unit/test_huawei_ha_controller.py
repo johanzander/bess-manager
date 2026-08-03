@@ -15,6 +15,7 @@ def controller() -> HomeAssistantAPIController:
         token="tok",
         sensor_config={"huawei_working_mode": "select.huawei_working_mode"},
         huawei_device_id="dev-123",
+        service_domain="huawei_solar",
     )
     ctrl.test_mode = False
     return ctrl

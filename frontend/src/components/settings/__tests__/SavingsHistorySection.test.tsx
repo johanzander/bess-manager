@@ -35,4 +35,34 @@ describe('SavingsHistorySection', () => {
       expect(screen.getByText(/0 days recorded/i)).toBeInTheDocument();
     });
   });
+
+  it('shows an error instead of a plausible "0 days recorded" when the fetch fails', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsHistoryDiskUsage').mockRejectedValue(
+      new Error('Request failed with status code 500')
+    );
+
+    render(<SavingsHistorySection />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not load savings history/i)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/days recorded/i)).not.toBeInTheDocument();
+  });
+
+  it('surfaces an error when clearing the history fails', async () => {
+    vi.spyOn(scheduleApi, 'clearSavingsHistory').mockRejectedValue(new Error('boom'));
+
+    render(<SavingsHistorySection />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/12 days recorded/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /clear history/i }));
+    fireEvent.click(screen.getByRole('button', { name: /confirm clear/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/could not load savings history: boom/i)).toBeInTheDocument();
+    });
+  });
 });

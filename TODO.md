@@ -392,16 +392,6 @@ Report:
 
 ---
 
-### Optional Components with ERROR Status Shown as Green in PreflightCheckDialog
-
-**Impact**: Low | **Effort**: Low
-
-**Description**: `PreflightCheckDialog.tsx` maps `required=false` checks unconditionally to `status: 'ok'` (green CheckCircle). An InfluxDB component in a genuine ERROR state (misconfigured, not just NOT_CONFIGURED) would appear green, masking the problem. Consider using a neutral/warning icon (e.g. `AlertCircle`) for optional components that are ERROR, reserving green for OK status only.
-
-**File**: `frontend/src/components/PreflightCheckDialog.tsx` line 34
-
----
-
 ## 🔄 **ARCHITECTURAL IMPROVEMENTS** (From Historical Design Analysis)
 
 ### 10. **Machine Learning Predictions**
@@ -544,6 +534,16 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
+### SolaxController VPP behavior has fallen behind SolaxModbusGrowattController's VPP fixes
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+**Description**: `SolaxController` (native SolaX inverters) and `SolaxModbusGrowattController` in `control_mode="vpp"` (Growatt via solax_modbus) both drive hardware through the same conceptual VPP power + remote-control model, but two Growatt-specific hardware fixes were never ported to SolaX: (1) #355's SOLAR_EXPORT grid-first hold (`block_passive_charging` -- Growatt actively holds the battery so solar bypasses to grid; SolaX still calls `set_solax_vpp_disabled()`, which lets solar passively recharge the battery during SOLAR_EXPORT), and (2) #413's LOAD_SUPPORT remote-control release (Growatt releases control to the inverter's own load-following self-use; SolaX still forces a fixed discharge-rate watt target). `SolaxController`'s own docstring (`solax_controller.py:120-126`) already flags the SOLAR_EXPORT gap as known and unverified on real hardware. These two controllers should probably converge on identical VPP semantics, but doing so changes real SolaX hardware behavior and needs its own hardware validation -- out of scope for the issue #415 display-only fix (`docs/superpowers/specs/2026-07-29-control-model-display-design.md`), which instead surfaces this divergence transparently (each controller's displayed VPP power/remote-control state reflects its own actual, currently-different, behavior).
+
+**Files**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
+
+---
+
 ### Savings history: untested error paths and swallowed fetch failures
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
@@ -553,7 +553,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
 
 ---
-
 
 ### Move inverter-specific logic out of BatterySystemManager
 
@@ -567,29 +566,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 - `grid_charge_enabled()` in `ha_api_controller.py` — not applicable to SolaX, logs a spurious WARNING
 
 **Files**: `core/bess/battery_system_manager.py`, `core/bess/inverter_controller.py`, `core/bess/solax_controller.py`, `core/bess/ha_api_controller.py`
-
----
-
-
-### Simplify Health Check Severity Model
-
-**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `power_monitor.py`, all callers of `perform_health_check()`
-
-**Description**: The current model has two independent knobs that are easy to misconfigure:
-
-- `is_required` — marks the component as critical to the system (used only by the dashboard banner to set `has_critical_errors`)
-- `required_methods` — controls whether a failing sensor inside the component shows ERROR vs WARNING on the component card
-
-These concepts are orthogonal but interact in non-obvious ways. The correct mapping of `is_required` → severity was never enforced, which caused `Power Monitoring` (`is_required=False`) to show ERROR instead of WARNING because `required_methods=all_methods` was passed. Fixed by hand, but the underlying design is fragile.
-
-**Proposed simplification**: Derive `required_methods` automatically from `is_required` instead of requiring callers to pass both:
-
-- `is_required=True` → all methods are required → failure → ERROR
-- `is_required=False` → no methods are required → failure → WARNING
-
-This eliminates the `required_methods` parameter entirely and makes the policy self-consistent: optional components can never show ERROR, required components always show ERROR on failure.
-
-**Files**: `core/bess/health_check.py`, `core/bess/power_monitor.py`, `core/bess/health_check.py` (all `perform_health_check()` call sites)
 
 ---
 
@@ -671,16 +647,6 @@ These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, 
 
 ---
 
-### Clean up suffix map dead entries
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
-
-**Description**: `GROWATT_MIN_SUFFIX_MAP` contains `battery_discharge_soc_limit_on_grid` which never matches any real `unique_id` suffix. The actual `growatt_server` unique_id for this entity uses the shorter suffix `soc_limit_on_grid` (added separately). Audit all per-platform suffix maps for other entries that exist only because they matched entity_id patterns but have no corresponding unique_id in any real integration. Discovery matches exclusively on `unique_id` via `_map_registry_entities`, so entity_id-shaped suffixes are dead code.
-
-**Files**: `core/bess/ha_api_controller.py` (per-platform suffix maps)
-
----
-
 ### Consolidate Growatt MIN/SPH detection into a single path
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`
@@ -692,24 +658,6 @@ These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, 
 Both are called sequentially from `run_setup_discovery()` in `api.py`. They serve different stages (platform identification vs sensor mapping), but having two heuristics for the same question is fragile — they could theoretically disagree. Consolidate by deriving the platform list from the suffix map match results instead of the separate `has_tlx` check.
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
-
-### Remove device_id discovery fallbacks and dead `device_sn` code
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
-
-**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
-
-Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
-
-**What to remove**:
-- `_extract_growatt_device_sn()` method
-- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
-- `device_sn` from discovery result dict and API response
-- `deviceSn` from frontend `DiscoveryResult` type
-
-**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
-
----
 
 ### Other Technical Debt
 
@@ -772,8 +720,6 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
 
-**Stale comment in `BatteryActionsTable.tsx:91`**: `// Use backend-calculated summary data instead of frontend calculations` was the header of the now-deleted Summary Cards block; it now floats above the `finalHour` declaration with nothing to describe. Harmless, mildly misleading.
-
 **`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
 
 **`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
@@ -816,6 +762,10 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 **Stale line-number citation in a test docstring** (`core/bess/tests/unit/test_sensor_collector_gapfill.py:7`) — cites the InfluxDB gap-fill `if` block at a line range that has drifted by one line from its actual current location (`252-263`) after later edits in the same file. Cosmetic only.
 
-**`backend/app.py` has no `if __name__ == "__main__":` guard around its module-level `BESSController()` construction and `start_in_background()` call** — pre-existing, unrelated to #387, but it's what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing. Worth a guard so `backend/app.py` is import-safe for future tests without workarounds.
+**`backend/app.py` constructs `BESSController()` and calls `start_in_background()` at module level**, which is what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing.
+
+**Do not "fix" this with `if __name__ == "__main__":`** — every launch path is `uvicorn app:app` (`backend/run.sh`, `backend/Dockerfile.dev`, `docker-compose.ci.yml`, `docker-compose.prod-test.yml`), so `__name__` is always `"app"` and the guarded block would never run. That would silently stop BESS from ever starting while leaving the web server up.
+
+The real fix is to move construction into the FastAPI `lifespan` startup hook, which runs under uvicorn but not on bare import. That is a change to the application's entire startup path (and `api.py`'s `from app import bess_controller` would then see `None` until lifespan runs), so it needs the mock-HA E2E stack to verify — not a small cleanup.
 
 ---

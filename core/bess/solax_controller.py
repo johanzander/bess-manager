@@ -55,6 +55,8 @@ class SolaxController(InverterController):
     # never a load-following ceiling. See #324.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "vpp_power"
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""
         super().__init__(battery_settings)
@@ -149,6 +151,36 @@ class SolaxController(InverterController):
         except Exception as e:
             logger.error("FAILED: SolaX VPP period write: %s", e)
             return False, str(e)
+
+    def _vpp_display_state(
+        self,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
+        strategic_intent: str = "",
+    ) -> tuple[int, bool]:
+        """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
+        for display, mirroring _write_period_to_hardware()'s three branches
+        exactly. Unlike SolaxModbusGrowattController._intent_to_vpp(), this
+        ignores block_passive_charging and strategic_intent -- SolaX's
+        actual hardware write logic doesn't use them either (see the
+        TODO.md gap note: SolaX never received the #355/#413 Growatt VPP
+        fixes, so its real behavior for SOLAR_EXPORT/LOAD_SUPPORT differs).
+        The two extra parameters exist only so the base class's
+        _mode_display_fields() can call _vpp_display_state() with a single
+        unified signature across all vpp_power controllers -- they do not
+        change SolaxController's own behavior.
+
+        Returns:
+            (power_pct, remote_control_enabled) -- power_pct expressed as a
+            percent of max charge/discharge power, matching discharge_rate's
+            own convention (not raw watts).
+        """
+        if not grid_charge and discharge_rate == 0:
+            return 0, False
+        if grid_charge:
+            return 100, True
+        return -discharge_rate, True
 
     def write_to_hardware(
         self,
@@ -355,7 +387,6 @@ class SolaxController(InverterController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }
@@ -368,7 +399,8 @@ class SolaxController(InverterController):
                     "segment_id": i,
                     "start_time": group["start_time"],
                     "end_time": group["end_time"],
-                    "batt_mode": group["mode"],
+                    "vpp_power_pct": group["vpp_power_pct"],
+                    "vpp_remote_control": group["vpp_remote_control"],
                     "enabled": True,
                     "strategic_intent": group["intent"],
                 }

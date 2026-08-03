@@ -76,6 +76,7 @@ class HomeAssistantAPIController:
         sensor_config: dict | None = None,
         growatt_device_id: str | None = None,
         huawei_device_id: str | None = None,
+        service_domain: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -85,6 +86,9 @@ class HomeAssistantAPIController:
             sensor_config: Sensor configuration mapping from options.json
             growatt_device_id: Growatt device ID for TOU segment operations
             huawei_device_id: Huawei battery device ID for TOU period operations
+            service_domain: HA integration domain for vendor service calls
+                (SettingsStore.get_service_domain() — "huawei_solar",
+                "growatt_server", or a compatible integration's own domain)
 
         """
         self.base_url = ha_url
@@ -105,6 +109,12 @@ class HomeAssistantAPIController:
 
         # Store Huawei battery device ID for TOU period operations
         self.huawei_device_id = huawei_device_id
+
+        # HA integration domain for vendor service calls (set_tou_periods,
+        # update_time_segment, ...). Every other service call infers its
+        # domain from the entity_id prefix; these target a device, so the
+        # domain is configuration — see SettingsStore.get_service_domain.
+        self.service_domain = service_domain or ""
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -873,6 +883,20 @@ class HomeAssistantAPIController:
         # This ensures proper sensor mapping and prevents silent failures
         raise ValueError(f"No entity ID configured for sensor '{sensor_key}'")
 
+    def is_sensor_configured(self, sensor_key: str) -> bool:
+        """Report whether ``sensor_key`` is mapped to a usable entity ID.
+
+        Public predicate for controllers that treat an optional entity's
+        absence as a supported configuration rather than a fault — e.g.
+        HuaweiController skipping the working-mode gate on installs behind
+        an energy manager that exposes no LUNA2000 working-mode select.
+        """
+        try:
+            self._resolve_entity_id(sensor_key)
+        except ValueError:
+            return False
+        return True
+
     def get_method_sensor_info(self, method_name: str) -> dict:
         """Get sensor configuration info for a controller method."""
         method_info = self.METHOD_SENSOR_MAP.get(method_name)
@@ -1077,6 +1101,25 @@ class HomeAssistantAPIController:
 
                     raise  # Re-raise the last exception
 
+    def _vendor_service_domain(self) -> str:
+        """Return the configured vendor integration domain, or raise.
+
+        Raises:
+            SystemConfigurationError: If no domain is configured — the
+                install has no inverter platform selected, so a vendor
+                service call can't be addressed at all.
+        """
+        if not self.service_domain:
+            raise SystemConfigurationError(
+                component="inverter service domain",
+                message=(
+                    "No inverter service domain configured. Run the setup "
+                    "wizard to select an inverter platform, or set the "
+                    "service domain override in Settings."
+                ),
+            )
+        return self.service_domain
+
     def _service_call_with_retry(
         self, service_domain, service_name, operation: str | None = None, **kwargs
     ):
@@ -1092,16 +1135,25 @@ class HomeAssistantAPIController:
             Response from service call or None
 
         """
-        # List of read-only operations that are safe to execute in test mode
-        # In test mode, we block ALL operations EXCEPT these safe reads
-        safe_read_operations = [
-            ("growatt_server", "read_time_segments"),
-            ("growatt_server", "read_ac_charge_times"),
-            ("growatt_server", "read_ac_discharge_times"),
-            ("nordpool", "get_prices_for_date"),
-        ]
-
-        is_safe_read = (service_domain, service_name) in safe_read_operations
+        # Read-only operations that are safe to execute in test mode, and
+        # that HA requires return_response=true for. The vendor reads are
+        # matched by service name against whatever domain this install's
+        # inverter integration uses (self.service_domain), not the literal
+        # "growatt_server" — a compatible integration under a different
+        # domain implements the same services and would otherwise get no
+        # data back, failing in a way that looks like its own fault.
+        vendor_safe_reads = (
+            "read_time_segments",
+            "read_ac_charge_times",
+            "read_ac_discharge_times",
+        )
+        is_vendor_domain = bool(self.service_domain) and (
+            service_domain == self.service_domain
+        )
+        is_safe_read = (service_domain, service_name) == (
+            "nordpool",
+            "get_prices_for_date",
+        ) or (is_vendor_domain and service_name in vendor_safe_reads)
 
         # Test mode blocks ALL operations except safe reads (deny by default)
         if self.test_mode and not is_safe_read:
@@ -1142,11 +1194,7 @@ class HomeAssistantAPIController:
             category=(
                 "battery_control"
                 if service_domain in ["number", "input_number", "switch"]
-                else (
-                    "inverter_control"
-                    if service_domain == "growatt_server"
-                    else "other"
-                )
+                else ("inverter_control" if is_vendor_domain else "other")
             ),
             context=context,
             json=json_data,
@@ -1457,7 +1505,7 @@ class HomeAssistantAPIController:
                 "to configure the inverter."
             )
         self._service_call_with_retry(
-            "huawei_solar",
+            self._vendor_service_domain(),
             "set_tou_periods",
             operation="Write Huawei TOU periods",
             device_id=self.huawei_device_id,
@@ -1501,7 +1549,7 @@ class HomeAssistantAPIController:
 
         enabled_str = "enabled" if enabled else "disabled"
         self._service_call_with_retry(
-            "growatt_server",
+            self._vendor_service_domain(),
             "update_time_segment",
             operation=f"Write TOU segment {segment_id}: {batt_mode} {start_time}-{end_time} ({enabled_str})",
             **service_params,
@@ -1523,7 +1571,7 @@ class HomeAssistantAPIController:
 
             # Call the service and get the response
             result = self._service_call_with_retry(
-                "growatt_server",
+                self._vendor_service_domain(),
                 "read_time_segments",
                 operation=None,
                 **service_params,
@@ -1831,7 +1879,10 @@ class HomeAssistantAPIController:
             )
 
         self._service_call_with_retry(
-            "growatt_server", "write_ac_charge_times", None, **service_params
+            self._vendor_service_domain(),
+            "write_ac_charge_times",
+            None,
+            **service_params,
         )
 
     def read_ac_charge_times(self) -> dict:
@@ -1852,7 +1903,10 @@ class HomeAssistantAPIController:
                 )
 
             result = self._service_call_with_retry(
-                "growatt_server", "read_ac_charge_times", None, **service_params
+                self._vendor_service_domain(),
+                "read_ac_charge_times",
+                None,
+                **service_params,
             )
 
             if result and "service_response" in result:
@@ -1894,7 +1948,10 @@ class HomeAssistantAPIController:
             )
 
         self._service_call_with_retry(
-            "growatt_server", "write_ac_discharge_times", None, **service_params
+            self._vendor_service_domain(),
+            "write_ac_discharge_times",
+            None,
+            **service_params,
         )
 
     def read_ac_discharge_times(self) -> dict:
@@ -1915,7 +1972,10 @@ class HomeAssistantAPIController:
                 )
 
             result = self._service_call_with_retry(
-                "growatt_server", "read_ac_discharge_times", None, **service_params
+                self._vendor_service_domain(),
+                "read_ac_discharge_times",
+                None,
+                **service_params,
             )
 
             if result and "service_response" in result:

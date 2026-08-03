@@ -140,7 +140,10 @@ class BESSController:
         inverter_config = merged.get("inverter", {})
         huawei_device_id = inverter_config.get("device_id")
         self.ha_controller = self._init_ha_controller(
-            sensor_config, growatt_device_id, huawei_device_id
+            sensor_config,
+            growatt_device_id,
+            huawei_device_id,
+            self.settings_store.get_service_domain(),
         )
 
         # Enable test mode from environment variable OR persisted demo_mode setting.
@@ -209,7 +212,11 @@ class BESSController:
         logger.info("BESS Controller initialized with early settings loading")
 
     def _init_ha_controller(
-        self, sensor_config, growatt_device_id=None, huawei_device_id=None
+        self,
+        sensor_config,
+        growatt_device_id=None,
+        huawei_device_id=None,
+        service_domain=None,
     ):
         """Initialize Home Assistant API controller based on environment.
 
@@ -217,6 +224,7 @@ class BESSController:
             sensor_config: Sensor configuration dictionary to use for the controller.
             growatt_device_id: Growatt device ID for TOU segment operations.
             huawei_device_id: Huawei device ID for battery operations.
+            service_domain: HA integration domain for vendor service calls.
         """
         ha_token = os.getenv("HASSIO_TOKEN")
         if ha_token:
@@ -235,6 +243,7 @@ class BESSController:
             sensor_config=sensor_config,
             growatt_device_id=growatt_device_id,
             huawei_device_id=huawei_device_id,
+            service_domain=service_domain,
         )
 
     def _load_options(self):
@@ -278,6 +287,18 @@ class BESSController:
         """
         active = self.settings_store.get_active_sensors()
         self.ha_controller.sensors = {k: v for k, v in active.items() if v}
+
+    def refresh_service_domain(self) -> None:
+        """Sync the live ha_controller.service_domain from persisted settings.
+
+        Like ha_controller.sensors, this is a plain copy taken at init — an
+        inverter platform switch changes which vendor domain the platform
+        resolves to, and an explicit inverter.service_domain override
+        changes it directly. Call this after any settings mutation that can
+        touch the inverter section, or vendor service calls keep targeting
+        the previous integration until the next restart.
+        """
+        self.ha_controller.service_domain = self.settings_store.get_service_domain()
 
     def apply_discovered_config(
         self,

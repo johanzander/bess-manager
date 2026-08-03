@@ -277,8 +277,17 @@ export interface RuntimeFailure {
   operation: string;
   category: string;
   error_message: string;
-  error_type: string;
-  retry_count: number;
+  occurrence_count: number;
 }
+
+/**
+ * Which inverter control primitive the platform exposes for battery
+ * scheduling. Determines whether a discrete "battery mode" register is
+ * meaningful for display purposes (tou_register only) -- vpp_power and
+ * period_list installs have no such register.
+ * See docs/superpowers/specs/2026-07-29-control-model-display-design.md.
+ */
+export type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
+
 
 

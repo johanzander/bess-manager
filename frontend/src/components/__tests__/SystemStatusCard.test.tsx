@@ -280,4 +280,29 @@ describe('SystemStatusCard', () => {
     expect(screen.queryByText(/Cost & Savings \(2 days\)/)).not.toBeInTheDocument();
     expect(screen.queryByText(/Tomorrow:/)).not.toBeInTheDocument();
   });
+
+  it('shows the Battery Mode metric for tou_register installs', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Battery Mode')).toBeInTheDocument();
+    expect(screen.getByText('Load First')).toBeInTheDocument();
+  });
+
+  it('hides the Battery Mode metric when controlModel is not tou_register', async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      data: { controlModel: 'vpp_power' },
+    });
+
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByText('Battery Mode')).not.toBeInTheDocument();
+  });
 });

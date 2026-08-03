@@ -860,6 +860,36 @@ class BatterySystemManager:
         logger.info("Historical seed loaded: %d periods from '%s'", loaded, seed_file)
         return loaded > 0
 
+    def _load_today_from_disk(self, current_period: int) -> None:
+        """Seed historical_store from today's persisted DailyView, if any.
+
+        Only periods marked data_source == "actual" are trusted as real
+        recovered data. Periods the file marked "predicted" or "missing"
+        (e.g. a period a scheduler tick never got around to recording, see
+        issue #403) are deliberately left unseeded so the InfluxDB backfill
+        that runs after this can still attempt them.
+        """
+        view = self.daily_view_store.load_day(time_utils.today())
+        if view is None:
+            return
+
+        seeded = 0
+        for period_data in view.periods:
+            if period_data.data_source != "actual":
+                continue
+            if not 0 <= period_data.period < current_period:
+                continue
+            try:
+                self.historical_store.record_period(period_data.period, period_data)
+                seeded += 1
+            except ValueError as e:
+                logger.warning(
+                    "Could not seed period %d from disk: %s", period_data.period, e
+                )
+
+        if seeded:
+            logger.info("Seeded %d period(s) from today's persisted file", seeded)
+
     def _fetch_and_initialize_historical_data(self, status_callback=None) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
         try:
@@ -873,6 +903,9 @@ class BatterySystemManager:
             if current_period > 0 and self._load_historical_seed(current_period):
                 self.sensor_collector.warm_readings_cache()
                 return
+
+            if current_period > 0:
+                self._load_today_from_disk(current_period)
 
             if not is_influxdb_configured():
                 logger.info(
@@ -897,6 +930,8 @@ class BatterySystemManager:
                         status_callback(
                             f"Fetching historical data ({hour}/{total_hours}h)..."
                         )
+                    if self.historical_store.get_period(period) is not None:
+                        continue
                     try:
                         # Collect cumulative sensor readings at period boundary (calculate deltas for energy flows)
                         period_energy_data = self.sensor_collector.collect_energy_data(
@@ -1444,17 +1479,10 @@ class BatterySystemManager:
                 logger.warning(f"Failed to get initial SOC: {e}")
 
         if prepare_next_day:
-            logger.info(
-                "Preparing for next day - saving daily view and refreshing predictions"
-            )
-            if is_first_run:
-                # No schedule has ever been created yet (fresh start/restart), so
-                # there is no completed day's view to persist.
-                logger.info(
-                    "Skipping daily view save: no schedule exists yet for today"
-                )
-            else:
-                self.daily_view_store.save_day(self.get_current_daily_view())
+            # Today's file is already current — _persist_today_view() (called
+            # from _update_energy_data on every tick, including this one) has
+            # been keeping it up to date all day. Nothing to save here.
+            logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 
@@ -1649,6 +1677,8 @@ class BatterySystemManager:
             )
         else:
             logger.info("Historical store: no periods stored yet")
+
+        self._persist_today_view()
 
     def _get_planned_intent_for_period(self, period: int) -> str | None:
         """Get the DP-planned strategic intent for a period.
@@ -3128,6 +3158,23 @@ class BatterySystemManager:
         """
         return self._runtime_failure_tracker.dismiss_all()
 
+    def record_scheduler_misfire(self, job_id: str, scheduled_run_time) -> None:
+        """Record a scheduler job whose fire time was missed (dropped, not run).
+
+        APScheduler's default coalesce behavior silently drops a misfired run
+        with no log line (issue #403) — this makes it visible via the same
+        runtime-failure banner used for hardware-write failures.
+        """
+        run_time_str = scheduled_run_time.strftime("%H:%M")
+        self._runtime_failure_tracker.record_failure(
+            category="scheduler_misfire",
+            operation=(
+                f"Scheduled job '{job_id}' missed its {run_time_str} run "
+                f"(previous run still busy) and was dropped"
+            ),
+            error=Exception(f"Job '{job_id}' misfire at {run_time_str}"),
+        )
+
     def dismiss_historical_data_warning(self, missing_hours: list[int]) -> None:
         """Dismiss the historical-data-incomplete warning for today.
 
@@ -3196,6 +3243,32 @@ class BatterySystemManager:
 
         # Build daily view with current period
         return self.daily_view_builder.build_daily_view(current_period)
+
+    def _persist_today_view(self) -> None:
+        """Best-effort snapshot of today's merged view to disk.
+
+        Write-through cache for HistoricalDataStore: called on every tick
+        that may have recorded new actuals, so a mid-day restart can seed
+        from disk instead of relying solely on InfluxDB backfill. No-op
+        until the first schedule of the day exists (build_daily_view raises
+        ValueError otherwise) — this mirrors the is_first_run skip that used
+        to gate the old 23:55-only save call.
+
+        Never lets a disk-related failure propagate: this is called from
+        _update_energy_data on every tick, and an uncaught exception here
+        would abort that tick's optimization and hardware write.
+        """
+        # Skip during BESS_HISTORICAL_SEED_FILE replay (see _load_historical_seed):
+        # persisting replayed fixture data to /data/daily_views would corrupt
+        # real disk state for a test/E2E run.
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
+        if self.schedule_store.get_latest_schedule() is None:
+            return
+        try:
+            self.daily_view_store.save_day(self.get_current_daily_view())
+        except Exception as e:
+            logger.warning("Failed to persist today's view: %s", e)
 
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption.

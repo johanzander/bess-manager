@@ -460,7 +460,6 @@ def test_below_min_soe_charges_from_real_solar_instead_of_holding_at_negative_pr
         max_discharge_power_kw=5,
         charging_power_rate=40,
         cycle_cost_per_kwh=0.035,
-        min_action_profit_threshold=0,
         efficiency_charge=0.97,
         efficiency_discharge=0.95,
         inverter_max_ac_power_kw=0,

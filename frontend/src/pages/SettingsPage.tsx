@@ -39,7 +39,7 @@ const EMPTY_BATTERY: BatteryForm = {
   maxChargeDischargePowerKw: 0,
   cycleCostPerKwh: 0,
   efficiencyCharge: 97, efficiencyDischarge: 97,
-  temperatureDeratingEnabled: false, minActionProfit: 0,
+  temperatureDeratingEnabled: false,
   inverterMaxAcPowerKw: 0, inverterAcPowerMargin: 0.05,
 };
 const EMPTY_HOME: HomeForm = {
@@ -170,7 +170,6 @@ const SettingsPage: React.FC = () => {
         efficiencyCharge: bat_s.efficiencyCharge ?? 0.97,
         efficiencyDischarge: bat_s.efficiencyDischarge ?? 0.95,
         temperatureDeratingEnabled: bat_s.temperatureDerating?.enabled ?? false,
-        minActionProfit: bat_s.minActionProfitThreshold ?? 0,
         inverterMaxAcPowerKw: bat_s.inverterMaxAcPowerKw ?? 0,
         inverterAcPowerMargin: bat_s.inverterAcPowerMargin ?? 0.05,
       };
@@ -448,7 +447,6 @@ const SettingsPage: React.FC = () => {
           maxChargePowerKw: batteryForm.maxChargeDischargePowerKw,
           maxDischargePowerKw: batteryForm.maxChargeDischargePowerKw,
           cycleCostPerKwh: batteryForm.cycleCostPerKwh,
-          minActionProfitThreshold: batteryForm.minActionProfit,
           efficiencyCharge: batteryForm.efficiencyCharge,
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           inverterMaxAcPowerKw: batteryForm.inverterMaxAcPowerKw,

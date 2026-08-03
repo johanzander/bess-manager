@@ -11,7 +11,6 @@
       "max_charge_power_kw": 15.0,
       "max_discharge_power_kw": 15.0,
       "cycle_cost_per_kwh": 0.4,
-      "min_action_profit_threshold": 0.0,
       "efficiency_charge": 0.97,
       "efficiency_discharge": 0.95
     },
@@ -1342,7 +1341,6 @@
         "maxSoc": 95.0,
         "maxChargeDischargePower": 5.0,
         "cycleCost": 0.5,
-        "minActionProfitThreshold": 0.0,
         "currency": "GBP",
         "consumption": 4.0,
         "consumptionStrategy": "fixed",
@@ -1428,7 +1426,6 @@
         "maxSoc": 100.0,
         "maxChargeDischargePower": 15.0,
         "cycleCost": 0.4,
-        "minActionProfitThreshold": 0.0,
         "currency": "GBP",
         "consumption": 4.6,
         "consumptionStrategy": "fixed",

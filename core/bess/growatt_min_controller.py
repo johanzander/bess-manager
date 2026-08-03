@@ -1059,7 +1059,7 @@ class GrowattMinController(InverterController):
             marker = "*" if is_current else " "
 
             row = (
-                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['mode']:13} ║"
+                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['batt_mode']:13} ║"
                 f" {group['grid_charge']!s:11} ║ {group['charge_rate']:11}% ║ {group['discharge_rate']:13}% ║"
             )
             lines.append(row)

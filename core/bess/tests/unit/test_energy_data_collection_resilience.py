@@ -23,6 +23,8 @@ def _make_bsm():
     bsm._price_manager = MagicMock()
     bsm.battery_settings = MagicMock(cycle_cost_per_kwh=0.5)
     bsm._log_energy_balance = MagicMock()
+    bsm.schedule_store = MagicMock()
+    bsm.schedule_store.get_latest_schedule.return_value = None
     return bsm
 
 

@@ -21,14 +21,19 @@ communication.
 > (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
 > time slots). BESS detects the generation automatically from entity markers.
 
+> **Why `solis_modbus` and not `solax_modbus` for Solis:** `solax_modbus`
+> (the `wills106` project) advertises multi-brand support but does **not**
+> support Solis inverters in practice, so
+> [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus) — a
+> separate, dedicated integration domain — is the only viable local-Modbus
+> option for Solis.
+
 ## Inverter Integration Patterns
 
 Inverter control is **not** a single flat list of patterns — it is **two
-orthogonal axes** plus a shared vocabulary of control primitives. (This mirrors
-how cross-inverter optimizers like Predbat abstract ~20 brands: a *transport*
-capability set × a *common control vocabulary*, not a per-brand enumeration.)
-Adding a new inverter means placing it on both axes and listing which primitives
-it supports — that determines which existing controller to model on and how much
+orthogonal axes** plus a shared vocabulary of control primitives. Adding a new
+inverter means placing it on both axes and listing which primitives it
+supports — that determines which existing controller to model on and how much
 is new.
 
 ### Axis 1 — Transport (how commands reach the inverter)
@@ -50,7 +55,7 @@ serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
 | **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
 | **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud), Huawei LUNA2000 (local) |
 | **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
-| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP, Growatt VPP (GEN3+GEN4, experimental) |
 
 ### Common control primitives (the shared vocabulary)
 
@@ -59,41 +64,6 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 (start/end) · **discharge window** · **target / charge-stop SOC** ·
 **reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
 **grid-charge enable**.
-
-### Bring-your-own integration
-
-Every control primitive above is a plain entity write (`number.set_value`,
-`select.select_option`, `switch.turn_on`/`turn_off`) on every platform,
-including the TOU-via-entities platforms (Growatt Local/GEN4, SolaX, Solis).
-Those are core HA domains, not vendor-specific — any integration exposing
-entities that match a platform's suffix map (or that are mapped by hand in
-Settings) satisfies this. The source integration's name is irrelevant.
-
-The one exception is the TOU/schedule write on **Growatt Cloud** and
-**Huawei LUNA2000** — there it targets a *device* through a named vendor
-service (`growatt_server.write_ac_charge_times`, `huawei_solar.set_tou_periods`)
-rather than an entity, so there's no entity_id prefix to infer the domain
-from. The vendor domain for that service call is `inverter.service_domain`,
-defaulting to the platform's standard domain and overridable per install.
-
-A compatible integration for either platform works as a *configuration* of
-the existing platform, not a new one, as long as it exposes the same service
-under its own domain with the same call signature:
-
-- **Huawei LUNA2000** — `set_tou_periods(device_id, charge_periods,
-  discharge_periods, working_mode_settings)`. Real-world example:
-  [`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server),
-  for installs behind an EMMA energy manager where a third party owns the
-  Modbus TCP socket. See "Huawei LUNA2000 (Local)" below for the full
-  write-up, including what happens when no working-mode entity is mapped.
-- **Growatt Cloud** — `update_time_segment(segment_id, start_time, end_time,
-  mode, enabled)` (MIN) or `write_ac_charge_times`/`write_ac_discharge_times`
-  (SPH). Same mechanism as Huawei above.
-
-Discovery only matches the known integration domains
-(`huawei_solar`, `growatt_server`), so an install on a compatible integration
-under a different domain maps its entities and device_id by hand in Settings;
-`inverter.service_domain` is then the only field needed to point BESS at it.
 
 ### The six platforms as coordinates
 
@@ -107,43 +77,30 @@ under a different domain maps its entities and device_id by hand in Settings;
 | `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
 | `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
 
-### Worked examples for new inverters
+### Bring-your-own integration
 
-- **Solis** (issue #130) — **implemented** as `solis_modbus`: TX-Modbus ×
-  SM-Period-lists, via the dedicated
-  [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
-  integration (its own domain, not multiplexed through `wills106/homeassistant-
-  solax-modbus`). This supersedes the earlier note below (kept for history)
-  that considered `solis_modbus` "redundant with `solax_modbus`'s local niche"
-  — in practice `solax_modbus` (the `wills106` project) does **not** support
-  Solis inverters at all, so `solis_modbus` was the only viable local-Modbus
-  option. See "Solis — solis_modbus" below for the full write-up, including
-  which unique_ids were verified against the real integration source and
-  which control entities were intentionally left unwired (no global SOC-limit
-  write path yet). Ships **experimental** — not yet validated against a real
-  Solis installation; based on SA7BNT's research and initial implementation
-  in bess-manager-beta PR #51.
+To integrate an inverter or HA integration BESS doesn't yet support, place it
+on both axes above (Transport × Scheduling model) and check the coordinate
+table:
 
-  *(Historical note, superseded above):* Solis has several HA integrations
-  across both transports — `solis-cloud-control` (TX-Cloud, SolisCloud
-  Control API) would be the cloud alternative if a future contributor wants
-  it; `solis-sensor` (monitoring-only, no control) was ruled out as strictly
-  worse than `solis_modbus`.
-- **Huawei LUNA2000** — persistent charge/discharge TOU period lists via the
-  `huawei_solar` integration, shipping with full schedule control and
-  auto-discovery. See **"How BESS Controls Huawei LUNA2000"** section below.
-
-> **Both axes new?** A coordinate that needs a **new transport AND a new
-> scheduling model** is the expensive case. The safe interim for any new inverter
-> is **monitoring-only** (detection + sensors, no schedule control), as Growatt
-> GEN3 currently is.
-
-> **Note on the controller ABC:** `InverterController`'s method names are
-> TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
-> `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
-> Growatt register interface. SM-Ephemeral inverters (SolaX today)
-> implement these by synthesizing "segments." It works; renaming to neutral terms
-> is an optional future cleanup, not a prerequisite.
+- **Coordinate already covered, different integration domain** — for
+  TX-Cloud/TX-Vendor-service platforms (Growatt Cloud, Huawei), if the target
+  integration exposes the same service call with the same signature under its
+  own domain, `inverter.service_domain` points BESS at it with no controller
+  changes; map entities by hand in Settings, since discovery only recognizes
+  the known domains (`huawei_solar`, `growatt_server`). See the Growatt Cloud
+  and Huawei LUNA2000 sections below for the exact call signatures and a
+  real-world example.
+- **Coordinate already covered, TX-Modbus** — entity-based control
+  (`number`/`select`/`switch`) is already integration-agnostic; a new Modbus
+  integration exposing entities under the existing suffix map's names needs no
+  controller change, and a differently-named one needs a new suffix map but
+  can reuse the existing controller.
+- **New coordinate** — a scheduling model or transport not yet implemented
+  needs a new `InverterController` subclass. Model it on the controller for
+  the closest existing scheduling model (`SM-TOU-numbered`, `SM-Period-lists`,
+  `SM-Mode-slots`, `SM-Ephemeral`) and list which common control primitives
+  the hardware actually supports.
 
 ## How BESS Controls Each Platform
 

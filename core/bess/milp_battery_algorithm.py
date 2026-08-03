@@ -110,6 +110,7 @@ def solve_milp_schedule(
     compute_shadow_price: bool = False,
     compute_shadow_price_array: bool = False,
     max_charge_power_per_period: list[float] | None = None,
+    self_throttle_export_threshold_kwh: float = SELF_THROTTLE_EXPORT_THRESHOLD_KWH,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
 
@@ -525,7 +526,7 @@ def solve_milp_schedule(
         con(
             [
                 (exp[t], 1),
-                (throttled[t], -SELF_THROTTLE_EXPORT_THRESHOLD_KWH),
+                (throttled[t], -self_throttle_export_threshold_kwh),
                 (mode_discharge[t], -_EXPORT_BIG_M_KWH),
             ],
             -_EXPORT_BIG_M_KWH,
@@ -612,6 +613,8 @@ def solve_milp_schedule(
                 dt,
                 terminal_value_per_kwh,
                 integer_rates=True,
+                max_charge_power_per_period=max_charge_power_per_period,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             ).cost
             cost_below = solve_milp_schedule(
                 buy_price,
@@ -622,6 +625,8 @@ def solve_milp_schedule(
                 dt,
                 terminal_value_per_kwh,
                 integer_rates=True,
+                max_charge_power_per_period=max_charge_power_per_period,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             ).cost
             shadow_price = (cost_below - cost_at) / SOE_STEP_KWH
 

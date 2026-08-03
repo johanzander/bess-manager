@@ -79,28 +79,27 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 
 ### Bring-your-own integration
 
-To integrate an inverter or HA integration BESS doesn't yet support, place it
-on both axes above (Transport × Scheduling model) and check the coordinate
-table:
+If your inverter is already one of the platforms above but you reach it
+through a different HA integration than the one BESS expects — a bridge,
+a fork, a self-hosted alternative — you can point BESS at it without
+waiting for a new platform, as long as it matches that platform's
+coordinate (same scheduling model, same control primitives):
 
-- **Coordinate already covered, different integration domain** — for
-  TX-Cloud/TX-Vendor-service platforms (Growatt Cloud, Huawei), if the target
-  integration exposes the same service call with the same signature under its
-  own domain, `inverter.service_domain` points BESS at it with no controller
-  changes; map entities by hand in Settings, since discovery only recognizes
-  the known domains (`huawei_solar`, `growatt_server`). See the Growatt Cloud
-  and Huawei LUNA2000 sections below for the exact call signatures and a
-  real-world example.
-- **Coordinate already covered, TX-Modbus** — entity-based control
-  (`number`/`select`/`switch`) is already integration-agnostic; a new Modbus
-  integration exposing entities under the existing suffix map's names needs no
-  controller change, and a differently-named one needs a new suffix map but
-  can reuse the existing controller.
-- **New coordinate** — a scheduling model or transport not yet implemented
-  needs a new `InverterController` subclass. Model it on the controller for
-  the closest existing scheduling model (`SM-TOU-numbered`, `SM-Period-lists`,
-  `SM-Mode-slots`, `SM-Ephemeral`) and list which common control primitives
-  the hardware actually supports.
+- **TX-Cloud / TX-Vendor-service** (Growatt Cloud, Huawei) — your
+  integration needs to expose the same service call with the same
+  signature, under its own domain. Set `inverter.service_domain` to that
+  domain and map its entities by hand in Settings — auto-discovery only
+  recognizes the two known domains (`growatt_server`, `huawei_solar`). See
+  the Growatt Cloud and Huawei LUNA2000 sections below for the exact call
+  signatures and a real-world example.
+- **TX-Modbus** (Growatt Local, SolaX, Solis) — control is already plain
+  `number`/`select`/`switch` entity writes, so any integration exposing
+  the right entities works; map them by hand in Settings if auto-discovery
+  doesn't recognize your integration's domain.
+
+If your inverter doesn't match any platform above at all — a different
+scheduling model or transport — that's not something you can configure;
+open an issue describing what it needs.
 
 ## How BESS Controls Each Platform
 

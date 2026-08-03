@@ -13,6 +13,7 @@ import log_config as _  # noqa: F401
 # Import endpoints router
 from api import router as endpoints_router
 from api_conversion import build_system_settings
+from apscheduler.events import EVENT_JOB_MISSED
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from fastapi import FastAPI
@@ -325,6 +326,26 @@ class BESSController:
         self._init_scheduler_jobs()
         logger.info("Scheduler started")
 
+    def _on_job_missed(self, event) -> None:
+        """Surface a coalesced scheduler misfire that would otherwise be silent.
+
+        APScheduler's default coalesce=True drops a missed fire time with no
+        log line at all (issue #403) — for update_schedule_quarterly this
+        permanently lost a period's actuals with no trace it ever happened.
+        Scoped to that job only; other jobs' misfires are not this issue.
+        """
+        if event.job_id != "update_schedule_quarterly":
+            return
+        logger.warning(
+            f"Scheduled job '{event.job_id}' missed its "
+            f"{event.scheduled_run_time:%H:%M} run — previous run still busy, "
+            "misfire coalesced away"
+        )
+        self.system.record_scheduler_misfire(
+            job_id=event.job_id,
+            scheduled_run_time=event.scheduled_run_time,
+        )
+
     def _init_scheduler_jobs(self):
         """Configure scheduler jobs."""
 
@@ -337,8 +358,10 @@ class BESSController:
         self.scheduler.add_job(
             update_schedule_quarterly,
             CronTrigger(minute="0,15,30,45"),
+            id="update_schedule_quarterly",
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
+        self.scheduler.add_listener(self._on_job_missed, EVENT_JOB_MISSED)
 
         # Next day preparation (daily at 23:55)
         def prepare_next_day():

@@ -384,6 +384,17 @@ class TestRuntimeFailureTracking:
         with pytest.raises(ValueError):
             system.dismiss_runtime_failure("nonexistent-id")
 
+    def test_record_scheduler_misfire(self, system):
+        system.record_scheduler_misfire(
+            job_id="update_schedule_quarterly",
+            scheduled_run_time=datetime(2026, 7, 27, 0, 30),
+        )
+        failures = system.get_runtime_failures()
+        assert len(failures) == 1
+        assert failures[0].category == "scheduler_misfire"
+        assert "update_schedule_quarterly" in failures[0].operation
+        assert "00:30" in failures[0].operation
+
 
 class TestCriticalSensorFailures:
     def test_no_failures_initially(self, system):

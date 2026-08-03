@@ -67,16 +67,14 @@ Every control primitive above is a plain entity write (`number.set_value`,
 including the TOU-via-entities platforms (Growatt Local/GEN4, SolaX, Solis).
 Those are core HA domains, not vendor-specific — any integration exposing
 entities that match a platform's suffix map (or that are mapped by hand in
-Settings) already works today. Nothing about the source integration's name
-matters here, and nothing needed to change to support this.
+Settings) satisfies this. The source integration's name is irrelevant.
 
 The one exception is the TOU/schedule write on **Growatt Cloud** and
 **Huawei LUNA2000** — there it targets a *device* through a named vendor
 service (`growatt_server.write_ac_charge_times`, `huawei_solar.set_tou_periods`)
 rather than an entity, so there's no entity_id prefix to infer the domain
-from. That vendor domain was the one hardcoded part, and it's now a setting:
-`inverter.service_domain`, defaulting to the platform's standard domain and
-overridable per install.
+from. The vendor domain for that service call is `inverter.service_domain`,
+defaulting to the platform's standard domain and overridable per install.
 
 A compatible integration for either platform works as a *configuration* of
 the existing platform, not a new one, as long as it exposes the same service
@@ -90,9 +88,7 @@ under its own domain with the same call signature:
   write-up, including what happens when no working-mode entity is mapped.
 - **Growatt Cloud** — `update_time_segment(segment_id, start_time, end_time,
   mode, enabled)` (MIN) or `write_ac_charge_times`/`write_ac_discharge_times`
-  (SPH). Same mechanism, no known compatible integration yet — listed here so
-  the contract is visible before a use case shows up, not just documented
-  after the fact for the platform that happened to need it first.
+  (SPH). Same mechanism as Huawei above.
 
 Discovery only matches the known integration domains
 (`huawei_solar`, `growatt_server`), so an install on a compatible integration

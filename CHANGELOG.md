@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- **A silently dropped quarterly schedule-update tick permanently lost a period's actuals with no trace it ever happened** — the missed tick is now logged and surfaced as a runtime failure. ([#403](https://github.com/johanzander/bess-manager/issues/403))
+
 ### Removed
 
 - **"Min Action Profit" setting** — the DP optimizer stopped reading it when the profitability gate was replaced by pure backward induction (v10.0.0), but the field stayed in Settings → Battery and the setup wizard, still describing behaviour ("the optimizer skips cycles where the expected gain is below this value") that no longer happened. Removed from the UI, the settings schema, and the API. Existing configs are migrated automatically; no action needed.

@@ -88,6 +88,51 @@ describe('PreflightCheckDialog', () => {
     })
   })
 
+  it('does not show an optional component in ERROR as passing', async () => {
+    // check_historical_data_access() reports required:false with status ERROR
+    // when InfluxDB is configured but unreachable/misconfigured.
+    mockGet.mockResolvedValueOnce({
+      data: {
+        checks: [
+          { name: 'Battery Control', status: 'OK', required: true },
+          { name: 'Historical Data Access', status: 'ERROR', required: false },
+        ],
+      },
+    })
+
+    const { container } = render(
+      <PreflightCheckDialog open={true} onClose={() => {}} onConfirm={() => {}} />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Historical Data Access')).toBeInTheDocument()
+    })
+
+    // Exactly one green check (Battery Control) — the failing optional
+    // component must not be one of them.
+    expect(container.querySelectorAll('.text-green-500')).toHaveLength(1)
+    expect(container.querySelectorAll('.text-amber-500')).toHaveLength(1)
+  })
+
+  it('still enables the button when only an optional component has ERROR status', async () => {
+    mockGet.mockResolvedValueOnce({
+      data: {
+        checks: [
+          { name: 'Battery Control', status: 'OK', required: true },
+          { name: 'Historical Data Access', status: 'ERROR', required: false },
+        ],
+      },
+    })
+
+    render(<PreflightCheckDialog open={true} onClose={() => {}} onConfirm={() => {}} />)
+
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: /enable live control/i })
+      expect(button).not.toBeDisabled()
+    })
+    expect(screen.getByText(/some optional components reported problems/i)).toBeInTheDocument()
+  })
+
   it('shows success banner when all required checks pass', async () => {
     mockGet.mockResolvedValueOnce({
       data: {

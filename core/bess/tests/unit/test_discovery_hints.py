@@ -296,7 +296,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("SE3")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "SE3"
 
     def test_area_is_uppercased(self, monkeypatch):
@@ -304,7 +304,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("se3")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "SE3"
 
     def test_hacs_long_identifier_normalised(self, monkeypatch):
@@ -312,7 +312,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_se2_sek_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "SE2"
 
     def test_hacs_norwegian_identifier_normalised(self, monkeypatch):
@@ -320,7 +320,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_no1_nok_3_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "NO1"
 
     def test_hacs_nl_identifier_not_aliased_to_norway(self, monkeypatch):
@@ -328,7 +328,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_nl_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "NL"
 
     def test_hacs_be_identifier_normalised(self, monkeypatch):
@@ -336,7 +336,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_be_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "BE"
 
     def test_hacs_de_identifier_normalised(self, monkeypatch):
@@ -344,7 +344,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_de_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "DE"
 
     def test_hacs_de_lu_identifier_normalised(self, monkeypatch):
@@ -352,7 +352,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_de-lu_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "DE-LU"
 
     def test_hacs_de_lu_underscore_entity_id_normalised(self, monkeypatch):
@@ -365,7 +365,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_de_lu_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "DE_LU"
 
     def test_hacs_fr_identifier_normalised(self, monkeypatch):
@@ -373,7 +373,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_fr_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "FR"
 
     def test_hacs_at_identifier_normalised(self, monkeypatch):
@@ -381,7 +381,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_at_eur_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "AT"
 
     def test_hacs_pl_identifier_normalised(self, monkeypatch):
@@ -389,7 +389,7 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("nordpool_kwh_pl_pln_2_10_025")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] == "PL"
 
     def test_non_matching_config_entry_ignored(self, monkeypatch):
@@ -397,20 +397,20 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("SE3", config_entry_id="other")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] is None
 
     def test_no_nordpool_devices_returns_none(self, monkeypatch):
         """nordpool_area is None when no matching devices exist."""
         entry = {"domain": "nordpool", "state": "loaded", "entry_id": "abc"}
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], []))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] is None
 
     def test_no_nordpool_config_entry_returns_none(self, monkeypatch):
         """nordpool_area is None when there is no loaded nordpool config entry."""
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([]))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] is None
 
     def test_unloaded_entry_is_ignored(self, monkeypatch):
@@ -418,5 +418,5 @@ class TestDiscoverHaMetadataNordpoolArea:
         entry = {"domain": "nordpool", "state": "not_loaded", "entry_id": "abc"}
         devices = [self._nordpool_device("SE3")]
         monkeypatch.setattr(self.ctrl, "_ws_query", self._ws_stub([entry], devices))
-        result = self.ctrl.discover_ha_metadata(None)
+        result = self.ctrl.discover_ha_metadata()
         assert result["nordpool_area"] is None

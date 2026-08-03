@@ -356,3 +356,42 @@ def test_per_period_charge_cap_derates_the_store_rate():
     assert capped.soe == pytest.approx(expected_soe, abs=1e-6)
     # Uncapped charges far more per period at the same incentive.
     assert uncapped.soe[1] - uncapped.soe[0] > capped.soe[1] - capped.soe[0]
+
+
+def test_shadow_price_array_covers_every_period_and_is_sane():
+    """Production wiring needs a shadow price for EVERY period (not just
+    the current one, slice 5's scope) -- battery_system_manager.py's
+    intra-period discharge gate reads it per period, and shadow_price
+    defaults to 0.0 (not None) when unset, so an un-populated array would
+    silently force the gate open rather than fail loudly.
+
+    The LP-dual array is NOT asserted to exactly match the finite-
+    difference method (slice 5) -- a real, documented gap exists (the
+    exact discrete-action V is locally staircase-like; a local dual and a
+    genuine 0.05 kWh window can legitimately differ near a kink, same
+    reasoning dp_battery_algorithm.py itself documents for why it uses a
+    finite difference over an infinitesimal slope in the first place).
+    Instead this checks the array is well-formed and economically sane:
+    right length, no NaN/inf, and positive (a marginal kWh of stored
+    energy has real value) within a generous band around the price
+    signals actually in play."""
+    sc = _load_fixture()
+    battery = {**sc["battery"], "initial_soe": 10.0}
+    result = solve_milp_schedule(
+        buy_price=sc["buy_price"],
+        sell_price=sc["sell_price"],
+        home_consumption=sc["home_consumption"],
+        solar_production=sc["solar_production"],
+        battery=battery,
+        dt=sc["period_duration_hours"],
+        integer_rates=True,
+        compute_shadow_price_array=True,
+    )
+
+    horizon = len(sc["buy_price"])
+    assert result.shadow_prices is not None
+    assert len(result.shadow_prices) == horizon
+    assert np.all(np.isfinite(result.shadow_prices))
+    lo = min(sc["sell_price"]) * 0.5
+    hi = max(sc["buy_price"]) * 1.5
+    assert np.all((result.shadow_prices >= lo) & (result.shadow_prices <= hi))

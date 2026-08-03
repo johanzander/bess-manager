@@ -32,7 +32,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy import sparse
-from scipy.optimize import Bounds, LinearConstraint, milp
+from scipy.optimize import Bounds, LinearConstraint, linprog, milp
 
 from core.bess.dp_constants import SOE_STEP_KWH
 
@@ -62,6 +62,39 @@ class MilpScheduleResult:
     credited_exp: np.ndarray = None  # length horizon, export actually priced
     discharge_pct: np.ndarray = None  # length horizon, discharge rate (%)
     shadow_price: float | None = None  # marginal value of the current SOE
+    shadow_prices: np.ndarray = None  # length horizon, per-period LP-dual shadow price
+
+
+def _to_linprog_format(a_matrix, rlb, rub):
+    """Convert the unified two-sided (A, rlb, rub) row format `milp()`
+    accepts into `linprog`'s split A_eq/b_eq/A_ub/b_ub format (linprog has
+    no equivalent of `LinearConstraint`). Returns `eq_position`, a dict
+    mapping each ORIGINAL row index that turned out to be an equality
+    (rlb[i] == rub[i]) to its position in `b_eq` -- the only way to later
+    look up `linprog`'s `.eqlin.marginals[eq_position[original_row]]` for
+    a specific constraint of interest (e.g. one period's SOE recursion).
+    """
+    csr = a_matrix.tocsr()
+    a_eq_rows, b_eq = [], []
+    a_ub_rows, b_ub = [], []
+    eq_position: dict[int, int] = {}
+    for i in range(len(rlb)):
+        lo, hi = rlb[i], rub[i]
+        row = csr.getrow(i)
+        if lo == hi:
+            eq_position[i] = len(b_eq)
+            a_eq_rows.append(row)
+            b_eq.append(lo)
+        else:
+            if hi < np.inf:
+                a_ub_rows.append(row)
+                b_ub.append(hi)
+            if lo > -np.inf:
+                a_ub_rows.append(-row)
+                b_ub.append(-lo)
+    a_eq = sparse.vstack(a_eq_rows) if a_eq_rows else None
+    a_ub = sparse.vstack(a_ub_rows) if a_ub_rows else None
+    return a_eq, np.array(b_eq), a_ub, np.array(b_ub), eq_position
 
 
 def solve_milp_schedule(
@@ -74,6 +107,7 @@ def solve_milp_schedule(
     terminal_value_per_kwh: float = 0.0,
     integer_rates: bool = False,
     compute_shadow_price: bool = False,
+    compute_shadow_price_array: bool = False,
     max_charge_power_per_period: list[float] | None = None,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
@@ -119,6 +153,25 @@ def solve_milp_schedule(
     SOE_STEP_KWH)`), and returns None (no shadow price) when the anchor is
     below `min_soe_kwh + SOE_STEP_KWH / 2`, matching the DP's own guard
     (a backward difference below the grid's first point is undefined).
+
+    `compute_shadow_price_array`: requires integer_rates=True. The FULL
+    per-period array (unlike `compute_shadow_price` above), needed for
+    production wiring -- battery_system_manager.py's intra-period
+    discharge gate reads `shadow_price` for every period in the stored
+    schedule, not just the current one. A per-period finite-difference
+    (horizon-many re-solves) is not viable in production, so this uses
+    the LP-dual approach `compute_shadow_price` deliberately avoided: one
+    additional `linprog` solve with every binary fixed to the integer
+    solution's values (the "which branch of a min()" choices, not just
+    hardware mode), leaving continuous rates free, then reading the dual
+    of each period's SOE-recursion constraint -- period t's shadow price
+    is the (negated) dual of the recursion row linking e[t-1] to e[t] (or,
+    for period 0, of an explicit `e[0] = initial_soe` equality row added
+    for this solve only, replacing the bound pin so its dual is
+    accessible the same way). Negated because `linprog`'s dual convention
+    is d(cost)/d(b_eq), and injecting energy should decrease cost, not
+    increase it -- verified empirically before trusting the sign (see the
+    module's tests), not assumed from a derivation alone.
 
     `max_charge_power_per_period`: per-period charge power cap (kW),
     typically from temperature derating. When provided, the STORE/IDLE
@@ -243,7 +296,7 @@ def solve_milp_schedule(
     rlb: list[float] = []
     rub: list[float] = []
 
-    def con(coeffs: list[tuple[int, float]], lo: float, hi: float) -> None:
+    def con(coeffs: list[tuple[int, float]], lo: float, hi: float) -> int:
         r = len(rlb)
         for c_i, v in coeffs:
             rows.append(r)
@@ -251,6 +304,7 @@ def solve_milp_schedule(
             vals.append(v)
         rlb.append(lo)
         rub.append(hi)
+        return r
 
     # Big-M for the STORE/IDLE capacity-branch min() encoding below. Using
     # capacity_span (e_max - e_min) here implicitly assumes e[t] >= e_min
@@ -261,6 +315,7 @@ def solve_milp_schedule(
     # returned status="infeasible" with no real infeasibility). Sized
     # against the true minimum reachable e[t] instead.
     soe_force_big_m = e_max - min(e0, e_min)
+    soe_recursion_rows: list[int] = []
     for t in range(horizon):
         con(
             [
@@ -274,16 +329,18 @@ def solve_milp_schedule(
         )
 
         # SOE recursion.
-        con(
-            [
-                (e[t + 1], 1),
-                (e[t], -1),
-                (store_kwh[t], -1),
-                (idle_kwh[t], -1),
-                (discharge_pct[t], discharge_step_kwh / eta_d),
-            ],
-            0,
-            0,
+        soe_recursion_rows.append(
+            con(
+                [
+                    (e[t + 1], 1),
+                    (e[t], -1),
+                    (store_kwh[t], -1),
+                    (idle_kwh[t], -1),
+                    (discharge_pct[t], discharge_step_kwh / eta_d),
+                ],
+                0,
+                0,
+            )
         )
 
         # STORE: store_kwh = min(rate_throughput*eta_c, e_max - e[t]) if active.
@@ -567,6 +624,81 @@ def solve_milp_schedule(
             ).cost
             shadow_price = (cost_below - cost_at) / SOE_STEP_KWH
 
+    shadow_prices = None
+    if compute_shadow_price_array:
+        if not integer_rates:
+            raise NotImplementedError(
+                "compute_shadow_price_array requires integer_rates=True -- "
+                "shadow price is defined against the hardware-executable "
+                "schedule, matching the DP's own definition"
+            )
+        lb3 = lb.copy()
+        ub3 = ub.copy()
+        mode_binaries_dual = (mode_store, mode_idle, mode_bypass, mode_discharge)
+        for g in mode_binaries_dual:
+            fixed = np.round(result.x[g])
+            lb3[g] = fixed
+            ub3[g] = fixed
+        # Fix each period's auxiliary branch-select binary ONLY when it's
+        # actually relevant to that period's chosen mode -- an inert
+        # binary (e.g. store_active when mode_store=0, where its own
+        # constraints go vacuous via the mode's big-M term) still gets an
+        # arbitrary tied value from the stage-2 solve; fixing it anyway
+        # injects that arbitrary tie-break into the dual computation.
+        # Leaving it at its natural [0,1] bound instead makes it a free,
+        # economically-inert LP variable, which is what it actually is.
+        # ac_cap_active is always relevant (AC clipping applies regardless
+        # of mode), so it's always fixed. discharge_pct is left continuous
+        # throughout -- constrained to 0 by the existing mode_discharge=0
+        # constraint in every non-DISCHARGE period regardless.
+        mode_store_x = np.round(result.x[mode_store]).astype(bool)
+        mode_idle_x = np.round(result.x[mode_idle]).astype(bool)
+        mode_discharge_x = np.round(result.x[mode_discharge]).astype(bool)
+        for t in range(horizon):
+            if mode_store_x[t]:
+                for g in (store_active, s2b_active):
+                    fixed = np.round(result.x[g[t]])
+                    lb3[g[t]] = fixed
+                    ub3[g[t]] = fixed
+            if mode_idle_x[t]:
+                fixed = np.round(result.x[idle_active[t]])
+                lb3[idle_active[t]] = fixed
+                ub3[idle_active[t]] = fixed
+            if mode_discharge_x[t]:
+                fixed = np.round(result.x[throttled[t]])
+                lb3[throttled[t]] = fixed
+                ub3[throttled[t]] = fixed
+            fixed = np.round(result.x[ac_cap_active[t]])
+            lb3[ac_cap_active[t]] = fixed
+            ub3[ac_cap_active[t]] = fixed
+        # Free e[0] -- pinned via an explicit equality row instead (below)
+        # so its dual is reachable through .eqlin.marginals like every
+        # other period, rather than needing separate bound-dual handling.
+        lb3[e[0]] = 0.0
+        ub3[e[0]] = e_max
+        e0_row = con([(e[0], 1)], e0, e0)
+        a_matrix3 = sparse.csc_matrix((vals, (rows, cols)), shape=(len(rlb), n_vars))
+        a_eq, b_eq, a_ub, b_ub, eq_position = _to_linprog_format(a_matrix3, rlb, rub)
+        lp = linprog(
+            c=c_obj,
+            A_eq=a_eq,
+            b_eq=b_eq,
+            A_ub=a_ub,
+            b_ub=b_ub,
+            bounds=list(zip(lb3, ub3, strict=True)),
+            method="highs",
+        )
+        if lp.status != 0:
+            raise RuntimeError(
+                "shadow-price LP (binaries fixed) failed to solve -- "
+                f"status={lp.status}: {lp.message}"
+            )
+        marginals = lp.eqlin.marginals
+        shadow_prices = np.empty(horizon)
+        shadow_prices[0] = -marginals[eq_position[e0_row]]
+        for t in range(1, horizon):
+            shadow_prices[t] = -marginals[eq_position[soe_recursion_rows[t - 1]]]
+
     return MilpScheduleResult(
         status="optimal",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
@@ -576,4 +708,5 @@ def solve_milp_schedule(
         credited_exp=result.x[credited_exp],
         discharge_pct=result.x[discharge_pct],
         shadow_price=shadow_price,
+        shadow_prices=shadow_prices,
     )

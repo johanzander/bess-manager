@@ -8,9 +8,10 @@ pinned against the exact-PWL reference implementation
 
 Scope so far: modes/SOE/self-throttle/wear/terminal-value core (slice 1),
 negative-sell-price export-credit fix (slice 2), two-stage integer-rate
-re-integerization (slice 3), below-floor tolerance (slice 4, #233). Still
-missing: LP-dual shadow prices, AC-cap clipping, per-period charge caps --
-see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the
+re-integerization (slice 3), below-floor tolerance (slice 4, #233),
+current-period shadow price (slice 5), AC-cap clipping (slice 6). Still
+missing: per-period charge caps -- see
+docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the
 full remaining build list.
 """
 
@@ -283,3 +284,35 @@ def test_shadow_price_is_none_near_the_floor():
         compute_shadow_price=True,
     )
     assert result.shadow_price is None
+
+
+def test_ac_cap_clips_solar_above_the_inverter_limit():
+    """Solar above the AC cap is clipped -- lost, zero credit, not
+    exportable -- matching dp_battery_algorithm.py's _ac_flows. Must not
+    be silently mishandled as fully exportable (that would overstate
+    revenue) nor block the solve outright."""
+    battery = {
+        "initial_soe": 5.0,
+        "min_soe_kwh": 5.0,
+        "max_soe_kwh": 5.0,  # zero usable capacity: only BYPASS is feasible
+        "efficiency_charge": 0.97,
+        "efficiency_discharge": 0.95,
+        "cycle_cost_per_kwh": 0.4,
+        "max_charge_power_kw": 10,
+        "max_discharge_power_kw": 10,
+        "inverter_max_ac_power_kw": 4,  # ac_cap_kwh = 4*1*0.25 = 1.0
+        "inverter_ac_power_margin": 0,
+    }
+    result = solve_milp_schedule(
+        buy_price=[0.5, 0.5],
+        sell_price=[0.2, 0.2],
+        home_consumption=[0.0, 0.0],
+        solar_production=[2.0, 2.0],  # exceeds the 1.0 kWh AC cap
+        battery=battery,
+        dt=0.25,
+    )
+
+    assert result.status == "optimal"
+    assert result.exp == pytest.approx([1.0, 1.0], abs=1e-6)  # capped, not 2.0
+    assert result.credited_exp == pytest.approx([1.0, 1.0], abs=1e-6)
+    assert result.cost == pytest.approx(-0.4, abs=1e-6)  # -1.0 * 0.2 * 2

@@ -11,8 +11,8 @@ DP's SOE-grid snap noise mis-picks between financially near-tied windows
 This module is the feasibility spike
 (docs/superpowers/specs/2026-08-03-milp-spike-450.py) generalized into a
 reusable function. It is NOT yet feature complete -- see the spec's "Key
-design decisions for the build phase" for what's still missing: AC-cap
-clipping under negative prices and per-period charge caps.
+design decisions for the build phase" for what's still missing:
+per-period charge caps (temperature derating).
 
 Negative sell prices (spec point 3): the spike assumed buy > sell > 0 and
 relied on that spread alone to keep import/export exclusive, which is
@@ -143,13 +143,6 @@ def solve_milp_schedule(
             "without that spread, the import/export split has no unique "
             "LP optimum (unbounded degeneracy), which is out of scope"
         )
-    if not (solar <= ac_cap_kwh).all():
-        raise NotImplementedError(
-            "solve_milp_schedule assumes solar production never exceeds "
-            "the AC cap (slice 1 scope) -- AC-clip handling is a deferred "
-            "build-phase item, see the pivot spec point 4"
-        )
-
     surplus = np.maximum(0.0, solar - cons)
     idle_charge_kwh = np.minimum(surplus, rate_throughput_kwh) * eta_c
     ac_headroom_kwh = np.maximum(0.0, ac_cap_kwh - np.minimum(solar, ac_cap_kwh))
@@ -169,6 +162,7 @@ def solve_milp_schedule(
     imp = var("imp", horizon)
     exp = var("exp", horizon)
     credited_exp = var("credited_exp", horizon)
+    ac_solar = var("ac_solar", horizon)
     mode_store = var("mode_store", horizon)
     mode_idle = var("mode_idle", horizon)
     mode_bypass = var("mode_bypass", horizon)
@@ -177,6 +171,7 @@ def solve_milp_schedule(
     s2b_active = var("s2b_active", horizon)
     idle_active = var("idle_active", horizon)
     throttled = var("throttled", horizon)
+    ac_cap_active = var("ac_cap_active", horizon)
     n_vars = len(names)
 
     integrality = np.zeros(n_vars)
@@ -189,6 +184,7 @@ def solve_milp_schedule(
         s2b_active,
         idle_active,
         throttled,
+        ac_cap_active,
     )
     for g in binary_groups:
         integrality[g] = 1
@@ -215,6 +211,7 @@ def solve_milp_schedule(
     ub[store_kwh] = rate_throughput_kwh * eta_c
     ub[solar_to_battery_kwh] = np.maximum(surplus, 0)
     ub[idle_kwh] = np.maximum(idle_charge_kwh, 0)
+    ub[ac_solar] = ac_cap_kwh
     ub[discharge_pct] = 100
     ub[exp] = _EXPORT_BIG_M_KWH
     ub[imp] = 50
@@ -375,17 +372,52 @@ def solve_milp_schedule(
             ac_headroom_kwh[t],
         )
 
+        # AC-cap clipping: solar not routed DC-side to the battery
+        # (residual_solar = solar - solar_to_battery - idle_kwh/eta_c)
+        # must pass through the inverter's AC stage; anything above the
+        # AC cap is clipped -- lost, zero credit, not exportable and not
+        # curtailable by choice (matches dp_battery_algorithm.py's
+        # _ac_flows). ac_solar = min(residual_solar, ac_cap_kwh) is forced
+        # to equality (not just bounded above) because the solver would
+        # otherwise "curtail" ac_solar for free whenever sell < 0 to dodge
+        # export cost -- the same loophole class as slice 2's negative-
+        # sell fix, here for the clip rather than the self-throttle path.
+        residual_m = max(solar[t], 1e-9)
+        con(
+            [
+                (ac_solar[t], 1),
+                (solar_to_battery_kwh[t], 1),
+                (idle_kwh[t], 1 / eta_c),
+            ],
+            -np.inf,
+            solar[t],
+        )
+        con(
+            [
+                (ac_solar[t], 1),
+                (solar_to_battery_kwh[t], 1),
+                (idle_kwh[t], 1 / eta_c),
+                (ac_cap_active[t], residual_m),
+            ],
+            solar[t],
+            np.inf,
+        )
+        con(
+            [(ac_solar[t], 1), (ac_cap_active[t], -ac_cap_kwh)],
+            0,
+            np.inf,
+        )
+
         # AC balance identity.
         con(
             [
                 (exp[t], 1),
                 (imp[t], -1),
-                (solar_to_battery_kwh[t], 1),
-                (idle_kwh[t], 1 / eta_c),
+                (ac_solar[t], -1),
                 (discharge_pct[t], -discharge_step_kwh),
             ],
-            solar[t] - cons[t],
-            solar[t] - cons[t],
+            -cons[t],
+            -cons[t],
         )
 
         # Export credit: full, except self-throttled below threshold in

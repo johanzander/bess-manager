@@ -60,6 +60,45 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 **reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
 **grid-charge enable**.
 
+### Bring-your-own integration
+
+Every control primitive above is a plain entity write (`number.set_value`,
+`select.select_option`, `switch.turn_on`/`turn_off`) on every platform,
+including the TOU-via-entities platforms (Growatt Local/GEN4, SolaX, Solis).
+Those are core HA domains, not vendor-specific — any integration exposing
+entities that match a platform's suffix map (or that are mapped by hand in
+Settings) already works today. Nothing about the source integration's name
+matters here, and nothing needed to change to support this.
+
+The one exception is the TOU/schedule write on **Growatt Cloud** and
+**Huawei LUNA2000** — there it targets a *device* through a named vendor
+service (`growatt_server.write_ac_charge_times`, `huawei_solar.set_tou_periods`)
+rather than an entity, so there's no entity_id prefix to infer the domain
+from. That vendor domain was the one hardcoded part, and it's now a setting:
+`inverter.service_domain`, defaulting to the platform's standard domain and
+overridable per install.
+
+A compatible integration for either platform works as a *configuration* of
+the existing platform, not a new one, as long as it exposes the same service
+under its own domain with the same call signature:
+
+- **Huawei LUNA2000** — `set_tou_periods(device_id, charge_periods,
+  discharge_periods, working_mode_settings)`. Real-world example:
+  [`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server),
+  for installs behind an EMMA energy manager where a third party owns the
+  Modbus TCP socket. See "Huawei LUNA2000 (Local)" below for the full
+  write-up, including what happens when no working-mode entity is mapped.
+- **Growatt Cloud** — `update_time_segment(segment_id, start_time, end_time,
+  mode, enabled)` (MIN) or `write_ac_charge_times`/`write_ac_discharge_times`
+  (SPH). Same mechanism, no known compatible integration yet — listed here so
+  the contract is visible before a use case shows up, not just documented
+  after the fact for the platform that happened to need it first.
+
+Discovery only matches the known integration domains
+(`huawei_solar`, `growatt_server`), so an install on a compatible integration
+under a different domain maps its entities and device_id by hand in Settings;
+`inverter.service_domain` is then the only field needed to point BESS at it.
+
 ### The six platforms as coordinates
 
 | Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
@@ -431,15 +470,13 @@ where the manager owns the mode. The health check reports WARNING rather than
 OK for such an install, since BESS is then trusting the operator's platform
 choice instead of checking it.
 
-**Compatible integrations under another domain.** The `set_tou_periods` call
-targets whichever HA integration domain `inverter.service_domain` resolves to
-(default `huawei_solar`). An integration exposing the same service with the
-same `(device_id, periods: str)` signature — e.g.
+**Compatible integrations under another domain.** See "Bring-your-own
+integration" above for the general contract. This platform's `set_tou_periods`
+call targets whichever domain `inverter.service_domain` resolves to (default
+`huawei_solar`); the tested real-world case is
 [`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
-for EMMA installs where a third party owns the Modbus TCP socket — works as a
-configuration of this platform rather than a new one. Discovery only matches
-`huawei_solar`, so such an install maps its entities and device_id by hand in
-Settings. Experimental: not validated against real hardware by the maintainer.
+for EMMA installs where a third party owns the Modbus TCP socket.
+Experimental: not validated against real hardware by the maintainer.
 
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.

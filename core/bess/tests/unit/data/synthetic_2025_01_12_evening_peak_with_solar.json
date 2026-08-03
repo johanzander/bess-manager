@@ -90,24 +90,23 @@
     "max_discharge_power_kw": 6.0
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 104.8008,
-    "battery_solar_cost": 41.618534,
-    "base_to_battery_solar_savings": 63.182266,
-    "base_to_battery_solar_savings_pct": 60.287962,
-    "total_charged": 28.421053,
-    "total_discharged": 25.62
+    "base_cost": 239.9514,
+    "battery_solar_cost": 125.58117,
+    "base_to_battery_solar_savings": 114.37023,
+    "base_to_battery_solar_savings_pct": 47.6639,
+    "total_charged": 30.021053,
+    "total_discharged": 27.06
   },
   "expected_behavior": {
     "description": "Evening peak with solar: grid-charge off-peak, export during peak hours",
     "intents_present": [
-      "GRID_CHARGING",
-      "BATTERY_EXPORT"
+      "GRID_CHARGING"
     ],
     "savings_positive": true,
     "constraints": {

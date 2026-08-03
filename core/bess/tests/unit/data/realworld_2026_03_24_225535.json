@@ -350,5 +350,6 @@
       "soe_within_bounds": true,
       "power_within_limits": true
     }
-  }
+  },
+  "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread eliminates both meaningful pinned intents (BATTERY_EXPORT, GRID_CHARGING) for this fixture, leaving only baseline IDLE/LOAD_SUPPORT -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up."
 }

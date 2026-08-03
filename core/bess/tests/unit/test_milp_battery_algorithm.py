@@ -6,16 +6,18 @@ used (docs/superpowers/specs/2026-08-03-milp-spike-450.py), which is itself
 pinned against the exact-PWL reference implementation
 (core/bess/dp_battery_algorithm.py) on this branch.
 
-Scope of this slice only: continuous discharge rate (no re-integerization
-yet), buy > sell > 0 assumed (no negative-sell export binary yet), no
-below-floor/AC-clip/per-period-cap semantics yet -- see
-docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the full
-remaining build list.
+Scope so far: modes/SOE/self-throttle/wear/terminal-value core (slice 1),
+negative-sell-price export-credit fix (slice 2), two-stage integer-rate
+re-integerization (slice 3). Still missing: LP-dual shadow prices,
+below-floor tolerance (#233), AC-cap clipping, per-period charge caps --
+see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md for the
+full remaining build list.
 """
 
 import json
 import os
 
+import numpy as np
 import pytest
 
 from core.bess.milp_battery_algorithm import solve_milp_schedule
@@ -115,3 +117,40 @@ def test_negative_sell_price_export_is_not_free():
         -sell * exp for sell, exp in zip([-0.2, -0.2], result.exp, strict=True)
     )
     assert result.cost == pytest.approx(expected_cost, abs=1e-6)
+
+
+def test_integer_rates_reintegerizes_to_hardware_executable_percents():
+    """Continuous discharge rates aren't hardware-executable (#282: percent
+    registers). integer_rates=True must fix the continuous solve's mode
+    choice and re-solve with discharge_pct restricted to integers, without
+    changing which window/mode sequence was chosen -- only the discharge
+    rate resolution."""
+    sc = _load_fixture()
+    kwargs = {
+        "buy_price": sc["buy_price"],
+        "sell_price": sc["sell_price"],
+        "home_consumption": sc["home_consumption"],
+        "solar_production": sc["solar_production"],
+        "battery": sc["battery"],
+        "dt": sc["period_duration_hours"],
+    }
+
+    continuous = solve_milp_schedule(**kwargs)
+    integer = solve_milp_schedule(**kwargs, integer_rates=True)
+
+    assert integer.status == "optimal"
+    non_integer_pct = integer.discharge_pct % 1
+    assert np.all(
+        np.minimum(non_integer_pct, 1 - non_integer_pct) < 1e-6
+    ), integer.discharge_pct
+
+    # Hardware-executable rates can only be worse (higher cost) than the
+    # continuous relaxation's, per the pivot spec's feasibility-spike table
+    # (~3 ore/day for this fixture) -- never better, and not wildly worse.
+    assert integer.cost >= continuous.cost - 1e-6
+    assert integer.cost < continuous.cost + 0.5
+
+    # Same window: the SOE trajectory shouldn't shift to a different mode
+    # sequence just because rates were re-integerized.
+    assert integer.soe[35] == pytest.approx(continuous.soe[35], abs=1e-2)
+    assert integer.soe[38] == pytest.approx(continuous.soe[38], abs=1e-2)

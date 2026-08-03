@@ -59,6 +59,7 @@ class MilpScheduleResult:
     imp: np.ndarray = None  # length horizon, AC import (kWh)
     exp: np.ndarray = None  # length horizon, AC export (kWh, raw)
     credited_exp: np.ndarray = None  # length horizon, export actually priced
+    discharge_pct: np.ndarray = None  # length horizon, discharge rate (%)
 
 
 def solve_milp_schedule(
@@ -69,6 +70,7 @@ def solve_milp_schedule(
     battery: dict,
     dt: float,
     terminal_value_per_kwh: float = 0.0,
+    integer_rates: bool = False,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
 
@@ -77,6 +79,15 @@ def solve_milp_schedule(
     efficiency_discharge, cycle_cost_per_kwh, max_charge_power_kw,
     max_discharge_power_kw, inverter_max_ac_power_kw,
     inverter_ac_power_margin.
+
+    `integer_rates`: hardware discharge rate is a percent register (#282),
+    not a continuous kW value -- continuous rates aren't executable as-is.
+    When True, this solves the fast continuous relaxation first, then fixes
+    every mode/active binary to its solved value and re-solves the much
+    smaller remaining MIP (only discharge_pct integer) to the
+    hardware-executable optimum, per the pivot spec's two-stage design
+    (re-solving with binaries fixed rather than round-and-repair, since
+    the small fixed-mode MIP is cheap and exact).
     """
     buy = np.asarray(buy_price, dtype=float)
     sell = np.asarray(sell_price, dtype=float)
@@ -376,6 +387,35 @@ def solve_milp_schedule(
             status="infeasible", cost=float("nan"), soe=np.array([])
         )
 
+    if integer_rates:
+        # Stage 2: fix every mode/active binary to its stage-1 value and
+        # re-solve the much smaller remaining MIP (only discharge_pct
+        # integer) to the hardware-executable optimum.
+        lb2 = lb.copy()
+        ub2 = ub.copy()
+        for g in binary_groups:
+            fixed = np.round(result.x[g])
+            lb2[g] = fixed
+            ub2[g] = fixed
+        integrality2 = integrality.copy()
+        integrality2[discharge_pct] = 1
+
+        stage2 = milp(
+            c=c_obj,
+            constraints=LinearConstraint(a_matrix, rlb, rub),
+            integrality=integrality2,
+            bounds=Bounds(lb2, ub2),
+            options={"time_limit": 60, "mip_rel_gap": 1e-6},
+        )
+        if stage2.x is None:
+            raise RuntimeError(
+                "integer_rates re-integerization: stage-1 mode selection "
+                "has no integer-rate solution -- round-and-repair fallback "
+                "is not implemented, this needs investigating rather than "
+                "silently falling back to the continuous stage-1 result"
+            )
+        result = stage2
+
     return MilpScheduleResult(
         status="optimal",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
@@ -383,4 +423,5 @@ def solve_milp_schedule(
         imp=result.x[imp],
         exp=result.x[exp],
         credited_exp=result.x[credited_exp],
+        discharge_pct=result.x[discharge_pct],
     )

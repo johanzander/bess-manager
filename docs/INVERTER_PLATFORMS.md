@@ -169,6 +169,35 @@ register (`total_load` is GEN3, `home_consumption_energy` is SPF). BESS
 derives `lifetime_load_consumption` as `solar + grid_import − grid_export`.
 `total_yield` maps to `lifetime_system_production`.
 
+### Export-limit curtailment (GEN2/GEN3/GEN4) — *(optional, opt-in)*
+
+Registers 122/123 via the solax_modbus Growatt plugin — verified against
+`plugin_growatt.py` SELECT_TYPES/NUMBER_TYPES (`allowedtypes=GEN2|GEN3|GEN4`),
+so this is available on both GEN3 and GEN4 hardware, not GEN4-only. Requires
+a grid CT/smart meter; disabled (`BatterySettings.export_curtailment_enabled
+= False`) by default.
+
+When enabled and a period is exporting solar surplus at a sell price below
+`export_curtailment_price_floor`, BESS writes:
+```
+select.select_option(entity: limit_grid_export, option: "Meter 1")
+number.set_value(entity: grid_export_limit, value: 0)
+```
+This throttles PV/MPPT production at the panel via the CT meter's real-time
+export reading — genuine supply-side curtailment, not just a downstream cap
+that gets bypassed once the battery is full. Confirmed by a real user's live
+test (Meter 1 + 0% dropped measured export to 0W within seconds). Once the
+period's sell price is no longer below the floor, BESS releases the limit
+with `select.select_option(entity: limit_grid_export, option: "Disabled")`
+only — the percentage register is left untouched on release (its negative
+range means "allow this much import," never written by BESS).
+
+The decision is platform-agnostic (`grid_exported > 0 AND sell_price <
+floor`, independent of strategic intent) but the actuation itself is
+gated by the `supports_export_limit_control` capability flag — currently
+only `SolaxModbusGrowattController` implements it. `growatt_server` (cloud)
+has no equivalent HA service to hook into and stays a safe no-op.
+
 ### Growatt MIX/SPH (Local) — `growatt_solax_modbus_gen3` (GEN3)
 
 GEN3 models (MIX/SPA/SPH) connected via the solax_modbus Growatt plugin.
@@ -556,6 +585,13 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_system_production` | `total_yield` | GEN4 register 3077 |
 | `lifetime_load_consumption` | — | **No native register.** BESS derives: solar + grid_import − grid_export |
 
+**Export-limit curtailment (GEN4, optional):**
+
+| BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
+|-----------------|-------------|---------------------|---------|
+| `growatt_export_limit_mode` | select | `limit_grid_export` | Meter/CT selection (Disabled/Meter 1/Meter 2/CT Clamp), register 122 |
+| `growatt_export_limit_value` | number | `grid_export_limit` | Export limit percentage, register 123 |
+
 ### Growatt MIX/SPH (Local) — GEN3 — `solax_modbus` Growatt plugin
 
 **Monitoring and EMS control (GEN3):**
@@ -586,6 +622,10 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_export_to_grid` | `total_grid_export` | Register 1050 |
 | `lifetime_load_consumption` | `total_load` | Register 1062 |
 | `lifetime_system_production` | — | **No native register.** BESS derives from `lifetime_solar_energy` |
+
+**Export-limit curtailment (GEN3, optional):** same registers/entities as
+GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
+`plugin_growatt.py` marks these `allowedtypes=GEN2|GEN3|GEN4`, not GEN4-only.
 
 ### SolaX — `solax_modbus` integration (native)
 

@@ -513,6 +513,27 @@ def _solax_growatt_vpp_entities() -> list[dict]:
     ]
 
 
+def _solax_growatt_export_limit_entities() -> list[dict]:
+    """Export-limit curtailment entities (registers 122/123, issue #269).
+
+    Present on GEN2/GEN3/GEN4 Growatt hardware via solax_modbus — verified
+    against plugin_growatt.py SELECT_TYPES/NUMBER_TYPES (allowedtypes=
+    GEN2|GEN3|GEN4), same verification method as the VPP entities above.
+    """
+    return [
+        _entity(
+            "select.growatt_inverter_solax_limit_grid_export",
+            "solax_modbus",
+            "solax_limit_grid_export",
+        ),
+        _entity(
+            "number.growatt_inverter_solax_grid_export_limit",
+            "solax_modbus",
+            "solax_grid_export_limit",
+        ),
+    ]
+
+
 def _solax_growatt_gen3_registry() -> list[dict]:
     """Entity registry for a GEN3 Growatt (MIX/SPA/SPH) via solax_modbus.
 
@@ -1045,11 +1066,13 @@ class TestMapRegistryEntities:
 
         The solax_modbus integration has both:
         - sensor with unique_id suffix "solax_total_reverse_power" (export power sensor)
-        - select with unique_id suffix "solax_limit_grid_export" (export limiter config)
+        - select with unique_id suffix "solax_limit_grid_export" (export limiter config,
+          now intentionally mapped to growatt_export_limit_mode — #269)
 
         The old short suffix "grid_export" matched the select entity because
         "solax_limit_grid_export" ends with "_grid_export".  With exact
-        "solax_" prefixed suffixes, only the correct sensor should match.
+        "solax_" prefixed suffixes, only the correct sensor should match
+        export_power — the select entity should map to its own key instead.
         """
         # Place the select BEFORE the sensor to reproduce the original bug
         # (first-writer-wins with old short suffixes)
@@ -1073,10 +1096,9 @@ class TestMapRegistryEntities:
         assert result["export_power"] == (
             "sensor.growatt_inverter_solax_total_export_power"
         )
-        # The select entity must NOT appear anywhere in the result
-        assert (
+        # The select entity must map to its own key, not steal export_power
+        assert result["growatt_export_limit_mode"] == (
             "select.growatt_inverter_solax_inverter_limit_grid_export"
-            not in result.values()
         )
 
 
@@ -1363,6 +1385,41 @@ class TestDiscoverSensorsFromRegistry:
         assert (
             growatt_sph["growatt_vpp_power"]
             == "number.growatt_inverter_solax_vpp_power"
+        )
+
+    def test_solax_growatt_gen4_export_limit_entities_discovered(self):
+        """GEN4 export-limit entities are mapped alongside TOU entities (#269)."""
+        registry = (
+            _solax_growatt_tou_registry() + _solax_growatt_export_limit_entities()
+        )
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_min"
+        growatt_min = sensors["solax_modbus_growatt_min"]
+        assert (
+            growatt_min["growatt_export_limit_mode"]
+            == "select.growatt_inverter_solax_limit_grid_export"
+        )
+        assert (
+            growatt_min["growatt_export_limit_value"]
+            == "number.growatt_inverter_solax_grid_export_limit"
+        )
+
+    def test_solax_growatt_gen3_export_limit_entities_discovered(self):
+        """GEN3 export-limit entities are mapped too — same registers, per
+        plugin_growatt.py's allowedtypes=GEN2|GEN3|GEN4."""
+        registry = (
+            _solax_growatt_gen3_registry() + _solax_growatt_export_limit_entities()
+        )
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_sph"
+        growatt_sph = sensors["solax_modbus_growatt_sph"]
+        assert (
+            growatt_sph["growatt_export_limit_mode"]
+            == "select.growatt_inverter_solax_limit_grid_export"
+        )
+        assert (
+            growatt_sph["growatt_export_limit_value"]
+            == "number.growatt_inverter_solax_grid_export_limit"
         )
 
     def test_gen3_marker_not_detected_for_gen4(self):

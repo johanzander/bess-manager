@@ -85,6 +85,10 @@ class SolaxModbusGrowattController(GrowattMinController):
     # cloud-only) silently re-gate this.
     dedupe_register_writes: ClassVar[bool] = False
 
+    # Export-limit registers (122/123) exist independent of control_mode —
+    # true in both TOU and VPP mode, unlike supports_charge_rate_control.
+    supports_export_limit_control: ClassVar[bool] = True
+
     def __init__(
         self, battery_settings: BatterySettings, control_mode: str = "tou"
     ) -> None:
@@ -137,6 +141,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         directly, so this stays True there (base class default).
         """
         return self._is_tou_control
+
+    def apply_export_limit(self, controller, curtail: bool) -> None:
+        """Curtail/release PV export via the CT-meter export-limit registers
+        (122/123, issue #269). Independent of control_mode (tou/vpp)."""
+        controller.set_growatt_export_limit(curtail)
 
     @property
     def discharge_rate_is_load_following(self) -> bool:

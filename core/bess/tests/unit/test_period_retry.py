@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.settings import BatterySettings
 
 
 def _make_bsm_with_mocks():
@@ -13,6 +14,7 @@ def _make_bsm_with_mocks():
     bsm._runtime_failure_tracker = MagicMock()
     bsm._scheduler = MagicMock()
     bsm._last_applied_discharge_rate = 0
+    bsm.battery_settings = BatterySettings()
     return bsm
 
 

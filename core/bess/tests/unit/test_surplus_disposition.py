@@ -174,6 +174,29 @@ def test_idle_with_solar_surplus_classifies_as_solar_export():
     assert classify_strategic_intent(0.0, ed2) == "IDLE"
 
 
+def test_store_mode_at_full_capacity_classifies_as_idle_not_solar_storage():
+    """A STORE-mode action (power > 0) that stores zero energy because the
+    battery is already at max_soe_kwh (no room) must classify as IDLE, not
+    SOLAR_STORAGE -- see #450 MILP wiring: the MILP has no cost incentive to
+    avoid selecting a no-op STORE at full capacity (it's cost-equivalent to
+    IDLE), so real fixtures with zero solar production surfaced this
+    mislabeling. classify_strategic_intent must derive intent from actual
+    energy movement, not just the sign of the raw requested power."""
+    from core.bess.decision_intelligence import classify_strategic_intent
+
+    ed = EnergyData(
+        solar_production=0.0,
+        home_consumption=5.2,
+        battery_charged=0.0,
+        battery_discharged=0.0,
+        grid_imported=5.2,
+        grid_exported=0.0,
+        battery_soe_start=30.0,
+        battery_soe_end=30.0,
+    )
+    assert classify_strategic_intent(15.0, ed) == "IDLE"
+
+
 # ---------------------------------------------------------------------------
 # Task 4b: BATTERY_EXPORT maps to grid_first + hold (no discharge)
 # ---------------------------------------------------------------------------

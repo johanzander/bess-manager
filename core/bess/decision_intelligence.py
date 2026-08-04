@@ -437,7 +437,13 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     Returns:
         One of: GRID_CHARGING, SOLAR_STORAGE, LOAD_SUPPORT, BATTERY_EXPORT, SOLAR_EXPORT, IDLE.
     """
-    if power < -_POWER_THRESHOLD_KW:  # Discharging
+    # A requested charge/discharge can still move zero actual energy -- e.g.
+    # STORE mode selected while the battery is already at max_soe_kwh (no
+    # room), or discharge selected already at the min-SOE floor. The MILP
+    # (#450) has no cost incentive to avoid picking such a no-op action (it's
+    # cost-equivalent to IDLE), so this must be classified from what actually
+    # moved, not from the sign of the raw requested power.
+    if power < -_POWER_THRESHOLD_KW and energy_data.battery_discharged > 0.01:
         # Any meaningfully nonzero export (same 0.01 kWh noise floor used by
         # every other flow check in this function) must be BATTERY_EXPORT:
         # LOAD_SUPPORT maps to load_first, which can only ever cover a real
@@ -447,7 +453,7 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         if energy_data.battery_to_grid > 0.01:
             return "BATTERY_EXPORT"
         return "LOAD_SUPPORT"
-    elif power > _POWER_THRESHOLD_KW:  # Charging
+    elif power > _POWER_THRESHOLD_KW and energy_data.battery_charged > 0.01:
         if energy_data.grid_to_battery > 0.01:
             return "GRID_CHARGING"
         return "SOLAR_STORAGE"

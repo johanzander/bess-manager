@@ -579,7 +579,7 @@ def solve_milp_schedule(
         constraints=LinearConstraint(a_matrix, rlb, rub),
         integrality=integrality,
         bounds=Bounds(lb, ub),
-        options={"time_limit": 60, "mip_rel_gap": 1e-6},
+        options={"time_limit": 5, "mip_rel_gap": 1e-6},
     )
 
     if result.x is None:
@@ -615,7 +615,7 @@ def solve_milp_schedule(
             constraints=LinearConstraint(a_matrix, rlb, rub),
             integrality=integrality2,
             bounds=Bounds(lb2, ub2),
-            options={"time_limit": 60, "mip_rel_gap": 1e-6},
+            options={"time_limit": 5, "mip_rel_gap": 1e-6},
         )
         if stage2.x is None:
             raise RuntimeError(

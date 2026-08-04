@@ -734,3 +734,68 @@ def pwl_window_is_feasible(
     return bool(
         _pwl_eval_array(V[0], np.array([start_soe]))[0] > PWL_WINDOW_INFEASIBLE_SEK
     )
+
+
+def resolve_pwl_window(
+    V: list[tuple[np.ndarray, np.ndarray]],
+    start_soe: float,
+    window_horizon: int,
+    buy_price: list[float],
+    sell_price: list[float],
+    home_consumption: list[float],
+    solar_production: list[float],
+    battery_settings: BatterySettings,
+    dt: float,
+    cost_basis: float,
+    max_charge_power_per_period: list[float] | None = None,
+    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
+    discharge_resolution_kw: float | None = None,
+) -> list[tuple[float, float]]:
+    """Forward-replay the window's resolved value table `V` (from
+    `run_pwl_window_backward_induction`) into a concrete action sequence,
+    greedily applying `_pwl_best_action_at_continuous_state` at each period
+    from the true continuous `start_soe` -- the mirror image of
+    `dp_battery_algorithm.py`'s grid-DP forward replay, but reading `V` as
+    PWL rows instead of a grid array.
+
+    Raises `RuntimeError` if `start_soe` cannot actually reach the window's
+    pinned end SOE (per `pwl_window_is_feasible`): replaying through V[0]'s
+    terminal-penalty region would silently produce actions that look
+    plausible but never reconnect to the pinned target, which is exactly the
+    failure Task 5's feasibility predicate exists to catch before it reaches
+    the splice.
+
+    Returns `[(power, next_soe), ...]` for each of the window's periods.
+    """
+    if not pwl_window_is_feasible(V, start_soe):
+        raise RuntimeError(
+            f"PWL window is infeasible from start_soe={start_soe} kWh: the "
+            "pinned end SOE cannot be reached (V[0] carries the terminal "
+            "penalty -- see pwl_window_is_feasible). Refusing to forward-"
+            "replay a trajectory that would not actually reconnect to the "
+            "pinned target."
+        )
+
+    soe = start_soe
+    basis = cost_basis
+    actions: list[tuple[float, float]] = []
+    for t in range(window_horizon):
+        action, next_soe, basis, _reward = _pwl_best_action_at_continuous_state(
+            soe=soe,
+            t=t,
+            V_next=V[t + 1],
+            power_levels=np.array([]),
+            home_consumption=home_consumption,
+            battery_settings=battery_settings,
+            dt=dt,
+            solar_production=solar_production,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            cost_basis=basis,
+            max_charge_power_per_period=max_charge_power_per_period,
+            discharge_resolution_kw=discharge_resolution_kw,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        )
+        actions.append((action, next_soe))
+        soe = next_soe
+    return actions

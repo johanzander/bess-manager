@@ -9,6 +9,7 @@ from core.bess.pwl_window_dp import (
     _pwl_prune,
     _pwl_window_seed_points,
     pwl_window_is_feasible,
+    resolve_pwl_window,
     run_pwl_window_backward_induction,
 )
 from core.bess.settings import BatterySettings
@@ -282,6 +283,77 @@ def test_out_of_range_end_soe_target_raises():
         run_pwl_window_backward_induction(end_soe_target=12.0, **kwargs)
     with pytest.raises(ValueError, match="outside the battery's usable range"):
         run_pwl_window_backward_induction(end_soe_target=0.5, **kwargs)
+
+
+def test_resolve_pwl_window_reaches_pinned_end_soe_exactly():
+    """End-to-end: `resolve_pwl_window` forward-replays V into an action
+    sequence that lands within the pin's tolerance of the target, matching
+    the manual replay loop already proven in
+    `test_pinned_window_forward_replay_lands_on_target`."""
+    battery = _tiny_battery()
+    V = run_pwl_window_backward_induction(
+        window_horizon=3,
+        buy_price=[1.0, 1.0, 1.0],
+        sell_price=[0.5, 0.5, 0.5],
+        home_consumption=[0.0, 0.0, 0.0],
+        solar_production=[0.0, 0.0, 0.0],
+        battery_settings=battery,
+        dt=0.25,
+        end_soe_target=5.0,
+        end_soe_tolerance=1e-3,
+    )
+    actions = resolve_pwl_window(
+        V,
+        start_soe=8.0,
+        window_horizon=3,
+        buy_price=[1.0, 1.0, 1.0],
+        sell_price=[0.5, 0.5, 0.5],
+        home_consumption=[0.0, 0.0, 0.0],
+        solar_production=[0.0, 0.0, 0.0],
+        battery_settings=battery,
+        dt=0.25,
+        cost_basis=0.0,
+    )
+    assert len(actions) == 3
+    pin_half_width = _end_soe_pin_tolerance(
+        1e-3, battery, dt=0.25, discharge_resolution_kw=None
+    )
+    final_soe = actions[-1][1]
+    assert final_soe == pytest.approx(5.0, abs=pin_half_width)
+
+
+def test_resolve_pwl_window_raises_on_infeasible_start_soe():
+    """A window whose target is physically unreachable from `start_soe` must
+    raise, not silently forward-replay through the terminal-penalty region
+    and hand back actions that never reconnect."""
+    battery = _tiny_battery()
+    horizon = 2
+    # Two 15-minute periods discharge at most 2 * 5 * 0.25 / 0.95 = 2.63 kWh,
+    # so 9.5 -> 1.5 (8.0 kWh) is out of reach (mirrors
+    # test_unreachable_target_fails_the_feasibility_predicate).
+    V = run_pwl_window_backward_induction(
+        window_horizon=horizon,
+        buy_price=[1.0, 1.0],
+        sell_price=[0.5, 0.5],
+        home_consumption=[0.0, 0.0],
+        solar_production=[0.0, 0.0],
+        battery_settings=battery,
+        dt=0.25,
+        end_soe_target=1.5,
+    )
+    with pytest.raises(RuntimeError, match="infeasible"):
+        resolve_pwl_window(
+            V,
+            start_soe=9.5,
+            window_horizon=horizon,
+            buy_price=[1.0, 1.0],
+            sell_price=[0.5, 0.5],
+            home_consumption=[0.0, 0.0],
+            solar_production=[0.0, 0.0],
+            battery_settings=battery,
+            dt=0.25,
+            cost_basis=0.0,
+        )
 
 
 def test_exact_discharge_preimages_are_seeded_on_every_row():

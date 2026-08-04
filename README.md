@@ -40,7 +40,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 | **Resolution** | 15-minute granularity (Nordpool) or 30-minute (Octopus) |
 | **Solar aware** | Integrates solar forecast to maximize self-consumption |
 | **Battery protection** | Models cycle degradation cost — won't chase marginal gains that wear out your battery |
-| **Fuse protection** | Monitors grid current and limits charging to prevent overloading your main fuse |
+| **Fuse protection** | Plans schedules and monitors real-time grid current to keep charging within your main fuse's limit |
 | **EV aware** | Automatically pauses battery discharge when your EV is charging |
 | **Re-optimization** | Continuously updates as prices, solar, and consumption data change |
 | **AI Analyst** | Chat with your battery system — ask questions, get explanations |

@@ -363,6 +363,57 @@ battery has room.  With the cap set:
   without it (SPH, SolaX native) the plan is cap-aware but deferred
   absorption is not hardware-enforceable.
 
+### The grid import (fuse) cap (#429)
+
+`HomeSettings.power_monitoring_enabled` (default False) makes the DP model the
+house's fuse service limit as a **grid-import** energy cap, the input-side
+counterpart to the AC output cap above — the two are independent constraints
+on opposite sides of the same AC stage and both apply simultaneously when
+configured.
+
+- **Derivation**: `voltage × max_fuse_current × safety_margin × phase_count`
+  (`_effective_import_cap_kwh`, `dp_battery_algorithm.py`) — each phase is an
+  independent fuse, so a balanced house can import up to `phase_count` times
+  a single phase's ceiling before any individual phase is stressed.
+  `HomePowerMonitor` (`core/bess/power_monitor.py`) relies on the same
+  balanced-load assumption at runtime: on a fully unloaded 3-phase house it
+  authorizes the battery up to its full `max_charge_power_w` (not a single
+  phase's worth), since `available_pct` is computed relative to
+  `max_charge_power_w / phase_count` per phase. `HomePowerMonitor` remains
+  the real-time backstop against *unbalanced* loads — it measures actual
+  per-phase current and throttles battery charging against the single
+  worst-loaded phase (a deliberate fix for that case, commit `37201cb9`,
+  #11) — but the DP's `home_consumption` forecast is a single household-total
+  figure with no per-phase breakdown, so it cannot reproduce that live check
+  and instead plans against the balanced-load assumption. Off (`None`) when
+  `power_monitoring_enabled` is False, matching the AC cap's own
+  `<= 0.0 → None` convention.
+- **Total import, not charging-only**: the cap bounds `grid_imported` (house
+  load + battery grid-charging) jointly, not just the charging component —
+  `HomePowerMonitor` only throttles charging today because that is the only
+  lever a runtime monitor has; the DP has discharge as a second lever and must
+  use it, or it just reproduces the runtime blind spot inside the plan too.
+- **Constrain, never raise**: same convention as the AC cap and temperature
+  derating (mask actions, don't except). A period whose forecast load alone
+  exceeds the cap forces the battery to cover the excess via discharge; if
+  even full discharge can't bring total import under the cap, the DP falls
+  back to the minimum-import action available rather than erroring — a real
+  fuse would also just run hot, not crash the planner.
+- **Grid-charging is throttled, not blocked outright**: when serving the load
+  already consumes the cap's headroom, `grid_to_battery` is reduced to
+  whatever room is left (`_state_transition`'s STORE branch) rather than the
+  charge action being excluded wholesale — the model-side equivalent of
+  `HomePowerMonitor.calculate_available_charging_power`'s runtime throttle.
+- **Absent/implausible settings**: hard failure at settings-validation time
+  (`HomeSettings.__post_init__` raises if `power_monitoring_enabled` is set
+  with non-positive `max_fuse_current`/`voltage`/`safety_margin`), never a
+  silent no-op inside the DP — matches `BatterySettings.__post_init__`'s
+  existing validation pattern for `inverter_max_ac_power_kw`.
+- **Out of scope**: export-side/feed-in capacity limits (a different
+  regulatory concept), and any change to `HomePowerMonitor`'s own runtime
+  behavior — it remains the real-time safety net; this constraint just makes
+  the *plan* agree with it.
+
 
 ## Execution Layer: What Can Override the Schedule
 

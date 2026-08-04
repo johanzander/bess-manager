@@ -2188,6 +2188,7 @@ class BatterySystemManager:
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 export_curtailment_active=export_curtailment_active,
+                home_settings=self.home_settings,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

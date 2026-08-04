@@ -29,7 +29,18 @@
       "Bash(gh pr diff *)",
       "Bash(gh pr list *)",
       "Bash(gh pr review *)",
-      "Bash(gh pr create *)"
+      "Bash(gh pr create *)",
+      "Bash(/Users/johanzander/GitHub/bess-manager/.venv/bin/pytest *)",
+      "Bash(git fetch *)",
+      "Bash(podman logs *)",
+      "Bash(gh issue list *)",
+      "Bash(node_modules/.bin/vitest run*)",
+      "Bash(gh run view *)",
+      "Bash(gh run list *)",
+      "Bash(gh run watch)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(rm -f *.bak)",
+      "Bash(rm *.bak)"
     ],
     "deny": [
       "Bash(podman machine rm *)",

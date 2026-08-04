@@ -4,7 +4,8 @@ Cumulative HA counters (e.g. Growatt lifetime discharge energy) only tick in
 0.1 kWh steps. When a real discharge happens but is too small to register in
 a period's window, the counter delta reads exactly zero. The historical/
 backfill collection path corrects this via InfluxDB power-sensor data
-(`sensor_collector.py:251-262`). Runtime (live) collection gets its own,
+(the gap-filling block in `sensor_collector.py`'s `collect_energy_data`).
+Runtime (live) collection gets its own,
 InfluxDB-free correction via PowerSampleBuffer - see
 test_sensor_collector_runtime_gapfill.py (#387).
 """

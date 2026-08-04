@@ -1007,6 +1007,7 @@ class HomeAssistantAPIController:
         category=None,
         context: dict | None = None,
         optional: bool = False,
+        suppress_retry_warnings: bool = False,
         **kwargs,
     ):
         """Make an API request to Home Assistant with retry logic.
@@ -1019,6 +1020,10 @@ class HomeAssistantAPIController:
             context: Optional dict of contextual parameters for failure diagnostics
             optional: If True, a 404 is expected (e.g. probing a legacy/disabled
                 entity) and is logged at debug level instead of error
+            suppress_retry_warnings: If True, retry/failure logging is downgraded
+                to debug/info (e.g. Nordpool tomorrow-price calls before the
+                provider has published data — an expected daily condition, not
+                an error)
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -1069,7 +1074,8 @@ class HomeAssistantAPIController:
 
                 if attempt < self.max_attempts - 1:  # Not the last attempt
                     delay = self.retry_base_delay * (2**attempt)
-                    logger.warning(
+                    log_fn = logger.debug if suppress_retry_warnings else logger.warning
+                    log_fn(
                         "API request to %s failed on attempt %d/%d: %s. Retrying in %d seconds...",
                         url,
                         attempt + 1,
@@ -1079,7 +1085,8 @@ class HomeAssistantAPIController:
                     )
                     time.sleep(delay)
                 else:  # Last attempt failed
-                    logger.error(
+                    log_fn = logger.info if suppress_retry_warnings else logger.error
+                    log_fn(
                         "API request to %s failed on final attempt %d/%d: %s",
                         path,
                         attempt + 1,
@@ -1134,6 +1141,7 @@ class HomeAssistantAPIController:
         service_name,
         operation: str | None = None,
         category: str | None = None,
+        suppress_retry_warnings: bool = False,
         **kwargs,
     ):
         """Call Home Assistant service with retry logic.
@@ -1144,6 +1152,7 @@ class HomeAssistantAPIController:
             operation: Optional human-readable operation description for failure tracking
             category: Optional failure-tracking category override. Defaults to a
                 domain-based heuristic when omitted.
+            suppress_retry_warnings: Forwarded to `_api_request` — see its docstring
             **kwargs: Service parameters
 
         Returns:
@@ -1213,6 +1222,7 @@ class HomeAssistantAPIController:
                 else ("inverter_control" if is_vendor_domain else "other")
             ),
             context=context,
+            suppress_retry_warnings=suppress_retry_warnings,
             json=json_data,
         )
 

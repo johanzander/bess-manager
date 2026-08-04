@@ -514,21 +514,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
-### Move inverter-specific logic out of BatterySystemManager
-
-**Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class
-
-**Description**: `BatterySystemManager` contains platform-specific checks like `if self.inverter_platform == "solax": return` in `adjust_charging_power()`. This logic belongs in the inverter controller layer — each controller should implement (or no-op) methods via the `InverterController` interface, so `BatterySystemManager` never branches on platform strings.
-
-**Examples**:
-
-- `adjust_charging_power()` — no-op for SolaX, active for Growatt
-- `grid_charge_enabled()` in `ha_api_controller.py` — not applicable to SolaX, logs a spurious WARNING
-
-**Files**: `core/bess/battery_system_manager.py`, `core/bess/inverter_controller.py`, `core/bess/solax_controller.py`, `core/bess/ha_api_controller.py`
-
----
-
 ### Reconsider whether the all-IDLE numerical safety net is still needed
 
 **Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `dp_battery_algorithm.py`, `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`
@@ -615,46 +600,6 @@ Both are called sequentially from `run_setup_discovery()` in `api.py`. They serv
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
 
-### Remove device_id discovery fallbacks and dead `device_sn` code
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
-
-**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
-
-Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
-
-**What to remove**:
-- `_extract_growatt_device_sn()` method
-- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
-- `device_sn` from discovery result dict and API response
-- `deviceSn` from frontend `DiscoveryResult` type
-
-**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
-
----
-
-### Sunset the legacy `growatt.inverter_type` config key
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `settings_store.py`, `battery_system_manager.py`, `api.py`
-
-**Description**: `inverter.platform` has been the source of truth since the multi-platform work, and `_migrate_schema()` rewrites `growatt.inverter_type` → `inverter.platform` on every load. The legacy key nonetheless survives in three live code paths, each of which has to keep re-deriving what the migration already settled:
-
-- `SettingsStore._bootstrap_defaults()` still seeds `growatt: {"inverter_type": ""}` into fresh installs, so new users get a key that exists only for backwards compatibility with themselves.
-- `BatterySystemManager._resolve_initial_platform()` falls back to it at startup, via a second platform map (`_INVERTER_TYPE_TO_PLATFORM`) that duplicates `UI_TYPE_TO_PLATFORM` in `api_conversion.py`.
-- `PATCH /api/settings` accepts `growatt.inverterType` and switches the live platform from it. That path is not reachable from the current frontend, and it was the source of a real bug in #451: it switched the controller without persisting `inverter.platform`, so anything resolving from the store (the vendor service domain) kept addressing the previous platform's integration until a restart.
-
-That third case is the argument for removing it rather than maintaining it — a legacy path no UI exercises is one nothing regression-tests either, so it silently drifts out of step with whatever the current path learns to do.
-
-**What to remove**:
-- `inverter_type` from `_bootstrap_defaults()`'s `growatt` section
-- The `growatt.inverter_type` fallback in `_resolve_initial_platform()`, and `_INVERTER_TYPE_TO_PLATFORM` with it
-- The `inverterType` branch in `patch_settings`'s `growatt` handler
-- Keep `_migrate_schema()`'s rewrite — it is what makes removal safe for installs predating `inverter.platform`, and it should outlive the rest by at least one release
-
-**Files**: `core/bess/settings_store.py` (`_bootstrap_defaults`, `_migrate_schema`), `core/bess/battery_system_manager.py` (`_resolve_initial_platform`), `backend/api.py` (`patch_settings`), `core/bess/tests/unit/test_fresh_install_startup.py`, `core/bess/tests/unit/test_bsm_settings_and_lifecycle.py`
-
----
-
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
@@ -663,7 +608,6 @@ That third case is the argument for removing it rather than maintaining it — a
 **From #221 (spot_multiplier/export_spot_multiplier) code review — deferred cleanup, not bugs**:
 
 - `backend/api.py`'s `_pricing_defaults_for_discovery()` duplicates the provider-priority chain (`octopus > entsoe > nordpool_official > nordpool_hacs`, gated on `not nordpool_found`) already computed independently in `frontend/src/pages/SetupWizardPage.tsx`'s `autoProvider` logic. The two can drift out of sync if the priority order changes in only one place. Consider deriving both from a single shared source (e.g. have the backend return the resolved provider and have the frontend just consume it, instead of recomputing it).
-- `backend/api_conversion.py`'s `PRICE_STORE_TO_API` (startup/read path) and `backend/api.py`'s `_PRICE_MAP` in `setup_complete()` (wizard-write path) are two independently-maintained camelCase↔snake_case tables for the same `PriceSettings` fields. The new `TestPriceModelAttrsConsistency` contract test (added in #221) only guards `PRICE_STORE_TO_API` — `_PRICE_MAP` can still silently drift for a future field with no test to catch it. Consider consolidating to one table, or extending the contract test to also cover `_PRICE_MAP`.
 - `backend/settings_store.py`'s `_migrate_schema()` electricity_price migration block hardcodes `spot_multiplier`/`export_spot_multiplier`/`use_actual_price` by name instead of iterating `PRICE_STORE_TO_API` + `PriceSettings` defaults generically. Every future `PriceSettings` field will need a new hand-written migration block, and it's easy to forget (silent `ValueError` in `build_system_settings()` at startup for existing users' configs). Consider making the migration generic against `PRICE_STORE_TO_API`.
 
 **TOU Segment Matching is Fragile**:
@@ -672,20 +616,11 @@ The current TOU comparison uses exact matching on start_time, end_time, batt_mod
 - Overlap-based matching: If segments overlap significantly and have same mode, treat as "same"
 - Smart merging: Detect when segments can be extended/shortened rather than replaced
 
-**Remove Hourly Aggregation Legacy**:
-With 15-min TOU resolution implemented, the hourly aggregation code is now legacy. Power rates are already set per-period in `_apply_period_settings()`. The following should be refactored or removed:
+**Remove Hourly Aggregation Legacy** (mostly done — residual only):
+The controller-side hourly aggregation is gone: `_calculate_hourly_settings_with_strategic_intents()`, `get_hourly_settings()`, `_get_hourly_intent()` and the `hourly_settings` dict no longer exist, and `adjust_charging_power()` reads `get_period_settings(current_period)` directly. What remains is display-side:
 
-- `_calculate_hourly_settings_with_strategic_intents()` - aggregates 15-min periods back to hourly
-- `get_hourly_settings()` - returns hourly settings (used by power monitor and display)
-- `_get_hourly_intent()` - majority voting for hourly intent (no longer needed for TOU)
-- `hourly_settings` dict - stores the aggregated hourly data
-
-To remove:
-
-1. Update `adjust_charging_power()` in `battery_system_manager.py` to use period-based settings
-2. Update schedule display table to show 15-min periods (or keep hourly summary for readability)
-3. Update `get_strategic_intent_summary()` to work directly with periods
-4. Remove the hourly aggregation methods listed above
+- `backend/api.py`'s `_get_hourly_settings_from_periods()` — a compatibility shim that majority-votes the 4 quarterly intents of an hour for API endpoints that still return hourly rows. Removable once the schedule display table renders 15-min periods.
+- `get_strategic_intent_summary()` (`core/bess/inverter_controller.py`) still summarises per hour rather than per period.
 
 **Re-run optimization on energy prediction method change**:
 When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), the optimization should re-run immediately with the new prediction method rather than waiting for the next scheduled cycle. The prediction cache should be cleared and a fresh optimization triggered in the same request that saves the new strategy.

@@ -172,27 +172,17 @@ class TestResolveInitialPlatform:
         )
         assert result == "growatt_server_sph"
 
-    def test_legacy_growatt_min(self):
-        result = BatterySystemManager._resolve_initial_platform(
-            {"growatt": {"inverter_type": "MIN"}}
-        )
-        assert result == "growatt_server_min"
-
-    def test_legacy_growatt_sph(self):
-        result = BatterySystemManager._resolve_initial_platform(
-            {"growatt": {"inverter_type": "SPH"}}
-        )
-        assert result == "growatt_server_sph"
-
     def test_fresh_install_returns_none(self):
         result = BatterySystemManager._resolve_initial_platform({})
         assert result is None
 
-    def test_unknown_legacy_type_asserts(self):
-        with pytest.raises(AssertionError):
-            BatterySystemManager._resolve_initial_platform(
-                {"growatt": {"inverter_type": "UNKNOWN"}}
-            )
+    def test_legacy_growatt_key_is_ignored(self):
+        """growatt.inverter_type is no longer read here — SettingsStore's
+        migration rewrites it to inverter.platform before startup."""
+        result = BatterySystemManager._resolve_initial_platform(
+            {"growatt": {"inverter_type": "MIN"}}
+        )
+        assert result is None
 
     def test_unknown_platform_asserts(self):
         with pytest.raises(AssertionError):

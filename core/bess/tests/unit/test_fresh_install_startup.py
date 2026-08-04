@@ -80,11 +80,12 @@ class TestFreshInstallStartup:
         assert system.inverter_platform == "growatt_server_min"
         assert system._inverter_controller is not None
 
-    def test_legacy_inverter_type_creates_configured_system(self):
-        """Legacy growatt.inverter_type still works for existing users."""
+    def test_legacy_inverter_type_alone_stays_unconfigured(self):
+        """growatt.inverter_type is no longer a startup fallback. Existing
+        users reach a configured system because SettingsStore._migrate_schema()
+        rewrites the key to inverter.platform before this code runs."""
         system = self._make_system(addon_options={"growatt": {"inverter_type": "SPH"}})
-        assert system.is_configured
-        assert system.inverter_platform == "growatt_server_sph"
+        assert not system.is_configured
 
     # --- Transition from unconfigured to configured ---
 
@@ -100,11 +101,6 @@ class TestFreshInstallStartup:
         assert system._inverter_controller is not None
 
     # --- Invalid config still fails explicitly ---
-
-    def test_invalid_inverter_type_raises(self):
-        """A non-empty but invalid inverter_type must still raise."""
-        with pytest.raises(AssertionError, match="Unknown inverter_type"):
-            self._make_system(addon_options={"growatt": {"inverter_type": "BOGUS"}})
 
     def test_invalid_platform_raises(self):
         """A non-empty but invalid platform must still raise."""

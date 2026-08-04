@@ -11,6 +11,8 @@ for why only the tied window gets this treatment instead of the whole
 horizon.
 """
 
+import logging
+
 import numpy as np
 
 from core.bess.dp_battery_algorithm import (
@@ -28,6 +30,8 @@ from core.bess.dp_battery_algorithm import (
     _state_transition_grid,
 )
 from core.bess.dp_constants import POWER_STEP_KW
+
+logger = logging.getLogger(__name__)
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -333,11 +337,41 @@ def _pwl_best_action_at_continuous_state(
 # six orders of magnitude above any realistic window-scale economics (a few
 # kWh moved across a spread of a few SEK/kWh), so the pin always dominates
 # the objective, while staying finite -- see `_pinned_terminal_row`.
-_TERMINAL_PENALTY_PER_KWH = 1e6
+PWL_TERMINAL_PENALTY_PER_KWH = 1e6
+
+# Largest end-SOE miss (kWh) a resolved window may carry and still be spliced
+# back into the grid DP's schedule. Well below `SOE_STEP_KWH`, the grid DP's
+# own state resolution, so a miss this small cannot change anything
+# downstream of the window.
+PWL_WINDOW_MAX_PIN_SHORTFALL_KWH = 0.01
+
+# The V[0] value at or below which a window counts as infeasible -- see
+# `pwl_window_is_feasible`, which is what callers should use.
+PWL_WINDOW_INFEASIBLE_SEK = -(
+    PWL_TERMINAL_PENALTY_PER_KWH * PWL_WINDOW_MAX_PIN_SHORTFALL_KWH
+)
 
 # Adaptive-refinement guards, matching the reference PWL prototype.
 PWL_MAX_REFINE_ITERS = 40
-PWL_MAX_SEED_POINTS = 30000
+
+# Ceiling on |X| (breakpoints per row) during refinement.
+PWL_MAX_BREAKPOINTS = 30000
+
+# Separate, much larger budget for the *transient* discharge-preimage cross
+# product in `_pwl_window_seed_points` (|xs_next| x |discharge levels|). It is
+# built, deduped and pruned within a single seeding call, so it is bounded by
+# memory (1e6 float64 ~ 8 MB), not by the per-row breakpoint ceiling. These
+# were one constant until review: sharing `PWL_MAX_BREAKPOINTS` silently
+# disabled exact preimage seeding on every row after the first backward step
+# (|xs_next| > ~303 already trips 303 x 98 > 30000), i.e. the mechanism was
+# off exactly where it was documented to be required.
+PWL_MAX_PREIMAGE_SEED_POINTS = 1_000_000
+
+# Two distinct tolerances that were previously ad-hoc literals:
+# points closer than this are the same breakpoint...
+_PWL_MERGE_EPS_KWH = 1e-12
+# ...and intervals narrower than this are not worth probing again.
+_PWL_MIN_PROBE_WIDTH_KWH = 1e-8
 
 
 def _end_soe_pin_tolerance(
@@ -354,7 +388,7 @@ def _end_soe_pin_tolerance(
     `rate_step * dt / efficiency_discharge` apart (0.0132 kWh for a 5 kW
     battery on 15-minute periods), so a 1e-6 band is generically empty. The
     terminal penalty then degenerates into a sawtooth of amplitude
-    `_TERMINAL_PENALTY_PER_KWH * step / 2` -- thousands of SEK -- which
+    `PWL_TERMINAL_PENALTY_PER_KWH * step / 2` -- thousands of SEK -- which
     swamps the cents-scale economics the window is being re-solved to
     compare, i.e. it would replace grid-snap tie noise with lattice-snap tie
     noise. Flooring at half a step makes the nearest reachable state always
@@ -377,7 +411,7 @@ def _pinned_terminal_row(
 ) -> tuple[np.ndarray, np.ndarray]:
     """Terminal PWL row pinning the window's end SOE to `end_soe_target`:
     exactly 0 inside `[target - tol, target + tol]`, then falling away with
-    a steep constant gradient (`_TERMINAL_PENALTY_PER_KWH`) on both sides.
+    a steep constant gradient (`PWL_TERMINAL_PENALTY_PER_KWH`) on both sides.
 
     Deviation from the plan's starting-point code, which used a *flat*
     `-1e9` plateau everywhere outside the tolerance band. A flat plateau
@@ -397,7 +431,17 @@ def _pinned_terminal_row(
     """
     min_soe = battery_settings.min_soe_kwh
     max_soe = battery_settings.max_soe_kwh
-    target = float(np.clip(end_soe_target, min_soe, max_soe))
+    target = float(end_soe_target)
+    if not min_soe <= target <= max_soe:
+        # Clipping instead would hand back a legitimate-looking, zero-penalty
+        # pin at the WRONG SOE, so `V[0]` would read as perfectly feasible and
+        # the window would be spliced against a reconnection point that never
+        # existed. A target outside the battery's own range can only come from
+        # an upstream bug, so fail loudly.
+        raise ValueError(
+            f"end_soe_target {target} kWh is outside the battery's usable "
+            f"range [{min_soe}, {max_soe}] kWh"
+        )
     tol = max(float(end_soe_tolerance), 0.0)
     lo = max(min_soe, target - tol)
     hi = min(max_soe, target + tol)
@@ -405,10 +449,10 @@ def _pinned_terminal_row(
     xs = np.array([min_soe, lo, hi, max_soe])
     vs = np.array(
         [
-            -_TERMINAL_PENALTY_PER_KWH * (lo - min_soe),
+            -PWL_TERMINAL_PENALTY_PER_KWH * (lo - min_soe),
             0.0,
             0.0,
-            -_TERMINAL_PENALTY_PER_KWH * (max_soe - hi),
+            -PWL_TERMINAL_PENALTY_PER_KWH * (max_soe - hi),
         ]
     )
     keep = np.concatenate(([True], np.diff(xs) > 1e-12))
@@ -469,14 +513,29 @@ def _pwl_window_seed_points(
     # Discharge preimages: discharge maps x -> x - e, so V[t+1]'s kink at b
     # is a kink of V[t] at b + e for every discharge level e. The reference
     # prototype left these to adaptive probing, which is fine for a smooth
-    # terminal reward but far too slow to localise a ~1e6 SEK/kWh pin --
-    # seed them exactly instead (bounded by the same point cap).
-    if xs_next.size * discharge_energy.size <= PWL_MAX_SEED_POINTS:
+    # terminal reward but far too slow to localise a ~1e6 SEK/kWh pin.
+    # Seeding them exactly is not just more accurate but *faster* end to end,
+    # because it removes refinement rounds (measured over 12 randomised
+    # 5-period windows: 1.00 s -> 0.68 s mean once the budget stopped
+    # cutting it off after the first backward step).
+    preimage_points = xs_next.size * discharge_energy.size
+    if preimage_points <= PWL_MAX_PREIMAGE_SEED_POINTS:
         points.append(np.add.outer(xs_next, discharge_energy).ravel())
+    else:
+        logger.warning(
+            "PWL window t=%d: exact discharge-preimage seeding skipped "
+            "(%d points > PWL_MAX_PREIMAGE_SEED_POINTS=%d); V[%d] falls back "
+            "to adaptive probing alone and may misplace the terminal pin's "
+            "reachable-set boundary",
+            t,
+            preimage_points,
+            PWL_MAX_PREIMAGE_SEED_POINTS,
+            t,
+        )
     points.append(np.arange(min_soe, max_soe + 0.1, 0.1))
 
     X = np.unique(np.clip(np.concatenate(points), min_soe, max_soe))
-    keep = np.concatenate(([True], np.diff(X) > 1e-9))
+    keep = np.concatenate(([True], np.diff(X) > _PWL_MERGE_EPS_KWH))
     return X[keep]
 
 
@@ -517,11 +576,14 @@ def run_pwl_window_backward_induction(
     Infeasible targets are not an error: if the window physically cannot
     reach `end_soe_target` from the caller's start SOE (rate limits, the
     inverter AC cap, solar), backward induction still returns a usable
-    table, but `V[0]` evaluated at that start SOE carries the terminal
-    penalty (`<= -_TERMINAL_PENALTY_PER_KWH * shortfall`) instead of an
-    economics-scale value. The caller must treat such a window as
-    unresolvable and keep the grid DP's original schedule rather than
-    splicing in a trajectory that misses the reconnection point.
+    table, but `V[0]` at that start SOE carries the terminal penalty
+    (`-PWL_TERMINAL_PENALTY_PER_KWH * shortfall`) instead of an
+    economics-scale value. Callers must gate on
+    `pwl_window_is_feasible(V, start_soe)` before splicing -- do not
+    re-derive that threshold at the call site.
+
+    An `end_soe_target` outside the battery's usable SOE range raises
+    `ValueError` (see `_pinned_terminal_row`).
     """
     horizon_inputs = (buy_price, sell_price, home_consumption, solar_production)
     power_row = np.concatenate(
@@ -575,10 +637,12 @@ def run_pwl_window_backward_induction(
             discharge_resolution_kw,
         )
         V_t = values_at(X)
+        converged = False
         for _ in range(PWL_MAX_REFINE_ITERS):
             widths = np.diff(X)
-            wide = widths > 1e-8
+            wide = widths > _PWL_MIN_PROBE_WIDTH_KWH
             if not wide.any():
+                converged = True
                 break
             left = X[:-1][wide]
             width = widths[wide]
@@ -587,16 +651,19 @@ def run_pwl_window_backward_induction(
             linear = np.interp(probes, X, V_t)
             # Absolute accuracy where the economics live, relative accuracy
             # where the terminal pin dominates: `PWL_EPS_REFINE` SEK is a
-            # meaningless target at |V| ~ 1e5 (a state that far from the
-            # pinned target is never chosen at any of those digits), and
-            # chasing it there costs ~40 bisection rounds per row for no
-            # decision-relevant gain.
+            # meaningless accuracy target at |V| ~ 1e5, because a state that
+            # far outside the pin is never chosen at any of those digits.
+            # (Measured: this changed no replayed decision and no runtime
+            # either -- it is kept because chasing absolute 1e-6 SEK in the
+            # penalty region is not a claim this code can honestly make, not
+            # because it bought a speedup.)
             tolerance = PWL_EPS_REFINE * (1.0 + np.abs(linear))
             bad = np.abs(probe_values - linear) > tolerance
             if not bad.any():
+                converged = True
                 break
             X = np.sort(np.concatenate((X, probes[bad])))
-            X = X[np.concatenate(([True], np.diff(X) > 1e-12))]
+            X = X[np.concatenate(([True], np.diff(X) > _PWL_MERGE_EPS_KWH))]
             # Prune inside the loop, not just at the end: every probe round
             # costs O(|X| x |actions|), so letting X accumulate tens of
             # thousands of provably-redundant points makes the row an order
@@ -605,9 +672,65 @@ def run_pwl_window_backward_induction(
             # is <= PWL_EPS_PRUNE, while re-adding it requires an error
             # above PWL_EPS_REFINE * (1 + |V|) >= PWL_EPS_PRUNE.
             X, V_t = _pwl_prune(X, values_at(X), eps=PWL_EPS_PRUNE)
-            if len(X) > PWL_MAX_SEED_POINTS:
+            if len(X) > PWL_MAX_BREAKPOINTS:
+                logger.warning(
+                    "PWL window t=%d: breakpoint ceiling hit (%d > "
+                    "PWL_MAX_BREAKPOINTS=%d); V[%d] is an under-refined "
+                    "approximation and the window's result should not be "
+                    "treated as exact",
+                    t,
+                    len(X),
+                    PWL_MAX_BREAKPOINTS,
+                    t,
+                )
+                converged = True  # stopped deliberately, already reported
                 break
+        if not converged:
+            logger.warning(
+                "PWL window t=%d: refinement did not converge within "
+                "PWL_MAX_REFINE_ITERS=%d (%d breakpoints); V[%d] may still "
+                "carry representation error above PWL_EPS_REFINE",
+                t,
+                PWL_MAX_REFINE_ITERS,
+                len(X),
+                t,
+            )
 
         V[t] = _pwl_prune(X, V_t, eps=PWL_EPS_PRUNE)
 
     return V
+
+
+def pwl_window_is_feasible(
+    V: list[tuple[np.ndarray, np.ndarray]], start_soe: float
+) -> bool:
+    """Whether a window solved by `run_pwl_window_backward_induction` can
+    actually reach its pinned end SOE from `start_soe`.
+
+    Callers must check this before splicing a resolved window back into the
+    grid DP's schedule. A window can be infeasible for ordinary physical
+    reasons -- charge/discharge rate limits, the inverter AC cap, solar
+    forcing SOE up -- and in that case backward induction still returns a
+    perfectly well-formed table; it just describes the best trajectory that
+    *misses* the reconnection point. Splicing that in would corrupt every
+    period after the window.
+
+    Mechanics: `V[0]` at `start_soe` is `economics - PWL_TERMINAL_PENALTY_PER_KWH
+    x shortfall`, where `shortfall` is how far outside the pin band the best
+    reachable end SOE lands. Window economics are at most a few hundred SEK,
+    so a value at or below `PWL_WINDOW_INFEASIBLE_SEK` (-1e4 SEK, i.e. a
+    `PWL_WINDOW_MAX_PIN_SHORTFALL_KWH` = 0.01 kWh shortfall) cannot be
+    economics and must be penalty.
+
+    The boundary is a continuum, not a cliff -- a shortfall just under
+    `PWL_WINDOW_MAX_PIN_SHORTFALL_KWH` returns True with several thousand SEK
+    of penalty still in `V[0]`, so that number is *not* a usable estimate of
+    the window's economics. That is deliberate and safe: the threshold sits
+    an order of magnitude below `SOE_STEP_KWH`, the grid DP's own state
+    resolution, so any miss this predicate accepts is smaller than the
+    reconnection point's own quantisation. Use it as a splice/don't-splice
+    gate only; take the window's economics from the replayed rewards.
+    """
+    return bool(
+        _pwl_eval_array(V[0], np.array([start_soe]))[0] > PWL_WINDOW_INFEASIBLE_SEK
+    )

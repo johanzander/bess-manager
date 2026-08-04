@@ -2,10 +2,13 @@ import numpy as np
 import pytest
 
 from core.bess.pwl_window_dp import (
+    _backward_discharge_levels,
     _end_soe_pin_tolerance,
     _pwl_best_action_at_continuous_state,
     _pwl_eval_array,
     _pwl_prune,
+    _pwl_window_seed_points,
+    pwl_window_is_feasible,
     run_pwl_window_backward_induction,
 )
 from core.bess.settings import BatterySettings
@@ -193,9 +196,17 @@ def test_pinned_window_forward_replay_lands_on_target():
         )
         soe = next_soe
 
-    assert soe == pytest.approx(
-        target, abs=0.02
-    ), f"forward replay must land on the pinned end SOE {target}, got {soe}"
+    # The real invariant is the pin's own half-width, not a round number:
+    # the discharge lattice guarantees a reachable state inside the band, so
+    # anything outside it means the pin failed to steer.
+    pin_half_width = _end_soe_pin_tolerance(
+        1e-3, battery, dt, discharge_resolution_kw=None
+    )
+    assert soe == pytest.approx(target, abs=pin_half_width), (
+        f"forward replay must land within the pin half-width "
+        f"{pin_half_width} of the pinned end SOE {target}, got {soe}"
+    )
+    assert pwl_window_is_feasible(V, start_soe)
 
 
 def test_end_soe_pin_tolerance_is_floored_at_half_the_action_lattice():
@@ -231,3 +242,76 @@ def test_unreachable_target_leaves_the_terminal_penalty_in_v0():
         end_soe_target=1.5,
     )
     assert _pwl_eval_array(V[0], np.array([9.5]))[0] < -1e6
+
+
+def test_unreachable_target_fails_the_feasibility_predicate():
+    """The infeasibility contract is a function callers invoke, not a magic
+    number they re-derive -- Task 6 gates its splice on this."""
+    battery = _tiny_battery()
+    V = run_pwl_window_backward_induction(
+        window_horizon=2,
+        buy_price=[1.0, 1.0],
+        sell_price=[0.5, 0.5],
+        home_consumption=[0.0, 0.0],
+        solar_production=[0.0, 0.0],
+        battery_settings=battery,
+        dt=0.25,
+        end_soe_target=1.5,
+    )
+    # 9.5 -> 1.5 needs 8.0 kWh in two 15-minute periods; at most 2.63 is
+    # available, so this window cannot reconnect.
+    assert not pwl_window_is_feasible(V, 9.5)
+    # 3.0 -> 1.5 is comfortably within one period's discharge.
+    assert pwl_window_is_feasible(V, 3.0)
+
+
+def test_out_of_range_end_soe_target_raises():
+    """Clipping would produce a legitimate-looking zero-penalty pin at the
+    wrong SOE, so an impossible target must fail loudly instead."""
+    battery = _tiny_battery()
+    kwargs = {
+        "window_horizon": 1,
+        "buy_price": [1.0],
+        "sell_price": [0.5],
+        "home_consumption": [0.0],
+        "solar_production": [0.0],
+        "battery_settings": battery,
+        "dt": 0.25,
+    }
+    with pytest.raises(ValueError, match="outside the battery's usable range"):
+        run_pwl_window_backward_induction(end_soe_target=12.0, **kwargs)
+    with pytest.raises(ValueError, match="outside the battery's usable range"):
+        run_pwl_window_backward_induction(end_soe_target=0.5, **kwargs)
+
+
+def test_exact_discharge_preimages_are_seeded_on_every_row():
+    """Regression: the preimage budget used to be shared with the per-row
+    breakpoint ceiling, which silently switched this mechanism off on every
+    row after the first backward step (|xs_next| > ~303 was enough). The
+    seeded set must contain `b + e` for V[t+1]'s breakpoints `b` and every
+    discharge energy step `e`, at realistic row sizes.
+    """
+    battery = _tiny_battery()
+    dt = 0.25
+    discharge_energy = (
+        _backward_discharge_levels(battery, None) * dt / battery.efficiency_discharge
+    )
+    # A row far larger than the old 30000 / 98 ~ 306 cut-off.
+    xs_next = np.linspace(battery.min_soe_kwh, battery.max_soe_kwh, 2000)
+
+    X = _pwl_window_seed_points(
+        0, xs_next, battery, dt, [0.0], [0.0], discharge_resolution_kw=None
+    )
+
+    expected = np.add.outer(xs_next, discharge_energy).ravel()
+    expected = expected[
+        (expected >= battery.min_soe_kwh) & (expected <= battery.max_soe_kwh)
+    ]
+    # Distance from each expected preimage to the nearest seeded point
+    # (checking both neighbours, since dedup may have merged one away).
+    idx = np.searchsorted(X, expected)
+    left = X[np.clip(idx - 1, 0, len(X) - 1)]
+    right = X[np.clip(idx, 0, len(X) - 1)]
+    nearest = np.minimum(np.abs(left - expected), np.abs(right - expected))
+    missing = expected[nearest > 1e-9]
+    assert missing.size == 0, f"{missing.size} discharge preimages were not seeded"

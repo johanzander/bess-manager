@@ -981,12 +981,16 @@ git commit -m "feat: splice windowed exact-solver actions into the grid DP sched
 This is primarily a regression-guard test, added to `core/bess/tests/unit/test_scenarios.py` or a new small file:
 
 ```python
-def test_hybrid_wiring_is_no_op_when_no_ties_detected(monkeypatch):
+import pytest
+
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.dp_battery_algorithm import optimize_battery_schedule
+
+
+def test_hybrid_wiring_is_no_op_when_no_ties_detected():
     """A fixture with no near-tied periods must produce byte-identical
     output whether or not the hybrid tie-detect/resolve/splice path exists
     -- this is the core latency guarantee of the hybrid design."""
-    from core.bess.tests.unit.test_scenarios import build_scenario_inputs
-    from core.bess.dp_battery_algorithm import optimize_battery_schedule
 
     scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
         build_scenario_inputs("synthetic_consumption_efficient")  # no known #450-style tie
@@ -1001,11 +1005,12 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(monkeypatch):
         period_duration_hours=period_duration_hours,
         terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
     )
-    assert result.economic_summary is not None
-    # The real assertion is a before/after diff of test_scenarios.py's full
-    # run (see the shell commands below this test), not a single value
-    # here -- this test only pins that the call signature/wiring itself
-    # doesn't raise.
+    # "synthetic_consumption_efficient" has no near-tied periods, so the
+    # hybrid path must be a no-op: this must still match the fixture's
+    # own pinned expected_results (core/bess/tests/unit/data/
+    # synthetic_consumption_efficient.json), unchanged by this task's wiring.
+    assert result.economic_summary.battery_solar_cost == pytest.approx(-28.28496, abs=1e-4)
+    assert result.economic_summary.base_to_battery_solar_savings == pytest.approx(88.22186, abs=1e-3)
 ```
 
 Note: the meaningful verification for this step is not a single assertion but a before/after diff — run `pytest core/bess/tests/unit/test_scenarios.py -v` and capture output *before* Step 2's implementation, then again *after*, and confirm zero fixtures changed cost. Do this explicitly rather than trusting a single test.

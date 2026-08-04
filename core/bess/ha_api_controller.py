@@ -1129,7 +1129,12 @@ class HomeAssistantAPIController:
         return self.service_domain
 
     def _service_call_with_retry(
-        self, service_domain, service_name, operation: str | None = None, **kwargs
+        self,
+        service_domain,
+        service_name,
+        operation: str | None = None,
+        category: str | None = None,
+        **kwargs,
     ):
         """Call Home Assistant service with retry logic.
 
@@ -1137,6 +1142,8 @@ class HomeAssistantAPIController:
             service_domain: Service domain (e.g., 'switch', 'number')
             service_name: Service name (e.g., 'turn_on', 'set_value')
             operation: Optional human-readable operation description for failure tracking
+            category: Optional failure-tracking category override. Defaults to a
+                domain-based heuristic when omitted.
             **kwargs: Service parameters
 
         Returns:
@@ -1199,7 +1206,8 @@ class HomeAssistantAPIController:
             "post",
             path,
             operation=operation or f"Call {service_domain}.{service_name}",
-            category=(
+            category=category
+            or (
                 "battery_control"
                 if service_domain in ["number", "input_number", "switch"]
                 else ("inverter_control" if is_vendor_domain else "other")
@@ -1372,7 +1380,9 @@ class HomeAssistantAPIController:
         """Get current battery discharging power in watts."""
         return self._get_sensor_value("battery_discharge_power")
 
-    def _set_number_like(self, entity_id: str, value, operation: str) -> None:
+    def _set_number_like(
+        self, entity_id: str, value, operation: str, category: str | None = None
+    ) -> None:
         """Write a value to a number-like entity.
 
         Supports both `number.*` (platform-native) and `input_number.*`
@@ -1384,6 +1394,7 @@ class HomeAssistantAPIController:
             domain,
             "set_value",
             operation=operation,
+            category=category,
             entity_id=entity_id,
             value=value,
         )
@@ -2180,6 +2191,7 @@ class HomeAssistantAPIController:
             "select",
             "select_option",
             operation=f"Growatt export limit mode -> {option}",
+            category="export_limit_curtailment",
             entity_id=mode_entity,
             option=option,
         )
@@ -2188,7 +2200,12 @@ class HomeAssistantAPIController:
             return
 
         value_entity = self._get_entity_for_service("growatt_export_limit_value")
-        self._set_number_like(value_entity, 0, "Growatt export limit -> 0% (curtail)")
+        self._set_number_like(
+            value_entity,
+            0,
+            "Growatt export limit -> 0% (curtail)",
+            category="export_limit_curtailment",
+        )
 
     def get_growatt_vpp_status(self) -> str | None:
         """Read the current Growatt VPP Status register state."""

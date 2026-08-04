@@ -2725,10 +2725,13 @@ class BatterySystemManager:
                         "export_limit_curtailment"
                     )
                 except Exception as e:
-                    self._runtime_failure_tracker.dismiss_by_category(
-                        "export_limit_curtailment"
-                    )
-                    self._runtime_failure_tracker.record_failure(
+                    # ha_api_controller's own retry logic already records a
+                    # failure under this same category via record_failure_once
+                    # for HTTP-level errors, so use record_failure_once here
+                    # too (rather than record_failure) to coalesce with it
+                    # instead of producing a second banner entry for one
+                    # underlying failure.
+                    self._runtime_failure_tracker.record_failure_once(
                         category="export_limit_curtailment",
                         operation=f"Period {period}: apply export-limit curtailment",
                         error=e,

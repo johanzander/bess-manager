@@ -299,3 +299,30 @@ def test_all_scenarios(scenario_name):
         f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
         f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
     )
+
+
+def test_hybrid_wiring_is_no_op_when_no_ties_detected():
+    """A fixture with no near-tied periods must produce output identical to
+    what the grid DP alone produced -- this is the core latency and
+    stability guarantee of the hybrid design (#450): when detect_tie_windows
+    returns nothing, none of the PWL machinery runs and the pinned
+    expected_results below stay exactly as they were before the wiring."""
+
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs("synthetic_consumption_efficient")
+    )
+    result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=scenario["home_consumption"],
+        solar_production=scenario["solar_production"],
+        initial_soe=scenario["battery"]["initial_soe"],
+        battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
+    )
+    assert result.economic_summary.battery_solar_cost == pytest.approx(
+        -28.28496, abs=1e-4
+    )
+    assert result.economic_summary.base_to_battery_solar_savings == pytest.approx(
+        88.22186, abs=1e-3
+    )

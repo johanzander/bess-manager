@@ -1434,6 +1434,90 @@ def _create_idle_schedule(
     )
 
 
+def _replay_accounting_pass(
+    horizon: int,
+    actions: list[float],
+    soe_trajectory: list[float],
+    initial_cost_basis: float,
+    V: np.ndarray,
+    soe_levels: np.ndarray,
+    buy_price: list[float],
+    sell_price: list[float],
+    reward_sell_price: list[float],
+    home_consumption: list[float],
+    solar_production: list[float],
+    battery_settings: BatterySettings,
+    dt: float,
+    currency: str,
+    self_throttle_export_threshold_kwh: float,
+) -> tuple[list[PeriodData], float]:
+    """Rebuild PeriodData (and the reward-objective cost) for a given
+    (action, SOE) trajectory.
+
+    Only used by the hybrid PWL path (#450): once a tied window's actions have
+    been re-solved exactly and spliced in, the accounting produced inline by
+    optimize_battery_schedule's selection loop describes the *pre-splice*
+    trajectory and must be recomputed. The no-tie path never calls this, so its
+    output is bit-for-bit whatever the selection loop produced.
+
+    Rewards are recomputed with the same `_compute_reward` call the selection
+    loop's `_best_action_at_continuous_state` makes internally (same explicit
+    next_soe, so the SOLAR_EXPORT-below-max bypass replays exactly), against
+    `reward_sell_price` -- the DP's own objective -- while the reported
+    PeriodData still carries the real `sell_price`.
+    """
+    hourly_results: list[PeriodData] = []
+    reward_objective_cost = 0.0
+    cost_basis = initial_cost_basis
+
+    for t in range(horizon):
+        soe = soe_trajectory[t]
+        next_soe = soe_trajectory[t + 1]
+        action_reward, new_cost_basis = _compute_reward(
+            power=actions[t],
+            soe=soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=reward_sell_price,
+            solar_production=solar_production[t],
+            cost_basis=cost_basis,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        )
+
+        period_data = _build_period_data(
+            power=actions[t],
+            soe=soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            new_cost_basis=new_cost_basis,
+            currency=currency,
+            continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
+        )
+
+        i = round((soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
+        i = min(max(0, i), len(soe_levels) - 1)
+        if i > 0:
+            period_data.decision.shadow_price = float(
+                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
+            )
+
+        hourly_results.append(period_data)
+        cost_basis = new_cost_basis
+        reward_objective_cost -= action_reward
+
+    return hourly_results, reward_objective_cost
+
+
 def optimize_battery_schedule(
     buy_price: list[float],
     sell_price: list[float],
@@ -1573,6 +1657,13 @@ def optimize_battery_schedule(
     _, power_levels = _discretize_state_action_space(battery_settings)
 
     tie_margins: list[float] = []
+    # Trajectory recorded alongside the inline accounting so the hybrid PWL
+    # path (#450) can re-solve a tied window and splice it back in. Recording
+    # is three list appends per period; nothing downstream reads them unless a
+    # tie is actually detected.
+    actions: list[float] = []
+    soe_trajectory: list[float] = [initial_soe]
+    cost_basis_trajectory: list[float] = []
     for t in range(horizon):
         # Recompute the action directly at the true continuous SoE using the
         # already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -1597,6 +1688,9 @@ def optimize_battery_schedule(
             )
         )
         tie_margins.append(tie_margin)
+        cost_basis_trajectory.append(current_cost_basis)
+        actions.append(action)
+        soe_trajectory.append(next_soe)
 
         period_data = _build_period_data(
             power=action,
@@ -1635,6 +1729,104 @@ def optimize_battery_schedule(
         current_soe = next_soe
         current_cost_basis = new_cost_basis
         reward_objective_cost -= action_reward
+
+    # Step 2b (#450): hybrid exact resolution of near-tied decisions. The grid
+    # DP snaps continuation-value lookups to SOE_STEP_KWH, which is noise on
+    # the order of the tie margins recorded above -- so where two actions are
+    # near-tied, the grid DP's pick can be an artifact of that snapping rather
+    # than economics. Those windows (and only those) are re-solved with the
+    # exact continuous-SOE PWL DP, pinned to the grid DP's own SOE at both
+    # ends so everything outside the window is untouched.
+    #
+    # When no window is flagged -- the overwhelmingly common case -- nothing
+    # below this point runs and the schedule built above is returned bit-for-
+    # bit unchanged. Imported here rather than at module scope because
+    # pwl_window_dp imports this module (it reuses this file's reward and
+    # transition primitives), so a top-level import would be circular.
+    from core.bess.pwl_window_dp import (
+        resolve_pwl_window,
+        run_pwl_window_backward_induction,
+    )
+    from core.bess.schedule_splicer import splice_schedule
+    from core.bess.tie_detection import detect_tie_windows
+
+    windows = detect_tie_windows(
+        tie_margins,
+        buy_price,
+        reward_sell_price,
+        soe_step_kwh=SOE_STEP_KWH,
+    )
+
+    if windows:
+        logger.info(
+            "Near-tied DP decisions detected (#450): re-solving %d window(s) "
+            "%s with the exact PWL DP",
+            len(windows),
+            [(w.start, w.end) for w in windows],
+        )
+        window_resolutions: dict[int, list[tuple[float, float]]] = {}
+        for window in windows:
+            window_horizon = window.end - window.start
+            sl = slice(window.start, window.end)
+            window_max_charge = (
+                max_charge_power_per_period[sl]
+                if max_charge_power_per_period is not None
+                else None
+            )
+            # End SOE is pinned to the grid DP's own SOE at the window's exit,
+            # so the untouched schedule after the window stays valid. An
+            # infeasible pin raises out of resolve_pwl_window -- deliberately
+            # not caught: silently keeping the grid DP's possibly-wrong choice
+            # is exactly the fallback this project forbids.
+            V_window = run_pwl_window_backward_induction(
+                window_horizon=window_horizon,
+                buy_price=buy_price[sl],
+                sell_price=reward_sell_price[sl],
+                home_consumption=home_consumption[sl],
+                solar_production=solar_production[sl],
+                battery_settings=battery_settings,
+                dt=dt,
+                end_soe_target=soe_trajectory[window.end],
+                max_charge_power_per_period=window_max_charge,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                discharge_resolution_kw=discharge_resolution_kw,
+            )
+            window_resolutions[window.start] = resolve_pwl_window(
+                V_window,
+                start_soe=soe_trajectory[window.start],
+                window_horizon=window_horizon,
+                buy_price=buy_price[sl],
+                sell_price=reward_sell_price[sl],
+                home_consumption=home_consumption[sl],
+                solar_production=solar_production[sl],
+                battery_settings=battery_settings,
+                dt=dt,
+                cost_basis=cost_basis_trajectory[window.start],
+                max_charge_power_per_period=window_max_charge,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                discharge_resolution_kw=discharge_resolution_kw,
+            )
+
+        actions, soe_trajectory = splice_schedule(
+            actions, soe_trajectory, windows, window_resolutions
+        )
+        hourly_results, reward_objective_cost = _replay_accounting_pass(
+            horizon=horizon,
+            actions=actions,
+            soe_trajectory=soe_trajectory,
+            initial_cost_basis=initial_cost_basis,
+            V=V,
+            soe_levels=soe_levels,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            reward_sell_price=reward_sell_price,
+            home_consumption=home_consumption,
+            solar_production=solar_production,
+            battery_settings=battery_settings,
+            dt=dt,
+            currency=currency,
+            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        )
 
     # Step 3: Calculate economic summary directly from PeriodData
     total_base_cost = sum(

@@ -138,17 +138,14 @@ available battery room and pays wear cost on it, but never discharges to
 recoup that cost, so it isn't automatically better than what it would
 replace.
 
-**Shadow price (marginal value of stored energy)**: The backward induction
-builds a value-to-go per period as a piecewise-linear function of continuous
-SOE (#450) — the best achievable result from that point onward.  The **shadow
-price** of a period is a backward difference of that value over a 0.05 kWh
-window (`SOE_STEP_KWH`): *how much one extra actionable increment of stored
-energy is worth, in SEK per kWh, given the optimal future use of it*.  It is
-deliberately a finite difference, not the infinitesimal slope — with a
-discrete (integer-percent) action set the exact value function is locally
-staircase-like at micro scales (a marginal 1e-6 kWh cannot be monetized by
-any executable action), so only the actionable-increment difference is
-economically meaningful.  It is **not** the cost basis
+**Shadow price (marginal value of stored energy)**: *how much one extra
+actionable increment (0.05 kWh, `SOE_STEP_KWH`) of stored energy is worth, in
+SEK per kWh, given the optimal future use of it*.  It is deliberately a
+finite difference over the actionable increment, not the infinitesimal slope
+— with a discrete (integer-percent) action set the exact value function is
+locally staircase-like at micro scales (a marginal 1e-6 kWh cannot be
+monetized by any executable action), so only the actionable-increment
+difference is economically meaningful.  It is **not** the cost basis
 (what the energy cost to store — a sunk cost).  It is the forward-looking
 **opportunity value**, and it automatically accounts for everything the
 optimizer can do with that kWh later: avoid a future expensive grid purchase,
@@ -156,6 +153,24 @@ export it at a future high sell price, or — crucially — nothing extra, becau
 upcoming solar will refill the battery anyway (**replenishment**).  Each
 period's shadow price is stored on its decision data and is used at apply time
 for the SOLAR_EXPORT discharge gate (below).
+
+Since the MILP pivot (#450, PR #461) there is no value-to-go table to read
+this from; `milp_battery_algorithm.compute_shadow_price_array` computes it as
+an LP dual (all binaries fixed) per period, corrected by an explicit
+finite-difference re-solve only where the SOE trajectory sits within one
+`SOE_STEP_KWH` of a capacity bound — the condition that makes the dual
+degenerate.  **Known caveat**: outside that near-bound window the LP dual can
+carry an `efficiency_discharge`-scaling bias (e.g. reporting
+`sell × eta_d = 0.285` where the true actionable-increment value is `0.300`;
+see `test_solar_export_discharge_gate.py`).  On the pinned fixture suite this
+bias never flips the discharge gate — the gate comparison margins are wider
+than the bias — but it means interior-period shadow prices are approximate,
+not exact, and the Governing Economic Law's steady-state identity
+(`shadow ≈ sell_price` under replenishment) holds only to within that bias.
+Correcting every period was tried and rejected: re-solving a truncated
+sub-horizon far from a bound can lock onto a different policy than the
+full-horizon marginal-value definition and produce larger errors than the
+bias it removes.
 
 
 ## The Governing Economic Law (read this first)

@@ -1,9 +1,14 @@
 # Design: MILP optimizer pivot (#450)
 
 **Date**: 2026-08-03
-**Status**: Direction decided (owner-approved); feasibility spike PASSED; full
-implementation is the next phase. The exact-PWL DP on this branch is a
-validated reference implementation, not the shipping fix.
+**Status**: IMPLEMENTED (PR #461). The MILP
+(`core/bess/milp_battery_algorithm.py`) is the sole production optimizer,
+wired unconditionally through `optimize_battery_schedule`. The exact-PWL DP
+retained in `dp_battery_algorithm.py` is a validated reference implementation
+used by validation tests only — it is not a runtime fallback. One deviation
+from this spec: the shipped solver dependency is `scipy` (musllinux
+aarch64/x86_64 wheels verified), not `highspy`; migrating to `highspy` for
+warm starts and direct duals is tracked in TODO.md.
 **Related**: #450 (root cause), #448/#269 (field reports), #275 (same
 discretization family), 2026-07-12-dp-continuous-path-reconstruction-fix-design.md
 (Option C is this doc).

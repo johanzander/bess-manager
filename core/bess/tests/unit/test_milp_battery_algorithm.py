@@ -523,3 +523,145 @@ def test_ac_cap_disabled_sentinel_does_not_block_discharge():
     assert (result.discharge_pct > 0).any()
     grid_only_cost = sum(0.9 * c for c in [1.0, 1.0, 1.0, 1.0])
     assert result.cost < grid_only_cost
+
+
+class TestSolverStatusPropagation:
+    """A time-limited HiGHS run hands back its best feasible incumbent with
+    scipy status=1 (limit reached), not status=0 (proven optimal). Reporting
+    that incumbent as "optimal" would silently defeat the production
+    optimality guard in dp_battery_algorithm.optimize_battery_schedule
+    (PR #461 review finding). Each test wraps the real solver and overrides
+    only the reported status, so the solution vector stays genuine."""
+
+    @staticmethod
+    def _fixture_kwargs():
+        sc = _load_fixture()
+        return {
+            "buy_price": sc["buy_price"],
+            "sell_price": sc["sell_price"],
+            "home_consumption": sc["home_consumption"],
+            "solar_production": sc["solar_production"],
+            "battery": sc["battery"],
+            "dt": sc["period_duration_hours"],
+        }
+
+    def _patch_status(self, monkeypatch, status, drop_solution=False):
+        import core.bess.milp_battery_algorithm as milp_mod
+
+        real_milp = milp_mod.milp
+
+        def patched_milp(*args, **kwargs):
+            res = real_milp(*args, **kwargs)
+            res.status = status
+            if drop_solution:
+                res.x = None
+            return res
+
+        monkeypatch.setattr(milp_mod, "milp", patched_milp)
+
+    def test_time_limit_incumbent_reported_as_time_limit(self, monkeypatch):
+        self._patch_status(monkeypatch, status=1)
+
+        result = solve_milp_schedule(**self._fixture_kwargs(), integer_rates=True)
+
+        assert result.status == "time_limit"
+        assert np.isfinite(result.cost)
+        assert len(result.soe) > 0
+
+    def test_proven_optimal_still_reported_as_optimal(self):
+        result = solve_milp_schedule(**self._fixture_kwargs(), integer_rates=True)
+
+        assert result.status == "optimal"
+
+    def test_unexpected_solver_status_raises(self, monkeypatch):
+        self._patch_status(monkeypatch, status=4)
+
+        with pytest.raises(RuntimeError, match="status=4"):
+            solve_milp_schedule(**self._fixture_kwargs())
+
+    def test_no_incumbent_at_time_limit_is_not_reported_infeasible(self, monkeypatch):
+        """x=None with status=1 means the limit expired before ANY feasible
+        incumbent -- that is a solver-budget failure, not proof the model
+        is infeasible, and must raise rather than return "infeasible"."""
+        self._patch_status(monkeypatch, status=1, drop_solution=True)
+
+        with pytest.raises(RuntimeError, match="status=1"):
+            solve_milp_schedule(**self._fixture_kwargs())
+
+    def test_production_path_accepts_time_limit_with_warning(self, monkeypatch, caplog):
+        """optimize_battery_schedule must accept a time-limited incumbent
+        (a feasible schedule beats no schedule at all) but say so loudly --
+        never raise, never stay silent."""
+        self._patch_status(monkeypatch, status=1)
+        sc = _load_fixture()
+        battery_settings = BatterySettings(
+            total_capacity=sc["battery"]["max_soe_kwh"],
+            min_soc=sc["battery"]["min_soe_kwh"] / sc["battery"]["max_soe_kwh"] * 100,
+            max_soc=100.0,
+            max_charge_power_kw=sc["battery"]["max_charge_power_kw"],
+            max_discharge_power_kw=sc["battery"]["max_discharge_power_kw"],
+            cycle_cost_per_kwh=sc["battery"]["cycle_cost_per_kwh"],
+            efficiency_charge=sc["battery"]["efficiency_charge"],
+            efficiency_discharge=sc["battery"]["efficiency_discharge"],
+            inverter_max_ac_power_kw=sc["battery"]["inverter_max_ac_power_kw"],
+            inverter_ac_power_margin=sc["battery"]["inverter_ac_power_margin"],
+        )
+
+        with caplog.at_level("WARNING", logger="core.bess.dp_battery_algorithm"):
+            result = optimize_battery_schedule(
+                buy_price=sc["buy_price"],
+                sell_price=sc["sell_price"],
+                home_consumption=sc["home_consumption"],
+                battery_settings=battery_settings,
+                solar_production=sc["solar_production"],
+                initial_soe=sc["battery"]["initial_soe"],
+                initial_cost_basis=sc["battery"]["initial_cost_basis"],
+                period_duration_hours=sc["period_duration_hours"],
+            )
+
+        assert result is not None
+        assert "time limit" in caplog.text.lower()
+
+
+def test_shadow_price_sub_solve_escalates_instead_of_nan(monkeypatch):
+    """A shadow-price sub-solve whose tight time budget expires with no
+    feasible incumbent must escalate to the main solve budget and produce a
+    real finite difference -- before the PR #461 review fix this silently
+    returned cost=NaN and fed NaN shadow prices to the live discharge gate.
+    Fixture chosen because its SOE trajectory rides the max bound, actually
+    triggering the near-bound correction sub-solves."""
+    import core.bess.milp_battery_algorithm as milp_mod
+
+    real_milp = milp_mod.milp
+
+    class _NoIncumbent:
+        x = None
+        status = 1
+        message = "Time limit reached (simulated starvation)"
+
+    def starved_milp(*args, **kwargs):
+        time_limit = kwargs.get("options", {}).get("time_limit", float("inf"))
+        if time_limit <= milp_mod._SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT:
+            return _NoIncumbent()
+        return real_milp(*args, **kwargs)
+
+    monkeypatch.setattr(milp_mod, "milp", starved_milp)
+
+    fixture = os.path.join(
+        os.path.dirname(__file__), "data", "regression_2026_07_25_090230.json"
+    )
+    with open(fixture) as f:
+        sc = json.load(f)
+    result = solve_milp_schedule(
+        buy_price=sc["buy_price"],
+        sell_price=sc["sell_price"],
+        home_consumption=sc["home_consumption"],
+        solar_production=sc["solar_production"],
+        battery=sc["battery"],
+        dt=sc["period_duration_hours"],
+        integer_rates=True,
+        compute_shadow_price_array=True,
+    )
+
+    assert result.shadow_prices is not None
+    assert np.isfinite(result.shadow_prices).all()

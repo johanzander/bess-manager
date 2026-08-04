@@ -1,17 +1,27 @@
 """
-Dynamic Programming Algorithm for Battery Energy Storage System (BESS) Optimization.
+Battery Energy Storage System (BESS) schedule optimization.
 
-This module implements a sophisticated dynamic programming approach to optimize battery
-dispatch decisions over a 24-hour horizon, considering time-varying electricity prices,
-solar production forecasts, and home consumption patterns.
-
-UPDATED: Now captures strategic intent at decision time rather than analyzing flows afterward.
+This module's public entry point, `optimize_battery_schedule`, optimizes battery
+dispatch decisions over a 24-hour horizon, considering time-varying electricity
+prices, solar production forecasts, and home consumption patterns.
 
 ALGORITHM OVERVIEW:
-The optimization uses backward induction dynamic programming to find the globally optimal
-battery charging and discharging schedule. At each hour, the algorithm evaluates all
-possible battery actions (charge/discharge/hold) and selects the one that minimizes
-total cost over the remaining time horizon.
+Since the #450 pivot (PR #461), the schedule itself is found by the MILP in
+core/bess/milp_battery_algorithm.py — solved over continuous SOE, so there is
+no state grid to snap to. This module then replays the MILP's chosen actions
+through its own reward/accounting machinery (_compute_reward,
+_build_period_data): FIFO cost basis, wear cost, AC flows, self-throttle and
+strategic-intent capture are all still computed here, unchanged.
+
+REFERENCE IMPLEMENTATION (not the production path):
+The exact-PWL backward-induction DP that preceded the MILP
+(_run_dynamic_programming, _best_action_at_continuous_state and their PWL
+helpers) is retained in this module as a validated reference implementation.
+It is unreachable from optimize_battery_schedule and exercised only by
+validation tests (test_dp_breakpoint_search.py, test_dp_no_guardrails.py,
+test_issue_313_solar_export_below_max.py) that pin the MILP's semantics
+against an independently-derived optimum. It is NOT a runtime fallback; its
+end state (keep vs delete) is tracked in TODO.md.
 
 KEY FEATURES:
 - 24-hour optimization horizon with perfect foresight
@@ -1810,7 +1820,17 @@ def optimize_battery_schedule(
         max_charge_power_per_period=max_charge_power_per_period,
         self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
     )
-    if milp_result.status != "optimal":
+    if milp_result.status == "time_limit":
+        # The solver hit its time budget and returned its best feasible
+        # incumbent. A feasible schedule beats no schedule at all (raising
+        # here would leave the battery uncontrolled for the hour), but this
+        # must never pass silently: optimality is claimed everywhere else
+        # in this module's accounting.
+        logger.warning(
+            "MILP solver hit its time limit; using best feasible schedule "
+            "found (optimality not proven for this run)"
+        )
+    elif milp_result.status != "optimal":
         raise RuntimeError(
             f"MILP battery schedule optimization failed: status={milp_result.status}"
         )

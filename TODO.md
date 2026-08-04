@@ -26,29 +26,32 @@
 
 ## 🟡 **HIGH PRIORITY** (Core Functionality)
 
-### **Plan B for #450: MILP reformulation of the battery optimizer**
+### **MILP optimizer (#450): shipped — remaining follow-ups**
 
-**Impact**: Medium | **Effort**: High | **Dependencies**: `core/bess/dp_battery_algorithm.py`, new solver dependency (`scipy`/HiGHS)
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/milp_battery_algorithm.py`
 
-**Description**: Fallback / long-term alternative to the ε-certified PWL DP shipped for #450.
-Deterministic day-ahead battery arbitrage with linear prices, efficiencies, wear cost, AC
-cap and terminal value is the textbook MILP: per-period mode binaries (STORE / IDLE-passive /
-bypass / discharge), a binary for the room-vs-surplus clamp equality that IDLE's forced
-passive charge imposes, a binary for the self-throttle export cutoff, and integer-percent
-discharge rates. ~4 binaries × 192 periods solves in well under a second with HiGHS
-(`scipy.optimize.milp` — scipy is NOT currently a dependency, this adds one). Exact optimum
-with no state discretization anywhere; LP duals (binaries fixed) give exact shadow prices;
-intents and cost basis derive post-hoc from solved flows exactly as `classify_strategic_intent`
-already works from flows.
+**Status**: SHIPPED as the sole production optimizer (`core/bess/milp_battery_algorithm.py`,
+wired through `optimize_battery_schedule`). What was originally scoped here as "Plan B"
+became the actual #450 fix; every DP-adjacent semantic (#233 below-floor tolerance, #240
+self-throttle, #313 bypass, #353 future_value) was re-derived as MILP constraints and
+re-validated against the pinned fixture suite. The ε-certified PWL DP remains in
+`dp_battery_algorithm.py` as a non-production reference implementation used by validation
+tests only.
 
-**When to pick this up**: if the PWL DP's breakpoint growth or runtime becomes a problem on
-future features (multi-battery, network constraints, longer horizons), or if a rewrite is
-wanted anyway. Every DP-adjacent semantic (#233 below-floor tolerance, #240 self-throttle,
-#313 bypass, #353 future_value) must be re-derived as MILP constraints and re-validated
-against the pinned fixture suite — this is why it is the plan B, not the shipped fix.
+**Remaining follow-ups**:
+
+- Migrate from `scipy.optimize.milp` to `highspy` directly: warm starts across the
+  shadow-price finite-difference sub-solves (the dominant runtime cost — the near-bound
+  correction re-solves the sub-horizon MILP up to ~4× per triggered period), direct dual
+  access, and a smaller dependency (~10 MB vs scipy's ~40 MB), per the pivot spec's
+  original solver preference.
+- Decide the PWL DP's end state: keep as a labeled reference/validation harness or delete
+  it (with its whitebox tests) once the MILP has soaked in production.
+- Interior-period shadow-price accuracy: the LP dual carries an eta_d-scaling bias outside
+  the near-bound finite-difference window (see docs/agents/bess-knowledge.md caveat).
 
 **Analysis**: issue #450 (2026-08-03 prototype investigation; the PWL premise test and this
-MILP assessment were validated/scoped together).
+MILP assessment were validated/scoped together); PR #461.
 
 ---
 

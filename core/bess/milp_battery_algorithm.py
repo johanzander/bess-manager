@@ -65,6 +65,13 @@ _MIN_DISCHARGE_PCT = 2
 _SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT = 0.05
 
 
+class MilpNoIncumbentError(RuntimeError):
+    """The solver's time budget expired before ANY feasible incumbent was
+    found -- a solver-budget failure, not model infeasibility. Callers that
+    can afford a bigger budget may retry with one; nothing may swallow this
+    into a NaN cost."""
+
+
 @dataclass
 class MilpScheduleResult:
     status: str
@@ -624,9 +631,31 @@ def solve_milp_schedule(
     )
 
     if result.x is None:
-        return MilpScheduleResult(
-            status="infeasible", cost=float("nan"), soe=np.array([])
+        # scipy.optimize.milp status: 0=proven optimal, 1=iteration/time
+        # limit reached, 2=infeasible, 3=unbounded, 4=other. Only a proven
+        # status=2 may be reported as "infeasible" -- x=None at status=1
+        # means the time limit expired before ANY feasible incumbent was
+        # found, a solver-budget failure that must surface, not masquerade
+        # as model infeasibility.
+        if result.status == 2:
+            return MilpScheduleResult(
+                status="infeasible", cost=float("nan"), soe=np.array([])
+            )
+        if result.status == 1:
+            raise MilpNoIncumbentError(
+                "MILP solver time budget expired before any feasible "
+                f"incumbent was found: status={result.status} ({result.message})"
+            )
+        raise RuntimeError(
+            "MILP solver returned no solution: "
+            f"status={result.status} ({result.message})"
         )
+    if result.status not in (0, 1):
+        raise RuntimeError(
+            "MILP solver returned an unexpected status with a solution "
+            f"vector: status={result.status} ({result.message})"
+        )
+    proven_optimal = result.status == 0
 
     if integer_rates:
         # Stage 2: fix every mode/active binary to its stage-1 value and
@@ -659,12 +688,26 @@ def solve_milp_schedule(
             options={"time_limit": _solver_time_limit, "mip_rel_gap": 1e-6},
         )
         if stage2.x is None:
+            if stage2.status == 1:
+                raise MilpNoIncumbentError(
+                    "integer_rates re-integerization: time budget expired "
+                    "before any feasible incumbent was found "
+                    f"(status={stage2.status}: {stage2.message})"
+                )
             raise RuntimeError(
                 "integer_rates re-integerization: stage-1 mode selection "
                 "has no integer-rate solution -- round-and-repair fallback "
                 "is not implemented, this needs investigating rather than "
-                "silently falling back to the continuous stage-1 result"
+                "silently falling back to the continuous stage-1 result "
+                f"(status={stage2.status}: {stage2.message})"
             )
+        if stage2.status not in (0, 1):
+            raise RuntimeError(
+                "integer_rates re-integerization returned an unexpected "
+                f"status with a solution vector: status={stage2.status} "
+                f"({stage2.message})"
+            )
+        proven_optimal = proven_optimal and stage2.status == 0
         result = stage2
 
     shadow_price = None
@@ -801,10 +844,13 @@ def solve_milp_schedule(
         for t in range(1, horizon):
             shadow_prices[t] = -marginals[eq_position[soe_recursion_rows[t - 1]]]
 
-        # Near-bound correction: SOE_STEP_KWH * 6 is a generous margin --
-        # covers both the exact-bound degeneracy and the eta_d-scaling
-        # drift observed up to ~5 steps away from the bound on the
-        # regression fixtures. A broader trigger (any non-decisive
+        # Near-bound correction margin: one SOE_STEP_KWH -- the tested
+        # value (wider margins were tried and rejected, see below); it
+        # covers the exact-bound dual degeneracy, which is the error mode
+        # this correction exists for. The eta_d-scaling drift observed
+        # further from the bound on the regression fixtures is deliberately
+        # left uncorrected (documented caveat in
+        # docs/agents/bess-knowledge.md). A broader trigger (any non-decisive
         # DISCHARGE/IDLE/BYPASS period) was tried and rejected: the
         # finite-difference sub-solve re-optimizes the WHOLE remaining
         # sub-horizon from scratch, and far from a bound it can discover a
@@ -818,6 +864,45 @@ def solve_milp_schedule(
         # reliable and re-solving only introduces this new failure mode.
         soe_trajectory = result.x[e]
         near_bound_margin = SOE_STEP_KWH * 1
+
+        def _sub_horizon_cost(t: int, sub_battery: dict) -> float:
+            """Cost estimate for the remaining sub-horizon [t:]. The tight
+            default budget finds an incumbent on the vast majority of
+            sub-solves; when it expires with none -- which, before the
+            PR #461 review fix, silently propagated a NaN cost into the
+            shadow price and from there into the live discharge gate --
+            escalate through a middle rung (most escalations just need a
+            little more room for a first incumbent) up to the main solve
+            budget. If even that yields no incumbent, MilpNoIncumbentError
+            propagates: explicit failure, never NaN."""
+            sub_charge_cap = (
+                charge_power_kw[t:].tolist() if max_charge_power_per_period else None
+            )
+            budgets = (
+                _SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT,
+                0.5,
+                max(_solver_time_limit, 1.0),
+            )
+            for i, budget in enumerate(budgets):
+                try:
+                    return solve_milp_schedule(
+                        buy[t:],
+                        sell[t:],
+                        cons[t:],
+                        solar[t:],
+                        sub_battery,
+                        dt,
+                        terminal_value_per_kwh,
+                        integer_rates=True,
+                        max_charge_power_per_period=sub_charge_cap,
+                        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                        _solver_time_limit=budget,
+                    ).cost
+                except MilpNoIncumbentError:
+                    if i == len(budgets) - 1:
+                        raise
+            raise AssertionError("unreachable")
+
         for t in range(horizon):
             current_soe = float(soe_trajectory[t])
             if not (
@@ -835,35 +920,8 @@ def solve_milp_schedule(
                 continue
             sub_battery_at = {**battery, "initial_soe": anchor}
             sub_battery_below = {**battery, "initial_soe": anchor - SOE_STEP_KWH}
-            sub_charge_cap = (
-                charge_power_kw[t:].tolist() if max_charge_power_per_period else None
-            )
-            cost_at = solve_milp_schedule(
-                buy[t:],
-                sell[t:],
-                cons[t:],
-                solar[t:],
-                sub_battery_at,
-                dt,
-                terminal_value_per_kwh,
-                integer_rates=True,
-                max_charge_power_per_period=sub_charge_cap,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-                _solver_time_limit=_SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT,
-            ).cost
-            cost_below = solve_milp_schedule(
-                buy[t:],
-                sell[t:],
-                cons[t:],
-                solar[t:],
-                sub_battery_below,
-                dt,
-                terminal_value_per_kwh,
-                integer_rates=True,
-                max_charge_power_per_period=sub_charge_cap,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-                _solver_time_limit=_SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT,
-            ).cost
+            cost_at = _sub_horizon_cost(t, sub_battery_at)
+            cost_below = _sub_horizon_cost(t, sub_battery_below)
             shadow_prices[t] = (cost_below - cost_at) / SOE_STEP_KWH
 
     mode = np.full(horizon, "", dtype=object)
@@ -873,7 +931,11 @@ def solve_milp_schedule(
     mode[np.round(result.x[mode_discharge]).astype(bool)] = "DISCHARGE"
 
     return MilpScheduleResult(
-        status="optimal",
+        # "time_limit": HiGHS hit its solve budget and returned the best
+        # feasible incumbent found so far -- a usable schedule, but NOT
+        # proven optimal. Callers decide the policy; hardcoding "optimal"
+        # here would silently defeat their guard (PR #461 review).
+        status="optimal" if proven_optimal else "time_limit",
         cost=float(result.fun) + terminal_value_per_kwh * e_min,
         soe=result.x[e],
         imp=result.x[imp],

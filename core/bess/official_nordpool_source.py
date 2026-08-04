@@ -83,10 +83,14 @@ class OfficialNordpoolSource(PriceSource):
             if self.area:
                 service_data["areas"] = self.area
 
-            # Make service call
+            # Make service call. Tomorrow's prices are routinely unavailable
+            # before the market publishes them (~13:00 CET) — that failure is
+            # expected daily, not an error, so its retries/failure are logged
+            # quietly rather than as WARNING/ERROR.
             response = self.ha_controller._service_call_with_retry(
                 "nordpool",
                 "get_prices_for_date",
+                suppress_retry_warnings=(target_date == tomorrow_date),
                 **service_data,
                 return_response=True,
             )

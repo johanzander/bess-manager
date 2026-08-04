@@ -253,23 +253,6 @@ const formatBatteryMode = (mode: string): string => {
   }
 };
 
-interface BatterySettings {
-  totalCapacity: number;
-  reservedCapacity: number;
-  minSoc: number;
-  maxSoc: number;
-  minSoeKwh: number;
-  maxSoeKwh: number;
-  maxChargePowerKw: number;
-  maxDischargePowerKw: number;
-  cycleCostPerKwh: number;
-  chargingPowerRate: number;
-  dischargingPowerRate: number;
-  efficiencyCharge: number;
-  efficiencyDischarge: number;
-  estimatedConsumption: number;
-}
-
 interface DashboardData {
   hourlyData: Array<{
     period: number;
@@ -305,7 +288,6 @@ interface DashboardData {
 const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
   const [inverterSchedule, setInverterSchedule] = useState<InverterSchedule | null>(null);
-  const [batterySettings, setBatterySettings] = useState<BatterySettings | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -342,11 +324,6 @@ const InverterStatusDashboard: React.FC = () => {
     return response.data;
   };
 
-  const fetchBatterySettings = async (): Promise<BatterySettings> => {
-    const response = await api.get('/api/settings');
-    return response.data.battery;
-  };
-
   const fetchDashboardData = async (): Promise<DashboardData> => {
     const response = await api.get('/api/dashboard', {
       params: { resolution: 'hourly' }
@@ -364,7 +341,6 @@ const InverterStatusDashboard: React.FC = () => {
       const results = await Promise.allSettled([
         fetchInverterStatus(),
         fetchInverterSchedule(),
-        fetchBatterySettings(),
         fetchDashboardData()
       ]);
 
@@ -379,14 +355,9 @@ const InverterStatusDashboard: React.FC = () => {
         console.warn('Failed to fetch schedule:', results[1].reason);
       }
       if (results[2].status === 'fulfilled') {
-        setBatterySettings(results[2].value);
+        setDashboardData(results[2].value);
       } else {
-        console.warn('Failed to fetch battery settings:', results[2].reason);
-      }
-      if (results[3].status === 'fulfilled') {
-        setDashboardData(results[3].value);
-      } else {
-        console.warn('Failed to fetch dashboard data:', results[3].reason);
+        console.warn('Failed to fetch dashboard data:', results[2].reason);
       }
 
       setLastUpdate(new Date());

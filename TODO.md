@@ -87,10 +87,6 @@
 
 
 
-### ~~**Improve InfluxDB health check error messages in UI**~~ ✅ Completed (v8.2.1)
-
-**Resolution**: HTTP 401/403/404 now show actionable messages; ConnectionError shows the URL that failed.
-
 ### 1. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations
@@ -266,13 +262,6 @@ The discharge inhibit only blocks discharging — it does not change the TOU sch
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
 
-### ~~9. Add multi day view~~ ✅ Completed (v7.2.0-v7.3.0, PRs #21-#22)
-
-**Problem**: Today we only operate on 24h intervals.
-But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
-
-**Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
-
 ### **Make ha_statistics consumption forecast work on all platforms**
 
 **Impact**: Medium | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`, `ha_api_controller.py`
@@ -293,19 +282,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
 
-### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
-
-**Description**: The Nordpool integration returns HTTP 500 when tomorrow's prices aren't published yet (typically before ~13:00 CET). `_api_request` logs a WARNING on each retry attempt, producing misleading warnings every optimization cycle overnight (00:00–12:00). The retry eventually fails, but `get_combined_prices()` in `price_manager.py` handles this gracefully — it catches the exception and falls back to today-only prices with an INFO log. The warnings are harmless but noisy and can alarm users reading logs.
-
-**Options**:
-1. Have `official_nordpool_source.py` catch the 500 for tomorrow and raise a specific "not available yet" exception that `_api_request` doesn't retry
-2. Add a `suppress_retry_warnings=True` param to `_api_request` for expected-failure calls
-3. Accept the noise as-is (log-level only, no UI banners)
-
-**Files**: `core/bess/official_nordpool_source.py`, `core/bess/ha_api_controller.py`, `core/bess/price_manager.py`
-
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
 ### **Retry discovery on startup when HA WebSocket is not ready**
@@ -315,12 +291,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 **Description**: BESS Manager starts as an HA add-on and can launch before HA's WebSocket API is fully ready. When the initial `discover_integrations()` WS connection fails during early boot, `nordpool_config_entry_id` stays None and the system enters degraded mode with no price data — even though HA becomes ready seconds later. Observed on Niklas's system (b18, 2026-05-26): WS failed at 05:08 (4 min after boot), but by 05:45 discovery worked fine.
 
 **Fix**: Re-attempt discovery with short backoff (e.g. 5s, 10s, 20s) until `config_entry_id` is populated or a max number of retries is reached.
-
----
-
-### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
-
-**Resolution**: EV energy meter dead code removed entirely in v8.0.0 release.
 
 ---
 
@@ -544,16 +514,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
-### Savings history: untested error paths and swallowed fetch failures
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
-
-**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
-
-**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
-
----
-
 ### Move inverter-specific logic out of BatterySystemManager
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class
@@ -612,10 +572,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
 
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
-
-### ~~Hardcoded Fallback Values Violating CLAUDE.md~~ ✅ Completed (v8.2.1)
-
-**Resolution**: All `hasattr` guards and hardcoded fallback values removed from `api.py`. System now accesses `battery_settings`, `controller`, `price_manager`, `_schedule_manager`, and `has_critical_sensor_failures` directly. Added `_get_intent_description()` to `SphScheduleManager` to eliminate polymorphism-related `hasattr`.
 
 ### Upstream PR: growatt_server should register services per device type
 
@@ -750,21 +706,9 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 
 The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
 
-## From #271 charge-power-rate fix code review (non-blocking, nice-to-have)
-
-**`InverterStatusDashboard.tsx`'s `batterySettings` state is now write-only**: after switching the "Charge Power Rate" tile to read `inverterStatus?.chargePowerRate` instead of `batterySettings?.chargingPowerRate`, nothing in the component reads `batterySettings` anymore — only `setBatterySettings` (from `fetchBatterySettings()`) is called. Left as-is deliberately to keep the fix minimal. Worth a follow-up to either remove the now-dead `fetchBatterySettings()` call/state or confirm another consumer still needs it.
-
-**File**: `frontend/src/components/InverterStatusDashboard.tsx`
-
----
-
 ## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
 
 **`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
-
-**`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
-
-**`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.
 
 ---
 
@@ -796,11 +740,7 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ## From #387 runtime power gap-fill code review (non-blocking)
 
-**`PowerSampleBuffer.consume()`'s `if values` guard is dead code** (`core/bess/power_sample_buffer.py`) — `record()` always appends immediately via `setdefault(...).append(watts)`, so no `values` list can ever be empty when `consume()` reaches it. Harmless but unnecessary defensiveness; inconsistent with the "no speculative fallbacks" convention.
-
 **`sample_live_power()`'s per-getter `entity_id`/skip handling is implicit rather than defensive-by-design** (`core/bess/sensor_collector.py`) — correct today, just worth a second look if the getter-based rewrite (done in the #387 final-review fix wave) is touched again.
-
-**Stale line-number citation in a test docstring** (`core/bess/tests/unit/test_sensor_collector_gapfill.py:7`) — cites the InfluxDB gap-fill `if` block at a line range that has drifted by one line from its actual current location (`252-263`) after later edits in the same file. Cosmetic only.
 
 **`backend/app.py` constructs `BESSController()` and calls `start_in_background()` at module level**, which is what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing.
 

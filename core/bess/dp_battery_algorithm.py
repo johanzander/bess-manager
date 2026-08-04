@@ -1163,7 +1163,7 @@ def _best_action_at_continuous_state(
     max_charge_power_per_period: list[float] | None,
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
     value -- the same reward+max(V) logic as _run_dynamic_programming's
@@ -1180,7 +1180,13 @@ def _best_action_at_continuous_state(
     search itself, kept only for call-site compatibility with
     `_discretize_state_action_space`.
 
-    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
+    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
+    tie_margin), where tie_margin is the gap between the chosen action's
+    value and the runner-up candidate's value -- a large positive number
+    (best_value - (-inf)) if fewer than two feasible candidates were
+    considered, meaning "not tied, no comparison possible". Used by the
+    hybrid PWL tie detector (#450) to find near-tied periods without
+    re-deriving this comparison.
     """
     period_max_charge = (
         max_charge_power_per_period[t]
@@ -1192,14 +1198,15 @@ def _best_action_at_continuous_state(
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
     best_value = float("-inf")
+    second_best_value = float("-inf")
     best_action = 0.0
     best_next_soe = soe
     best_new_cost_basis = cost_basis
     best_reward = 0.0
 
     def consider(power: float) -> None:
-        nonlocal best_value, best_action, best_next_soe, best_new_cost_basis
-        nonlocal best_reward
+        nonlocal best_value, second_best_value, best_action, best_next_soe
+        nonlocal best_new_cost_basis, best_reward
         next_soe = _state_transition(
             soe,
             power,
@@ -1232,11 +1239,14 @@ def _best_action_at_continuous_state(
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
         if value > best_value:
+            second_best_value = best_value
             best_value = value
             best_action = power
             best_next_soe = next_soe
             best_new_cost_basis = new_cost_basis
             best_reward = reward
+        elif value > second_best_value:
+            second_best_value = value
 
     # IDLE -- always a feasible candidate.
     consider(0.0)
@@ -1264,11 +1274,14 @@ def _best_action_at_continuous_state(
     )
     value = reward + _interpolate_value(V_next, soe, battery_settings)
     if value > best_value:
+        second_best_value = best_value
         best_value = value
         best_action = 0.0
         best_next_soe = soe
         best_new_cost_basis = new_cost_basis
         best_reward = reward
+    elif value > second_best_value:
+        second_best_value = value
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
     for p in _discharge_candidates(
@@ -1289,7 +1302,8 @@ def _best_action_at_continuous_state(
     if charge_candidate is not None:
         consider(charge_candidate)
 
-    return best_action, best_next_soe, best_new_cost_basis, best_reward
+    tie_margin = best_value - second_best_value
+    return best_action, best_next_soe, best_new_cost_basis, best_reward, tie_margin
 
 
 def _create_idle_schedule(
@@ -1558,12 +1572,13 @@ def optimize_battery_schedule(
     )
     _, power_levels = _discretize_state_action_space(battery_settings)
 
+    tie_margins: list[float] = []
     for t in range(horizon):
         # Recompute the action directly at the true continuous SoE using the
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, action_reward = (
+        action, next_soe, new_cost_basis, action_reward, tie_margin = (
             _best_action_at_continuous_state(
                 soe=current_soe,
                 t=t,
@@ -1581,6 +1596,7 @@ def optimize_battery_schedule(
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             )
         )
+        tie_margins.append(tie_margin)
 
         period_data = _build_period_data(
             power=action,

@@ -40,7 +40,7 @@ def _prepare(scenario_name):
     scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
         scenario_name
     )
-    horizon = len(scenario["base_prices"])
+    horizon = len(buy_prices)
     home_consumption = scenario["home_consumption"][:horizon]
     solar_production = scenario["solar_production"][:horizon]
     V = _run_dynamic_programming(
@@ -76,7 +76,7 @@ def _total_value(
     sell_prices,
 ):
     _, power_levels = _discretize_state_action_space(battery_settings)
-    _, best_next_soe, _, best_reward = _best_action_at_continuous_state(
+    _, best_next_soe, _, best_reward, _ = _best_action_at_continuous_state(
         soe=soe,
         t=t,
         V_next=V[t + 1, :],
@@ -339,6 +339,46 @@ def test_discharge_candidates_use_injected_resolution():
     for p in finer_candidates:
         pct = p / step
         assert pct == pytest.approx(round(pct), abs=1e-6)
+
+
+def test_best_action_returns_tie_margin():
+    """_best_action_at_continuous_state must report the gap between its
+    chosen action's value and the runner-up's, so the hybrid tie detector
+    (#450) can find near-tied periods without re-deriving this comparison."""
+    (
+        battery_settings,
+        buy_prices,
+        sell_prices,
+        home_consumption,
+        solar_production,
+        V,
+        dt,
+    ) = _prepare("regression_2026_08_02_043728")
+    t = 0
+    soe = 2.0  # matches the fixture's documented initial_soe
+    result = _best_action_at_continuous_state(
+        soe,
+        t,
+        V[t + 1],
+        power_levels=np.array(
+            []
+        ),  # unused by current implementation; keep call-compatible
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar_production,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+    )
+    assert (
+        len(result) == 5
+    ), "expected (action, next_soe, cost_basis, reward, tie_margin)"
+    _, _, _, _, tie_margin = result
+    assert (
+        tie_margin >= 0.0
+    ), "margin must be non-negative (best >= second-best by construction)"
 
 
 def test_interpolate_value_extrapolates_below_min_soe():

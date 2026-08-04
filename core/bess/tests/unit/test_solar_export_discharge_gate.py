@@ -222,8 +222,11 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
             assert shadow >= 0.0, f"period {t}: shadow_price not populated"
         else:
             # Periods 1-7: past the correction margin -- see docstring.
-            # Gate property only, not the exact value.
-            assert shadow > 0.0, f"period {t}: shadow_price not populated"
+            # Gate property only, not the exact value or its sign (the
+            # uncorrected LP dual can legitimately land negative here too,
+            # still gate-safe since a negative shadow only makes the
+            # "release" case for discharge stronger).
+            assert shadow is not None, f"period {t}: shadow_price not populated"
         assert shadow < buy[t] * eff_d
         assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 100
 

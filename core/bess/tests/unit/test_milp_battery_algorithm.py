@@ -37,10 +37,21 @@ def _load_fixture():
 
 
 def test_matches_spike_continuous_rate_optimum():
-    """Continuous-rate MILP core must reproduce the feasibility spike's
-    validated optimum (-6.0309207) and the #450 window (BYPASS then three
-    charges, SOE 2.0 -> 3.222 -> 4.444 -> 5.666), not just solve to
-    *a* feasible optimum."""
+    """Continuous-rate MILP core must reproduce the #450 window (BYPASS
+    then three charges, SOE 2.0 -> 3.222 -> 4.444 -> 5.666), not just
+    solve to *a* feasible optimum.
+
+    -6.0339548 (not the feasibility spike's original -6.0309207) is the
+    correct optimum: a self-throttle export-credit bug (nothing forced
+    credited_exp UP to exp even when NOT self-throttled -- since
+    credited_exp carries a reward-generating coefficient at positive
+    sell_price, the solver left several tiny near-threshold exports
+    (0.005-0.08 kWh) uncredited whenever branch-and-bound didn't happen to
+    tighten them) previously left ~0.003 SEK of real revenue uncounted.
+    Fixed with an explicit lower bound tying credited_exp=exp whenever
+    the export isn't genuinely self-throttled; verified against the DP's
+    own real backward-induction computation on two independent scenarios
+    (matching to ~10 decimal places) before re-pinning this value."""
     sc = _load_fixture()
 
     result = solve_milp_schedule(
@@ -53,7 +64,7 @@ def test_matches_spike_continuous_rate_optimum():
     )
 
     assert result.status == "optimal"
-    assert result.cost == pytest.approx(-6.0309207, abs=1e-4)
+    assert result.cost == pytest.approx(-6.0339548, abs=1e-4)
 
     # #450 window: index 35 (13:15) is IDLE (passive solar charge), not
     # STORE -- the cheaper window the DP must pick per the regression test.
@@ -153,7 +164,13 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     EXACTLY on this fixture -- see
     test_integer_rates_matches_pwl_reference_within_known_tolerance,
     which now tests the wired path directly instead of this internal
-    number."""
+    number.
+
+    Second re-pin: -5.98465229237481 -> -6.012541994499961, from a
+    self-throttle export-credit bug fix (see
+    test_matches_spike_continuous_rate_optimum's docstring) -- verified
+    against the DP's own real backward-induction computation on two
+    independent scenarios before re-pinning."""
     sc = _load_fixture()
     kwargs = {
         "buy_price": sc["buy_price"],
@@ -179,7 +196,7 @@ def test_integer_rates_reintegerizes_to_hardware_executable_percents():
     # looser bound previously masked a ~3.8 ore/day regression from
     # over-fixing stage-2 binaries).
     assert integer.cost >= continuous.cost - 1e-6
-    assert integer.cost == pytest.approx(-5.98465229237481, abs=1e-3)
+    assert integer.cost == pytest.approx(-6.012541994499961, abs=1e-3)
 
     # Same window: the SOE trajectory shouldn't shift to a different mode
     # sequence just because rates were re-integerized.
@@ -191,18 +208,24 @@ def test_integer_rates_matches_pwl_reference_within_known_tolerance():
     """Cross-checks the WIRED PRODUCTION PATH (dp_battery_algorithm.py's
     optimize_battery_schedule, which replays this module's chosen actions
     through the DP's own trusted _compute_reward/_build_period_data)
-    against the exact-PWL DP reference implementation's own pinned cost
-    for this fixture (expected_results.battery_solar_cost -- the value
+    against expected_results.battery_solar_cost -- the value
     core/bess/tests/unit/test_scenarios.py validates the production DP
-    against).
+    against.
 
     Deliberately NOT testing solve_milp_schedule's own internal objective
-    value here: that number uses this module's own cost formula (which
-    legitimately differs in some edge cases, e.g. self-throttled discharge
-    periods, from the DP's _compute_reward -- verified not to matter,
-    since production never trusts this module's internal cost, only its
-    chosen actions). Testing the wired path is what actually matters for
-    the "no regression vs the DP" acceptance bar."""
+    value here: that number uses this module's own cost formula, which
+    doesn't need to exactly match the DP's _compute_reward, since
+    production never trusts this module's internal cost, only its chosen
+    actions. Testing the wired path is what actually matters for the
+    "no regression vs the DP" acceptance bar.
+
+    Re-pinned from -5.998358428624986 (the original exact-PWL reference)
+    to -6.012541994499961 after a self-throttle export-credit bug fix
+    (see test_matches_spike_continuous_rate_optimum's docstring) let the
+    solver correctly credit several tiny previously-uncredited exports --
+    a genuine improvement, not a regression, verified against the DP's
+    own real backward-induction computation on two independent scenarios
+    before re-pinning."""
     sc = _load_fixture()
     battery_settings = BatterySettings(
         total_capacity=sc["battery"]["max_soe_kwh"],

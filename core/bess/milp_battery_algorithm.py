@@ -545,8 +545,28 @@ def solve_milp_schedule(
         # equal exp exactly -- self-throttle is a DISCHARGE-mode-only
         # hardware quirk, and export forced by the AC balance (solar
         # surplus that can't be stored) is always a real, priced
-        # transaction, even at a negative sell price. Without this floor
-        # the solver can zero out credited_exp for free whenever sell < 0.
+        # transaction, even at a negative sell price.
+        #
+        # throttled[t]=1 means "not self-throttled, full credit allowed";
+        # throttled[t]=0 forces credited_exp=0. Two bugs were found (and
+        # are fixed by the constraints below) by replaying real negative-
+        # sell_price scenarios through the solver and comparing the chosen
+        # schedule's cost against the DP's own shared _compute_reward
+        # accounting (used for the reported cost) -- both let the solver
+        # understate the true cost and prefer a schedule _compute_reward
+        # rates as strictly worse:
+        #
+        # 1. Nothing forced credited_exp UP to exp even when throttled=1
+        #    (only an upper bound existed) -- since credited_exp carries a
+        #    positive cost coefficient at negative sell_price, the solver
+        #    drove it to 0 regardless of throttled's value. Fixed by the
+        #    4th constraint below, a genuine lower bound in the
+        #    throttled=1 branch.
+        # 2. Nothing tied throttled=0 (the zero-credit branch) to the
+        #    export actually being small -- confirmed exploitable: a 1 kWh
+        #    DISCHARGE export at sell_price=-0.1 got credited_exp=0, a
+        #    fabricated "self-throttle" nowhere near the real ~0.01 kWh
+        #    hardware threshold. Fixed by the 5th constraint below.
         con([(credited_exp[t], 1), (exp[t], -1)], -np.inf, 0)
         con(
             [
@@ -568,12 +588,22 @@ def solve_milp_schedule(
         )
         con(
             [
-                (exp[t], 1),
-                (throttled[t], -self_throttle_export_threshold_kwh),
+                (credited_exp[t], 1),
+                (exp[t], -1),
+                (throttled[t], -_EXPORT_BIG_M_KWH),
                 (mode_discharge[t], -_EXPORT_BIG_M_KWH),
             ],
-            -_EXPORT_BIG_M_KWH,
+            -2 * _EXPORT_BIG_M_KWH,
             np.inf,
+        )
+        con(
+            [
+                (exp[t], 1),
+                (throttled[t], -_EXPORT_BIG_M_KWH),
+                (mode_discharge[t], _EXPORT_BIG_M_KWH),
+            ],
+            -np.inf,
+            self_throttle_export_threshold_kwh + _EXPORT_BIG_M_KWH,
         )
 
     c_obj = np.zeros(n_vars)

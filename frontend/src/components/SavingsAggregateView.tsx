@@ -386,6 +386,7 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
                   fill={colors.text}
                   fillOpacity={0.35}
                   isAnimationActive={false}
+                  barSize={4}
                   radius={[4, 4, 0, 0]}
                 />
                 <Bar
@@ -394,6 +395,7 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
                   fill={colors.cost}
                   fillOpacity={0.8}
                   isAnimationActive={false}
+                  barSize={4}
                   radius={[4, 4, 0, 0]}
                 />
                 <Bar
@@ -402,6 +404,7 @@ export const SavingsAggregateView: React.FC<SavingsAggregateViewProps> = ({ peri
                   fill={colors.savings}
                   fillOpacity={0.8}
                   isAnimationActive={false}
+                  barSize={4}
                   radius={[4, 4, 0, 0]}
                 />
               </BarChart>

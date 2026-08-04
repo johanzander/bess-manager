@@ -37,7 +37,7 @@ BUY_PRICE = (
 )
 HOME_CONSUMPTION = [1.5] * N
 SOLAR_PRODUCTION = [0.0] * N
-LOAD_SUPPORT_PERIOD = 10  # DP plans a partial (14%) LOAD_SUPPORT discharge here
+LOAD_SUPPORT_PERIOD = 11  # DP plans a partial (15%) LOAD_SUPPORT discharge here
 
 
 def _battery(initial_soe: float) -> dict:

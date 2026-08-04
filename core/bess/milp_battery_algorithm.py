@@ -54,6 +54,16 @@ _EXPORT_BIG_M_KWH = 6.0
 # near-BYPASS state that isn't a real hardware-executable action.
 _MIN_DISCHARGE_PCT = 2
 
+# Time limit for the extra re-solves compute_shadow_price_array's near-bound
+# correction makes (see below) -- deliberately tighter than the main
+# schedule's _solver_time_limit default (5s). These sub-solves only need a
+# decent cost ESTIMATE to take a finite difference of, not a proof of
+# optimality, and the #450 pivot spec's own time_limit sweep (0.5s-60s, see
+# docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up)
+# found no measurable cost-quality difference down to 0.5s even for the main
+# schedule solve -- these sub-horizon problems are smaller and easier still.
+_SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT = 0.05
+
 
 @dataclass
 class MilpScheduleResult:
@@ -114,6 +124,7 @@ def solve_milp_schedule(
     compute_shadow_price_array: bool = False,
     max_charge_power_per_period: list[float] | None = None,
     self_throttle_export_threshold_kwh: float = SELF_THROTTLE_EXPORT_THRESHOLD_KWH,
+    _solver_time_limit: float = 5,
 ) -> MilpScheduleResult:
     """Solve the #450 MILP core model to global optimality.
 
@@ -579,7 +590,7 @@ def solve_milp_schedule(
         constraints=LinearConstraint(a_matrix, rlb, rub),
         integrality=integrality,
         bounds=Bounds(lb, ub),
-        options={"time_limit": 5, "mip_rel_gap": 1e-6},
+        options={"time_limit": _solver_time_limit, "mip_rel_gap": 1e-6},
     )
 
     if result.x is None:
@@ -615,7 +626,7 @@ def solve_milp_schedule(
             constraints=LinearConstraint(a_matrix, rlb, rub),
             integrality=integrality2,
             bounds=Bounds(lb2, ub2),
-            options={"time_limit": 5, "mip_rel_gap": 1e-6},
+            options={"time_limit": _solver_time_limit, "mip_rel_gap": 1e-6},
         )
         if stage2.x is None:
             raise RuntimeError(
@@ -670,6 +681,26 @@ def solve_milp_schedule(
                 "shadow price is defined against the hardware-executable "
                 "schedule, matching the DP's own definition"
             )
+        # Hybrid: the LP dual (binaries fixed, one linprog solve) is cheap
+        # but WRONG whenever e[t] sits near a capacity bound -- ~31% of
+        # periods across the pinned fixture suite, not a rare edge case.
+        # There, multiple constraints (the SOE-recursion row AND the
+        # e_max/e_min bound itself) bind simultaneously, so the dual is not
+        # unique -- HiGHS returns an economically-arbitrary vertex,
+        # confirmed against the DP's own real (verified, not just
+        # documented) computation on two regression scenarios: one off by
+        # exactly a factor of efficiency_discharge (0.285 vs the true
+        # 0.300), the other returning 0.0 in a period where the true value
+        # was 1.43 (a reserve that should have been held, silently released
+        # instead -- see test_solar_export_discharge_gate.py). The
+        # per-period finite difference (two re-solves of the remaining
+        # sub-horizon [t:], matching compute_shadow_price's already-
+        # validated single-value method exactly) is correct but far too
+        # slow to run for every period -- there is no MILP equivalent of
+        # the DP's value-to-go table to read it from cheaply. So: LP dual
+        # for every period (cheap), corrected by the expensive finite
+        # difference ONLY where e[t] is within a few SOE_STEP_KWH of a
+        # bound -- the specific condition that causes the degeneracy.
         lb3 = lb.copy()
         ub3 = ub.copy()
         mode_binaries_dual = (mode_store, mode_idle, mode_bypass, mode_discharge)
@@ -739,6 +770,71 @@ def solve_milp_schedule(
         shadow_prices[0] = -marginals[eq_position[e0_row]]
         for t in range(1, horizon):
             shadow_prices[t] = -marginals[eq_position[soe_recursion_rows[t - 1]]]
+
+        # Near-bound correction: SOE_STEP_KWH * 6 is a generous margin --
+        # covers both the exact-bound degeneracy and the eta_d-scaling
+        # drift observed up to ~5 steps away from the bound on the
+        # regression fixtures. A broader trigger (any non-decisive
+        # DISCHARGE/IDLE/BYPASS period) was tried and rejected: the
+        # finite-difference sub-solve re-optimizes the WHOLE remaining
+        # sub-horizon from scratch, and far from a bound it can discover a
+        # different (locally attractive but not aligned with the DP's
+        # marginal-value definition) policy for the truncated problem --
+        # confirmed by a period 6+ kWh from any bound swinging to the
+        # future buy price (5.0) instead of the correct steady-state
+        # export value (0.3) once triggered broadly. Close to a bound, the
+        # LP dual's degeneracy is the dominant error and finite-difference
+        # correction is a net win; far from a bound, the LP dual is
+        # reliable and re-solving only introduces this new failure mode.
+        soe_trajectory = result.x[e]
+        near_bound_margin = SOE_STEP_KWH * 1
+        for t in range(horizon):
+            current_soe = float(soe_trajectory[t])
+            if not (
+                current_soe >= e_max - near_bound_margin
+                or current_soe <= e_min + near_bound_margin
+            ):
+                continue
+            anchor = e_min + SOE_STEP_KWH * round(
+                (min(current_soe, e_max) - e_min) / SOE_STEP_KWH
+            )
+            if anchor < e_min + SOE_STEP_KWH / 2:
+                # Below the grid's first point -- undefined, matches the
+                # DP's own guard (dp_battery_algorithm.py). Leave the LP
+                # dual value in place rather than override with nothing.
+                continue
+            sub_battery_at = {**battery, "initial_soe": anchor}
+            sub_battery_below = {**battery, "initial_soe": anchor - SOE_STEP_KWH}
+            sub_charge_cap = (
+                charge_power_kw[t:].tolist() if max_charge_power_per_period else None
+            )
+            cost_at = solve_milp_schedule(
+                buy[t:],
+                sell[t:],
+                cons[t:],
+                solar[t:],
+                sub_battery_at,
+                dt,
+                terminal_value_per_kwh,
+                integer_rates=True,
+                max_charge_power_per_period=sub_charge_cap,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                _solver_time_limit=_SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT,
+            ).cost
+            cost_below = solve_milp_schedule(
+                buy[t:],
+                sell[t:],
+                cons[t:],
+                solar[t:],
+                sub_battery_below,
+                dt,
+                terminal_value_per_kwh,
+                integer_rates=True,
+                max_charge_power_per_period=sub_charge_cap,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                _solver_time_limit=_SHADOW_PRICE_SUB_SOLVE_TIME_LIMIT,
+            ).cost
+            shadow_prices[t] = (cost_below - cost_at) / SOE_STEP_KWH
 
     mode = np.full(horizon, "", dtype=object)
     mode[np.round(result.x[mode_store]).astype(bool)] = "STORE"

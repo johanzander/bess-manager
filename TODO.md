@@ -535,13 +535,9 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
-### Savings history: untested error paths and swallowed fetch failures
+### ~~Savings history: untested error paths and swallowed fetch failures~~ ✅ Completed
 
-**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
-
-**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
-
-**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
+**Resolution**: Both gaps are already closed in the current codebase — `backend/tests/test_savings_aggregate_api.py::TestUnderlyingErrorsReturn500` covers all three `/api/savings/*` routes returning 500 on an underlying store error, and `SavingsHistorySection.tsx` has proper `loading`/`error` state (no bare `.catch(() => {})`).
 
 ---
 
@@ -743,9 +739,7 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ## From #271 charge-power-rate fix code review (non-blocking, nice-to-have)
 
-**`InverterStatusDashboard.tsx`'s `batterySettings` state is now write-only**: after switching the "Charge Power Rate" tile to read `inverterStatus?.chargePowerRate` instead of `batterySettings?.chargingPowerRate`, nothing in the component reads `batterySettings` anymore — only `setBatterySettings` (from `fetchBatterySettings()`) is called. Left as-is deliberately to keep the fix minimal. Worth a follow-up to either remove the now-dead `fetchBatterySettings()` call/state or confirm another consumer still needs it.
-
-**File**: `frontend/src/components/InverterStatusDashboard.tsx`
+~~**`InverterStatusDashboard.tsx`'s `batterySettings` state is now write-only**~~ ✅ Completed — confirmed no other consumer needed it; removed the dead `fetchBatterySettings()` call, `batterySettings` state, and the now-unused `BatterySettings` interface.
 
 ---
 
@@ -753,9 +747,9 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 **`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
 
-**`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
+~~**`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`~~ Moot — `DetailedSavingsAnalysis` has since been removed from `SavingsPage` entirely (a later refactor), so there's no DOM order left to assert.
 
-**`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.
+~~**`today_view` is built unconditionally for `period=day`**~~ ✅ Completed — `get_savings_aggregate` now skips the `build_daily_view()` call when today's date is already persisted in `daily_view_store`.
 
 ---
 

@@ -2498,7 +2498,12 @@ async def get_savings_aggregate(
         resolved_count = count or DEFAULT_COUNTS[period]
 
         today_view = None
-        if period == "day" and target_date == time_utils.today():
+        if (
+            period == "day"
+            and target_date == time_utils.today()
+            and target_date.isoformat()
+            not in bess_controller.system.daily_view_store.list_available_dates()
+        ):
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             today_view = bess_controller.system.daily_view_builder.build_daily_view(

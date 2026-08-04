@@ -580,6 +580,11 @@ class HomeAssistantAPIController:
         "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
         "vpp_time": "growatt_vpp_time",
         "vpp_power": "growatt_vpp_power",
+        # Export-limit curtailment (registers 122/123, GEN2|GEN3|GEN4).
+        # See issue #269 — verified against plugin_growatt.py
+        # SELECT_TYPES/NUMBER_TYPES the same way as the VPP entries above.
+        "limit_grid_export": "growatt_export_limit_mode",
+        "grid_export_limit": "growatt_export_limit_value",
         # TOU time slots (9 slots)
         "time_1_enabled": "tou_time_1_enabled",
         "time_1_begin": "tou_time_1_begin",
@@ -660,6 +665,9 @@ class HomeAssistantAPIController:
         "vpp_allow_ac_charging": "growatt_vpp_allow_ac_charging",
         "vpp_time": "growatt_vpp_time",
         "vpp_power": "growatt_vpp_power",
+        # Export-limit curtailment (registers 122/123, GEN2|GEN3|GEN4) — #269.
+        "limit_grid_export": "growatt_export_limit_mode",
+        "grid_export_limit": "growatt_export_limit_value",
     }
 
     # SolaX native inverters via solax_modbus integration
@@ -1121,7 +1129,12 @@ class HomeAssistantAPIController:
         return self.service_domain
 
     def _service_call_with_retry(
-        self, service_domain, service_name, operation: str | None = None, **kwargs
+        self,
+        service_domain,
+        service_name,
+        operation: str | None = None,
+        category: str | None = None,
+        **kwargs,
     ):
         """Call Home Assistant service with retry logic.
 
@@ -1129,6 +1142,8 @@ class HomeAssistantAPIController:
             service_domain: Service domain (e.g., 'switch', 'number')
             service_name: Service name (e.g., 'turn_on', 'set_value')
             operation: Optional human-readable operation description for failure tracking
+            category: Optional failure-tracking category override. Defaults to a
+                domain-based heuristic when omitted.
             **kwargs: Service parameters
 
         Returns:
@@ -1191,7 +1206,8 @@ class HomeAssistantAPIController:
             "post",
             path,
             operation=operation or f"Call {service_domain}.{service_name}",
-            category=(
+            category=category
+            or (
                 "battery_control"
                 if service_domain in ["number", "input_number", "switch"]
                 else ("inverter_control" if is_vendor_domain else "other")
@@ -1364,7 +1380,9 @@ class HomeAssistantAPIController:
         """Get current battery discharging power in watts."""
         return self._get_sensor_value("battery_discharge_power")
 
-    def _set_number_like(self, entity_id: str, value, operation: str) -> None:
+    def _set_number_like(
+        self, entity_id: str, value, operation: str, category: str | None = None
+    ) -> None:
         """Write a value to a number-like entity.
 
         Supports both `number.*` (platform-native) and `input_number.*`
@@ -1376,6 +1394,7 @@ class HomeAssistantAPIController:
             domain,
             "set_value",
             operation=operation,
+            category=category,
             entity_id=entity_id,
             value=value,
         )
@@ -2152,6 +2171,40 @@ class HomeAssistantAPIController:
             time_entity,
             fallback_minutes,
             f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
+        )
+
+    # ── Growatt export-limit curtailment (registers 122/123) ──────────────────
+    #
+    # See issue #269 — requires a grid CT/smart meter. Curtailing writes
+    # "Meter 1" (use the CT meter to throttle PV/MPPT production) and 0%
+    # (strict zero export); releasing writes "Disabled" only — the register
+    # 123 percentage is meaningless once the meter selection is disabled, so
+    # it's left untouched (and the negative range on 123 means "allow this
+    # much import," never written here).
+
+    def set_growatt_export_limit(self, curtail: bool) -> None:
+        """Enable/disable PV export curtailment via the CT-meter export limit."""
+        mode_entity = self._get_entity_for_service("growatt_export_limit_mode")
+        option = "Meter 1" if curtail else "Disabled"
+        logger.info("Growatt export limit: mode -> %s", option)
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Growatt export limit mode -> {option}",
+            category="export_limit_curtailment",
+            entity_id=mode_entity,
+            option=option,
+        )
+
+        if not curtail:
+            return
+
+        value_entity = self._get_entity_for_service("growatt_export_limit_value")
+        self._set_number_like(
+            value_entity,
+            0,
+            "Growatt export limit -> 0% (curtail)",
+            category="export_limit_curtailment",
         )
 
     def get_growatt_vpp_status(self) -> str | None:

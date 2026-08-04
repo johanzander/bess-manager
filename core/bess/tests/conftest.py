@@ -127,7 +127,9 @@ class MockHomeAssistantController(HomeAssistantAPIController):
             "growatt_vpp_status": [],
             "growatt_vpp_allow_ac_charging": [],
             "growatt_vpp_periods": [],
+            "growatt_export_limit": [],
         }
+        self._growatt_export_limit_curtailed: bool = False
         self._growatt_vpp_status_state: str = "Disabled"
         self._growatt_vpp_remote_control_state: str | None = None
 
@@ -380,6 +382,11 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_growatt_vpp_status(self) -> str | None:
         """Return mock Growatt VPP Status state."""
         return self._growatt_vpp_status_state
+
+    def set_growatt_export_limit(self, curtail: bool) -> None:
+        """Record Growatt export-limit curtailment write (#269)."""
+        self._growatt_export_limit_curtailed = curtail
+        self.calls["growatt_export_limit"].append(curtail)
 
     def get_growatt_vpp_remote_control(self) -> str | None:
         """Return mock Growatt VPP Remote Control state."""

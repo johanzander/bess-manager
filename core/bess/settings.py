@@ -127,6 +127,10 @@ class BatterySettings:
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
     inverter_max_ac_power_kw: float = INVERTER_MAX_AC_POWER_KW
     inverter_ac_power_margin: float = INVERTER_AC_POWER_MARGIN
+    # PV export-limit curtailment (issue #269) — opt-in, requires a grid
+    # CT/smart meter and a platform with supports_export_limit_control.
+    export_curtailment_enabled: bool = False
+    export_curtailment_price_floor: float = 0.0
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)

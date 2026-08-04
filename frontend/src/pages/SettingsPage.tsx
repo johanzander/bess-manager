@@ -41,6 +41,7 @@ const EMPTY_BATTERY: BatteryForm = {
   efficiencyCharge: 97, efficiencyDischarge: 97,
   temperatureDeratingEnabled: false,
   inverterMaxAcPowerKw: 0, inverterAcPowerMargin: 0.05,
+  exportCurtailmentEnabled: false, exportCurtailmentPriceFloor: 0,
 };
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'sensor',
@@ -172,6 +173,8 @@ const SettingsPage: React.FC = () => {
         temperatureDeratingEnabled: bat_s.temperatureDerating?.enabled ?? false,
         inverterMaxAcPowerKw: bat_s.inverterMaxAcPowerKw ?? 0,
         inverterAcPowerMargin: bat_s.inverterAcPowerMargin ?? 0.05,
+        exportCurtailmentEnabled: bat_s.exportCurtailmentEnabled ?? false,
+        exportCurtailmentPriceFloor: bat_s.exportCurtailmentPriceFloor ?? 0,
       };
       setBatteryForm(bat);
       savedBattery.current = JSON.stringify(bat);
@@ -458,6 +461,8 @@ const SettingsPage: React.FC = () => {
           efficiencyDischarge: batteryForm.efficiencyDischarge,
           inverterMaxAcPowerKw: batteryForm.inverterMaxAcPowerKw,
           inverterAcPowerMargin: batteryForm.inverterAcPowerMargin,
+          exportCurtailmentEnabled: batteryForm.exportCurtailmentEnabled,
+          exportCurtailmentPriceFloor: batteryForm.exportCurtailmentPriceFloor,
           temperatureDerating: {
             enabled: batteryForm.temperatureDeratingEnabled,
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',

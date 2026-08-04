@@ -344,6 +344,8 @@ _BATTERY_OPTIONAL_FIELDS = frozenset(
         "efficiency_discharge",
         "inverter_max_ac_power_kw",
         "inverter_ac_power_margin",
+        "export_curtailment_enabled",
+        "export_curtailment_price_floor",
     }
 )
 # min_valid is an internal algorithm parameter, never read from the settings

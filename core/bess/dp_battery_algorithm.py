@@ -1434,6 +1434,7 @@ def optimize_battery_schedule(
     max_charge_power_per_period: list[float] | None = None,
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float | None = None,
+    export_curtailment_active: bool = False,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -1455,6 +1456,17 @@ def optimize_battery_schedule(
             from temperature derating. When provided, charging actions exceeding the
             limit for each period are excluded from the optimization. Defaults to None
             (no per-period limits, uses battery_settings.max_charge_power_kw).
+        export_curtailment_active: Caller-computed, capability-aware flag for
+            whether export-limit curtailment (#269) will actually execute --
+            battery_settings.export_curtailment_enabled AND the platform
+            supports it AND the entities are configured. Deliberately NOT
+            read from battery_settings.export_curtailment_enabled directly:
+            that's just the user's opt-in preference, and planning as if
+            curtailment will happen on a platform/config that can't actually
+            do it would make outcomes worse than leaving the feature off
+            (the plan forgoes real defenses against a loss that never gets
+            neutralized). Same call-site pattern as discharge_resolution_kw
+            below. Defaults to False.
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -1493,13 +1505,31 @@ def optimize_battery_schedule(
         f"Starting direct optimization: horizon={horizon}, initial_soe={initial_soe:.1f}, initial_cost_basis={initial_cost_basis:.3f}"
     )
 
+    # Reward-facing sell price only (#269): when export curtailment is
+    # enabled, periods priced below the curtailment floor get an effective
+    # sell price of 0.0 for the DP's own reward/action-selection calculation
+    # only -- backward induction propagates a later period's reward into
+    # every earlier period's decision via the continuation value, so leaving
+    # this unfixed would make the DP refuse a genuinely profitable earlier
+    # action just to avoid a loss that curtailment neutralizes in reality.
+    # The real sell_price list (unchanged) is still what gets reported on
+    # PeriodData.economic.sell_price below and fed to _build_period_data --
+    # BSM's execution-time curtailment trigger reads that field directly, and
+    # the displayed plan should show the honest physics-only cost, not the
+    # actuation override.
+    if export_curtailment_active:
+        floor = battery_settings.export_curtailment_price_floor
+        reward_sell_price = [0.0 if p < floor else p for p in sell_price]
+    else:
+        reward_sell_price = sell_price
+
     # Step 1: Run DP to compute the value-to-go array V. Step 2 recomputes
     # each replay action directly from V (interpolated at the true
     # continuous SoE) rather than looking up a grid-snapped policy table.
     V = _run_dynamic_programming(
         horizon=horizon,
         buy_price=buy_price,
-        sell_price=sell_price,
+        sell_price=reward_sell_price,
         home_consumption=home_consumption,
         solar_production=solar_production,
         initial_soe=initial_soe,
@@ -1520,6 +1550,7 @@ def optimize_battery_schedule(
     hourly_results = []
     current_soe = initial_soe
     current_cost_basis = initial_cost_basis
+    reward_objective_cost = 0.0
     soe_levels = np.arange(
         battery_settings.min_soe_kwh,
         battery_settings.max_soe_kwh + SOE_STEP_KWH,
@@ -1532,21 +1563,23 @@ def optimize_battery_schedule(
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, _ = _best_action_at_continuous_state(
-            soe=current_soe,
-            t=t,
-            V_next=V[t + 1],
-            power_levels=power_levels,
-            home_consumption=home_consumption,
-            battery_settings=battery_settings,
-            dt=dt,
-            solar_production=solar_production,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            cost_basis=current_cost_basis,
-            max_charge_power_per_period=max_charge_power_per_period,
-            discharge_resolution_kw=discharge_resolution_kw,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        action, next_soe, new_cost_basis, action_reward = (
+            _best_action_at_continuous_state(
+                soe=current_soe,
+                t=t,
+                V_next=V[t + 1],
+                power_levels=power_levels,
+                home_consumption=home_consumption,
+                battery_settings=battery_settings,
+                dt=dt,
+                solar_production=solar_production,
+                buy_price=buy_price,
+                sell_price=reward_sell_price,
+                cost_basis=current_cost_basis,
+                max_charge_power_per_period=max_charge_power_per_period,
+                discharge_resolution_kw=discharge_resolution_kw,
+                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            )
         )
 
         period_data = _build_period_data(
@@ -1585,6 +1618,7 @@ def optimize_battery_schedule(
         hourly_results.append(period_data)
         current_soe = next_soe
         current_cost_basis = new_cost_basis
+        reward_objective_cost -= action_reward
 
     # Step 3: Calculate economic summary directly from PeriodData
     total_base_cost = sum(
@@ -1648,7 +1682,40 @@ def optimize_battery_schedule(
         battery_settings=battery_settings,
         dt=dt,
     )
-    if idle_schedule.economic_summary.battery_solar_cost < total_optimized_cost:
+
+    # When export_curtailment_active, the DP's action selection optimized
+    # against reward_sell_price (floored), not the real sell_price used
+    # above -- so comparing total_optimized_cost/idle_schedule at real
+    # price here would be judging the DP's plan by a different objective
+    # than the one it was asked to optimize, and could silently discard a
+    # plan the DP correctly preferred (confirmed via a randomized sweep
+    # against this optimizer, #459 review). Recompute both sides of the
+    # guardrail comparison at reward_sell_price so it's internally
+    # consistent with the actual objective; the RETURNED idle_schedule
+    # (if the guardrail fires) still reports at the real price, unchanged.
+    guardrail_optimized_cost = total_optimized_cost
+    guardrail_idle_cost = idle_schedule.economic_summary.battery_solar_cost
+    if export_curtailment_active:
+        # reward_objective_cost is accumulated directly from each period's
+        # action_reward (_best_action_at_continuous_state's own return
+        # value) -- the exact objective the DP chose actions against, not a
+        # reconstruction from reported PeriodData (which could drift from
+        # the real per-action reward, e.g. self-throttle export-credit
+        # zeroing applying to the reward calc but not to the raw
+        # grid_exported energy field).
+        guardrail_optimized_cost = reward_objective_cost
+        guardrail_idle_cost = _create_idle_schedule(
+            horizon=horizon,
+            buy_price=buy_price,
+            sell_price=reward_sell_price,
+            home_consumption=home_consumption,
+            solar_production=solar_production,
+            initial_soe=initial_soe,
+            battery_settings=battery_settings,
+            dt=dt,
+        ).economic_summary.battery_solar_cost
+
+    if guardrail_idle_cost < guardrail_optimized_cost:
         return idle_schedule
 
     return OptimizationResult(

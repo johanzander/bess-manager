@@ -91,6 +91,12 @@ def start() -> None
 - Consumption predictions (one entry per period, matching price array length)
 - Solar production forecast (one entry per period, matching price array length)
 - Current battery state and cost basis
+- Home electrical settings (fuse current, voltage, phase count) when
+  `power_monitoring_enabled` — derives a per-period grid-import cap that
+  constrains total import (load + battery charging), forcing the battery to
+  cover a load spike via discharge rather than importing past the house's
+  fuse limit. See `docs/agents/bess-knowledge.md`'s "grid import (fuse) cap"
+  section (#429).
 
 **Outputs**:
 

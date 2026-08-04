@@ -208,6 +208,22 @@ class HomeSettings:
             1,
             3,
         ), f"phase_count must be 1 or 3, got {self.phase_count}"
+        if self.power_monitoring_enabled:
+            if self.max_fuse_current <= 0:
+                raise ValueError(
+                    f"max_fuse_current must be positive when power_monitoring_enabled, "
+                    f"got {self.max_fuse_current}"
+                )
+            if self.voltage <= 0:
+                raise ValueError(
+                    f"voltage must be positive when power_monitoring_enabled, "
+                    f"got {self.voltage}"
+                )
+            if self.safety_margin <= 0:
+                raise ValueError(
+                    f"safety_margin must be positive when power_monitoring_enabled, "
+                    f"got {self.safety_margin}"
+                )
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from a snake_case dict — the store's native format.

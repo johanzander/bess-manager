@@ -279,7 +279,7 @@ def test_compute_reward_self_throttle_threshold_is_parameterized():
     settings = make_battery_settings(max_discharge_power_kw=5.0)
     # power chosen so grid_exported lands strictly between 0 and 0.01 kWh
     # at dt=1.0h: home_consumption=1.0, discharge=1.005 kW -> export=0.005 kWh
-    reward_default, _ = _compute_reward(
+    reward_default, _, _ = _compute_reward(
         power=-1.005,
         soe=15.0,
         next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
@@ -292,7 +292,7 @@ def test_compute_reward_self_throttle_threshold_is_parameterized():
         solar_production=0.0,
         cost_basis=0.0,
     )
-    reward_no_throttle, _ = _compute_reward(
+    reward_no_throttle, _, _ = _compute_reward(
         power=-1.005,
         soe=15.0,
         next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,

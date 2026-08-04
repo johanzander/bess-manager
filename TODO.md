@@ -293,18 +293,9 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
 
-### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
+### ~~**Suppress retry warnings for expected Nordpool "tomorrow not available" responses**~~ ✅ Completed
 
-**Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
-
-**Description**: The Nordpool integration returns HTTP 500 when tomorrow's prices aren't published yet (typically before ~13:00 CET). `_api_request` logs a WARNING on each retry attempt, producing misleading warnings every optimization cycle overnight (00:00–12:00). The retry eventually fails, but `get_combined_prices()` in `price_manager.py` handles this gracefully — it catches the exception and falls back to today-only prices with an INFO log. The warnings are harmless but noisy and can alarm users reading logs.
-
-**Options**:
-1. Have `official_nordpool_source.py` catch the 500 for tomorrow and raise a specific "not available yet" exception that `_api_request` doesn't retry
-2. Add a `suppress_retry_warnings=True` param to `_api_request` for expected-failure calls
-3. Accept the noise as-is (log-level only, no UI banners)
-
-**Files**: `core/bess/official_nordpool_source.py`, `core/bess/ha_api_controller.py`, `core/bess/price_manager.py`
+**Resolution**: Added a `suppress_retry_warnings` param to `_api_request`/`_service_call_with_retry` (option 2), set by `official_nordpool_source.py` when fetching tomorrow's prices. Retry/final-failure logs downgrade to debug/info for that call instead of WARNING/ERROR.
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
@@ -796,11 +787,11 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 ## From #387 runtime power gap-fill code review (non-blocking)
 
-**`PowerSampleBuffer.consume()`'s `if values` guard is dead code** (`core/bess/power_sample_buffer.py`) — `record()` always appends immediately via `setdefault(...).append(watts)`, so no `values` list can ever be empty when `consume()` reaches it. Harmless but unnecessary defensiveness; inconsistent with the "no speculative fallbacks" convention.
+~~**`PowerSampleBuffer.consume()`'s `if values` guard is dead code**~~ ✅ Completed — the guard was removed and a comment added explaining why it's safe (`record()` always appends immediately, so no `values` list can ever be empty when `consume()` reaches it).
 
 **`sample_live_power()`'s per-getter `entity_id`/skip handling is implicit rather than defensive-by-design** (`core/bess/sensor_collector.py`) — correct today, just worth a second look if the getter-based rewrite (done in the #387 final-review fix wave) is touched again.
 
-**Stale line-number citation in a test docstring** (`core/bess/tests/unit/test_sensor_collector_gapfill.py:7`) — cites the InfluxDB gap-fill `if` block at a line range that has drifted by one line from its actual current location (`252-263`) after later edits in the same file. Cosmetic only.
+~~**Stale line-number citation in a test docstring**~~ ✅ Completed — replaced the line-number citation with a reference to the enclosing function name (`collect_energy_data`), which won't rot as the file is edited.
 
 **`backend/app.py` constructs `BESSController()` and calls `start_in_background()` at module level**, which is what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing.
 

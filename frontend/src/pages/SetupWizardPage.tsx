@@ -42,6 +42,10 @@ const SetupWizardPage: React.FC = () => {
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [controlMode, setControlMode] = useState<'demo' | 'live' | null>(null);
   const existingSensorsRef = useRef<PerPlatformSensors>(emptyPerPlatformSensors());
+  // Only true on a genuinely new install (no prior setup) -- gates the
+  // fuse-protection auto-enable below so re-running the wizard on an
+  // already-configured system never overrides an explicit user choice.
+  const wizardNeededRef = useRef<boolean>(false);
 
   const [batteryForm, setBatteryForm] = useState<BatteryForm>({
     totalCapacity: 30.0,
@@ -71,7 +75,9 @@ const SetupWizardPage: React.FC = () => {
     voltage: 230,
     safetyMarginFactor: 1.0,
     phaseCount: 3,
-    powerMonitoringEnabled: true,
+    // Turned on in handleScan only once its required sensors are actually
+    // detected on a new install -- see wizardNeededRef.
+    powerMonitoringEnabled: false,
   });
 
   const [pricingForm, setPricingForm] = useState<PricingForm>({
@@ -202,6 +208,16 @@ const SetupWizardPage: React.FC = () => {
       }
 
       setSensors(newSensors);
+
+      // On a genuinely new install, pre-enable fuse protection once its
+      // required sensors are actually present -- never on a wizard re-run
+      // for an already-configured system, where this could silently
+      // override a choice the user already made.
+      const chargeRateSensorFound = !!getActiveSensorsFlat(newSensors).battery_charging_power_rate;
+      if (wizardNeededRef.current && chargeRateSensorFound && d.detectedPhaseCount) {
+        setHomeForm(f => ({ ...f, powerMonitoringEnabled: true }));
+      }
+
       setStep(1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Discovery failed';
@@ -212,10 +228,19 @@ const SetupWizardPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Record whether this is a genuinely new install (no prior setup) before
+    // the settings/scan sequence below runs, so handleScan can gate the
+    // fuse-protection auto-enable on it. Awaited alongside the settings load
+    // (both feed into the same .finally() below) so it's always resolved
+    // before handleScan reads it.
+    const statusPromise = api.get('/api/setup/status').then(res => {
+      wizardNeededRef.current = !!res.data.wizardNeeded;
+    }).catch(() => {});
+
     // Load existing settings so re-running the wizard preserves user config,
     // then run the sensor scan. Sequencing via .finally() ensures the scan
     // never overwrites the loaded values (scan seeds only auto-detected hints).
-    api.get('/api/settings').then(res => {
+    const settingsPromise = api.get('/api/settings').then(res => {
       const s = res.data;
       const bat = s.battery ?? {};
       const home = s.home ?? {};
@@ -286,7 +311,9 @@ const SetupWizardPage: React.FC = () => {
       if (status !== 404) {
         console.error('Failed to load existing settings:', err);
       }
-    }).finally(() => {
+    });
+
+    Promise.all([statusPromise, settingsPromise]).finally(() => {
       handleScan();
     });
   }, [handleScan]);

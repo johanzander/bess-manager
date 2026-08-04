@@ -371,18 +371,23 @@ counterpart to the AC output cap above — the two are independent constraints
 on opposite sides of the same AC stage and both apply simultaneously when
 configured.
 
-- **Derivation**: `voltage × max_fuse_current × safety_margin`
-  (`_effective_import_cap_kwh`, `dp_battery_algorithm.py`) — the same
-  single-phase wattage `HomePowerMonitor` (`core/bess/power_monitor.py`)
-  derives at runtime, deliberately **not** multiplied by `phase_count`:
-  `HomePowerMonitor` gates on the single worst-loaded phase
-  (`max(phase_loads)`), not phase-summed power — a deliberate fix for
-  unbalanced 3-phase loads (commit `37201cb9`, #11). The DP's
-  `home_consumption` forecast is a single household-total figure with no
-  per-phase breakdown, so the only cap consistent with what the runtime
-  monitor actually enforces is that same single-phase ceiling, applied to
-  the household total. Off (`None`) when `power_monitoring_enabled` is
-  False, matching the AC cap's own `<= 0.0 → None` convention.
+- **Derivation**: `voltage × max_fuse_current × safety_margin × phase_count`
+  (`_effective_import_cap_kwh`, `dp_battery_algorithm.py`) — each phase is an
+  independent fuse, so a balanced house can import up to `phase_count` times
+  a single phase's ceiling before any individual phase is stressed.
+  `HomePowerMonitor` (`core/bess/power_monitor.py`) relies on the same
+  balanced-load assumption at runtime: on a fully unloaded 3-phase house it
+  authorizes the battery up to its full `max_charge_power_w` (not a single
+  phase's worth), since `available_pct` is computed relative to
+  `max_charge_power_w / phase_count` per phase. `HomePowerMonitor` remains
+  the real-time backstop against *unbalanced* loads — it measures actual
+  per-phase current and throttles battery charging against the single
+  worst-loaded phase (a deliberate fix for that case, commit `37201cb9`,
+  #11) — but the DP's `home_consumption` forecast is a single household-total
+  figure with no per-phase breakdown, so it cannot reproduce that live check
+  and instead plans against the balanced-load assumption. Off (`None`) when
+  `power_monitoring_enabled` is False, matching the AC cap's own
+  `<= 0.0 → None` convention.
 - **Total import, not charging-only**: the cap bounds `grid_imported` (house
   load + battery grid-charging) jointly, not just the charging component —
   `HomePowerMonitor` only throttles charging today because that is the only

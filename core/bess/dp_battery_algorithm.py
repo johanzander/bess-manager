@@ -204,15 +204,19 @@ def _effective_import_cap_kwh(
     """Per-period grid-import energy cap (kWh) derived from the house's fuse
     service limit, or None when power monitoring is disabled (issue #429).
 
-    Deliberately NOT multiplied by `phase_count`: `HomePowerMonitor`
-    (`core/bess/power_monitor.py`) gates on the single worst-loaded phase
-    (`max_power_per_phase = voltage x max_fuse_current x safety_margin`,
-    throttled against `max(phase_loads)`), not on phase-summed power -- a
-    deliberate fix for unbalanced 3-phase loads (commit 37201cb9, #11). The
-    DP's `home_consumption` forecast is a single household-total figure with
-    no per-phase breakdown, so the only cap consistent with what the runtime
-    monitor will actually enforce is the same single-phase ceiling, applied
-    to the household total.
+    Multiplied by `phase_count`: each phase is an independent fuse, so a
+    balanced 3-phase house can import up to `phase_count` times a single
+    phase's ceiling before any individual phase is stressed. `HomePowerMonitor`
+    (`core/bess/power_monitor.py`) already relies on this same assumption at
+    runtime -- on a fully unloaded 3-phase house it authorizes the battery up
+    to its full `max_charge_power_w` (not a single phase's worth), since
+    `available_pct` is computed relative to `max_charge_power_w / phase_count`
+    per phase. `HomePowerMonitor` remains the real-time backstop against
+    unbalanced loads (it measures actual per-phase current and throttles
+    battery charging against the single worst-loaded phase, commit 37201cb9,
+    #11); the DP has no per-phase forecast to reproduce that live check, so it
+    caps against the balanced-load assumption instead of the unbalanced
+    worst case.
     """
     if home_settings is None or not home_settings.power_monitoring_enabled:
         return None
@@ -220,6 +224,7 @@ def _effective_import_cap_kwh(
         home_settings.voltage
         * home_settings.max_fuse_current
         * home_settings.safety_margin
+        * home_settings.phase_count
         / 1000.0
     ) * dt
 

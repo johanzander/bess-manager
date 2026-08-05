@@ -260,8 +260,10 @@ semantics" below):
 - `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
   regardless of `discharge_rate` (releases to `load_first` self-use — see
   "LOAD_SUPPORT semantics" below)
-- `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
+- `SOLAR_STORAGE` (rate=0, `block_passive_charging=False`) → remote
   control disabled (`load_first`/self-use — battery may absorb solar surplus)
+- `IDLE` (rate=0) → `vpp_power=+1%`, remote control **enabled**
+  (`battery_first` hold — see "IDLE semantics" below)
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
   remote control **enabled** (`grid_first` hold)
 
@@ -322,6 +324,29 @@ already-proven precedent to lean on).
 architectural gap but is **not** fixed here — no SolaX vendor protocol has
 been verified the way the Growatt spec was, so extending this fix there
 would be speculation, not a verified command. Tracked as a follow-up.
+
+**IDLE semantics (fixed — issue [#466](https://github.com/johanzander/bess-manager/issues/466)):**
+`IDLE` previously mapped to the same `remote_control=Disabled` → native
+`load_first` self-use as `SOLAR_STORAGE`. That is wrong for IDLE
+specifically: `load_first` self-use discharges the battery to cover house
+load before drawing from grid, but the DP's own cost model for IDLE periods
+(`_idle_battery_flows` in `dp_battery_algorithm.py`) never credits the
+battery discharging — it only ever models passive solar absorption
+(charging). A real overnight IDLE period therefore drained the battery for
+house load in a way the optimizer's schedule never priced for. Confirmed by
+a real-hardware report (Growatt MIN, control_mode=vpp) on issue #466.
+
+The `grid_first` hold used for `SOLAR_EXPORT` above is **not** a fix for
+this: per issue #118's real-hardware testing, `grid_first`
+(`vpp_power<=0`, remote control enabled) still draws self-consumption from
+the battery — it only stops the battery *absorbing* solar, not discharging
+for load. Only `battery_first` (`vpp_power>0`) releases self-consumption to
+grid/solar. `IDLE` now maps to `remote_control=Enabled`, `vpp_power=+1`
+(the minimal `battery_first` magnitude) instead. **Not yet
+real-hardware-validated**: ships experimental pending confirmation that this
+doesn't cause any grid-charge creep overnight (`vpp_power>0` is the same
+mechanism `GRID_CHARGING` uses at `+100%` to force-charge from grid, just at
+a 1% target).
 
 **Enable sequence** (real-hardware-tested, see issue #118 comments): write
 `vpp_status=Enabled` + `vpp_allow_ac_charging=Enabled`, wait ~1s, then write

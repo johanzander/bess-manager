@@ -233,12 +233,23 @@ implementation detail that can change independently of this doc.
 
 **Hardware mapping**: Intents control actual inverter behavior (register-
 based platforms — Growatt TOU/cloud/SPH; VPP-style platforms select
-`grid_first`/`load_first` per-period instead of via a persistent mode, see
-the SOLAR_EXPORT hardware-mapping note below):
+`grid_first`/`battery_first`/`load_first` per-period instead of via a
+persistent mode, see the SOLAR_EXPORT and IDLE hardware-mapping notes below):
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
 - BATTERY_EXPORT → grid_first mode (battery discharge to grid)
 - SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
+
+This `load_first` mapping is what register-based platforms (Growatt
+TOU/cloud/SPH) use for all three. **VPP-style platforms diverge for IDLE**
+(issue #466): `load_first` self-use discharges the battery to cover house
+load, but IDLE's own DP cost model (`_idle_battery_flows` in
+`dp_battery_algorithm.py`) never credits battery discharge — only passive
+solar absorption. VPP-mode IDLE instead maps to `remote_control=Enabled`,
+`vpp_power=+1` (`battery_first` hold), keeping self-consumption on
+grid/solar. See `docs/INVERTER_PLATFORMS.md`'s "IDLE semantics" section for
+the full mapping and why `grid_first` (the SOLAR_EXPORT pattern) doesn't
+also fix this.
 
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
 

@@ -35,8 +35,16 @@ still forces a rate for it, this controller now releases VPP control instead.
   load-following self-use instead of forcing a fixed discharge rate, which
   causes unnecessary grid imports/exports whenever the schedule's load
   prediction misses)
-- SOLAR_STORAGE/IDLE (rate=0, block_passive_charging=False) -> remote_control
+- SOLAR_STORAGE (rate=0, block_passive_charging=False) -> remote_control
   disabled (load_first self-use -- battery may absorb solar surplus)
+- IDLE (rate=0) -> power=+1%, remote_control ENABLED (battery-first hold,
+  per the Growatt VPP protocol V2.01 section 3.5 -- #466: load_first
+  self-use discharges the battery to cover house load, but the DP's own
+  cost model never credits battery discharge during IDLE
+  (_idle_battery_flows in dp_battery_algorithm.py); battery-first keeps
+  self-consumption on grid/solar instead. grid_first (power<=0) does not
+  achieve this -- per #118, self-consumption is still drawn from the
+  battery in grid_first, only battery-first releases it to grid/solar)
 - SOLAR_EXPORT (rate=0, block_passive_charging=True) -> power=0,
   remote_control ENABLED (grid_first hold, per the Growatt VPP protocol
   V2.01 section 3.5 -- battery held flat, solar bypasses to grid)
@@ -231,14 +239,16 @@ class SolaxModbusGrowattController(GrowattMinController):
                 register instead. VPP mode acts on it directly (#355): it
                 has no charge_rate register, so this is its only channel for
                 distinguishing SOLAR_EXPORT (hold, block charging) from
-                SOLAR_STORAGE/IDLE (self-use, allow charging) at
-                discharge_rate=0.
+                SOLAR_STORAGE (self-use, allow charging) at discharge_rate=0.
+                IDLE is intercepted earlier via strategic_intent (#466) and
+                does not reach this flag.
             strategic_intent: The period's strategic intent string. TOU mode
                 ignores this (it derives mode from strategic_intents itself).
-                VPP mode acts on it directly (#413): grid_charge/
-                discharge_rate alone can't distinguish LOAD_SUPPORT from
-                BATTERY_EXPORT, but VPP mode must -- LOAD_SUPPORT releases
-                control instead of forcing a fixed rate.
+                VPP mode acts on it directly: distinguishes LOAD_SUPPORT
+                (#413) and IDLE (#466) from other rate=0 intents --
+                grid_charge/discharge_rate/block_passive_charging alone
+                can't tell them apart, but VPP mode must, since each needs a
+                different remote_control/power command.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -342,8 +352,19 @@ class SolaxModbusGrowattController(GrowattMinController):
           docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md.
           Not yet real-hardware-validated; ships experimental pending
           confirmation.
+        - grid_charge=False, rate=0, intent=IDLE   -> +1%, remote control
+          ENABLED (#466 -- "battery first" per the protocol's >0 branch).
+          IDLE's own DP cost model never credits battery discharge for load
+          (_idle_battery_flows), so self-consumption must come from
+          grid/solar, not the battery. grid_first (this function's block=True
+          branch) does NOT achieve that -- per #118, self-consumption is
+          still drawn from the battery under grid_first; only battery_first
+          releases it to grid/solar. Checked before the generic rate=0
+          branch below so IDLE doesn't fall into SOLAR_STORAGE's self-use
+          disable. Not yet real-hardware-validated; ships experimental
+          pending confirmation.
         - grid_charge=False, rate=0, block=False  -> 0%, remote control DISABLED
-          (load_first self-use -- SOLAR_STORAGE/IDLE, battery may absorb solar)
+          (load_first self-use -- SOLAR_STORAGE, battery may absorb solar)
         - grid_charge=False, rate>0 (otherwise, i.e. BATTERY_EXPORT)
           -> -rate% (discharge/export)
         """
@@ -352,6 +373,8 @@ class SolaxModbusGrowattController(GrowattMinController):
         if strategic_intent == "LOAD_SUPPORT":
             return 0, False
         if discharge_rate == 0:
+            if strategic_intent == "IDLE":
+                return 1, True
             return 0, block_passive_charging
         return -discharge_rate, True
 

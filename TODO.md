@@ -1,7 +1,7 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
-## �🔴 **CRITICAL PRIORITY** (System Reliability)
+## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
 ### 0. **Fix Battery Discharge Power Control Bug**
 
@@ -214,46 +214,6 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
-## 📄 **DOCUMENTATION IMPROVEMENTS**
-
-### Improve Consumption Forecast Documentation
-
-**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
-
-**Current gap**: Step 3 explains *how* to create the 48h average sensor but not *why* it works or how to tune it for different households.
-
-**What to add**:
-
-- Explain what BESS does with the sensor: the DP optimizer uses the current sensor value as the predicted consumption for all future periods in the optimization horizon.
-- Explain why the battery-active filter matters: without it, battery discharge power inflates the apparent home consumption, causing the optimizer to over-predict load and charge more aggressively than needed.
-- Explain how to tune for your household:
-  - The 48h window is a good default — it captures both weekday and weekend patterns.
-  - If your consumption has strong seasonal variation (e.g. heat pump), consider a shorter window (12-24h) so the average adapts faster.
-  - If you have large predictable loads (sauna, hot tub), the average smooths these out — the optimizer will not plan for a 3 kW sauna spike at 19:00 specifically.
-  - EV charging: whether to include or exclude depends on whether BESS should see EV charging as "normal home load" (include → optimizer plans for it) or as a separate managed load (exclude → optimizer ignores it, relies on discharge inhibit sensor instead).
-
----
-
-### Improve EV Charging / Discharge Inhibit Documentation
-
-**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
-
-**Current gap**: Line 172 says "EV charging: Exclude if managed separately. Include if you want BESS to optimize around it." — too brief. The discharge inhibit sensor is not explained at all.
-
-**What to add**:
-
-BESS does not control EV charging — it is designed to work in parallel with it. Normally both the car and the battery charge when electricity is cheap, so there is no conflict.
-
-The exception is **Tibber grid rewards** (and similar grid balancing programs). Grid rewards can start EV charging even when prices are not at their lowest, because Tibber compensates you separately for supporting grid balancing.
-
-BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` or `_is_charging` (e.g. `binary_sensor.zap263668_charging`) and treats it as a **discharge inhibit** signal. When the sensor is `on`, BESS will not discharge the battery even if the schedule says to.
-
-If BESS were to discharge the battery at the same time, that energy would flow to the car instead of from the grid — you would miss out on the grid reward income while also losing the battery support you would have had for the home.
-
-The discharge inhibit only blocks discharging — it does not change the TOU schedule, trigger charging, or interfere with the EV charging session in any way.
-
----
-
 ## 🟢 **LOW PRIORITY** (Polish)
 
 ### 7. Add Prediction accuracy and history
@@ -346,9 +306,9 @@ Report:
 
 **Impact**: Low (only at mode switch) | **Effort**: Medium
 
-**Description**: `reinitialize_tou_schedule()` is called directly inside the `async def patch_settings` handler, which blocks the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
+**Description**: `BatterySystemManager.set_demo_mode()` (formerly `reinitialize_tou_schedule()`) is called directly inside the `async def patch_settings` handler. On the demo→live transition it runs `_initialize_tou_schedule_from_inverter()` + `initialize_hardware()`, blocking the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
 
-**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
+**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/battery_system_manager.py` — `set_demo_mode`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
 
 ---
 
@@ -356,7 +316,7 @@ Report:
 
 **Impact**: Low | **Effort**: Low
 
-**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup, and the same underlying path is triggered again by `reinitialize_tou_schedule()` when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
+**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup (`battery_system_manager.py:533`), and the same path is triggered again by `set_demo_mode(False)` (`battery_system_manager.py:574`, formerly `reinitialize_tou_schedule()`) when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
 
 **File**: `core/bess/battery_system_manager.py`
 
@@ -546,7 +506,9 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ### FormattingContext Architecture
 
-**Impact**: Low | **Effort**: Low (45 min) | **Dependencies**: None
+**Impact**: Low | **Effort**: Medium-High (originally estimated 45 min — see below) | **Dependencies**: None
+
+**Status**: Parked deliberately. **Do not start until the trigger below fires.**
 
 **Description**: Replace currency parameter passing with FormattingContext dataclass for better extensibility and i18n support.
 
@@ -555,6 +517,20 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Implementation**: Create frozen FormattingContext dataclass, update `create_formatted_value()` and dataclass `from_internal()` methods, modify API endpoints to create context from settings
 
 **Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
+
+**Trigger — do it when a second field actually exists**: i.e. when locale,
+timezone, or configurable precision is genuinely requested. Until then the
+context would carry exactly one field (currency), so its shape has to be
+guessed, and guessing wrong means doing the migration twice.
+
+**Why not now** (measured 2026-08-05): the "45 min" estimate is wrong — there
+are ~163 `create_formatted_value()` call sites across `backend/` and `core/`,
+5 `from_internal()` implementations, and ~120 currency references in
+`api_dataclasses.py` alone. Every one of them feeds a number the dashboard
+renders, so the best possible outcome is that nothing changes visibly: pure
+regression risk for no user-facing payoff, and nothing that would earn a
+CHANGELOG line. When the trigger fires, the refactor pays for itself
+immediately and the context's shape is dictated by a real requirement.
 
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
 
@@ -603,7 +579,6 @@ Both are called sequentially from `run_setup_discovery()` in `api.py`. They serv
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
-- Check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
 
 **From #221 (spot_multiplier/export_spot_multiplier) code review — deferred cleanup, not bugs**:
 
@@ -625,9 +600,6 @@ The controller-side hourly aggregation is gone: `_calculate_hourly_settings_with
 **Re-run optimization on energy prediction method change**:
 When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), the optimization should re-run immediately with the new prediction method rather than waiting for the next scheduled cycle. The prediction cache should be cleared and a fresh optimization triggered in the same request that saves the new strategy.
 
-**Sensor Collector InfluxDB Usage**:
-Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).
-
 ## From #215 health-recovery-banner code review (non-blocking, low severity)
 
 **Concurrent health-check race could double-record a recovery**:
@@ -638,14 +610,6 @@ Based on the code analysis: The function `_get_hour_readings` in SensorCollector
 
 **`/api/health-recoveries` uses camelCase (`convert_keys_to_camel_case`) while sibling `/api/runtime-failures` returns raw snake_case `__dict__`**:
 Both are valid given each has its own matching frontend hook, but it's an inconsistent precedent for the next tracker-style endpoint someone adds. Worth standardizing next time either is touched.
-
-The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
-
-## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
-
-**`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
-
----
 
 ## From #317 period-group intent reconciliation code review (non-blocking)
 
@@ -661,8 +625,6 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).
 
-**`_interpolate_value`'s index clamp flattens continuation value below the SOE floor**: `V`'s grid (`soe_levels`) starts exactly at `min_soe_kwh`, so any `next_soe` below the floor clamps to `V_row[0]` regardless of how far below floor it is — candidates ending at different below-floor SoEs get identical continuation credit. Bounded in practice (discharge is already excluded below floor, and `next_soe` is monotonically non-decreasing once below floor) — not filed as an issue, just worth a comment in `_interpolate_value` noting the approximation if this file is touched again.
-
 ---
 
 ## From #353 immediate_value/future_value investigation (non-blocking)
@@ -674,8 +636,6 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 ---
 
 ## From #387 runtime power gap-fill code review (non-blocking)
-
-**`sample_live_power()`'s per-getter `entity_id`/skip handling is implicit rather than defensive-by-design** (`core/bess/sensor_collector.py`) — correct today, just worth a second look if the getter-based rewrite (done in the #387 final-review fix wave) is touched again.
 
 **`backend/app.py` constructs `BESSController()` and calls `start_in_background()` at module level**, which is what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing.
 

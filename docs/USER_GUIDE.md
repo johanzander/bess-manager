@@ -354,7 +354,7 @@ BESS does not control EV charging — it is designed to work alongside it. Under
 
 The exception is grid reward programs such as **Tibber grid rewards**. These programs can start EV charging for grid balancing reasons, even when the spot price is not at its lowest. If BESS were to discharge the battery at the same time, that energy would flow toward the car instead of from the grid — you would miss the grid reward income and also lose the battery capacity you would otherwise have had available for the home.
 
-To prevent this, BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` (for example `binary_sensor.zap263668_charging`) and treats it as a **discharge inhibit** signal. When the sensor is `on`, battery discharging is paused regardless of what the schedule says.
+To prevent this, BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` or `_is_charging` (for example `binary_sensor.zap263668_charging`), or contains `discharge_inhibit`, and treats it as a **discharge inhibit** signal. When the sensor is `on`, battery discharging is paused regardless of what the schedule says.
 
 The discharge inhibit only affects discharging — it does not change the TOU schedule, trigger battery charging, or interfere with the EV charging session in any way.
 

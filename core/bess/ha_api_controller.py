@@ -833,6 +833,11 @@ class HomeAssistantAPIController:
     # Huawei LUNA2000 via the huawei_solar integration. unique_id format is
     # f"{device.serial_number}_{register_key}" — verified against
     # wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200.
+    # Lifetime energy register keys verified against
+    # wlcrs/huawei-solar-lib register_names.py/sensor.py: accumulated_yield_energy
+    # (inverter), storage_total_charge/storage_total_discharge (battery),
+    # grid_exported_energy/grid_accumulated_energy (separate power-meter device,
+    # so these two resolve to "not configured" on meterless installs).
     HUAWEI_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         "storage_state_of_capacity": "battery_soc",
         "storage_charge_discharge_power": "battery_charge_power",
@@ -843,6 +848,11 @@ class HomeAssistantAPIController:
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
         "active_power": "local_load_power",
+        "accumulated_yield_energy": "lifetime_solar_energy",
+        "storage_total_charge": "lifetime_battery_charged",
+        "storage_total_discharge": "lifetime_battery_discharged",
+        "grid_exported_energy": "lifetime_export_to_grid",
+        "grid_accumulated_energy": "lifetime_import_from_grid",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:

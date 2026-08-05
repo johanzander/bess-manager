@@ -101,13 +101,33 @@ class TestIntentToVpp:
         assert power_pct == 100
         assert enabled is True
 
-    def test_idle_disables_remote_control(self, controller):
-        """SOLAR_STORAGE/IDLE (block_passive_charging=False) -> self-use."""
+    def test_solar_storage_disables_remote_control(self, controller):
+        """SOLAR_STORAGE (block_passive_charging=False) -> self-use, battery
+        may absorb solar surplus."""
         power_pct, enabled = controller._intent_to_vpp(
-            grid_charge=False, discharge_rate=0, block_passive_charging=False
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="SOLAR_STORAGE",
         )
         assert power_pct == 0
         assert enabled is False
+
+    def test_idle_enables_battery_first_hold(self, controller):
+        """#466: IDLE must not fall back to native load_first self-use --
+        load_first discharges the battery to cover house load, but the DP's
+        own cost model (_idle_battery_flows) never credits battery discharge
+        during IDLE. remote_control=Enabled, vpp_power=+1 (battery first)
+        keeps self-consumption on grid/solar instead of draining the
+        battery, per the Growatt VPP protocol V2.01 section 3.5."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="IDLE",
+        )
+        assert power_pct == 1
+        assert enabled is True
 
     def test_solar_export_keeps_remote_control_enabled(self, controller):
         """SOLAR_EXPORT (block_passive_charging=True) -> grid-first hold,
@@ -238,10 +258,12 @@ class TestApplyPeriodVpp:
         assert period["remote_control_enabled"] is False
         assert period["power_pct"] == 0
 
-    def test_idle_disables_remote_control_on_hardware(self, controller, mock_ha):
+    def test_idle_enables_battery_first_hold_on_hardware(self, controller, mock_ha):
+        """#466: IDLE must write remote_control=Enabled, power=+1 (battery
+        first) instead of falling back to native load_first self-use."""
         intents = hourly_to_quarterly({0: "IDLE"})
         controller.apply_intents(make_schedule(intents), current_period=0)
-        controller._last_written_vpp_remote_control = True  # force a change
+        controller._last_written_vpp_remote_control = False  # force a change
 
         _apply_at_period(
             controller,
@@ -250,10 +272,12 @@ class TestApplyPeriodVpp:
             grid_charge=False,
             discharge_rate=0,
             block_passive_charging=False,
+            strategic_intent="IDLE",
         )
 
         period = mock_ha.calls["growatt_vpp_periods"][-1]
-        assert period["remote_control_enabled"] is False
+        assert period["remote_control_enabled"] is True
+        assert period["power_pct"] == 1
 
     def test_solar_export_keeps_remote_control_enabled_on_hardware(
         self, controller, mock_ha

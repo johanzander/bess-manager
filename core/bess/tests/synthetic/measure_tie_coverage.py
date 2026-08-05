@@ -396,6 +396,26 @@ def segment_reference_cost(
     return reference_cost
 
 
+def post_splice_soe_trajectory(
+    result: OptimizationResult, initial_soe: float
+) -> list[float]:
+    """The schedule's realized SOE per period boundary, length `horizon + 1`,
+    suitable for `segment_reference_cost`'s `soe_trajectory` argument.
+
+    Deliberately built from `result.period_data` (post-splice) rather than
+    `tie_diagnostics["soe_trajectory"]` (pre-splice): the diagnostics copy is
+    recorded before the hybrid splices any re-solved window and so diverges
+    from the reported schedule inside one. Confirmed on the #450 fixture --
+    seeding `segment_reference_cost` with the pre-splice trajectory there
+    pins an end SOE the reported schedule never actually reaches, fabricating
+    a -0.714 SEK "impact" where the post-splice trajectory correctly gives
+    0.0. See `segment_reference_cost`'s own docstring for the same warning.
+    """
+    return [initial_soe] + [
+        period.energy.battery_soe_end for period in result.period_data
+    ]
+
+
 @dataclass(frozen=True)
 class ScenarioMeasurement:
     """One scenario's coverage measurement: how close every period's margin
@@ -417,6 +437,10 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     never produces an import cap for this harness to thread.
     """
     inputs = _scenario_inputs(scenario)
+    # Fail fast on an objective this harness cannot reproduce, before paying
+    # for the solve -- replay_schedule/segment_reference_cost would raise the
+    # same NotImplementedError, but only after optimize_battery_schedule ran.
+    _reject_unsupported_objective(inputs["battery_settings"])
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
 
@@ -428,7 +452,9 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
         diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
     )
     if segment is None:
-        return ScenarioMeasurement(margin_ratio_counts, None)
+        return ScenarioMeasurement(
+            margin_ratio_counts=margin_ratio_counts, financial_impact_sek=None
+        )
 
     period_costs, cost_bases = replay_schedule(
         result,
@@ -445,12 +471,6 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     )
     hybrid_segment_cost = sum(period_costs[segment.start : segment.end])
 
-    # NOT diagnostics["soe_trajectory"] -- that copy is recorded before the
-    # hybrid splices any re-solved window and so differs from the schedule
-    # actually reported inside one (see segment_reference_cost's docstring).
-    soe_trajectory = [inputs["initial_soe"]] + [
-        period.energy.battery_soe_end for period in result.period_data
-    ]
     reference_cost = segment_reference_cost(
         segment,
         buy_price=inputs["buy_price"],
@@ -459,7 +479,7 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
         solar_production=inputs["solar_production"],
         battery_settings=inputs["battery_settings"],
         dt=inputs["period_duration_hours"],
-        soe_trajectory=soe_trajectory,
+        soe_trajectory=post_splice_soe_trajectory(result, inputs["initial_soe"]),
         cost_basis=cost_bases[segment.start],
         self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
@@ -468,4 +488,7 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     delta = hybrid_segment_cost - reference_cost
     # A negative delta is solver noise (segment_reference_cost is not a
     # proven optimum), not a real finding -- never report a negative impact.
-    return ScenarioMeasurement(margin_ratio_counts, max(0.0, delta))
+    return ScenarioMeasurement(
+        margin_ratio_counts=margin_ratio_counts,
+        financial_impact_sek=max(0.0, delta),
+    )

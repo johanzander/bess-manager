@@ -17,6 +17,7 @@ from core.bess.tests.synthetic.measure_tie_coverage import (
     classify_margin_ratios,
     measure_scenario,
     near_miss_segment,
+    post_splice_soe_trajectory,
     replay_schedule,
     segment_reference_cost,
 )
@@ -167,8 +168,7 @@ def _reference(inputs, result, segment, cost_bases):
         solar_production=inputs["solar_production"],
         battery_settings=inputs["battery_settings"],
         dt=inputs["period_duration_hours"],
-        soe_trajectory=[inputs["initial_soe"]]
-        + [p.energy.battery_soe_end for p in result.period_data],
+        soe_trajectory=post_splice_soe_trajectory(result, inputs["initial_soe"]),
         cost_basis=cost_bases[segment.start],
         self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,

@@ -2,17 +2,23 @@
 suite (see docs/superpowers/specs/2026-08-05-tie-detection-synthetic-
 validation-design.md)."""
 
+from dataclasses import dataclass
+
 from core.bess.dp_battery_algorithm import (
+    BATTERY_EXPORT_THRESHOLD_KWH,
     POWER_STEP_KW,
     POWER_TOLERANCE_KW,
     _compute_reward,
+    optimize_battery_schedule,
 )
+from core.bess.dp_constants import SOE_STEP_KWH
 from core.bess.models import OptimizationResult
 from core.bess.pwl_window_dp import (
     resolve_pwl_window,
     run_pwl_window_backward_induction,
 )
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import _scenario_inputs
 from core.bess.tie_detection import Window, epsilon_for_period
 
 # Must equal `detect_tie_windows`' own `pad` default: the measured segment has
@@ -388,3 +394,78 @@ def segment_reference_cost(
         soe = next_soe
 
     return reference_cost
+
+
+@dataclass(frozen=True)
+class ScenarioMeasurement:
+    """One scenario's coverage measurement: how close every period's margin
+    ratio sat to the theoretical snap-noise floor, plus the SEK value of the
+    single closest near miss (`None` if the scenario had nothing measurable --
+    see `near_miss_segment`)."""
+
+    margin_ratio_counts: dict[str, int]
+    financial_impact_sek: float | None
+
+
+def measure_scenario(scenario: dict) -> ScenarioMeasurement:
+    """Run the hybrid DP on `scenario`, then measure its tie-detection
+    coverage: a margin-ratio histogram over every period, and the SEK value of
+    the closest near miss the detector did not flag.
+
+    `import_cap_kwh=None` throughout: no fixture in the current suite (see
+    `core/bess/tests/unit/data/`) sets a `home` block, so `_scenario_inputs`
+    never produces an import cap for this harness to thread.
+    """
+    inputs = _scenario_inputs(scenario)
+    diagnostics: dict = {}
+    result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
+
+    margin_ratio_counts = classify_margin_ratios(
+        diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
+    )
+
+    segment = near_miss_segment(
+        diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
+    )
+    if segment is None:
+        return ScenarioMeasurement(margin_ratio_counts, None)
+
+    period_costs, cost_bases = replay_schedule(
+        result,
+        buy_price=inputs["buy_price"],
+        sell_price=inputs["sell_price"],
+        home_consumption=inputs["home_consumption"],
+        solar_production=inputs["solar_production"],
+        battery_settings=inputs["battery_settings"],
+        dt=inputs["period_duration_hours"],
+        initial_soe=inputs["initial_soe"],
+        initial_cost_basis=inputs["initial_cost_basis"],
+        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+        import_cap_kwh=None,
+    )
+    hybrid_segment_cost = sum(period_costs[segment.start : segment.end])
+
+    # NOT diagnostics["soe_trajectory"] -- that copy is recorded before the
+    # hybrid splices any re-solved window and so differs from the schedule
+    # actually reported inside one (see segment_reference_cost's docstring).
+    soe_trajectory = [inputs["initial_soe"]] + [
+        period.energy.battery_soe_end for period in result.period_data
+    ]
+    reference_cost = segment_reference_cost(
+        segment,
+        buy_price=inputs["buy_price"],
+        sell_price=inputs["sell_price"],
+        home_consumption=inputs["home_consumption"],
+        solar_production=inputs["solar_production"],
+        battery_settings=inputs["battery_settings"],
+        dt=inputs["period_duration_hours"],
+        soe_trajectory=soe_trajectory,
+        cost_basis=cost_bases[segment.start],
+        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+        import_cap_kwh=None,
+    )
+
+    delta = hybrid_segment_cost - reference_cost
+    # A negative delta is solver noise (segment_reference_cost is not a
+    # proven optimum), not a real finding -- never report a negative impact.
+    return ScenarioMeasurement(margin_ratio_counts, max(0.0, delta))

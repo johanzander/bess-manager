@@ -10,9 +10,12 @@ from core.bess.dp_battery_algorithm import (
 from core.bess.pwl_window_dp import PWLWindowUnderRefinedError
 from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import _scenario_inputs
+from core.bess.tests.synthetic import measure_tie_coverage
 from core.bess.tests.synthetic.measure_tie_coverage import (
     TIE_WINDOW_PAD,
+    ScenarioMeasurement,
     classify_margin_ratios,
+    measure_scenario,
     near_miss_segment,
     replay_schedule,
     segment_reference_cost,
@@ -458,3 +461,74 @@ def test_refuses_to_measure_a_scenario_with_export_curtailment_enabled():
             self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
             import_cap_kwh=None,
         )
+
+
+# --------------------------------------------------------------------------
+# measure_scenario -- the full harness, wired end to end
+# --------------------------------------------------------------------------
+
+
+@pytest.mark.slow
+def test_measure_scenario_reports_a_real_non_zero_near_miss():
+    """The "near miss found, financial impact computed" path, end to end.
+
+    Same fixture and segment as
+    `test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all` above,
+    which independently pins the delta at 0.078224 SEK by calling
+    `replay_schedule`/`segment_reference_cost` directly. This test exercises
+    the same numbers through the public `measure_scenario` entry point, so a
+    wiring mistake in `measure_scenario` itself (wrong segment, wrong slice,
+    wrong SOE trajectory) would show up here even though the lower-level
+    pieces are already covered individually.
+    """
+    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+
+    measurement = measure_scenario(scenario)
+
+    assert isinstance(measurement, ScenarioMeasurement)
+    assert sum(measurement.margin_ratio_counts.values()) == len(
+        scenario["home_consumption"]
+    )
+    assert measurement.financial_impact_sek == pytest.approx(0.078224, abs=1e-5)
+
+
+@pytest.mark.slow
+def test_measure_scenario_reports_none_when_nothing_is_measurable():
+    """The "no near miss" path: every period is a detector blind spot.
+
+    Mirrors `test_scenario_with_no_measurable_period_reports_nothing_rather_
+    than_guessing` above, which pins `near_miss_segment` returning `None`
+    directly on this fixture. `measure_scenario` must propagate that as
+    `financial_impact_sek=None` rather than measuring an arbitrary segment.
+    """
+    scenario = load_test_scenario("historical_2025_01_05_no_spread_no_solar")
+
+    measurement = measure_scenario(scenario)
+
+    assert measurement.financial_impact_sek is None
+    assert sum(measurement.margin_ratio_counts.values()) == len(
+        scenario["home_consumption"]
+    )
+
+
+@pytest.mark.slow
+def test_measure_scenario_floors_a_negative_delta_at_zero(monkeypatch):
+    """`segment_reference_cost` can legitimately undershoot the hybrid (a
+    known PWL solver limitation, see `segment_reference_cost`'s docstring) --
+    when it does, `measure_scenario` must report "no measurable miss"
+    (0.0), never a negative "impact". No fixture in the current suite happens
+    to trigger a negative delta on its near-miss segment, so this pins the
+    flooring directly: monkeypatch `segment_reference_cost` to return a cost
+    far above the hybrid's, forcing a negative delta, and assert it comes out
+    as 0.0 rather than negative.
+    """
+    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    monkeypatch.setattr(
+        measure_tie_coverage,
+        "segment_reference_cost",
+        lambda *args, **kwargs: 1_000_000.0,
+    )
+
+    measurement = measure_scenario(scenario)
+
+    assert measurement.financial_impact_sek == 0.0

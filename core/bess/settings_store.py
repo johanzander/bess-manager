@@ -462,7 +462,7 @@ class SettingsStore:
                 "octopus": {},
                 "entsoe": {"entity": ""},
             },
-            "growatt": {"inverter_type": "", "device_id": ""},
+            "growatt": {"device_id": ""},
             "inverter": {
                 "platform": "",
                 "device_id": "",
@@ -628,16 +628,16 @@ class SettingsStore:
 
         growatt = self.data.get("growatt")
         if isinstance(growatt, dict):
-            from api_conversion import UI_TYPE_TO_PLATFORM
+            from api_conversion import LEGACY_INVERTER_PLATFORM_MAP
 
             old_type = growatt.get("inverter_type", "")
             inverter = dict(self.data.get("inverter", {}))
             if (
                 old_type
                 and not inverter.get("platform")
-                and old_type in UI_TYPE_TO_PLATFORM
+                and old_type in LEGACY_INVERTER_PLATFORM_MAP
             ):
-                platform = UI_TYPE_TO_PLATFORM[old_type]
+                platform = LEGACY_INVERTER_PLATFORM_MAP[old_type]
                 inverter["platform"] = platform
                 if not inverter.get("device_id") and growatt.get("device_id"):
                     inverter["device_id"] = growatt["device_id"]

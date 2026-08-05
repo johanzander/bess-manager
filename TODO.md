@@ -1,7 +1,7 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
-## �🔴 **CRITICAL PRIORITY** (System Reliability)
+## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
 ### 0. **Fix Battery Discharge Power Control Bug**
 
@@ -87,10 +87,6 @@
 
 
 
-### ~~**Improve InfluxDB health check error messages in UI**~~ ✅ Completed (v8.2.1)
-
-**Resolution**: HTTP 401/403/404 now show actionable messages; ConnectionError shows the URL that failed.
-
 ### 1. **Improve Battery SOC and Actions Component**
 
 **Impact**: Medium-High | **Effort**: High | **Dependencies**: Backend cost calculations
@@ -121,6 +117,9 @@
 ---
 
 ### 2. **Complete Decision Intelligence Implementation**
+
+> **Superseded — do not start.** See "Scrap the Decision Intelligence framework"
+> under TECHNICAL DEBT. The recommendation is to delete this path, not finish it.
 
 **Impact**: Medium-High | **Effort**: Medium | **Dependencies**: `decision_intelligence.py`, `sensor_collector.py`, `dp_battery_algorithm.py`
 
@@ -173,6 +172,11 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 
 ### 5. **Enhance Insights Page with Decision Detail**
 
+> **Blocked on the same decision.** See "Scrap the Decision Intelligence
+> framework" under TECHNICAL DEBT. The goal (explain DP decisions to users) is
+> still valid; the vehicle should be the AI chat panel, not another orphaned
+> component. Do not start before that decision lands.
+
 **Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
 
 **Current State**: `InsightsPage.tsx` renders `PredictionAnalysisView` but lacks decision reasoning, algorithm transparency, and confidence metrics
@@ -218,46 +222,6 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 - Update frontend to show demo mode indicators
 - Ensure optimization algorithms work with mock data
 
-## 📄 **DOCUMENTATION IMPROVEMENTS**
-
-### Improve Consumption Forecast Documentation
-
-**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
-
-**Current gap**: Step 3 explains *how* to create the 48h average sensor but not *why* it works or how to tune it for different households.
-
-**What to add**:
-
-- Explain what BESS does with the sensor: the DP optimizer uses the current sensor value as the predicted consumption for all future periods in the optimization horizon.
-- Explain why the battery-active filter matters: without it, battery discharge power inflates the apparent home consumption, causing the optimizer to over-predict load and charge more aggressively than needed.
-- Explain how to tune for your household:
-  - The 48h window is a good default — it captures both weekday and weekend patterns.
-  - If your consumption has strong seasonal variation (e.g. heat pump), consider a shorter window (12-24h) so the average adapts faster.
-  - If you have large predictable loads (sauna, hot tub), the average smooths these out — the optimizer will not plan for a 3 kW sauna spike at 19:00 specifically.
-  - EV charging: whether to include or exclude depends on whether BESS should see EV charging as "normal home load" (include → optimizer plans for it) or as a separate managed load (exclude → optimizer ignores it, relies on discharge inhibit sensor instead).
-
----
-
-### Improve EV Charging / Discharge Inhibit Documentation
-
-**Impact**: Medium | **Effort**: Low | **Dependencies**: `docs/INSTALLATION.md`
-
-**Current gap**: Line 172 says "EV charging: Exclude if managed separately. Include if you want BESS to optimize around it." — too brief. The discharge inhibit sensor is not explained at all.
-
-**What to add**:
-
-BESS does not control EV charging — it is designed to work in parallel with it. Normally both the car and the battery charge when electricity is cheap, so there is no conflict.
-
-The exception is **Tibber grid rewards** (and similar grid balancing programs). Grid rewards can start EV charging even when prices are not at their lowest, because Tibber compensates you separately for supporting grid balancing.
-
-BESS auto-detects any `binary_sensor` whose entity ID ends with `_charging` or `_is_charging` (e.g. `binary_sensor.zap263668_charging`) and treats it as a **discharge inhibit** signal. When the sensor is `on`, BESS will not discharge the battery even if the schedule says to.
-
-If BESS were to discharge the battery at the same time, that energy would flow to the car instead of from the grid — you would miss out on the grid reward income while also losing the battery support you would have had for the home.
-
-The discharge inhibit only blocks discharging — it does not change the TOU schedule, trigger charging, or interfere with the EV charging session in any way.
-
----
-
 ## 🟢 **LOW PRIORITY** (Polish)
 
 ### 7. Add Prediction accuracy and history
@@ -265,13 +229,6 @@ The discharge inhibit only blocks discharging — it does not change the TOU sch
 ### 8. Intent is not always correct for historical data
 
 **Current State**: The inverter sometimes charges/discharges small amounts like 0.1kW. Or its a rounding error or inefficiencies losses when calculating flows. I don't think its a strategic intent, but it is interpreted as one.
-
-### ~~9. Add multi day view~~ ✅ Completed (v7.2.0-v7.3.0, PRs #21-#22)
-
-**Problem**: Today we only operate on 24h intervals.
-But at noon every day we get tomorrows schedule. We could use this information to take better economic decisions. It would mean changing a lot of places where 24h is hard coded.
-
-**Resolution**: The DP optimizer now considers up to 192 periods (2 days) when tomorrow's prices are available (PR #21). Dashboard charts (PR #22) and inverter schedule overview (PR #23) display the extended horizon. TOU deployment remains today-only due to Growatt hardware limitations.
 
 ### **Make ha_statistics consumption forecast work on all platforms**
 
@@ -293,19 +250,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 
 **Files**: `core/bess/settings.py`, `backend/settings_store.py`, `docs/USER_GUIDE.md`
 
-### **Suppress retry warnings for expected Nordpool "tomorrow not available" responses**
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `official_nordpool_source.py`, `ha_api_controller.py`
-
-**Description**: The Nordpool integration returns HTTP 500 when tomorrow's prices aren't published yet (typically before ~13:00 CET). `_api_request` logs a WARNING on each retry attempt, producing misleading warnings every optimization cycle overnight (00:00–12:00). The retry eventually fails, but `get_combined_prices()` in `price_manager.py` handles this gracefully — it catches the exception and falls back to today-only prices with an INFO log. The warnings are harmless but noisy and can alarm users reading logs.
-
-**Options**:
-1. Have `official_nordpool_source.py` catch the 500 for tomorrow and raise a specific "not available yet" exception that `_api_request` doesn't retry
-2. Add a `suppress_retry_warnings=True` param to `_api_request` for expected-failure calls
-3. Accept the noise as-is (log-level only, no UI banners)
-
-**Files**: `core/bess/official_nordpool_source.py`, `core/bess/ha_api_controller.py`, `core/bess/price_manager.py`
-
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
 ### **Retry discovery on startup when HA WebSocket is not ready**
@@ -315,12 +259,6 @@ But at noon every day we get tomorrows schedule. We could use this information t
 **Description**: BESS Manager starts as an HA add-on and can launch before HA's WebSocket API is fully ready. When the initial `discover_integrations()` WS connection fails during early boot, `nordpool_config_entry_id` stays None and the system enters degraded mode with no price data — even though HA becomes ready seconds later. Observed on Niklas's system (b18, 2026-05-26): WS failed at 05:08 (4 min after boot), but by 05:45 discovery worked fine.
 
 **Fix**: Re-attempt discovery with short backoff (e.g. 5s, 10s, 20s) until `config_entry_id` is populated or a max number of retries is reached.
-
----
-
-### ~~**Complete or Remove EV Energy Meter Integration**~~ ✅ Completed (v8.0.0)
-
-**Resolution**: EV energy meter dead code removed entirely in v8.0.0 release.
 
 ---
 
@@ -376,9 +314,9 @@ Report:
 
 **Impact**: Low (only at mode switch) | **Effort**: Medium
 
-**Description**: `reinitialize_tou_schedule()` is called directly inside the `async def patch_settings` handler, which blocks the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
+**Description**: `BatterySystemManager.set_demo_mode()` (formerly `reinitialize_tou_schedule()`) is called directly inside the `async def patch_settings` handler. On the demo→live transition it runs `_initialize_tou_schedule_from_inverter()` + `initialize_hardware()`, blocking the event loop while performing up to 36 synchronous HTTP calls to Home Assistant (reading all 9 TOU slots × 4 entities each). Should be offloaded to a background thread or thread pool executor.
 
-**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
+**File**: `backend/api.py` — `patch_settings` / `setup_complete`, `core/bess/battery_system_manager.py` — `set_demo_mode`, `core/bess/ha_api_controller.py` — `read_tou_segments_from_entities`
 
 ---
 
@@ -386,7 +324,7 @@ Report:
 
 **Impact**: Low | **Effort**: Low
 
-**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup, and the same underlying path is triggered again by `reinitialize_tou_schedule()` when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
+**Description**: `BatterySystemManager.start()` calls `_initialize_tou_schedule_from_inverter()` at startup (`battery_system_manager.py:533`), and the same path is triggered again by `set_demo_mode(False)` (`battery_system_manager.py:574`, formerly `reinitialize_tou_schedule()`) when switching demo→live. There is no threading lock protecting against concurrent calls. If both happen in rapid succession (fast live switch during startup), both threads may issue overlapping hardware writes.
 
 **File**: `core/bess/battery_system_manager.py`
 
@@ -524,6 +462,121 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
+### Scrap the Decision Intelligence framework
+
+**Impact**: Medium (removes ~2000 lines of unreachable code) | **Effort**: Low-Medium | **Dependencies**: none — nothing routed consumes it
+
+**Decision**: the *goal* (explain DP decisions to users, because backward
+induction is opaque) is valid and unmet. This *implementation* should go. It
+narrates the chosen action from its own energy flows — a restatement of numbers
+the actions table already shows — rather than the counterfactual the user
+actually wants ("why 02:00 and not 03:00", "why 80% and not 100%"). The DP
+evaluated those alternatives; the framework never captured the comparison.
+
+Evidence it was never load-bearing: `future_value` — the one field carrying
+anything the user could not already see — was hardcoded `0.0` until #353 fixed
+it in 2026, and nobody noticed, because nothing rendered it. Two orphaned
+attempts at the same feature (`DecisionFramework.tsx`,
+`TableBatteryDecisionExplorer.tsx`) were never routed in `App.tsx`.
+
+**What did work, and why**: PR #358 (`visualize-debug-log` skill, still open on
+`feat/visualize-debug-log-skill`) is the successful version — for *maintainers*,
+not end users. It renders `shadow_price` against the price it is actually weighed
+against, `cost_basis` + cycle cost as a breakeven, and `reward + future_value` as
+"total value (top candidate)". That is the **counterfactual** framing this
+framework never had: what the DP compared, not a retelling of what it chose. It
+also deliberately skips `immediate_value`, with a comment saying it duplicates the
+dashboard's Net Grid Cost / Net Savings. Keep that as the model if the end-user
+version is ever attempted: show the comparison, not the narration.
+
+**Delete**:
+
+- `frontend/src/components/DecisionFramework.tsx` (608 lines, imported by nothing)
+- `frontend/src/lib/decisionIntelligenceAPI.tsx` (33 lines)
+- `frontend/src/components/TableBatteryDecisionExplorer.tsx` (imported by nothing)
+- `backend/api.py`: `convert_real_data_to_mock_format` (876-1034),
+  `get_decision_intelligence` + the `/api/decision-intelligence` route
+  (1037-1084), `get_decision_intelligence_mock` (1086-1509 — 424 lines of
+  hardcoded demo prices with its route decorator already commented out)
+- `core/bess/decision_intelligence.py`: `generate_advanced_flow_pattern_name`,
+  `generate_strategic_pattern_name`, `generate_flow_description`,
+  `generate_economic_chain`, `calculate_detailed_flow_values`,
+  `extract_economic_values_from_reward` — all have **zero** references outside
+  the module once the above is gone
+- `core/bess/models.py` `DecisionData` fields: `pattern_name`, `description`,
+  `economic_chain`, `immediate_value`, `net_strategy_value`,
+  `advanced_flow_pattern`, `detailed_flow_values`, `future_target_hours` —
+  every consumer of these lives inside the deleted `api.py` block.
+  **Not `future_value`** — see Keep.
+
+**Keep** (live and load-bearing, despite sharing the module):
+
+- `classify_strategic_intent()` — 19 external references; drives the TOU
+  hardware mode via `INTENT_TO_CONTROL` and the intent badges in
+  `BatteryActionsTable`. Has its own postmortems (#275, #282). Move it out of
+  `decision_intelligence.py` into a module whose name reflects that it is
+  control-path code, not reporting.
+- `create_decision_data()`, reduced to the fields that survive.
+- `DecisionData.strategic_intent`, `observed_intent`, `battery_action`,
+  `cost_basis`, `shadow_price` (the last gates SOLAR_EXPORT discharge at
+  `battery_system_manager.py:2659`; `cost_basis` and `shadow_price` are also
+  both rendered by PR #358).
+- **`DecisionData.future_value` and `_build_period_data`'s `continuation_value`
+  parameter** — PR #358 consumes them: `total_value = reward + future_value`
+  ("total value (top candidate)") plus a "future value / best achievable outcome
+  from the resulting battery level onward" tooltip row. #353's fix stays. Keep
+  `core/bess/tests/unit/test_decision_intelligence.py` (its regression test) too.
+
+**Ripple**:
+
+- `e2e/tests/api-smoke.spec.ts:38` and `e2e/tests/api-contracts.spec.ts:312`
+  both assert on `/api/decision-intelligence` — delete those two blocks.
+- `core/bess/tests/unit/test_data_models.py` asserts the removed fields around
+  lines 338-364 — trim to the surviving ones.
+- **PR #358 coordination**: `build_chart.py` extracts `economic_chain` and
+  `immediate_value` into its ROWS (two sites each, both `dec.get(...)` with
+  defaults) but renders neither. Dropping those four lines plus the `ROWS`
+  description in `SKILL.md` is the whole change there. Since #358 is still
+  **open**, either land it first and clean up after, or fold the four-line
+  removal into it — do not delete the fields while the PR is in flight without
+  telling it.
+- No performance change: `create_decision_data` runs once per reconstructed
+  period in `_build_period_data`, not in the DP inner loop.
+
+**Retires** TODO items 2 and 5 and the #353 `immediate_value` note below.
+
+**Cost of the decision**: none to #353 — its `future_value` fix and
+continuation-value plumbing survive, because PR #358 renders them. What is lost
+is only the templated narration and the two orphaned UIs.
+
+**Where "explain the decision" lives afterwards**: PR #358's skill for
+maintainers (bundle-level, counterfactual, already proven — it caught the
+#342/#350 discrepancy), and the AI chat panel (`backend/ai_chat.py` +
+`docs/agents/bess-knowledge.md`) for users, which can answer a specific question
+at the depth asked instead of emitting a fixed string per intent. If a
+user-facing UI is ever wanted, build it on #358's math, not on `economic_chain`.
+
+---
+
+### Decide the fate of `EnergySankeyChart.tsx`
+
+**Impact**: Low | **Effort**: Low (decision only)
+
+**Description**: `frontend/src/components/EnergySankeyChart.tsx` is imported by
+nothing — a third orphaned visualization alongside the two in the Decision
+Intelligence scope above. Unlike those, it is **energy-flow visualization, not
+decision explanation**, so it is a separate question and is deliberately left
+in place for now: a Sankey of solar → home / battery / grid may still earn a
+place on the Dashboard or Insights page in a way the decision-narration
+components never could.
+
+**Decide**: route it (Dashboard or Insights) or delete it. Do not let it drift
+as a fourth orphan.
+
+**Files**: `frontend/src/components/EnergySankeyChart.tsx`
+
+---
+
 ### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/historical_data_store.py`, `core/bess/prediction_snapshot.py`, `core/bess/daily_view_store.py`
@@ -541,31 +594,6 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 **Description**: `SolaxController` (native SolaX inverters) and `SolaxModbusGrowattController` in `control_mode="vpp"` (Growatt via solax_modbus) both drive hardware through the same conceptual VPP power + remote-control model, but two Growatt-specific hardware fixes were never ported to SolaX: (1) #355's SOLAR_EXPORT grid-first hold (`block_passive_charging` -- Growatt actively holds the battery so solar bypasses to grid; SolaX still calls `set_solax_vpp_disabled()`, which lets solar passively recharge the battery during SOLAR_EXPORT), and (2) #413's LOAD_SUPPORT remote-control release (Growatt releases control to the inverter's own load-following self-use; SolaX still forces a fixed discharge-rate watt target). `SolaxController`'s own docstring (`solax_controller.py:120-126`) already flags the SOLAR_EXPORT gap as known and unverified on real hardware. These two controllers should probably converge on identical VPP semantics, but doing so changes real SolaX hardware behavior and needs its own hardware validation -- out of scope for the issue #415 display-only fix (`docs/superpowers/specs/2026-07-29-control-model-display-design.md`), which instead surfaces this divergence transparently (each controller's displayed VPP power/remote-control state reflects its own actual, currently-different, behavior).
 
 **Files**: `core/bess/solax_controller.py`, `core/bess/solax_modbus_growatt_controller.py`
-
----
-
-### Savings history: untested error paths and swallowed fetch failures
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
-
-**Description**: Two related test/UX gaps from the Daily Savings History feature. First, none of the three new `/api/savings/*` routes in `backend/api.py` has a test exercising its failure path — all three share an identical try/except-to-500 wrapper with no coverage proving it actually returns a 500 on an underlying error. Second, `SavingsHistorySection` fetches disk usage with a bare `.catch(() => {})`, so a failed request silently renders a plausible-but-wrong "0 days recorded" instead of an error state, unlike `SavingsAggregateView`, which has proper loading/error handling for the same kind of fetch. Neither is architecturally significant, but both are cheap to close and worth picking up together.
-
-**Files**: `backend/api.py`, `frontend/src/components/settings/SavingsHistorySection.tsx`
-
----
-
-### Move inverter-specific logic out of BatterySystemManager
-
-**Impact**: Low | **Effort**: Medium | **Dependencies**: `InverterController` base class
-
-**Description**: `BatterySystemManager` contains platform-specific checks like `if self.inverter_platform == "solax": return` in `adjust_charging_power()`. This logic belongs in the inverter controller layer — each controller should implement (or no-op) methods via the `InverterController` interface, so `BatterySystemManager` never branches on platform strings.
-
-**Examples**:
-
-- `adjust_charging_power()` — no-op for SolaX, active for Growatt
-- `grid_charge_enabled()` in `ha_api_controller.py` — not applicable to SolaX, logs a spurious WARNING
-
-**Files**: `core/bess/battery_system_manager.py`, `core/bess/inverter_controller.py`, `core/bess/solax_controller.py`, `core/bess/ha_api_controller.py`
 
 ---
 
@@ -601,7 +629,9 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ### FormattingContext Architecture
 
-**Impact**: Low | **Effort**: Low (45 min) | **Dependencies**: None
+**Impact**: Low | **Effort**: Medium-High (originally estimated 45 min — see below) | **Dependencies**: None
+
+**Status**: Parked deliberately. **Do not start until the trigger below fires.**
 
 **Description**: Replace currency parameter passing with FormattingContext dataclass for better extensibility and i18n support.
 
@@ -611,11 +641,21 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 **Benefits**: Type safety, extensibility for locale/timezone/precision without signature changes, future-proof for internationalization
 
+**Trigger — do it when a second field actually exists**: i.e. when locale,
+timezone, or configurable precision is genuinely requested. Until then the
+context would carry exactly one field (currency), so its shape has to be
+guessed, and guessing wrong means doing the migration twice.
+
+**Why not now** (measured 2026-08-05): the "45 min" estimate is wrong — there
+are ~163 `create_formatted_value()` call sites across `backend/` and `core/`,
+5 `from_internal()` implementations, and ~120 currency references in
+`api_dataclasses.py` alone. Every one of them feeds a number the dashboard
+renders, so the best possible outcome is that nothing changes visibly: pure
+regression risk for no user-facing payoff, and nothing that would earn a
+CHANGELOG line. When the trigger fires, the refactor pays for itself
+immediately and the context's shape is dictated by a real requirement.
+
 **Files**: `backend/api_dataclasses.py`, `backend/api.py`
-
-### ~~Hardcoded Fallback Values Violating CLAUDE.md~~ ✅ Completed (v8.2.1)
-
-**Resolution**: All `hasattr` guards and hardcoded fallback values removed from `api.py`. System now accesses `battery_settings`, `controller`, `price_manager`, `_schedule_manager`, and `has_critical_sensor_failures` directly. Added `_get_intent_description()` to `SphScheduleManager` to eliminate polymorphism-related `hasattr`.
 
 ### Upstream PR: growatt_server should register services per device type
 
@@ -659,55 +699,13 @@ Both are called sequentially from `run_setup_discovery()` in `api.py`. They serv
 
 **Files**: `core/bess/ha_api_controller.py` (`_parse_ha_metadata`, `discover_sensors_from_registry`), `backend/api.py` (`run_setup_discovery`)
 
-### Remove device_id discovery fallbacks and dead `device_sn` code
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `api.py`, `sensorDefinitions.ts`
-
-**Description**: Device ID discovery has two strategies: config_entry match (primary, always works) and identifiers/SN match (fallback). The fallback depends on `_extract_growatt_device_sn()`, which fragily parses SOC entity IDs to extract the serial number. Real HA devices always have `config_entries` on the device object, so the fallback is unnecessary.
-
-Additionally, `device_sn` is extracted, returned in the API response as `deviceSn`, and declared in the frontend `DiscoveryResult` type — but nothing in the frontend or backend ever reads it. It's dead code end to end.
-
-**What to remove**:
-- `_extract_growatt_device_sn()` method
-- Identifiers-based device_id fallback (strategy 2 in `_parse_ha_metadata`)
-- `device_sn` from discovery result dict and API response
-- `deviceSn` from frontend `DiscoveryResult` type
-
-**Files**: `core/bess/ha_api_controller.py`, `backend/api.py`, `frontend/src/components/settings/SensorConfigSection.tsx`
-
----
-
-### Sunset the legacy `growatt.inverter_type` config key
-
-**Impact**: Low | **Effort**: Low | **Dependencies**: `settings_store.py`, `battery_system_manager.py`, `api.py`
-
-**Description**: `inverter.platform` has been the source of truth since the multi-platform work, and `_migrate_schema()` rewrites `growatt.inverter_type` → `inverter.platform` on every load. The legacy key nonetheless survives in three live code paths, each of which has to keep re-deriving what the migration already settled:
-
-- `SettingsStore._bootstrap_defaults()` still seeds `growatt: {"inverter_type": ""}` into fresh installs, so new users get a key that exists only for backwards compatibility with themselves.
-- `BatterySystemManager._resolve_initial_platform()` falls back to it at startup, via a second platform map (`_INVERTER_TYPE_TO_PLATFORM`) that duplicates `UI_TYPE_TO_PLATFORM` in `api_conversion.py`.
-- `PATCH /api/settings` accepts `growatt.inverterType` and switches the live platform from it. That path is not reachable from the current frontend, and it was the source of a real bug in #451: it switched the controller without persisting `inverter.platform`, so anything resolving from the store (the vendor service domain) kept addressing the previous platform's integration until a restart.
-
-That third case is the argument for removing it rather than maintaining it — a legacy path no UI exercises is one nothing regression-tests either, so it silently drifts out of step with whatever the current path learns to do.
-
-**What to remove**:
-- `inverter_type` from `_bootstrap_defaults()`'s `growatt` section
-- The `growatt.inverter_type` fallback in `_resolve_initial_platform()`, and `_INVERTER_TYPE_TO_PLATFORM` with it
-- The `inverterType` branch in `patch_settings`'s `growatt` handler
-- Keep `_migrate_schema()`'s rewrite — it is what makes removal safe for installs predating `inverter.platform`, and it should outlive the rest by at least one release
-
-**Files**: `core/bess/settings_store.py` (`_bootstrap_defaults`, `_migrate_schema`), `core/bess/battery_system_manager.py` (`_resolve_initial_platform`), `backend/api.py` (`patch_settings`), `core/bess/tests/unit/test_fresh_install_startup.py`, `core/bess/tests/unit/test_bsm_settings_and_lifecycle.py`
-
----
-
 ### Other Technical Debt
 
 - Refactor all API endpoints to use dataclass-based serialization (with robust mapping for all field variants) for consistent, type-safe, and future-proof API responses. Ensure all details and fields are preserved as in the original dict-based implementation.
-- Check if all sensors in config.yaml are actually needed and used (lifetime e.g.)
 
 **From #221 (spot_multiplier/export_spot_multiplier) code review — deferred cleanup, not bugs**:
 
 - `backend/api.py`'s `_pricing_defaults_for_discovery()` duplicates the provider-priority chain (`octopus > entsoe > nordpool_official > nordpool_hacs`, gated on `not nordpool_found`) already computed independently in `frontend/src/pages/SetupWizardPage.tsx`'s `autoProvider` logic. The two can drift out of sync if the priority order changes in only one place. Consider deriving both from a single shared source (e.g. have the backend return the resolved provider and have the frontend just consume it, instead of recomputing it).
-- `backend/api_conversion.py`'s `PRICE_STORE_TO_API` (startup/read path) and `backend/api.py`'s `_PRICE_MAP` in `setup_complete()` (wizard-write path) are two independently-maintained camelCase↔snake_case tables for the same `PriceSettings` fields. The new `TestPriceModelAttrsConsistency` contract test (added in #221) only guards `PRICE_STORE_TO_API` — `_PRICE_MAP` can still silently drift for a future field with no test to catch it. Consider consolidating to one table, or extending the contract test to also cover `_PRICE_MAP`.
 - `backend/settings_store.py`'s `_migrate_schema()` electricity_price migration block hardcodes `spot_multiplier`/`export_spot_multiplier`/`use_actual_price` by name instead of iterating `PRICE_STORE_TO_API` + `PriceSettings` defaults generically. Every future `PriceSettings` field will need a new hand-written migration block, and it's easy to forget (silent `ValueError` in `build_system_settings()` at startup for existing users' configs). Consider making the migration generic against `PRICE_STORE_TO_API`.
 
 **TOU Segment Matching is Fragile**:
@@ -716,26 +714,14 @@ The current TOU comparison uses exact matching on start_time, end_time, batt_mod
 - Overlap-based matching: If segments overlap significantly and have same mode, treat as "same"
 - Smart merging: Detect when segments can be extended/shortened rather than replaced
 
-**Remove Hourly Aggregation Legacy**:
-With 15-min TOU resolution implemented, the hourly aggregation code is now legacy. Power rates are already set per-period in `_apply_period_settings()`. The following should be refactored or removed:
+**Remove Hourly Aggregation Legacy** (mostly done — residual only):
+The controller-side hourly aggregation is gone: `_calculate_hourly_settings_with_strategic_intents()`, `get_hourly_settings()`, `_get_hourly_intent()` and the `hourly_settings` dict no longer exist, and `adjust_charging_power()` reads `get_period_settings(current_period)` directly. What remains is display-side:
 
-- `_calculate_hourly_settings_with_strategic_intents()` - aggregates 15-min periods back to hourly
-- `get_hourly_settings()` - returns hourly settings (used by power monitor and display)
-- `_get_hourly_intent()` - majority voting for hourly intent (no longer needed for TOU)
-- `hourly_settings` dict - stores the aggregated hourly data
-
-To remove:
-
-1. Update `adjust_charging_power()` in `battery_system_manager.py` to use period-based settings
-2. Update schedule display table to show 15-min periods (or keep hourly summary for readability)
-3. Update `get_strategic_intent_summary()` to work directly with periods
-4. Remove the hourly aggregation methods listed above
+- `backend/api.py`'s `_get_hourly_settings_from_periods()` — a compatibility shim that majority-votes the 4 quarterly intents of an hour for API endpoints that still return hourly rows. Removable once the schedule display table renders 15-min periods.
+- `get_strategic_intent_summary()` (`core/bess/inverter_controller.py`) still summarises per hour rather than per period.
 
 **Re-run optimization on energy prediction method change**:
 When the user changes the consumption strategy (e.g. from `sensor` to `fixed`), the optimization should re-run immediately with the new prediction method rather than waiting for the next scheduled cycle. The prediction cache should be cleared and a fresh optimization triggered in the same request that saves the new strategy.
-
-**Sensor Collector InfluxDB Usage**:
-Based on the code analysis: The function `_get_hour_readings` in SensorCollector is called by `collect_energy_data(hour)`. This is not called every hour automatically by the system; it is called when the system wants to collect and record data for a specific hour. The actual historical data for the dashboard is served from the HistoricalDataStore, which is an in-memory store populated by calls to `record_energy_data` (which uses the output of `collect_energy_data`).
 
 ## From #215 health-recovery-banner code review (non-blocking, low severity)
 
@@ -747,26 +733,6 @@ Based on the code analysis: The function `_get_hour_readings` in SensorCollector
 
 **`/api/health-recoveries` uses camelCase (`convert_keys_to_camel_case`) while sibling `/api/runtime-failures` returns raw snake_case `__dict__`**:
 Both are valid given each has its own matching frontend hook, but it's an inconsistent precedent for the next tracker-style endpoint someone adds. Worth standardizing next time either is touched.
-
-The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to reconstruct history) and whenever a new hour is completed and needs to be recorded. It is not called every hour by a scheduler, but it is called for each hour that needs to be reconstructed or recorded.
-
-## From #271 charge-power-rate fix code review (non-blocking, nice-to-have)
-
-**`InverterStatusDashboard.tsx`'s `batterySettings` state is now write-only**: after switching the "Charge Power Rate" tile to read `inverterStatus?.chargePowerRate` instead of `batterySettings?.chargingPowerRate`, nothing in the component reads `batterySettings` anymore — only `setBatterySettings` (from `fetchBatterySettings()`) is called. Left as-is deliberately to keep the fix minimal. Worth a follow-up to either remove the now-dead `fetchBatterySettings()` call/state or confirm another consumer still needs it.
-
-**File**: `frontend/src/components/InverterStatusDashboard.tsx`
-
----
-
-## From #249 net-grid-cost-savings-redesign whole-branch review (non-blocking, low severity)
-
-**`BatteryActionsTable.tsx` TOTAL footer row shows Actual Cost as the wear-inclusive total with no "of which wear" sub-line**, while every per-period row above it now carries that breakdown. Consistent with "table content otherwise unchanged" but the totals row is the one place the per-column wear breakdown silently drops. Purely cosmetic.
-
-**`SavingsPage.test.tsx` doesn't assert DOM order** of `SavingsAggregateView` vs `DetailedSavingsAnalysis`, even though their reorder was the one functional change in that task. Cosmetic reorder, not a regression risk worth a merge block, but a `compareDocumentPosition` assertion would close the gap cheaply if this file is touched again.
-
-**`today_view` is built unconditionally for `period=day`** in `backend/api.py` even when today is already persisted (post-rollover) or `count>1`, cases where `build_buckets` ignores it. One wasted `daily_view_builder.build_daily_view()` call per request; negligible cost.
-
----
 
 ## From #317 period-group intent reconciliation code review (non-blocking)
 
@@ -782,25 +748,21 @@ The `_get_hour_readings` (and thus the InfluxDB query) is called at startup (to 
 
 **`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).
 
-**`_interpolate_value`'s index clamp flattens continuation value below the SOE floor**: `V`'s grid (`soe_levels`) starts exactly at `min_soe_kwh`, so any `next_soe` below the floor clamps to `V_row[0]` regardless of how far below floor it is — candidates ending at different below-floor SoEs get identical continuation credit. Bounded in practice (discharge is already excluded below floor, and `next_soe` is monotonically non-decreasing once below floor) — not filed as an issue, just worth a comment in `_interpolate_value` noting the approximation if this file is touched again.
-
 ---
 
 ## From #353 immediate_value/future_value investigation (non-blocking)
 
 **`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
 
-**Suggestion**: remove `immediate_value` (and the `economic_chain` string's reliance on it) once a decision is made on `DecisionFramework.tsx`/`/api/decision-intelligence` — either wire it up to the real app using `grid_cost`/`netSavings` terminology instead of re-deriving a redundant metric, or delete the dead path entirely. Not filed as its own issue since it's a design/scope decision, not a bug.
+**Superseded** by "Scrap the Decision Intelligence framework" (TECHNICAL DEBT), which deletes this whole path.
+
+**Superseded**: the design decision this note was waiting on has been made — see
+"Scrap the Decision Intelligence framework" under TECHNICAL DEBT, which deletes
+the whole path (`immediate_value` included) rather than wiring it up.
 
 ---
 
 ## From #387 runtime power gap-fill code review (non-blocking)
-
-**`PowerSampleBuffer.consume()`'s `if values` guard is dead code** (`core/bess/power_sample_buffer.py`) — `record()` always appends immediately via `setdefault(...).append(watts)`, so no `values` list can ever be empty when `consume()` reaches it. Harmless but unnecessary defensiveness; inconsistent with the "no speculative fallbacks" convention.
-
-**`sample_live_power()`'s per-getter `entity_id`/skip handling is implicit rather than defensive-by-design** (`core/bess/sensor_collector.py`) — correct today, just worth a second look if the getter-based rewrite (done in the #387 final-review fix wave) is touched again.
-
-**Stale line-number citation in a test docstring** (`core/bess/tests/unit/test_sensor_collector_gapfill.py:7`) — cites the InfluxDB gap-fill `if` block at a line range that has drifted by one line from its actual current location (`252-263`) after later edits in the same file. Cosmetic only.
 
 **`backend/app.py` constructs `BESSController()` and calls `start_in_background()` at module level**, which is what forces `backend/tests/test_scheduler_jobs.py` to patch two unrelated methods (`SettingsStore._write`, `HomeAssistantAPIController.get_ha_config`) just to import the module safely for testing.
 

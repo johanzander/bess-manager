@@ -114,8 +114,6 @@ control path; **no silent fallbacks** (`docs/agents/rules.md`).
      `self.inverter_platform == "<platform_id>"` branch returning the new
      controller.
    - `VALID_PLATFORMS` ClassVar (line 187) — add `"<platform_id>"`.
-   - `_INVERTER_TYPE_TO_PLATFORM` (line 195) — add `"<platform_id>": "<platform_id>"`
-     plus any legacy alias.
 3. **`backend/settings_store.py`** → `VALID_PLATFORMS` — **defined twice
    (lines 35 and 58); update BOTH occurrences.** (Known wart — the tuple is
    duplicated.) Add new keys to `SHARED_SENSOR_KEYS` only if they are platform-
@@ -242,7 +240,7 @@ tester confirms (per `docs/agents/memory/` maturity conventions).
 | Model: charge/discharge period lists | `core/bess/growatt_sph_controller.py` (`GrowattSphController`) |
 | Model: local-Modbus TOU slots | `core/bess/solax_modbus_growatt_controller.py` (`SolaxModbusGrowattController`) |
 | Model: ephemeral VPP commands | `core/bess/solax_controller.py` (`SolaxController`) |
-| Controller factory + platform maps | `core/bess/battery_system_manager.py` (`_create_inverter_controller`, `VALID_PLATFORMS`, `_INVERTER_TYPE_TO_PLATFORM`, `switch_inverter_platform`) |
+| Controller factory + platform maps | `core/bess/battery_system_manager.py` (`_create_inverter_controller`, `VALID_PLATFORMS`, `switch_inverter_platform`) |
 | Settings platform list (×2) | `backend/settings_store.py` (`VALID_PLATFORMS` at L35 and L58, `SHARED_SENSOR_KEYS`) |
 | Detection + sensor suffix maps | `core/bess/ha_api_controller.py` (`*_SUFFIX_MAP`, `_*_MARKER_SUFFIX`, `_INVERTER_PLATFORMS`, `detect_inverter_integrations`) |
 | Debug export | `core/bess/debug_data_exporter.py` |

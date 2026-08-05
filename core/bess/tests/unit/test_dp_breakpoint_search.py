@@ -281,7 +281,7 @@ def test_compute_reward_self_throttle_threshold_is_parameterized():
     settings = make_battery_settings(max_discharge_power_kw=5.0)
     # power chosen so grid_exported lands strictly between 0 and 0.01 kWh
     # at dt=1.0h: home_consumption=1.0, discharge=1.005 kW -> export=0.005 kWh
-    reward_default, _ = _compute_reward(
+    reward_default, _, _ = _compute_reward(
         power=-1.005,
         soe=15.0,
         next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
@@ -294,7 +294,7 @@ def test_compute_reward_self_throttle_threshold_is_parameterized():
         solar_production=0.0,
         cost_basis=0.0,
     )
-    reward_no_throttle, _ = _compute_reward(
+    reward_no_throttle, _, _ = _compute_reward(
         power=-1.005,
         soe=15.0,
         next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
@@ -395,10 +395,10 @@ def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
     Candidates within TIE_DEDUP_SOE_KWH of the chosen next_soe are excluded
     from the runner-up search.
     """
-    # (value, power, next_soe, cost_basis, reward)
-    chosen = (10.0, 0.0, 5.0, 0.0, 0.0)
-    duplicate = (10.0, 0.0, 5.0, 0.0, 0.0)  # identical outcome -- not a tie
-    distinct = (9.0, -2.0, 5.0 + TIE_DEDUP_SOE_KWH + 0.1, 0.0, 0.0)
+    # (value, power, next_soe, cost_basis, reward, grid_imported)
+    chosen = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)
+    duplicate = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)  # identical outcome -- not a tie
+    distinct = (9.0, -2.0, 5.0 + TIE_DEDUP_SOE_KWH + 0.1, 0.0, 0.0, 0.0)
 
     assert _tie_margin([chosen, duplicate], best_index=0) == float("inf")
     assert _tie_margin([chosen, duplicate, distinct], best_index=0) == pytest.approx(
@@ -409,7 +409,7 @@ def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
 def test_tie_margin_is_infinite_without_a_distinct_alternative():
     """ "No distinct alternative was feasible" must read as "not tied", not
     as a zero margin that the detector would flag (#450)."""
-    only = (3.0, 0.0, 5.0, 0.0, 0.0)
+    only = (3.0, 0.0, 5.0, 0.0, 0.0, 0.0)
     assert _tie_margin([only], best_index=0) == float("inf")
 
 

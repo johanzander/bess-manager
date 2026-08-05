@@ -77,7 +77,7 @@ from core.bess.models import (
     OptimizationResult,
     PeriodData,
 )
-from core.bess.settings import BatterySettings
+from core.bess.settings import BatterySettings, HomeSettings
 
 # Configure logging
 logging.basicConfig(
@@ -198,6 +198,37 @@ def _effective_ac_cap_kwh(battery_settings: BatterySettings, dt: float) -> float
     )
 
 
+def _effective_import_cap_kwh(
+    home_settings: HomeSettings | None, dt: float
+) -> float | None:
+    """Per-period grid-import energy cap (kWh) derived from the house's fuse
+    service limit, or None when power monitoring is disabled (issue #429).
+
+    Multiplied by `phase_count`: each phase is an independent fuse, so a
+    balanced 3-phase house can import up to `phase_count` times a single
+    phase's ceiling before any individual phase is stressed. `HomePowerMonitor`
+    (`core/bess/power_monitor.py`) already relies on this same assumption at
+    runtime -- on a fully unloaded 3-phase house it authorizes the battery up
+    to its full `max_charge_power_w` (not a single phase's worth), since
+    `available_pct` is computed relative to `max_charge_power_w / phase_count`
+    per phase. `HomePowerMonitor` remains the real-time backstop against
+    unbalanced loads (it measures actual per-phase current and throttles
+    battery charging against the single worst-loaded phase, commit 37201cb9,
+    #11); the DP has no per-phase forecast to reproduce that live check, so it
+    caps against the balanced-load assumption instead of the unbalanced
+    worst case.
+    """
+    if home_settings is None or not home_settings.power_monitoring_enabled:
+        return None
+    return (
+        home_settings.voltage
+        * home_settings.max_fuse_current
+        * home_settings.safety_margin
+        * home_settings.phase_count
+        / 1000.0
+    ) * dt
+
+
 def _ac_flows(
     solar_production: float,
     home_consumption: float,
@@ -227,6 +258,28 @@ def _ac_flows(
     return grid_imported, grid_exported, clipped_solar
 
 
+def _ac_flows_grid(
+    solar_to_battery: np.ndarray,
+    battery_discharged: np.ndarray | float,
+    solar_production: float,
+    home_consumption: float,
+    ac_cap_kwh: float | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    """np mirror of `_ac_flows` — same formulas, broadcast-friendly.
+
+    Returns (grid_imported, grid_exported), omitting `clipped_solar` (unused
+    by any vectorized caller so far).
+    """
+    residual_solar = solar_production - solar_to_battery
+    if ac_cap_kwh is None:
+        ac_solar = residual_solar
+    else:
+        ac_solar = np.minimum(residual_solar, ac_cap_kwh)
+    ac_output = ac_solar + battery_discharged
+    home_served = np.minimum(ac_output, home_consumption)
+    return home_consumption - home_served, ac_output - home_served
+
+
 def _state_transition(
     soe: float,
     power: float,
@@ -234,6 +287,8 @@ def _state_transition(
     dt: float,
     solar_production: float,
     home_consumption: float,
+    ac_cap_kwh: float | None = None,
+    import_cap_kwh: float | None = None,
 ) -> float:
     """
     Calculate the next state of energy based on current SOE and power action.
@@ -260,6 +315,16 @@ def _state_transition(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
         grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
+        if import_cap_kwh is not None:
+            # Grid charging must not push total import (load + charging)
+            # over the house fuse's import cap (#429) -- throttle the
+            # grid-charge component to whatever headroom the load leaves.
+            load_import, _, _ = _ac_flows(
+                solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
+            )
+            grid_to_battery = min(
+                grid_to_battery, max(0.0, import_cap_kwh - load_import)
+            )
         charge_energy = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -297,6 +362,8 @@ def _state_transition_grid(
     dt: float,
     solar_production: float,
     home_consumption: float,
+    ac_cap_kwh: float | None = None,
+    import_cap_kwh: float | None = None,
 ) -> np.ndarray:
     """Vectorized form of `_state_transition` for the DP backward pass.
 
@@ -324,6 +391,13 @@ def _state_transition_grid(
         0.0, np.minimum(rate_throughput, room_throughput) - solar_to_battery
     )
     grid_to_battery = remaining_rate
+    if import_cap_kwh is not None:
+        load_import, _ = _ac_flows_grid(
+            solar_to_battery, 0.0, solar_production, home_consumption, ac_cap_kwh
+        )
+        grid_to_battery = np.minimum(
+            grid_to_battery, np.maximum(0.0, import_cap_kwh - load_import)
+        )
     store_charge_energy = (solar_to_battery + grid_to_battery) * eff_charge
     store_next_soe = np.minimum(max_soe, soe + store_charge_energy)
 
@@ -361,14 +435,18 @@ def _compute_reward_grid(
     current_sell_price: float,
     solar_production: float,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
-) -> np.ndarray:
+    import_cap_kwh: float | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
     """Vectorized form of `_compute_reward`'s reward calculation.
 
-    Only the reward is needed by the DP backward pass (it discards
-    `new_cost_basis`), so this omits the cost-basis bookkeeping entirely --
-    same simplification the caller already applies to the scalar path
-    (`reward, _ = _compute_reward(...)`). Formulas mirror `_compute_reward`
-    exactly, branch for branch, for numerical parity. See #236.
+    Only the reward (and, for the import-cap feasibility mask, total
+    grid_imported) is needed by the DP backward pass -- it discards
+    `new_cost_basis`, same simplification the caller already applies to the
+    scalar path (`reward, _ = _compute_reward(...)`). Formulas mirror
+    `_compute_reward` exactly, branch for branch, for numerical parity. See
+    #236.
+
+    Returns (reward, grid_imported).
     """
     max_soe = battery_settings.max_soe_kwh
     eff_charge = battery_settings.efficiency_charge
@@ -379,15 +457,13 @@ def _compute_reward_grid(
     is_discharge = power < -POWER_TOLERANCE_KW
 
     def ac_flows_grid(solar_to_battery, battery_discharged):
-        """np mirror of _ac_flows — same formulas, broadcast-friendly."""
-        residual_solar = solar_production - solar_to_battery
-        if ac_cap_kwh is None:
-            ac_solar = residual_solar
-        else:
-            ac_solar = np.minimum(residual_solar, ac_cap_kwh)
-        ac_output = ac_solar + battery_discharged
-        home_served = np.minimum(ac_output, home_consumption)
-        return home_consumption - home_served, ac_output - home_served
+        return _ac_flows_grid(
+            solar_to_battery,
+            battery_discharged,
+            solar_production,
+            home_consumption,
+            ac_cap_kwh,
+        )
 
     # Idle passive-absorption flows. No below-floor special case needed --
     # see _idle_battery_flows's docstring (#269): the delta is already zero
@@ -410,9 +486,15 @@ def _compute_reward_grid(
         0.0, np.minimum(rate_throughput, room_throughput) - solar_to_battery
     )
     grid_to_battery = remaining_rate
+    grid_imported_store, grid_exported_store = ac_flows_grid(solar_to_battery, 0.0)
+    if import_cap_kwh is not None:
+        # Grid charging must not push total import (load + charging) over
+        # the house fuse's import cap (#429).
+        grid_to_battery = np.minimum(
+            grid_to_battery, np.maximum(0.0, import_cap_kwh - grid_imported_store)
+        )
     energy_stored_store = (solar_to_battery + grid_to_battery) * eff_charge
     battery_wear_cost_store = energy_stored_store * cycle_cost
-    grid_imported_store, grid_exported_store = ac_flows_grid(solar_to_battery, 0.0)
     grid_imported_store = grid_imported_store + grid_to_battery
     total_cost_store = (
         grid_imported_store * current_buy_price
@@ -447,7 +529,12 @@ def _compute_reward_grid(
     reward = np.where(
         is_charge, reward_store, np.where(is_discharge, reward_discharge, reward_idle)
     )
-    return reward
+    grid_imported = np.where(
+        is_charge,
+        grid_imported_store,
+        np.where(is_discharge, grid_imported_d, grid_imported_idle),
+    )
+    return reward, grid_imported
 
 
 def _compute_reward(
@@ -463,7 +550,8 @@ def _compute_reward(
     solar_production: float,
     cost_basis: float,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
-) -> tuple[float, float]:
+    import_cap_kwh: float | None = None,
+) -> tuple[float, float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
 
     CYCLE COST POLICY:
@@ -483,7 +571,9 @@ def _compute_reward(
       revenue -- load-first hardware never actually delivers it to the grid.
 
     Returns:
-        (reward, new_cost_basis).
+        (reward, new_cost_basis, grid_imported). `grid_imported` is exposed
+        so callers can enforce the import-cap feasibility constraint (#429)
+        without recomputing these flows.
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -506,15 +596,21 @@ def _compute_reward(
         )
         grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
 
-        energy_stored = (
-            solar_to_battery + grid_to_battery
-        ) * battery_settings.efficiency_charge
-        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-
         # genuine excess solar (above rate/room) is exported; deliberate grid top-up imported
         grid_imported, grid_exported, _ = _ac_flows(
             solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
         )
+        if import_cap_kwh is not None:
+            # Grid charging must not push total import (load + charging)
+            # over the house fuse's import cap (#429).
+            grid_to_battery = min(
+                grid_to_battery, max(0.0, import_cap_kwh - grid_imported)
+            )
+
+        energy_stored = (
+            solar_to_battery + grid_to_battery
+        ) * battery_settings.efficiency_charge
+        battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
         grid_imported += grid_to_battery
 
         if ac_cap_kwh is None:
@@ -543,7 +639,7 @@ def _compute_reward(
             - grid_exported * current_sell_price
             + battery_wear_cost
         )
-        return -total_cost, new_cost_basis
+        return -total_cost, new_cost_basis, grid_imported
 
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0
@@ -594,7 +690,7 @@ def _compute_reward(
         - grid_exported * current_sell_price
         + battery_wear_cost
     )
-    return -total_cost, new_cost_basis
+    return -total_cost, new_cost_basis, grid_imported
 
 
 def _build_period_data(
@@ -611,6 +707,7 @@ def _build_period_data(
     new_cost_basis: float,
     currency: str,
     continuation_value: float = 0.0,
+    import_cap_kwh: float | None = None,
 ) -> PeriodData:
     """Build full PeriodData for the winning action of a DP cell.
 
@@ -640,6 +737,15 @@ def _build_period_data(
             0.0, min(rate_throughput, room_throughput) - solar_to_battery
         )
         grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
+        if import_cap_kwh is not None:
+            # Grid charging must not push total import (load + charging)
+            # over the house fuse's import cap (#429).
+            load_import, _, _ = _ac_flows(
+                solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
+            )
+            grid_to_battery = min(
+                grid_to_battery, max(0.0, import_cap_kwh - load_import)
+            )
         battery_charged = solar_to_battery + grid_to_battery
         battery_discharged = 0.0
         # STORE physics are binary (any positive power charges at rate_throughput),
@@ -869,6 +975,7 @@ def _run_dynamic_programming(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
+    import_cap_kwh: float | None = None,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
@@ -959,10 +1066,12 @@ def _run_dynamic_programming(
             dt,
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
+            ac_cap_kwh=ac_cap_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
         feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
 
-        reward = _compute_reward_grid(
+        reward, grid_imported = _compute_reward_grid(
             power_row,
             soe_col,
             next_soe,
@@ -973,7 +1082,22 @@ def _run_dynamic_programming(
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
+
+        effective_import_cap = None
+        if import_cap_kwh is not None:
+            # Constrain, don't raise (#429): an action pushing total import
+            # over the cap is infeasible UNLESS no feasible action can meet
+            # it (e.g. load alone exceeds the cap even at max discharge) --
+            # then the least-bad (minimum-import) action(s) remain the
+            # feasible floor, same convention as the AC-output cap and
+            # temperature derating (mask, never except).
+            floor_grid_imported = np.min(
+                np.where(feasible, grid_imported, np.inf), axis=1, keepdims=True
+            )
+            effective_import_cap = np.maximum(import_cap_kwh, floor_grid_imported)
+            feasible &= grid_imported <= effective_import_cap + 1e-9
 
         next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
         next_i = np.clip(next_i, 0, n_states - 1)
@@ -1000,7 +1124,7 @@ def _run_dynamic_programming(
         # exported surplus and the DP weighs the clipped remainder against
         # the value of keeping the room (no separate HOLD action needed).
         zeros_col = np.zeros_like(soe_col)
-        reward_bypass = _compute_reward_grid(
+        reward_bypass, grid_imported_bypass = _compute_reward_grid(
             zeros_col,
             soe_col,
             soe_col,
@@ -1011,8 +1135,15 @@ def _run_dynamic_programming(
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
         value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
+        if effective_import_cap is not None:
+            bypass_feasible = (
+                grid_imported_bypass.reshape(-1)
+                <= effective_import_cap.reshape(-1) + 1e-9
+            )
+            value_bypass = np.where(bypass_feasible, value_bypass, -np.inf)
         V[t, :] = np.maximum(V[t, :], value_bypass)
 
     return V
@@ -1210,13 +1341,16 @@ TIE_DEDUP_SOE_KWH = 1.0
 
 
 def _tie_margin(
-    candidates: list[tuple[float, float, float, float, float]], best_index: int
+    candidates: list[tuple[float, float, float, float, float, float]],
+    best_index: int,
 ) -> float:
     """Value gap between the chosen candidate and the best *behaviourally
     distinct* alternative (#450).
 
-    `candidates` are `(value, power, next_soe, new_cost_basis, reward)`
-    tuples as built by `_best_action_at_continuous_state`.
+    `candidates` are `(value, power, next_soe, new_cost_basis, reward,
+    grid_imported)` tuples as built by `_best_action_at_continuous_state`,
+    already filtered against the import cap (#429) so every entry here is an
+    action the house's fuse can actually support.
 
     A raw best-minus-second-best gap over the full candidate list is not a
     usable ambiguity signal, because several of those candidates are the
@@ -1238,9 +1372,9 @@ def _tie_margin(
     Returns float("inf") when no distinct alternative is feasible ("not
     tied, no comparison possible").
     """
-    best_value, _, best_next_soe, _, _ = candidates[best_index]
+    best_value, _, best_next_soe, _, _, _ = candidates[best_index]
     runner_up = float("-inf")
-    for index, (value, _power, next_soe, _cb, _reward) in enumerate(candidates):
+    for index, (value, _power, next_soe, _cb, _reward, _gi) in enumerate(candidates):
         if index == best_index:
             continue
         if abs(next_soe - best_next_soe) <= TIE_DEDUP_SOE_KWH:
@@ -1267,6 +1401,7 @@ def _best_action_at_continuous_state(
     max_charge_power_per_period: list[float] | None,
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
+    import_cap_kwh: float | None = None,
 ) -> tuple[float, float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -1310,10 +1445,14 @@ def _best_action_at_continuous_state(
     solar = solar_production[t]
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
-    # (value, power, next_soe, new_cost_basis, reward) per feasible candidate,
+    # Candidates are gathered first, then filtered against the import cap
+    # (#429), so the cap's "constrain, don't raise" floor -- the minimum
+    # grid_imported any candidate in this set actually achieves -- can be
+    # computed before any candidate is discarded. Each entry is
+    # (value, power, next_soe, new_cost_basis, reward, grid_imported),
     # appended in the original consideration order so that exact value ties
     # still resolve to the first-considered candidate exactly as before.
-    candidates: list[tuple[float, float, float, float, float]] = []
+    candidates: list[tuple[float, float, float, float, float, float]] = []
 
     def consider(power: float, forced_next_soe: float | None = None) -> None:
         next_soe = (
@@ -1326,6 +1465,8 @@ def _best_action_at_continuous_state(
                 dt,
                 solar_production=solar,
                 home_consumption=home,
+                ac_cap_kwh=ac_cap_kwh,
+                import_cap_kwh=import_cap_kwh,
             )
         )
         # See _soe_floor's docstring (#233): the feasible floor for this
@@ -1336,7 +1477,7 @@ def _best_action_at_continuous_state(
             or next_soe > battery_settings.max_soe_kwh
         ):
             return
-        reward, new_cost_basis = _compute_reward(
+        reward, new_cost_basis, grid_imported = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
@@ -1349,9 +1490,12 @@ def _best_action_at_continuous_state(
             sell_price=sell_price,
             cost_basis=cost_basis,
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
-        candidates.append((value, power, next_soe, new_cost_basis, reward))
+        candidates.append(
+            (value, power, next_soe, new_cost_basis, reward, grid_imported)
+        )
 
     # IDLE -- always a feasible candidate.
     consider(0.0)
@@ -1384,9 +1528,21 @@ def _best_action_at_continuous_state(
     if charge_candidate is not None:
         consider(charge_candidate)
 
+    # Import-cap filtering (#429) runs BEFORE the argmax and before the tie
+    # margin is measured: a candidate the fuse cannot actually support is not
+    # a runner-up, so letting it into _tie_margin would report ambiguity
+    # against an action that was never on the table.
+    if import_cap_kwh is not None and candidates:
+        floor_grid_imported = min(c[5] for c in candidates)
+        effective_import_cap = max(import_cap_kwh, floor_grid_imported)
+        candidates = [c for c in candidates if c[5] <= effective_import_cap + 1e-9]
+
     # The SOLAR_EXPORT-below-max candidate holds soe exactly unchanged, so it
-    # is feasible at every state -- `candidates` is never empty and an
-    # IndexError below would be a real bug, not a case to defend against.
+    # is feasible at every state, and the import-cap filter above cannot empty
+    # a non-empty list (its threshold is floored at the minimum grid_imported
+    # any candidate achieves, so that candidate always survives) --
+    # `candidates` is never empty and an IndexError below would be a real bug,
+    # not a case to defend against.
     best_index = 0
     best_value = float("-inf")
     for index, candidate in enumerate(candidates):
@@ -1394,7 +1550,7 @@ def _best_action_at_continuous_state(
             best_value = candidate[0]
             best_index = index
 
-    _, best_action, best_next_soe, best_new_cost_basis, best_reward = candidates[
+    _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index
     ]
     return (
@@ -1550,6 +1706,7 @@ def _replay_accounting_pass(
     dt: float,
     currency: str,
     self_throttle_export_threshold_kwh: float,
+    import_cap_kwh: float | None = None,
 ) -> tuple[list[PeriodData], float]:
     """Rebuild PeriodData (and the reward-objective cost) for a given
     (action, SOE) trajectory.
@@ -1565,6 +1722,10 @@ def _replay_accounting_pass(
     next_soe, so the SOLAR_EXPORT-below-max bypass replays exactly), against
     `reward_sell_price` -- the DP's own objective -- while the reported
     PeriodData still carries the real `sell_price`.
+
+    `import_cap_kwh` is the same fuse-derived grid-import cap (#429) the
+    selection loop optimized against, so the replayed flows describe the same
+    throttled grid charging the schedule actually plans.
     """
     hourly_results: list[PeriodData] = []
     reward_objective_cost = 0.0
@@ -1573,7 +1734,7 @@ def _replay_accounting_pass(
     for t in range(horizon):
         soe = soe_trajectory[t]
         next_soe = soe_trajectory[t + 1]
-        action_reward, new_cost_basis = _compute_reward(
+        action_reward, new_cost_basis, _grid_imported = _compute_reward(
             power=actions[t],
             soe=soe,
             next_soe=next_soe,
@@ -1586,6 +1747,7 @@ def _replay_accounting_pass(
             solar_production=solar_production[t],
             cost_basis=cost_basis,
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
 
         period_data = _build_period_data(
@@ -1601,6 +1763,7 @@ def _replay_accounting_pass(
             solar_production=solar_production[t],
             new_cost_basis=new_cost_basis,
             currency=currency,
+            import_cap_kwh=import_cap_kwh,
             continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
         )
 
@@ -1633,6 +1796,7 @@ def optimize_battery_schedule(
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float | None = None,
     export_curtailment_active: bool = False,
+    home_settings: HomeSettings | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -1665,6 +1829,12 @@ def optimize_battery_schedule(
             (the plan forgoes real defenses against a loss that never gets
             neutralized). Same call-site pattern as discharge_resolution_kw
             below. Defaults to False.
+        home_settings: Home electrical settings (fuse limit, voltage, phases). When
+            `power_monitoring_enabled` is set, the DP derives a per-period grid-import
+            energy cap and treats it as a hard physical constraint (#429): total import
+            (house load + battery charging) may not exceed it, constraining rather than
+            excluding a period whose load alone exceeds the cap. Defaults to None (no
+            import cap, matching power_monitoring_enabled's own default of False).
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -1672,6 +1842,7 @@ def optimize_battery_schedule(
 
     horizon = len(buy_price)
     dt = period_duration_hours
+    import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 
@@ -1738,6 +1909,7 @@ def optimize_battery_schedule(
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
         self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+        import_cap_kwh=import_cap_kwh,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -1790,6 +1962,7 @@ def optimize_battery_schedule(
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                import_cap_kwh=import_cap_kwh,
             )
         )
         tie_margins.append(tie_margin)
@@ -1811,6 +1984,7 @@ def optimize_battery_schedule(
             solar_production=solar_production[t],
             new_cost_basis=new_cost_basis,
             currency=currency,
+            import_cap_kwh=import_cap_kwh,
             # Same continuation-value term _best_action_at_continuous_state
             # added internally to choose this action (dp_battery_algorithm.py
             # _best_action_at_continuous_state's `value = reward +
@@ -1892,6 +2066,14 @@ def optimize_battery_schedule(
             # possibly-wrong choice, or splicing in a table whose accuracy the
             # solver itself could not certify, are both exactly the fallback
             # this project forbids.
+            #
+            # `import_cap_kwh` is the same fuse-derived grid-import cap (#429)
+            # the grid DP optimized the rest of the schedule against. It has to
+            # be passed here too: the windowed solver re-decides exactly the
+            # periods where charging-vs-not is closest, so a window solved
+            # without the cap could splice back a grid-charge action that
+            # plans more import than the house's fuse can carry -- weakening
+            # the constraint precisely where it is most likely to bind.
             V_window = run_pwl_window_backward_induction(
                 window_horizon=window_horizon,
                 buy_price=buy_price[sl],
@@ -1904,6 +2086,7 @@ def optimize_battery_schedule(
                 max_charge_power_per_period=window_max_charge,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
+                import_cap_kwh=import_cap_kwh,
             )
             window_resolutions[window.start] = resolve_pwl_window(
                 V_window,
@@ -1919,6 +2102,7 @@ def optimize_battery_schedule(
                 max_charge_power_per_period=window_max_charge,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
+                import_cap_kwh=import_cap_kwh,
             )
 
         actions, soe_trajectory = splice_schedule(
@@ -1940,6 +2124,7 @@ def optimize_battery_schedule(
             dt=dt,
             currency=currency,
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+            import_cap_kwh=import_cap_kwh,
         )
 
     # Step 3: Calculate economic summary directly from PeriodData

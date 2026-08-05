@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
+from core.bess.dp_battery_algorithm import _compute_reward
 from core.bess.pwl_window_dp import (
     PWLWindowUnderRefinedError,
     _backward_discharge_levels,
@@ -433,3 +434,108 @@ def test_skipped_preimage_seeding_raises(monkeypatch):
     monkeypatch.setattr(pwl_window_dp, "PWL_MAX_PREIMAGE_SEED_POINTS", 1)
     with pytest.raises(PWLWindowUnderRefinedError, match="discharge-preimage"):
         _solve_tiny_window(_tiny_battery())
+
+
+def test_pwl_replay_respects_the_grid_import_cap():
+    """The windowed PWL replay must obey the same fuse-derived grid-import
+    cap (#429) the surrounding grid DP enforces.
+
+    The window is re-solved precisely where charging-vs-not is closest
+    (#450), so an unthreaded cap here would let the exact solver splice back
+    a grid-charge action the house's fuse cannot carry -- silently weakening
+    the constraint exactly where it is most likely to bind.
+    """
+    battery = _tiny_battery()
+    # Continuation value rising steeply with SOE, so charging is strongly
+    # preferred and only the cap can hold it back.
+    v_next = (
+        np.array([battery.min_soe_kwh, battery.max_soe_kwh]),
+        np.array([0.0, 10.0 * (battery.max_soe_kwh - battery.min_soe_kwh)]),
+    )
+    home = 1.0  # kWh per period of household load
+    cap = 1.2  # leaves only 0.2 kWh of headroom for grid charging
+
+    _, uncapped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+        soe=2.0,
+        t=0,
+        V_next=v_next,
+        power_levels=np.array([]),
+        home_consumption=[home],
+        battery_settings=battery,
+        dt=1.0,
+        solar_production=[0.0],
+        buy_price=[0.1],
+        sell_price=[0.0],
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+    )
+    _, capped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+        soe=2.0,
+        t=0,
+        V_next=v_next,
+        power_levels=np.array([]),
+        home_consumption=[home],
+        battery_settings=battery,
+        dt=1.0,
+        solar_production=[0.0],
+        buy_price=[0.1],
+        sell_price=[0.0],
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+        import_cap_kwh=cap,
+    )
+
+    # Uncapped, STORE charges at the full 5 kW rate (4.75 kWh stored after
+    # charge efficiency) and would import 6.0 kWh -- five times the cap.
+    assert uncapped_next_soe == pytest.approx(2.0 + 5.0 * battery.efficiency_charge)
+    # Capped, only the 0.2 kWh the load leaves may go to the battery.
+    assert capped_next_soe == pytest.approx(2.0 + 0.2 * battery.efficiency_charge)
+
+
+def test_pwl_window_backward_induction_respects_the_grid_import_cap():
+    """End to end over a whole window: every replayed period's planned grid
+    import stays within the cap (#429), and the window still charges (so the
+    assertion is not vacuously satisfied by an idle plan)."""
+    battery = _tiny_battery()
+    home = 1.0
+    cap = 1.2
+    start_soe = 2.0
+    per_period_gain = 0.2 * battery.efficiency_charge
+    end_soe_target = start_soe + 2 * per_period_gain
+
+    kwargs = {
+        "window_horizon": 2,
+        "buy_price": [0.1, 0.1],
+        "sell_price": [0.0, 0.0],
+        "home_consumption": [home, home],
+        "solar_production": [0.0, 0.0],
+        "battery_settings": battery,
+        "dt": 1.0,
+        "import_cap_kwh": cap,
+    }
+    V = run_pwl_window_backward_induction(end_soe_target=end_soe_target, **kwargs)
+    actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
+
+    soe = start_soe
+    for t, (power, next_soe) in enumerate(actions):
+        _reward, _basis, grid_imported = _compute_reward(
+            power=power,
+            soe=soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home,
+            battery_settings=battery,
+            dt=1.0,
+            solar_production=0.0,
+            buy_price=[0.1, 0.1],
+            sell_price=[0.0, 0.0],
+            cost_basis=0.0,
+            import_cap_kwh=cap,
+        )
+        assert grid_imported <= cap + 1e-9, (
+            f"period {t} plans {grid_imported} kWh of grid import, above the "
+            f"fuse cap of {cap} kWh"
+        )
+        soe = next_soe
+
+    assert soe > start_soe, "window should still charge -- otherwise vacuous"

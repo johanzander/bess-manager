@@ -22,7 +22,7 @@ def test_idle_passively_charges_from_solar_surplus():
     expected_stored = 1.4 * bs.efficiency_charge  # 1.4 * 0.97 = 1.358
     assert round(next_soe - 5.0, 4) == round(expected_stored, 4)
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=0.0,
         soe=5.0,
         next_soe=next_soe,
@@ -50,7 +50,7 @@ def test_idle_exports_when_battery_full():
     )
     assert next_soe == full_soe  # battery full, cannot charge
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=0.0,
         soe=full_soe,
         next_soe=full_soe,
@@ -87,7 +87,7 @@ def test_store_action_charges_at_max_rate_solar_plus_grid():
         f"but got {next_soe - 5.0:.4f} kWh"
     )
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=0.4,
         soe=5.0,
         next_soe=next_soe,
@@ -465,7 +465,7 @@ def test_discharge_no_longer_blocked_by_cost_basis_floor_issue_204():
         soe, power, bs, DT, solar_production=0.893, home_consumption=0.155
     )
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=soe,
         next_soe=next_soe,
@@ -505,7 +505,7 @@ def test_small_discharge_still_evaluated_without_profitability_floor():
         capacity_after_discharge < 0.1
     )  # confirms this is the smaller-action edge case
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=soe,
         next_soe=next_soe,
@@ -545,7 +545,7 @@ def test_discharge_not_blocked_when_solar_does_not_cover_load():
         home_consumption=home_consumption,
     )
 
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=soe,
         next_soe=next_soe,

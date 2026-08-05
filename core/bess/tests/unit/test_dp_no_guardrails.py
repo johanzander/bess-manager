@@ -26,7 +26,7 @@ def test_discharge_no_longer_blocked_by_cost_basis_floor():
     settings = make_battery_settings()
     power = -1.0
     next_soe = 5.0 - (abs(power) * 1.0 / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -55,7 +55,7 @@ def test_small_discharge_overshoot_not_credited_as_export():
     home_consumption = 1.0
     power = -1.005  # discharges 1.005 kWh -- 0.005 kWh over consumption
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -84,7 +84,7 @@ def test_large_discharge_overshoot_still_credited_as_export():
     home_consumption = 1.0
     power = -2.0  # discharges 2.0 kWh -- 1.0 kWh over consumption
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -223,7 +223,7 @@ def test_battery_export_threshold_matches_classification_boundary():
     home_consumption = 1.0
     power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,

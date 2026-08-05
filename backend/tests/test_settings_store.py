@@ -100,6 +100,80 @@ class TestFirstBootMigration:
         assert store.get_section("battery")["total_capacity"] == 10.0
 
 
+class TestLegacyInverterTypeMigration:
+    """`growatt.inverter_type` -> `inverter.platform`.
+
+    This migration is the *only* remaining backward-compat path for installs
+    predating `inverter.platform`: the redundant fallback in
+    `BatterySystemManager._resolve_initial_platform()` was removed, so if this
+    rewrite ever breaks, those installs silently boot into unconfigured mode
+    with no price data. Pin it explicitly.
+    """
+
+    def _load(self, tmp_path, monkeypatch, existing: dict) -> SettingsStore:
+        path = _patch_path(tmp_path, monkeypatch)
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(existing, f)
+        store = SettingsStore()
+        store.load({})
+        return store
+
+    @pytest.mark.parametrize(
+        ("legacy_type", "expected_platform"),
+        [("MIN", "growatt_server_min"), ("SPH", "growatt_server_sph")],
+    )
+    def test_legacy_type_rewritten_to_platform(
+        self, tmp_path, monkeypatch, legacy_type, expected_platform
+    ):
+        store = self._load(
+            tmp_path, monkeypatch, {"growatt": {"inverter_type": legacy_type}}
+        )
+        assert store.get_section("inverter")["platform"] == expected_platform
+
+    def test_growatt_device_id_carried_over(self, tmp_path, monkeypatch):
+        """The device_id moves with the platform — an SPH install that only
+        ever wrote growatt.device_id must not lose it."""
+        store = self._load(
+            tmp_path,
+            monkeypatch,
+            {"growatt": {"inverter_type": "SPH", "device_id": "dev-42"}},
+        )
+        assert store.get_section("inverter")["device_id"] == "dev-42"
+
+    def test_existing_platform_wins_over_legacy_type(self, tmp_path, monkeypatch):
+        """A config carrying both keys keeps inverter.platform — it is the
+        source of truth, and a stale inverter_type must not override it."""
+        store = self._load(
+            tmp_path,
+            monkeypatch,
+            {
+                "growatt": {"inverter_type": "MIN"},
+                "inverter": {"platform": "solax_modbus_native"},
+            },
+        )
+        assert store.get_section("inverter")["platform"] == "solax_modbus_native"
+
+    def test_unknown_legacy_type_leaves_platform_unset(self, tmp_path, monkeypatch):
+        """An unrecognised value must not invent a platform."""
+        store = self._load(
+            tmp_path, monkeypatch, {"growatt": {"inverter_type": "BOGUS"}}
+        )
+        assert not store.get_section("inverter").get("platform")
+
+    def test_migrated_config_resolves_to_configured_platform(
+        self, tmp_path, monkeypatch
+    ):
+        """End-to-end: the migrated store feeds BatterySystemManager's startup
+        resolution, which no longer reads growatt.inverter_type itself."""
+        from core.bess.battery_system_manager import BatterySystemManager
+
+        store = self._load(tmp_path, monkeypatch, {"growatt": {"inverter_type": "SPH"}})
+        assert (
+            BatterySystemManager._resolve_initial_platform(store.data)
+            == "growatt_server_sph"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Section read / write
 # ---------------------------------------------------------------------------

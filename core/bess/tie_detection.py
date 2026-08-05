@@ -58,10 +58,15 @@ class Window:
     end: int
 
 
-def _epsilon_for_period(value_slope: float, soe_step_kwh: float) -> float:
+def epsilon_for_period(value_slope: float, soe_step_kwh: float) -> float:
     """Value noise (currency) that SOE_STEP_KWH grid-snapping can inject
     into a single period's action comparison, given the local marginal
-    value of stored energy `value_slope` (dV/dSoE, currency per kWh)."""
+    value of stored energy `value_slope` (dV/dSoE, currency per kWh).
+
+    Public because the #450 coverage-measurement harness must compare a
+    period's margin against this exact threshold -- a harness that
+    re-derived the formula could drift from the detector it is measuring.
+    """
     return TIE_NOISE_FACTOR * soe_step_kwh * abs(value_slope)
 
 
@@ -77,7 +82,7 @@ def detect_tie_windows(
             f"value_slopes has {len(value_slopes)} entries but tie_margins has "
             f"{horizon} -- they must be recorded per period in the same pass"
         )
-    epsilons = [_epsilon_for_period(s, soe_step_kwh) for s in value_slopes]
+    epsilons = [epsilon_for_period(s, soe_step_kwh) for s in value_slopes]
     flagged = [t for t in range(horizon) if tie_margins[t] < epsilons[t]]
 
     # Two structural blind spots, logged rather than left invisible because

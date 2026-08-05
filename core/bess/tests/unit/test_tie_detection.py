@@ -3,8 +3,8 @@ import pytest
 from core.bess.tie_detection import (
     TIE_NOISE_FACTOR,
     Window,
-    _epsilon_for_period,
     detect_tie_windows,
+    epsilon_for_period,
 )
 
 # dV/dSoE = 1.0 currency/kWh at every period, so epsilon is a flat
@@ -63,12 +63,12 @@ def test_epsilon_scales_with_the_local_marginal_value_of_energy():
     """Epsilon is the value error SOE_STEP_KWH grid-snapping can inject, so
     it must scale with dV/dSoE -- a period where stored energy has no
     marginal value has nothing a flipped decision could cost (#450)."""
-    assert _epsilon_for_period(2.0, STEP) == pytest.approx(
-        2 * _epsilon_for_period(1.0, STEP)
+    assert epsilon_for_period(2.0, STEP) == pytest.approx(
+        2 * epsilon_for_period(1.0, STEP)
     )
-    assert _epsilon_for_period(-1.0, STEP) == _epsilon_for_period(1.0, STEP)
-    assert _epsilon_for_period(0.0, STEP) == 0.0
-    assert _epsilon_for_period(1.0, STEP) == pytest.approx(TIE_NOISE_FACTOR * STEP)
+    assert epsilon_for_period(-1.0, STEP) == epsilon_for_period(1.0, STEP)
+    assert epsilon_for_period(0.0, STEP) == 0.0
+    assert epsilon_for_period(1.0, STEP) == pytest.approx(TIE_NOISE_FACTOR * STEP)
 
 
 def test_zero_marginal_value_periods_are_never_flagged():

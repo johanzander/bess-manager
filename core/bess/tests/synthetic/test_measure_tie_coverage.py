@@ -1,18 +1,23 @@
+import inspect
+
 import pytest
 
 from core.bess.dp_battery_algorithm import (
     BATTERY_EXPORT_THRESHOLD_KWH,
-    POWER_TOLERANCE_KW,
-    _compute_reward,
+    SOE_STEP_KWH,
     optimize_battery_schedule,
 )
 from core.bess.pwl_window_dp import PWLWindowUnderRefinedError
 from core.bess.tests.helpers import _scenario_inputs
 from core.bess.tests.synthetic.measure_tie_coverage import (
+    TIE_WINDOW_PAD,
     classify_margin_ratios,
-    full_horizon_reference_cost,
+    near_miss_segment,
+    replay_schedule,
+    segment_reference_cost,
 )
 from core.bess.tests.unit.test_scenarios import load_test_scenario
+from core.bess.tie_detection import Window, detect_tie_windows
 
 
 def test_classifies_into_expected_buckets():
@@ -56,57 +61,73 @@ def test_empty_input_returns_zero_counts():
     }
 
 
-def _hybrid_prefix_cost(
-    result, inputs, initial_cost_basis: float, periods: int
-) -> float:
-    """The hybrid schedule's own `reward_objective_cost` restricted to its
-    first `periods` periods, replayed from the returned PeriodData.
+# --------------------------------------------------------------------------
+# Segment selection (pure -- no solver, no fixture)
+# --------------------------------------------------------------------------
 
-    Needed because `OptimizationResult` reports only the horizon total. The
-    replay is verified against that total in
-    `test_prefix_replay_reproduces_the_reported_reward_objective_cost`, so a
-    drift between this reconstruction and the DP's own accounting fails
-    loudly rather than quietly biasing the comparison.
 
-    `power` is reconstructed from `decision.battery_action` (kWh, + charge /
-    - discharge), not from `energy.battery_charged`: an IDLE period whose
-    surplus solar passively charges the battery reports a positive
-    `battery_charged` but is not a STORE action, and feeding that back as
-    `power` would flip it into the charge branch of `_compute_reward`. STORE
-    physics are binary (see `_build_period_data`'s #203 note), so any power
-    above the tolerance replays the identical action.
-    """
-    dt = inputs["period_duration_hours"]
-    soes = [inputs["initial_soe"]] + [
-        p.energy.battery_soe_end for p in result.period_data
-    ]
-    cost_basis = initial_cost_basis
-    prefix_cost = 0.0
-    for t in range(periods):
-        action_kwh = result.period_data[t].decision.battery_action or 0.0
-        if action_kwh > POWER_TOLERANCE_KW * dt:
-            power = 1.0
-        elif action_kwh < -POWER_TOLERANCE_KW * dt:
-            power = action_kwh / dt
-        else:
-            power = 0.0
-        reward, cost_basis, _grid_imported = _compute_reward(
-            power=power,
-            soe=soes[t],
-            next_soe=soes[t + 1],
-            period=t,
-            home_consumption=inputs["home_consumption"][t],
-            battery_settings=inputs["battery_settings"],
-            dt=dt,
-            buy_price=inputs["buy_price"],
-            sell_price=inputs["sell_price"],
-            solar_production=inputs["solar_production"][t],
-            cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
-            import_cap_kwh=None,
-        )
-        prefix_cost -= reward
-    return prefix_cost
+def test_near_miss_segment_picks_the_period_closest_to_the_threshold():
+    # epsilon = TIE_NOISE_FACTOR(0.1) * soe_step(0.1) * |slope| = 0.01 * |slope|.
+    # With slope 1.0 everywhere epsilon is 0.01, so every margin below is an
+    # unflagged near miss. Period 3 sits closest to the threshold (1.2x).
+    tie_margins = [0.05, 0.02, 0.04, 0.012, 0.03]
+    value_slopes = [1.0] * 5
+
+    assert near_miss_segment(tie_margins, value_slopes, soe_step_kwh=0.1) == Window(
+        start=1, end=5
+    )
+
+
+def test_near_miss_segment_ignores_periods_the_detector_already_flagged():
+    # Period 1's margin (0.005) is BELOW epsilon 0.01, so the detector already
+    # flagged and re-solved it -- it is not a miss and must not be measured as
+    # one. Period 4 is the closest genuine near miss.
+    tie_margins = [0.05, 0.005, 0.04, 0.09, 0.011]
+    value_slopes = [1.0] * 5
+
+    assert near_miss_segment(tie_margins, value_slopes, soe_step_kwh=0.1) == Window(
+        start=2, end=5
+    )
+
+
+def test_near_miss_segment_skips_periods_no_ratio_can_be_formed_for():
+    # slope 0 -> epsilon 0 (the detector's zero-epsilon blind spot) and an
+    # infinite margin -> no comparison happened. Neither yields a meaningful
+    # distance-to-threshold, so neither may be selected; period 2 is the only
+    # measurable candidate.
+    tie_margins = [0.05, float("inf"), 0.02]
+    value_slopes = [0.0, 1.0, 1.0]
+
+    assert near_miss_segment(tie_margins, value_slopes, soe_step_kwh=0.1) == Window(
+        start=0, end=3
+    )
+
+
+def test_near_miss_segment_clamps_padding_to_the_horizon():
+    tie_margins = [0.011, 0.05]
+    value_slopes = [1.0, 1.0]
+
+    assert near_miss_segment(tie_margins, value_slopes, soe_step_kwh=0.1) == Window(
+        start=0, end=2
+    )
+
+
+def test_near_miss_segment_returns_none_when_nothing_is_measurable():
+    # Every period is either already flagged or has no formable ratio.
+    assert (
+        near_miss_segment([0.005, float("inf")], [1.0, 1.0], soe_step_kwh=0.1) is None
+    )
+    assert near_miss_segment([], [], soe_step_kwh=0.1) is None
+
+
+def test_near_miss_segment_rejects_mismatched_input_lengths():
+    with pytest.raises(ValueError, match="recorded per period in the same pass"):
+        near_miss_segment([0.01, 0.02], [1.0], soe_step_kwh=0.1)
+
+
+# --------------------------------------------------------------------------
+# Reference cost against the real #450 fixture
+# --------------------------------------------------------------------------
 
 
 def _run_450_fixture():
@@ -117,84 +138,188 @@ def _run_450_fixture():
     return inputs, diagnostics, result
 
 
-@pytest.mark.slow
-def test_prefix_replay_reproduces_the_reported_reward_objective_cost():
-    inputs, diagnostics, result = _run_450_fixture()
-
-    replayed = _hybrid_prefix_cost(
+def _replay(inputs, result):
+    return replay_schedule(
         result,
-        inputs,
-        diagnostics["resolved_initial_cost_basis"],
-        len(result.period_data),
-    )
-
-    assert replayed == pytest.approx(result.reward_objective_cost, abs=1e-9)
-
-
-@pytest.mark.slow
-def test_reference_matches_or_beats_the_hybrid_on_a_450_fixture_prefix():
-    # Six periods, not the fixture's full 78: the exact PWL solver's
-    # breakpoint set grows geometrically backwards and exhausts
-    # PWL_MAX_PREIMAGE_SEED_POINTS at 8 periods on this fixture (pinned by
-    # test_full_horizon_solve_exhausts_the_exact_solvers_accuracy_budget
-    # below). Six is the largest round horizon that solves comfortably.
-    periods = 6
-    inputs, diagnostics, result = _run_450_fixture()
-
-    reference_cost = full_horizon_reference_cost(
-        buy_price=inputs["buy_price"][:periods],
-        sell_price=inputs["sell_price"][:periods],
-        home_consumption=inputs["home_consumption"][:periods],
-        solar_production=inputs["solar_production"][:periods],
+        buy_price=inputs["buy_price"],
+        sell_price=inputs["sell_price"],
+        home_consumption=inputs["home_consumption"],
+        solar_production=inputs["solar_production"],
         battery_settings=inputs["battery_settings"],
         dt=inputs["period_duration_hours"],
-        start_soe=diagnostics["soe_trajectory"][0],
-        end_soe_target=diagnostics["soe_trajectory"][periods],
-        initial_cost_basis=diagnostics["resolved_initial_cost_basis"],
+        initial_soe=inputs["initial_soe"],
+        initial_cost_basis=inputs["initial_cost_basis"],
         self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
 
-    # The exact solve over this sub-horizon, pinned to the hybrid's own start
-    # and end SOE, can only match or beat the hybrid's cost over the same
-    # periods -- it is solving the same problem with no grid snapping. On
-    # this fixture the two agree exactly (delta 0.000000 SEK), i.e. the grid
-    # DP's first six decisions are provably optimal.
-    assert reference_cost <= (
-        _hybrid_prefix_cost(
-            result, inputs, diagnostics["resolved_initial_cost_basis"], periods
-        )
-        + 1e-6
+
+def _reference(inputs, result, segment, cost_bases):
+    return segment_reference_cost(
+        segment,
+        buy_price=inputs["buy_price"],
+        sell_price=inputs["sell_price"],
+        home_consumption=inputs["home_consumption"],
+        solar_production=inputs["solar_production"],
+        battery_settings=inputs["battery_settings"],
+        dt=inputs["period_duration_hours"],
+        soe_trajectory=[inputs["initial_soe"]]
+        + [p.energy.battery_soe_end for p in result.period_data],
+        cost_basis=cost_bases[segment.start],
+        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+        import_cap_kwh=None,
     )
 
 
 @pytest.mark.slow
-def test_full_horizon_solve_exhausts_the_exact_solvers_accuracy_budget():
-    """The 78-period exact solve this helper was specified for is not
-    computable, and that is a property of the solver, not of this call.
+def test_replay_reproduces_the_reported_reward_objective_cost():
+    """The comparison's hybrid side must be the DP's own accounting, exactly.
 
-    `run_pwl_window_backward_induction` seeds every discharge preimage of the
-    next row's breakpoints, so |breakpoints| grows geometrically going
-    backwards; on the #450 fixture it blows PWL_MAX_PREIMAGE_SEED_POINTS
-    (1e6) at horizon 8. Because the requirement compounds per backward step
-    rather than growing linearly, a 78-period solve is not reachable by
-    raising the budget. Pinned here so the limit is a documented, tested
-    boundary rather than a surprise for callers sizing a horizon.
+    `OptimizationResult` reports only the horizon total, so a segment's share
+    has to be replayed from the returned PeriodData. Pinning the total here is
+    what makes that replay trustworthy: if the reconstruction ever drifts from
+    what the DP actually accumulated, every segment delta silently inherits the
+    bias, and this suite exists to measure deltas in SEK.
     """
-    periods = 8
-    inputs, diagnostics, _result = _run_450_fixture()
+    inputs, _diagnostics, result = _run_450_fixture()
+
+    period_costs, _cost_bases = _replay(inputs, result)
+
+    assert sum(period_costs) == pytest.approx(result.reward_objective_cost, abs=1e-9)
+
+
+@pytest.mark.slow
+def test_reference_reproduces_the_hybrid_on_a_window_it_already_resolved():
+    """Self-consistency: on a window the hybrid re-solved with this very
+    solver, an independently-run exact solve must land on the same cost.
+
+    This is the control for the near-miss measurement below -- it isolates the
+    measurement rig from the thing being measured. A non-zero delta here would
+    mean the rig disagrees with the production hybrid on a case where both ran
+    the same exact solver, so any delta it reports on an *unflagged* segment
+    would be rig error, not a missed tie.
+    """
+    inputs, diagnostics, result = _run_450_fixture()
+    assert diagnostics["windows"], "fixture is expected to flag at least one window"
+    window = diagnostics["windows"][0]
+    period_costs, cost_bases = _replay(inputs, result)
+
+    reference_cost = _reference(inputs, result, window, cost_bases)
+
+    hybrid_cost = sum(period_costs[window.start : window.end])
+    assert reference_cost == pytest.approx(hybrid_cost, abs=1e-6)
+
+
+@pytest.mark.slow
+def test_reference_matches_or_beats_the_hybrid_on_the_closest_near_miss():
+    """The measurement itself: what the DP's closest near miss actually costs.
+
+    The segment is the window `detect_tie_windows` *would* have built had the
+    threshold been low enough to flag this period, so the delta answers the
+    counterfactual this suite exists to answer -- "how much SEK was left on
+    the table by not flagging it".
+    """
+    inputs, diagnostics, result = _run_450_fixture()
+    segment = near_miss_segment(
+        diagnostics["tie_margins"],
+        diagnostics["value_slopes"],
+        soe_step_kwh=SOE_STEP_KWH,
+    )
+    assert segment is not None
+    period_costs, cost_bases = _replay(inputs, result)
+
+    reference_cost = _reference(inputs, result, segment, cost_bases)
+
+    # Pinned to the hybrid's own SOE at both ends and solved with no grid
+    # snapping, the exact segment can only match or beat the hybrid over the
+    # same periods. A reference that came out *worse* would mean the rig is
+    # solving a different (or infeasible) problem, not that the DP won.
+    assert reference_cost <= sum(period_costs[segment.start : segment.end]) + 1e-6
+
+
+@pytest.mark.slow
+def test_segment_reference_refuses_a_segment_longer_than_the_solver_can_certify():
+    """Why the segment stays short, pinned as a tested boundary.
+
+    The exact solver seeds every discharge preimage of the next row's
+    breakpoints, so its breakpoint set compounds per backward step: on this
+    fixture it exhausts `PWL_MAX_PREIMAGE_SEED_POINTS` (1e6) at a horizon of 8
+    periods and raises. That wall is why this reference measures a padded
+    segment rather than the whole 78-period horizon. The raise is deliberately
+    not caught -- an uncertifiable table has no honest use as a "true optimal"
+    reference -- so callers must keep segments at the detector's own pad width.
+    """
+    inputs, _diagnostics, result = _run_450_fixture()
+    _period_costs, cost_bases = _replay(inputs, result)
 
     with pytest.raises(PWLWindowUnderRefinedError):
-        full_horizon_reference_cost(
-            buy_price=inputs["buy_price"][:periods],
-            sell_price=inputs["sell_price"][:periods],
-            home_consumption=inputs["home_consumption"][:periods],
-            solar_production=inputs["solar_production"][:periods],
-            battery_settings=inputs["battery_settings"],
-            dt=inputs["period_duration_hours"],
-            start_soe=diagnostics["soe_trajectory"][0],
-            end_soe_target=diagnostics["soe_trajectory"][periods],
-            initial_cost_basis=diagnostics["resolved_initial_cost_basis"],
-            self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
-            import_cap_kwh=None,
+        _reference(inputs, result, Window(start=0, end=8), cost_bases)
+
+
+def test_segment_padding_matches_the_detectors_own():
+    # The measured segment must be the window production would have built, so
+    # this default is not free to drift from `detect_tie_windows`'.
+    detector_pad = inspect.signature(detect_tie_windows).parameters["pad"].default
+    assert TIE_WINDOW_PAD == detector_pad
+
+
+@pytest.mark.slow
+def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
+    """The zero-flag case, which is the one this suite exists for.
+
+    A scenario where the detector flagged nothing produces no evidence about
+    its own coverage -- so the near-miss segment is the only thing that can
+    tell us whether the silence was earned. On this fixture it is not
+    entirely: re-solving the five periods around the closest miss is worth a
+    real, non-zero amount (measured 0.078 SEK), which is exactly the kind of
+    finding the suite has to be able to surface.
+
+    Interpreting the number: it is a *segment* delta with both ends pinned, so
+    it under-counts what a free-horizon optimum could win, and it credits any
+    grid-quantization gain in those five periods, not only the near-tie
+    itself. Both directions are stated in `segment_reference_cost`'s docstring
+    and must survive into Task 6's reporting.
+    """
+    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    inputs = _scenario_inputs(scenario)
+    diagnostics: dict = {}
+    result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
+    assert diagnostics["windows"] == [], "fixture is expected to flag nothing"
+
+    segment = near_miss_segment(
+        diagnostics["tie_margins"],
+        diagnostics["value_slopes"],
+        soe_step_kwh=SOE_STEP_KWH,
+    )
+    assert segment is not None
+    period_costs, cost_bases = _replay(inputs, result)
+    reference_cost = _reference(inputs, result, segment, cost_bases)
+
+    delta = sum(period_costs[segment.start : segment.end]) - reference_cost
+    assert delta > 0.0
+    assert reference_cost <= sum(period_costs[segment.start : segment.end]) + 1e-6
+
+
+@pytest.mark.slow
+def test_scenario_with_no_measurable_period_reports_nothing_rather_than_guessing():
+    """Not every scenario has a near miss to measure.
+
+    On this fixture every period is a detector blind spot (flat value
+    function, or no behaviourally distinct alternative), so there is no
+    distance-to-threshold to rank. Returning `None` forces the caller to
+    report "nothing measurable" instead of silently measuring an arbitrary
+    segment and presenting its economics as a coverage result.
+    """
+    scenario = load_test_scenario("historical_2025_01_05_no_spread_no_solar")
+    inputs = _scenario_inputs(scenario)
+    diagnostics: dict = {}
+    optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
+
+    assert (
+        near_miss_segment(
+            diagnostics["tie_margins"],
+            diagnostics["value_slopes"],
+            soe_step_kwh=SOE_STEP_KWH,
         )
+        is None
+    )

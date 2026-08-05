@@ -118,6 +118,9 @@
 
 ### 2. **Complete Decision Intelligence Implementation**
 
+> **Superseded — do not start.** See "Scrap the Decision Intelligence framework"
+> under TECHNICAL DEBT. The recommendation is to delete this path, not finish it.
+
 **Impact**: Medium-High | **Effort**: Medium | **Dependencies**: `decision_intelligence.py`, `sensor_collector.py`, `dp_battery_algorithm.py`
 
 **Vision**: Transform the DP battery optimization from a "black box" into a transparent, educational system that helps users understand complex energy economics and multi-hour optimization strategies. Users should see real SEK values for each energy pathway and understand *why* the optimizer made each decision — not just what it decided.
@@ -168,6 +171,11 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 ---
 
 ### 5. **Enhance Insights Page with Decision Detail**
+
+> **Blocked on the same decision.** See "Scrap the Decision Intelligence
+> framework" under TECHNICAL DEBT. The goal (explain DP decisions to users) is
+> still valid; the vehicle should be the AI chat panel, not another orphaned
+> component. Do not start before that decision lands.
 
 **Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
 
@@ -454,6 +462,121 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
+### Scrap the Decision Intelligence framework
+
+**Impact**: Medium (removes ~2000 lines of unreachable code) | **Effort**: Low-Medium | **Dependencies**: none — nothing routed consumes it
+
+**Decision**: the *goal* (explain DP decisions to users, because backward
+induction is opaque) is valid and unmet. This *implementation* should go. It
+narrates the chosen action from its own energy flows — a restatement of numbers
+the actions table already shows — rather than the counterfactual the user
+actually wants ("why 02:00 and not 03:00", "why 80% and not 100%"). The DP
+evaluated those alternatives; the framework never captured the comparison.
+
+Evidence it was never load-bearing: `future_value` — the one field carrying
+anything the user could not already see — was hardcoded `0.0` until #353 fixed
+it in 2026, and nobody noticed, because nothing rendered it. Two orphaned
+attempts at the same feature (`DecisionFramework.tsx`,
+`TableBatteryDecisionExplorer.tsx`) were never routed in `App.tsx`.
+
+**What did work, and why**: PR #358 (`visualize-debug-log` skill, still open on
+`feat/visualize-debug-log-skill`) is the successful version — for *maintainers*,
+not end users. It renders `shadow_price` against the price it is actually weighed
+against, `cost_basis` + cycle cost as a breakeven, and `reward + future_value` as
+"total value (top candidate)". That is the **counterfactual** framing this
+framework never had: what the DP compared, not a retelling of what it chose. It
+also deliberately skips `immediate_value`, with a comment saying it duplicates the
+dashboard's Net Grid Cost / Net Savings. Keep that as the model if the end-user
+version is ever attempted: show the comparison, not the narration.
+
+**Delete**:
+
+- `frontend/src/components/DecisionFramework.tsx` (608 lines, imported by nothing)
+- `frontend/src/lib/decisionIntelligenceAPI.tsx` (33 lines)
+- `frontend/src/components/TableBatteryDecisionExplorer.tsx` (imported by nothing)
+- `backend/api.py`: `convert_real_data_to_mock_format` (876-1034),
+  `get_decision_intelligence` + the `/api/decision-intelligence` route
+  (1037-1084), `get_decision_intelligence_mock` (1086-1509 — 424 lines of
+  hardcoded demo prices with its route decorator already commented out)
+- `core/bess/decision_intelligence.py`: `generate_advanced_flow_pattern_name`,
+  `generate_strategic_pattern_name`, `generate_flow_description`,
+  `generate_economic_chain`, `calculate_detailed_flow_values`,
+  `extract_economic_values_from_reward` — all have **zero** references outside
+  the module once the above is gone
+- `core/bess/models.py` `DecisionData` fields: `pattern_name`, `description`,
+  `economic_chain`, `immediate_value`, `net_strategy_value`,
+  `advanced_flow_pattern`, `detailed_flow_values`, `future_target_hours` —
+  every consumer of these lives inside the deleted `api.py` block.
+  **Not `future_value`** — see Keep.
+
+**Keep** (live and load-bearing, despite sharing the module):
+
+- `classify_strategic_intent()` — 19 external references; drives the TOU
+  hardware mode via `INTENT_TO_CONTROL` and the intent badges in
+  `BatteryActionsTable`. Has its own postmortems (#275, #282). Move it out of
+  `decision_intelligence.py` into a module whose name reflects that it is
+  control-path code, not reporting.
+- `create_decision_data()`, reduced to the fields that survive.
+- `DecisionData.strategic_intent`, `observed_intent`, `battery_action`,
+  `cost_basis`, `shadow_price` (the last gates SOLAR_EXPORT discharge at
+  `battery_system_manager.py:2659`; `cost_basis` and `shadow_price` are also
+  both rendered by PR #358).
+- **`DecisionData.future_value` and `_build_period_data`'s `continuation_value`
+  parameter** — PR #358 consumes them: `total_value = reward + future_value`
+  ("total value (top candidate)") plus a "future value / best achievable outcome
+  from the resulting battery level onward" tooltip row. #353's fix stays. Keep
+  `core/bess/tests/unit/test_decision_intelligence.py` (its regression test) too.
+
+**Ripple**:
+
+- `e2e/tests/api-smoke.spec.ts:38` and `e2e/tests/api-contracts.spec.ts:312`
+  both assert on `/api/decision-intelligence` — delete those two blocks.
+- `core/bess/tests/unit/test_data_models.py` asserts the removed fields around
+  lines 338-364 — trim to the surviving ones.
+- **PR #358 coordination**: `build_chart.py` extracts `economic_chain` and
+  `immediate_value` into its ROWS (two sites each, both `dec.get(...)` with
+  defaults) but renders neither. Dropping those four lines plus the `ROWS`
+  description in `SKILL.md` is the whole change there. Since #358 is still
+  **open**, either land it first and clean up after, or fold the four-line
+  removal into it — do not delete the fields while the PR is in flight without
+  telling it.
+- No performance change: `create_decision_data` runs once per reconstructed
+  period in `_build_period_data`, not in the DP inner loop.
+
+**Retires** TODO items 2 and 5 and the #353 `immediate_value` note below.
+
+**Cost of the decision**: none to #353 — its `future_value` fix and
+continuation-value plumbing survive, because PR #358 renders them. What is lost
+is only the templated narration and the two orphaned UIs.
+
+**Where "explain the decision" lives afterwards**: PR #358's skill for
+maintainers (bundle-level, counterfactual, already proven — it caught the
+#342/#350 discrepancy), and the AI chat panel (`backend/ai_chat.py` +
+`docs/agents/bess-knowledge.md`) for users, which can answer a specific question
+at the depth asked instead of emitting a fixed string per intent. If a
+user-facing UI is ever wanted, build it on #358's math, not on `economic_chain`.
+
+---
+
+### Decide the fate of `EnergySankeyChart.tsx`
+
+**Impact**: Low | **Effort**: Low (decision only)
+
+**Description**: `frontend/src/components/EnergySankeyChart.tsx` is imported by
+nothing — a third orphaned visualization alongside the two in the Decision
+Intelligence scope above. Unlike those, it is **energy-flow visualization, not
+decision explanation**, so it is a separate question and is deliberately left
+in place for now: a Sankey of solar → home / battery / grid may still earn a
+place on the Dashboard or Insights page in a way the decision-narration
+components never could.
+
+**Decide**: route it (Dashboard or Insights) or delete it. Do not let it drift
+as a fourth orphan.
+
+**Files**: `frontend/src/components/EnergySankeyChart.tsx`
+
+---
+
 ### Consolidate HistoricalDataStore, PredictionSnapshotStore, and DailyViewStore
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/historical_data_store.py`, `core/bess/prediction_snapshot.py`, `core/bess/daily_view_store.py`
@@ -631,7 +754,11 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 
 **`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
 
-**Suggestion**: remove `immediate_value` (and the `economic_chain` string's reliance on it) once a decision is made on `DecisionFramework.tsx`/`/api/decision-intelligence` — either wire it up to the real app using `grid_cost`/`netSavings` terminology instead of re-deriving a redundant metric, or delete the dead path entirely. Not filed as its own issue since it's a design/scope decision, not a bug.
+**Superseded** by "Scrap the Decision Intelligence framework" (TECHNICAL DEBT), which deletes this whole path.
+
+**Superseded**: the design decision this note was waiting on has been made — see
+"Scrap the Decision Intelligence framework" under TECHNICAL DEBT, which deletes
+the whole path (`immediate_value` included) rather than wiring it up.
 
 ---
 

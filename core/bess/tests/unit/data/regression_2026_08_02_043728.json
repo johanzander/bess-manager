@@ -344,6 +344,6 @@
     "battery_solar_cost": -6.002124244499962,
     "base_to_battery_solar_savings": 15.01665236949968,
     "base_to_battery_solar_savings_pct": 166.5827890408867,
-    "_note": "Re-pinned to the hybrid grid-DP + windowed-PWL result (#450). The grid DP alone reports -5.989678408; the hybrid's window (31,40) recovers -6.002124244. The previous pin (-6.012541994) came from PR #461's full-horizon MILP. The windowed PWL cannot reach it: a full-horizon PWL re-solve of this fixture, pinned to the grid DP's terminal SOE as resolve_pwl_window requires, reports -5.998358429 -- so the residual ~0.010 SEK gap is the terminal-SOE pin, not the tie detector. Tracked separately."
+    "_note": "Re-pinned to the hybrid grid-DP + windowed-PWL result (#450). The grid DP alone reports -5.989678408 on battery_solar_cost; the hybrid's tie-detect/resolve/splice path (window 31-40) genuinely improves this to -6.002124244. This is a real improvement, not exact: full-horizon PWL reaches -5.984652292 on the actual reward objective (the quantity the optimizer maximizes) vs the windowed hybrid's -5.976470872 on that same objective -- the gap is expected windowing coverage (only part of the horizon is re-solved), not a defect. Do not compare against the previous pin (-6.012541994, from PR #461's full-horizon MILP): that figure is inflated by an unrelated MILP self-throttle export-credit bug (see TODO.md, 'From #450 hybrid grid-DP + windowed exact-PWL investigation') and is not a fair target."
   }
 }

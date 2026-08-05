@@ -212,6 +212,9 @@ very predictable homes; does not adapt to actual usage.
 > consumption from *grid import power* and therefore **does not account for
 > solar self-consumption** — on sunny days it under-estimates real consumption.
 > It also requires a hand-written template sensor. Prefer `ha_statistics`.
+> Note that it produces a **flat** 24-hour profile like `fixed`: BESS reads the
+> single current value of the 48h-average sensor and applies it to every period
+> in the horizon, so it has no time-of-day shape.
 
 If you still want it, BESS reads a sensor named `*48h_avg*grid_import*`
 (auto-discovered by name). Create it in `configuration.yaml`:

@@ -23,7 +23,6 @@ def perturb_scenario(base_fixture: dict, seed: int, params: PerturbationParams) 
     scenario = copy.deepcopy(base_fixture)
     rng = random.Random(seed)
 
-    # Handle direct prices (buy_price/sell_price)
     for key in ("buy_price", "sell_price"):
         if key in scenario:
             scaled = [v * params.price_level_multiplier for v in scenario[key]]
@@ -39,20 +38,6 @@ def perturb_scenario(base_fixture: dict, seed: int, params: PerturbationParams) 
                     for v in scaled
                 ]
             scenario[key] = scaled
-
-    # Handle base prices (from scenario with price_data)
-    if "base_prices" in scenario:
-        scaled = [v * params.price_level_multiplier for v in scenario["base_prices"]]
-        if params.volatility_jitter:
-            scaled = [
-                v
-                * (
-                    1.0
-                    + rng.uniform(-params.volatility_jitter, params.volatility_jitter)
-                )
-                for v in scaled
-            ]
-        scenario["base_prices"] = scaled
 
     if params.solar_scale != 1.0:
         scenario["solar_production"] = [

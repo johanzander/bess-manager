@@ -1797,6 +1797,7 @@ def optimize_battery_schedule(
     self_throttle_export_threshold_kwh: float | None = None,
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
+    tie_diagnostics: dict | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -1835,6 +1836,10 @@ def optimize_battery_schedule(
             (house load + battery charging) may not exceed it, constraining rather than
             excluding a period whose load alone exceeds the cap. Defaults to None (no
             import cap, matching power_monitoring_enabled's own default of False).
+        tie_diagnostics: Optional mutable dict. When provided, populated with the
+            internal tie-margin/value-slope/window/SoE-trajectory data this
+            function already computes, for offline measurement tooling (#450).
+            Never passed by production callers; a pure no-op when omitted.
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -2040,6 +2045,13 @@ def optimize_battery_schedule(
         value_slopes,
         soe_step_kwh=SOE_STEP_KWH,
     )
+
+    if tie_diagnostics is not None:
+        tie_diagnostics["tie_margins"] = list(tie_margins)
+        tie_diagnostics["value_slopes"] = list(value_slopes)
+        tie_diagnostics["windows"] = list(windows)
+        tie_diagnostics["soe_trajectory"] = list(soe_trajectory)
+        tie_diagnostics["resolved_initial_cost_basis"] = initial_cost_basis
 
     if windows:
         logger.info(

@@ -8,6 +8,7 @@ from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
 )
 from core.bess.pwl_window_dp import PWLWindowUnderRefinedError
+from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import _scenario_inputs
 from core.bess.tests.synthetic.measure_tie_coverage import (
     TIE_WINDOW_PAD,
@@ -190,14 +191,17 @@ def test_replay_reproduces_the_reported_reward_objective_cost():
 
 @pytest.mark.slow
 def test_reference_reproduces_the_hybrid_on_a_window_it_already_resolved():
-    """Self-consistency: on a window the hybrid re-solved with this very
-    solver, an independently-run exact solve must land on the same cost.
+    """On a window the hybrid re-solved with this same solver, an
+    independently-run solve lands on the same cost.
 
-    This is the control for the near-miss measurement below -- it isolates the
-    measurement rig from the thing being measured. A non-zero delta here would
-    mean the rig disagrees with the production hybrid on a case where both ran
-    the same exact solver, so any delta it reports on an *unflagged* segment
-    would be rig error, not a missed tie.
+    Scope stated narrowly, because this control is weaker than it looks: it
+    shows the rig hands the solver the same pins, prices and loads production
+    did. It does NOT verify window placement -- shifting the segment by one
+    period into periods the hybrid never re-solved reproduces the hybrid's
+    cost just as exactly, because the DP is already optimal on most segments.
+    Nor does it exercise `cost_basis`, which the returned cost provably does
+    not depend on. The mis-slicing control below is what actually catches a
+    bad slice.
     """
     inputs, diagnostics, result = _run_450_fixture()
     assert diagnostics["windows"], "fixture is expected to flag at least one window"
@@ -211,13 +215,19 @@ def test_reference_reproduces_the_hybrid_on_a_window_it_already_resolved():
 
 
 @pytest.mark.slow
-def test_reference_matches_or_beats_the_hybrid_on_the_closest_near_miss():
+def test_measures_the_closest_near_miss_on_the_450_fixture():
     """The measurement itself: what the DP's closest near miss actually costs.
 
     The segment is the window `detect_tie_windows` *would* have built had the
     threshold been low enough to flag this period, so the delta answers the
     counterfactual this suite exists to answer -- "how much SEK was left on
     the table by not flagging it".
+
+    On this fixture the answer is zero: the DP's closest miss (period 34, at
+    1.12x the detection threshold) was already the right call. Pinned as a
+    value, not as an inequality -- the reference is not a proven optimum (see
+    `segment_reference_cost`), so "reference <= hybrid" is not an invariant
+    this suite may assert.
     """
     inputs, diagnostics, result = _run_450_fixture()
     segment = near_miss_segment(
@@ -225,16 +235,111 @@ def test_reference_matches_or_beats_the_hybrid_on_the_closest_near_miss():
         diagnostics["value_slopes"],
         soe_step_kwh=SOE_STEP_KWH,
     )
-    assert segment is not None
+    assert segment == Window(start=32, end=37)
     period_costs, cost_bases = _replay(inputs, result)
 
     reference_cost = _reference(inputs, result, segment, cost_bases)
 
-    # Pinned to the hybrid's own SOE at both ends and solved with no grid
-    # snapping, the exact segment can only match or beat the hybrid over the
-    # same periods. A reference that came out *worse* would mean the rig is
-    # solving a different (or infeasible) problem, not that the DP won.
-    assert reference_cost <= sum(period_costs[segment.start : segment.end]) + 1e-6
+    delta = sum(period_costs[segment.start : segment.end]) - reference_cost
+    assert delta == pytest.approx(0.0, abs=1e-6)
+
+
+@pytest.mark.slow
+def test_reference_can_undershoot_the_hybrid_a_known_solver_limitation():
+    """The PWL solver is not a proven optimum, pinned as an executable fact.
+
+    On this segment the solver returns a schedule 0.031 SEK *worse* than the
+    one the grid DP already found, with both endpoints identical, the pin
+    honoured exactly, and every action on the DP's cheaper path inside
+    `_backward_discharge_levels`' own action grid -- the two paths differ only
+    at a single intermediate SOE (5.46 vs 5.64 kWh). The solver's own `V[0]`
+    matches its replayed cost, so the loss is in the backward induction rather
+    than the forward resolver: a row is missing a kink that refinement did not
+    detect and `PWL_EPS_REFINE` certification did not catch.
+
+    This is a real defect in `pwl_window_dp.py` (production code, used by the
+    hybrid path on short windows), tracked separately -- it is NOT a bug in
+    this harness, and a negative delta must not be reported as a coverage
+    finding. If this test starts failing because the delta went to zero, the
+    solver was fixed: delete the test and tighten
+    `segment_reference_cost`'s docstring accordingly.
+    """
+    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    inputs = _scenario_inputs(scenario)
+    diagnostics: dict = {}
+    result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
+    period_costs, cost_bases = _replay(inputs, result)
+
+    reference_cost = _reference(inputs, result, Window(start=7, end=12), cost_bases)
+
+    hybrid_cost = sum(period_costs[7:12])
+    assert hybrid_cost == pytest.approx(42.648857, abs=1e-5)
+    assert reference_cost == pytest.approx(42.679610, abs=1e-5)
+    assert hybrid_cost - reference_cost < 0.0
+
+
+@pytest.mark.slow
+def test_reference_cost_does_not_depend_on_cost_basis():
+    """`cost_basis` is threaded for call-signature parity with production, and
+    the docstring says so -- this is what makes that claim checkable.
+
+    `_compute_reward`'s total cost is import minus export plus wear; none of
+    those read the basis, which only rolls forward for profitability
+    reporting. A future change that made the objective basis-dependent would
+    silently invalidate every measurement seeded from `replay_schedule`, so
+    the independence is pinned rather than assumed.
+    """
+    inputs, diagnostics, result = _run_450_fixture()
+    segment = near_miss_segment(
+        diagnostics["tie_margins"],
+        diagnostics["value_slopes"],
+        soe_step_kwh=SOE_STEP_KWH,
+    )
+    _period_costs, cost_bases = _replay(inputs, result)
+
+    baseline = _reference(inputs, result, segment, cost_bases)
+    perturbed = _reference(
+        inputs, result, segment, [basis + 0.5 for basis in cost_bases]
+    )
+
+    assert perturbed == baseline
+
+
+@pytest.mark.slow
+def test_reference_reads_exactly_the_segments_periods_and_no_others():
+    """Off-by-one control for the slicing the rig does internally.
+
+    `segment_reference_cost` slices four horizon-length lists by the segment's
+    bounds, and neither the self-consistency test nor any economic assertion
+    would catch a one-period shift (the DP is near-optimal on neighbouring
+    segments too, so a shifted window still matches to the last digit). This
+    pins the boundary directly: perturbing the last period *inside* the
+    segment must move the answer, and perturbing the first period *outside* it
+    must not. An off-by-one in either direction flips one of the two.
+
+    The perturbed input is `home_consumption`, not a price: this fixture's
+    near-miss segment runs entirely on solar with zero grid import, so
+    `buy_price` provably cannot affect its cost -- perturbing that would be a
+    no-op dressed up as a control.
+    """
+    inputs, diagnostics, result = _run_450_fixture()
+    segment = near_miss_segment(
+        diagnostics["tie_margins"],
+        diagnostics["value_slopes"],
+        soe_step_kwh=SOE_STEP_KWH,
+    )
+    _period_costs, cost_bases = _replay(inputs, result)
+    baseline = _reference(inputs, result, segment, cost_bases)
+
+    def _with_extra_load(period: int):
+        perturbed = dict(inputs)
+        load = list(inputs["home_consumption"])
+        load[period] += 0.5
+        perturbed["home_consumption"] = load
+        return _reference(perturbed, result, segment, cost_bases)
+
+    assert _with_extra_load(segment.end - 1) != pytest.approx(baseline, abs=1e-6)
+    assert _with_extra_load(segment.end) == pytest.approx(baseline, abs=1e-12)
 
 
 @pytest.mark.slow
@@ -246,8 +351,7 @@ def test_segment_reference_refuses_a_segment_longer_than_the_solver_can_certify(
     fixture it exhausts `PWL_MAX_PREIMAGE_SEED_POINTS` (1e6) at a horizon of 8
     periods and raises. That wall is why this reference measures a padded
     segment rather than the whole 78-period horizon. The raise is deliberately
-    not caught -- an uncertifiable table has no honest use as a "true optimal"
-    reference -- so callers must keep segments at the detector's own pad width.
+    not caught -- an uncertifiable table has no honest use as a reference -- so callers must keep segments at the detector's own pad width.
     """
     inputs, _diagnostics, result = _run_450_fixture()
     _period_costs, cost_bases = _replay(inputs, result)
@@ -295,9 +399,13 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     period_costs, cost_bases = _replay(inputs, result)
     reference_cost = _reference(inputs, result, segment, cost_bases)
 
+    # A positive delta is a constructive witness: the reference is a concrete
+    # feasible schedule with identical endpoints, replayed through the DP's own
+    # reward function, so this proves the DP left money on the table here --
+    # independently of whether the PWL solver itself found the true optimum
+    # (it does not always; see the undershoot test above).
     delta = sum(period_costs[segment.start : segment.end]) - reference_cost
-    assert delta > 0.0
-    assert reference_cost <= sum(period_costs[segment.start : segment.end]) + 1e-6
+    assert delta == pytest.approx(0.078224, abs=1e-5)
 
 
 @pytest.mark.slow
@@ -323,3 +431,30 @@ def test_scenario_with_no_measurable_period_reports_nothing_rather_than_guessing
         )
         is None
     )
+
+
+def test_refuses_to_measure_a_scenario_with_export_curtailment_enabled():
+    """Fail fast on the one objective mismatch the harness cannot reproduce.
+
+    With curtailment active, production solves and accounts against a floored
+    `reward_sell_price` while this harness threads a single raw `sell_price`
+    into both the solve and the replay -- so a delta would be an objective
+    mismatch reported as a coverage finding. No fixture sets this today, which
+    is exactly why the guard is tested: the failure it prevents is silent.
+    """
+    battery_settings = BatterySettings(export_curtailment_enabled=True)
+
+    with pytest.raises(NotImplementedError, match="export curtailment"):
+        segment_reference_cost(
+            Window(start=0, end=2),
+            buy_price=[1.0, 1.0],
+            sell_price=[0.5, 0.5],
+            home_consumption=[1.0, 1.0],
+            solar_production=[0.0, 0.0],
+            battery_settings=battery_settings,
+            dt=0.25,
+            soe_trajectory=[2.0, 2.0, 2.0],
+            cost_basis=0.4,
+            self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+            import_cap_kwh=None,
+        )

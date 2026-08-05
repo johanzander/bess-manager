@@ -7,10 +7,12 @@ from core.bess.dp_battery_algorithm import (
     POWER_TOLERANCE_KW,
     _compute_reward,
 )
+from core.bess.models import OptimizationResult
 from core.bess.pwl_window_dp import (
     resolve_pwl_window,
     run_pwl_window_backward_induction,
 )
+from core.bess.settings import BatterySettings
 from core.bess.tie_detection import Window, epsilon_for_period
 
 # Must equal `detect_tie_windows`' own `pad` default: the measured segment has
@@ -20,6 +22,43 @@ from core.bess.tie_detection import Window, epsilon_for_period
 TIE_WINDOW_PAD = 2
 
 _BUCKET_ORDER = ["<0.1x", "0.1x-0.5x", "0.5x-1.0x", "1.0x-2.0x", ">2.0x"]
+
+
+def _reject_unsupported_objective(battery_settings: BatterySettings) -> None:
+    """Fail loudly on a scenario whose production objective this harness does
+    not reproduce.
+
+    With export curtailment active, `optimize_battery_schedule` solves and
+    accounts against a *floored* `reward_sell_price` (periods below
+    `export_curtailment_price_floor` priced at 0.0) while reporting the raw
+    `sell_price` on PeriodData. This harness threads a single `sell_price`
+    into both the exact solve and the replay, so on such a scenario it would
+    compare two different objectives and report the discrepancy as a coverage
+    finding. No fixture sets this today; the guard is here so that stays a
+    hard failure rather than a silent wrong number when one does.
+
+    Not threaded rather than not supported: adding a floored price path with
+    no fixture to exercise it would be untested code on the measurement rig
+    itself. Task 5 should thread `reward_sell_price` through both this
+    module's functions when a curtailment scenario is first added.
+
+    Same gap, not guardable from here: `max_charge_power_per_period` and
+    `discharge_resolution_kw` are optimizer *call arguments* production
+    threads into its window solves and this module omits. `_scenario_inputs`
+    never sets either today, so no scenario can currently reach the mismatch;
+    a caller that starts passing them must thread them into both
+    `run_pwl_window_backward_induction` and `resolve_pwl_window` here.
+    """
+    if battery_settings.export_curtailment_enabled:
+        raise NotImplementedError(
+            "measure_tie_coverage cannot measure a scenario with export "
+            "curtailment enabled: production solves against a floored "
+            "reward_sell_price while this harness uses the raw sell_price for "
+            "both the exact solve and the replay, so any delta it reported "
+            "would be an objective mismatch rather than a coverage finding. "
+            "Thread reward_sell_price through replay_schedule and "
+            "segment_reference_cost before measuring such a scenario."
+        )
 
 
 def _bucket_for_ratio(ratio: float) -> str:
@@ -116,12 +155,12 @@ def near_miss_segment(
 
 
 def replay_schedule(
-    result,
+    result: OptimizationResult,
     buy_price: list[float],
     sell_price: list[float],
     home_consumption: list[float],
     solar_production: list[float],
-    battery_settings,
+    battery_settings: BatterySettings,
     dt: float,
     initial_soe: float,
     initial_cost_basis: float | None,
@@ -154,6 +193,7 @@ def replay_schedule(
     *entering* period `t`, so `cost_bases[segment.start]` is what
     `segment_reference_cost` should be seeded with.
     """
+    _reject_unsupported_objective(battery_settings)
     soe = initial_soe
     cost_basis = (
         initial_cost_basis
@@ -198,29 +238,53 @@ def segment_reference_cost(
     sell_price: list[float],
     home_consumption: list[float],
     solar_production: list[float],
-    battery_settings,
+    battery_settings: BatterySettings,
     dt: float,
     soe_trajectory: list[float],
     cost_basis: float,
     self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None,
 ) -> float:
-    """Exact ("true optimal") objective cost over `segment`, solved with the
-    continuous-SOE PWL DP and pinned to the schedule's own SOE at both ends.
+    """Objective cost over `segment` as re-solved by the continuous-SOE PWL
+    DP, pinned to the schedule's own SOE at both ends.
 
-    WHAT THIS MEASURES, AND WHAT IT DELIBERATELY DOES NOT. This is a
-    *segment* reference, not a whole-horizon one, and the difference changes
-    how a caller may phrase its result. It answers "what would re-solving
-    these periods exactly have been worth, holding everything outside them
-    fixed" -- the counterfactual value of flagging one period. It does not
-    answer "what would a globally optimal schedule have cost": pinning both
-    ends to the incumbent SOE forbids the reference from banking energy
-    differently before or after, so a genuinely better global plan that needs
-    a different SOE at the boundary is out of reach by construction. The
-    number is therefore a LOWER BOUND on the true miss cost. Reporting it as
-    the total cost of a missed tie would overstate what was verified.
+    NOT A PROVEN OPTIMUM, and the difference is load-bearing for how a caller
+    may phrase a delta. This is "what the PWL solver achieves on these
+    periods", not "what the best possible schedule costs". The PWL backward
+    induction is itself measurably suboptimal on real data: on
+    `historical_2024_08_16_high_spread_no_solar` segment 7-12 it returns
+    42.679610 SEK against a DP path costing 42.648857 -- 0.031 SEK *worse*
+    -- with both endpoints identical, the pin honoured exactly, and every
+    action on the cheaper path inside `_backward_discharge_levels`' own grid
+    (the paths differ only at one intermediate SOE, 5.46 vs 5.64 kWh). The
+    solver's `V[0]` agrees with its own replayed cost to 1e-6, so the loss is
+    in the backward induction, not the forward resolver -- i.e. a row is
+    missing a kink its refinement did not detect, which its
+    `PWL_EPS_REFINE`-based certification did not catch. Pinned by
+    `test_reference_can_undershoot_the_hybrid_a_known_solver_limitation`.
 
-    That scoping is forced, not chosen. The exact solver's breakpoint set
+    Reading a delta (`hybrid_cost - reference_cost`) in light of that:
+    - POSITIVE is a sound constructive witness. The reference is a concrete
+      feasible schedule with identical endpoints, replayed through the DP's
+      own reward function, so a positive delta proves the DP left that much on
+      the table -- whether or not the PWL solver found the true optimum.
+    - NEGATIVE means the PWL solver undershot on this segment. It is solver
+      noise, NOT a harness failure and not a signal the DP did something
+      right; there is nothing for a caller to investigate. Callers should
+      report such segments as "no measurable miss" (floor the delta at zero)
+      rather than as a negative saving.
+    - Either way the magnitude is a LOWER BOUND on the true miss cost: pinning
+      both ends forbids the reference from banking energy differently outside
+      the segment, so a better global plan needing a different boundary SOE is
+      out of reach by construction.
+
+    Scope: this answers "what would re-solving these periods have been worth,
+    holding everything outside them fixed" -- the counterfactual value of
+    flagging one period -- not "what would a globally optimal schedule have
+    cost". Reporting it as the total cost of a missed tie would overstate what
+    was verified.
+
+    That scoping is forced, not chosen. The solver's breakpoint set
     compounds per backward step (it seeds every discharge preimage of the next
     row's breakpoints), exhausting `PWL_MAX_PREIMAGE_SEED_POINTS` at a horizon
     of 8 periods on the #450 fixture -- a 78-period exact solve is not
@@ -231,17 +295,28 @@ def segment_reference_cost(
 
     Pinning to the incumbent SOE at both ends is the same technique the
     production hybrid path uses when it splices a re-solved window
-    (`dp_battery_algorithm.py` Step 2b), so a segment the hybrid actually
-    resolved must come back with the same cost -- the rig's self-consistency
-    control.
+    (`dp_battery_algorithm.py` Step 2b).
 
-    `cost_basis` must be the basis entering `segment.start` (take it from
-    `replay_schedule`). `soe_trajectory` is the schedule's realized SOE per
-    period boundary, length `horizon + 1`; the pins are read from it at
-    `segment.start` and `segment.end`. Pass the *post-splice* trajectory (from
+    A segment may legitimately overlap a window the hybrid already resolved
+    with this same solver; the delta is then zero by construction. That is a
+    correct result, not a measurement -- such a segment carries no information
+    about detector coverage, since the detector did catch it.
+
+    `soe_trajectory` is the schedule's realized SOE per period boundary,
+    length `horizon + 1`; the pins are read from it at `segment.start` and
+    `segment.end`. Pass the *post-splice* trajectory (from
     `result.period_data`), not `tie_diagnostics["soe_trajectory"]`, which is
     recorded before the hybrid splices and so differs inside a resolved
     window.
+
+    `cost_basis` should be the basis entering `segment.start` (from
+    `replay_schedule`), but the returned cost does not depend on it: it is
+    threaded only for parity with production's `resolve_pwl_window` call.
+    `_compute_reward`'s `total_cost` is import cost minus export revenue plus
+    wear, none of which read the basis -- the basis is carried for
+    profitability reporting and rolls forward as `new_cost_basis`. Verified by
+    `test_reference_cost_does_not_depend_on_cost_basis`; do not infer from
+    this parameter that a mis-seeded basis would corrupt a measurement.
 
     The returned number is directly comparable to a slice of
     `replay_schedule`'s `period_costs`: same accumulation (negated
@@ -251,9 +326,10 @@ def segment_reference_cost(
     Raises `PWLWindowUnderRefinedError` if the segment is too long for the
     solver to certify, and `RuntimeError` if the pinned end SOE is
     unreachable. Neither is caught here: an uncertifiable or infeasible table
-    has no honest use as a "true optimal" reference, and a caller that
-    swallowed either would report a fabricated 0.00 SEK delta.
+    has no honest use as a reference, and a caller that swallowed either would
+    report a fabricated 0.00 SEK delta.
     """
+    _reject_unsupported_objective(battery_settings)
     sl = slice(segment.start, segment.end)
     window_horizon = segment.end - segment.start
     segment_buy = buy_price[sl]

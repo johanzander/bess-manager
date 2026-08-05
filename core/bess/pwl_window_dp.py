@@ -537,6 +537,16 @@ def _pwl_window_seed_points(
     value -- enough to invert the window's decision. Seeding the exact
     preimages puts a breakpoint *on* each kink instead, and the adaptive
     probe loop in `run_pwl_window_backward_induction` finds the rest.
+
+    Not cap-aware (#429): `store_gain`/`idle_gain` here are the *uncapped*
+    charge gains, so when a grid-import cap binds, the real STORE kink sits
+    at a smaller gain than the seed placed. This is safe but not free --
+    refinement is cap-aware and bisects its way to the true kink, and
+    `PWLWindowUnderRefinedError` is the backstop if it cannot -- so the cost
+    is extra refinement rounds and a correspondingly higher chance of
+    exhausting `PWL_MAX_REFINE_ITERS`, which aborts the whole optimization.
+    An availability risk on capped windows, not a correctness one; seeding
+    the capped gain as well is the fix if it ever fires.
     """
     min_soe = battery_settings.min_soe_kwh
     max_soe = battery_settings.max_soe_kwh

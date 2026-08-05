@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
-from core.bess.dp_battery_algorithm import _compute_reward
 from core.bess.pwl_window_dp import (
     PWLWindowUnderRefinedError,
     _backward_discharge_levels,
@@ -492,10 +491,36 @@ def test_pwl_replay_respects_the_grid_import_cap():
     assert capped_next_soe == pytest.approx(2.0 + 0.2 * battery.efficiency_charge)
 
 
+def _planned_import_kwh(
+    soe: float, next_soe: float, home_consumption: float, battery: BatterySettings
+) -> float:
+    """Grid import a no-solar period's plan actually requires, derived from the
+    SOE the solver committed to.
+
+    Deliberately NOT `_compute_reward`'s returned `grid_imported`: that function
+    self-throttles grid charging against the very cap under test, so it reports
+    a within-cap number for a plan that charges far beyond the cap. Asking it
+    would make the assertion true by construction (this is exactly how the
+    first version of these tests passed with the cap threading stripped out).
+    The achieved SOE delta cannot lie -- storing it took
+    `delta / efficiency_charge` kWh off the meter, on top of the house load.
+    """
+    return home_consumption + max(0.0, (next_soe - soe) / battery.efficiency_charge)
+
+
 def test_pwl_window_backward_induction_respects_the_grid_import_cap():
     """End to end over a whole window: every replayed period's planned grid
     import stays within the cap (#429), and the window still charges (so the
-    assertion is not vacuously satisfied by an idle plan)."""
+    assertion is not vacuously satisfied by an idle plan).
+
+    Verified by reversion: stripping the cap from
+    `_pwl_best_action_at_continuous_state` makes this fail with a planned
+    import of 6.0 kWh against the 1.2 kWh cap. It does NOT catch a cap
+    stripped from the backward pass alone -- the pin still steers the replay
+    to the same trajectory here -- so `_pwl_candidate_values_at` is covered
+    separately by
+    `test_pwl_backward_induction_values_reflect_the_grid_import_cap`.
+    """
     battery = _tiny_battery()
     home = 1.0
     cap = 1.2
@@ -517,25 +542,53 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
     actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
 
     soe = start_soe
-    for t, (power, next_soe) in enumerate(actions):
-        _reward, _basis, grid_imported = _compute_reward(
-            power=power,
-            soe=soe,
-            next_soe=next_soe,
-            period=t,
-            home_consumption=home,
-            battery_settings=battery,
-            dt=1.0,
-            solar_production=0.0,
-            buy_price=[0.1, 0.1],
-            sell_price=[0.0, 0.0],
-            cost_basis=0.0,
-            import_cap_kwh=cap,
-        )
-        assert grid_imported <= cap + 1e-9, (
-            f"period {t} plans {grid_imported} kWh of grid import, above the "
+    for t, (_power, next_soe) in enumerate(actions):
+        planned_import = _planned_import_kwh(soe, next_soe, home, battery)
+        assert planned_import <= cap + 1e-9, (
+            f"period {t} plans {planned_import} kWh of grid import, above the "
             f"fuse cap of {cap} kWh"
         )
         soe = next_soe
 
     assert soe > start_soe, "window should still charge -- otherwise vacuous"
+
+
+def test_pwl_backward_induction_values_reflect_the_grid_import_cap():
+    """Direct coverage of the backward pass (`_pwl_candidate_values_at`).
+
+    The V-table itself must be built under the cap, not just the forward
+    replay: the table is what the replay's one-step Bellman recompute reads as
+    its continuation value, so an uncapped table prices reachability the fuse
+    does not permit. With a pin the capped solver cannot reach, an uncapped
+    solve reaches it comfortably -- so the two tables must disagree at the
+    start SOE, and only the capped one may report the window infeasible.
+    """
+    battery = _tiny_battery()
+    home = 1.0
+    cap = 1.2
+    start_soe = 2.0
+    # Reachable only by charging faster than the cap allows: the uncapped
+    # STORE action stores 4.75 kWh in one period, the capped one 0.19 kWh.
+    end_soe_target = start_soe + 2.0
+
+    kwargs = {
+        "window_horizon": 2,
+        "buy_price": [0.1, 0.1],
+        "sell_price": [0.0, 0.0],
+        "home_consumption": [home, home],
+        "solar_production": [0.0, 0.0],
+        "battery_settings": battery,
+        "dt": 1.0,
+        "end_soe_target": end_soe_target,
+    }
+    V_capped = run_pwl_window_backward_induction(import_cap_kwh=cap, **kwargs)
+    V_uncapped = run_pwl_window_backward_induction(import_cap_kwh=None, **kwargs)
+
+    assert pwl_window_is_feasible(
+        V_uncapped, start_soe
+    ), "without a cap the window can charge its way to the pinned end SOE"
+    assert not pwl_window_is_feasible(V_capped, start_soe), (
+        "the capped backward pass must not price the pinned end SOE as "
+        "reachable -- getting there needs more grid import than the fuse "
+        "allows, so V[0] has to carry the terminal penalty"
+    )

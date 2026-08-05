@@ -11,8 +11,6 @@ for why only the tied window gets this treatment instead of the whole
 horizon.
 """
 
-import logging
-
 import numpy as np
 
 from core.bess.dp_battery_algorithm import (
@@ -31,10 +29,27 @@ from core.bess.dp_battery_algorithm import (
 )
 from core.bess.dp_constants import POWER_STEP_KW
 
-logger = logging.getLogger(__name__)
-
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
+
+
+class PWLWindowUnderRefinedError(RuntimeError):
+    """The windowed PWL solve hit one of its own accuracy budgets, so the
+    value table it would return is an approximation of unknown quality.
+
+    Distinct from the *infeasible* case (`pwl_window_is_feasible`), which is
+    an ordinary physical outcome the solver reports honestly. This one means
+    the solver cannot certify its own answer at all: the only reason the
+    hybrid path (#450) re-solves a window is that the grid DP's result on it
+    is not trustworthy to within tie-margin accuracy, so handing back a
+    result of *unknown* accuracy and letting it be spliced in as if exact
+    would replace one silent inaccuracy with another -- precisely the
+    fallback `docs/agents/rules.md` forbids. Raising instead makes the
+    condition impossible to miss; the budgets themselves (see
+    `PWL_MAX_BREAKPOINTS`, `PWL_MAX_REFINE_ITERS`,
+    `PWL_MAX_PREIMAGE_SEED_POINTS`) are the knobs to revisit if it ever
+    fires in practice -- it fires on none of the fixture suite's scenarios.
+    """
 
 
 def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):
@@ -519,19 +534,15 @@ def _pwl_window_seed_points(
     # 5-period windows: 1.00 s -> 0.68 s mean once the budget stopped
     # cutting it off after the first backward step).
     preimage_points = xs_next.size * discharge_energy.size
-    if preimage_points <= PWL_MAX_PREIMAGE_SEED_POINTS:
-        points.append(np.add.outer(xs_next, discharge_energy).ravel())
-    else:
-        logger.warning(
-            "PWL window t=%d: exact discharge-preimage seeding skipped "
-            "(%d points > PWL_MAX_PREIMAGE_SEED_POINTS=%d); V[%d] falls back "
-            "to adaptive probing alone and may misplace the terminal pin's "
-            "reachable-set boundary",
-            t,
-            preimage_points,
-            PWL_MAX_PREIMAGE_SEED_POINTS,
-            t,
+    if preimage_points > PWL_MAX_PREIMAGE_SEED_POINTS:
+        raise PWLWindowUnderRefinedError(
+            f"PWL window t={t}: exact discharge-preimage seeding would need "
+            f"{preimage_points} points > PWL_MAX_PREIMAGE_SEED_POINTS="
+            f"{PWL_MAX_PREIMAGE_SEED_POINTS}. Falling back to adaptive probing "
+            f"alone may misplace the terminal pin's reachable-set boundary, so "
+            f"V[{t}] cannot be certified exact and must not be spliced."
         )
+    points.append(np.add.outer(xs_next, discharge_energy).ravel())
     points.append(np.arange(min_soe, max_soe + 0.1, 0.1))
 
     X = np.unique(np.clip(np.concatenate(points), min_soe, max_soe))
@@ -584,6 +595,13 @@ def run_pwl_window_backward_induction(
 
     An `end_soe_target` outside the battery's usable SOE range raises
     `ValueError` (see `_pinned_terminal_row`).
+
+    Exhausting any of the accuracy budgets (`PWL_MAX_BREAKPOINTS`,
+    `PWL_MAX_REFINE_ITERS`, `PWL_MAX_PREIMAGE_SEED_POINTS`) raises
+    `PWLWindowUnderRefinedError` rather than returning the approximation --
+    unlike infeasibility, an uncertifiable table has no honest use, and
+    splicing one in as if exact is the silent degradation this whole path
+    exists to remove.
     """
     horizon_inputs = (buy_price, sell_price, home_consumption, solar_production)
     power_row = np.concatenate(
@@ -673,27 +691,18 @@ def run_pwl_window_backward_induction(
             # above PWL_EPS_REFINE * (1 + |V|) >= PWL_EPS_PRUNE.
             X, V_t = _pwl_prune(X, values_at(X), eps=PWL_EPS_PRUNE)
             if len(X) > PWL_MAX_BREAKPOINTS:
-                logger.warning(
-                    "PWL window t=%d: breakpoint ceiling hit (%d > "
-                    "PWL_MAX_BREAKPOINTS=%d); V[%d] is an under-refined "
-                    "approximation and the window's result should not be "
-                    "treated as exact",
-                    t,
-                    len(X),
-                    PWL_MAX_BREAKPOINTS,
-                    t,
+                raise PWLWindowUnderRefinedError(
+                    f"PWL window t={t}: breakpoint ceiling hit ({len(X)} > "
+                    f"PWL_MAX_BREAKPOINTS={PWL_MAX_BREAKPOINTS}); V[{t}] is an "
+                    f"under-refined approximation and the window's result must "
+                    f"not be treated as exact."
                 )
-                converged = True  # stopped deliberately, already reported
-                break
         if not converged:
-            logger.warning(
-                "PWL window t=%d: refinement did not converge within "
-                "PWL_MAX_REFINE_ITERS=%d (%d breakpoints); V[%d] may still "
-                "carry representation error above PWL_EPS_REFINE",
-                t,
-                PWL_MAX_REFINE_ITERS,
-                len(X),
-                t,
+            raise PWLWindowUnderRefinedError(
+                f"PWL window t={t}: refinement did not converge within "
+                f"PWL_MAX_REFINE_ITERS={PWL_MAX_REFINE_ITERS} ({len(X)} "
+                f"breakpoints); V[{t}] may still carry representation error "
+                f"above PWL_EPS_REFINE and must not be treated as exact."
             )
 
         V[t] = _pwl_prune(X, V_t, eps=PWL_EPS_PRUNE)

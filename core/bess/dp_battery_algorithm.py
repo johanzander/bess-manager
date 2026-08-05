@@ -1885,9 +1885,13 @@ def optimize_battery_schedule(
             )
             # End SOE is pinned to the grid DP's own SOE at the window's exit,
             # so the untouched schedule after the window stays valid. An
-            # infeasible pin raises out of resolve_pwl_window -- deliberately
-            # not caught: silently keeping the grid DP's possibly-wrong choice
-            # is exactly the fallback this project forbids.
+            # infeasible pin raises out of resolve_pwl_window, and a solve
+            # that blew one of its accuracy budgets raises
+            # PWLWindowUnderRefinedError out of the backward induction --
+            # both deliberately not caught. Silently keeping the grid DP's
+            # possibly-wrong choice, or splicing in a table whose accuracy the
+            # solver itself could not certify, are both exactly the fallback
+            # this project forbids.
             V_window = run_pwl_window_backward_induction(
                 window_horizon=window_horizon,
                 buy_price=buy_price[sl],
@@ -2039,6 +2043,7 @@ def optimize_battery_schedule(
     return OptimizationResult(
         period_data=hourly_results,
         economic_summary=economic_summary,
+        reward_objective_cost=reward_objective_cost,
         input_data={
             "buy_price": buy_price,
             "sell_price": sell_price,

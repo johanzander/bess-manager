@@ -1,7 +1,9 @@
 import numpy as np
 import pytest
 
+from core.bess import pwl_window_dp
 from core.bess.pwl_window_dp import (
+    PWLWindowUnderRefinedError,
     _backward_discharge_levels,
     _end_soe_pin_tolerance,
     _pwl_best_action_at_continuous_state,
@@ -387,3 +389,47 @@ def test_exact_discharge_preimages_are_seeded_on_every_row():
     nearest = np.minimum(np.abs(left - expected), np.abs(right - expected))
     missing = expected[nearest > 1e-9]
     assert missing.size == 0, f"{missing.size} discharge preimages were not seeded"
+
+
+def _solve_tiny_window(battery: BatterySettings):
+    """A small but non-trivial window (varying prices, non-zero load) whose
+    rows genuinely need adaptive refinement -- used by the guard tests below,
+    which shrink one budget at a time and require a loud failure."""
+    return run_pwl_window_backward_induction(
+        window_horizon=3,
+        buy_price=[1.0, 2.0, 0.5],
+        sell_price=[0.5, 1.5, 0.2],
+        home_consumption=[0.5, 0.5, 0.5],
+        solar_production=[0.0, 0.0, 0.0],
+        battery_settings=battery,
+        dt=0.25,
+        end_soe_target=5.0,
+    )
+
+
+def test_breakpoint_ceiling_raises_instead_of_returning_an_approximation(monkeypatch):
+    """Hitting `PWL_MAX_BREAKPOINTS` means the row is an under-refined
+    approximation. Returning it anyway would let the caller splice it into
+    the schedule as if it were exact -- a silent degradation of the one path
+    where the solver knows its own answer is untrustworthy."""
+    monkeypatch.setattr(pwl_window_dp, "PWL_MAX_BREAKPOINTS", 5)
+    with pytest.raises(PWLWindowUnderRefinedError, match="breakpoint ceiling"):
+        _solve_tiny_window(_tiny_battery())
+
+
+def test_refinement_non_convergence_raises(monkeypatch):
+    """Exhausting `PWL_MAX_REFINE_ITERS` without the probe error dropping
+    below tolerance means the row still carries representation error above
+    `PWL_EPS_REFINE` -- not something a caller may treat as exact."""
+    monkeypatch.setattr(pwl_window_dp, "PWL_MAX_REFINE_ITERS", 1)
+    with pytest.raises(PWLWindowUnderRefinedError, match="did not converge"):
+        _solve_tiny_window(_tiny_battery())
+
+
+def test_skipped_preimage_seeding_raises(monkeypatch):
+    """Skipping exact discharge-preimage seeding can misplace the terminal
+    pin's reachable-set boundary by ~1e6 SEK/kWh of fictitious value, which
+    is enough to invert the window's decision."""
+    monkeypatch.setattr(pwl_window_dp, "PWL_MAX_PREIMAGE_SEED_POINTS", 1)
+    with pytest.raises(PWLWindowUnderRefinedError, match="discharge-preimage"):
+        _solve_tiny_window(_tiny_battery())

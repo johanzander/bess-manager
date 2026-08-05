@@ -344,23 +344,14 @@ class TestPatchSettingsServiceDomainValidation:
 
 
 class TestPatchSettingsLegacyInverterType:
-    """The legacy growatt.inverter_type path switches the live platform. It
-    must also persist inverter.platform, since that is what the service
-    domain resolves from — otherwise vendor calls address the old platform's
-    integration (or fail outright) until a restart runs the migration."""
+    """The legacy growatt.inverterType path was removed — platform changes go
+    through the "inverter" section only. A stray legacy key must not switch
+    the live platform behind the store's back."""
 
-    def test_platform_persisted_alongside_live_switch(self, mock_controller):
-        # The endpoint validates inverter_type against the real map; the
-        # MagicMock's __contains__ would otherwise reject everything.
-        mock_controller.system._INVERTER_TYPE_TO_PLATFORM = {
-            "MIN": "growatt_server_min",
-            "SPH": "growatt_server_sph",
-        }
-        _client.patch("/api/settings", json={"growatt": {"inverterType": "SPH"}})
-        assert (
-            mock_controller.settings_store.data["inverter"]["platform"]
-            == "growatt_server_sph"
-        )
+    def test_legacy_inverter_type_does_not_switch_platform(self, mock_controller):
+        resp = _client.patch("/api/settings", json={"growatt": {"inverterType": "SPH"}})
+        assert resp.status_code == 200
+        mock_controller.system.switch_inverter_platform.assert_not_called()
 
 
 class TestPatchSettingsCamelToSnake:

@@ -307,29 +307,12 @@ async def patch_settings(updates: dict):
                 bess_controller.system.update_settings({"energy_provider": section})
 
             elif store_key == "growatt":
+                # Platform switching lives in the "inverter" branch below;
+                # this section only carries the Growatt cloud device_id.
                 if "device_id" in section:
                     bess_controller.ha_controller.growatt_device_id = section[
                         "device_id"
                     ]
-                # Map legacy inverter_type to platform and switch controller
-                inverter_type = section.get("inverter_type")
-                if inverter_type:
-                    platform_map = bess_controller.system._INVERTER_TYPE_TO_PLATFORM
-                    if inverter_type not in platform_map:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unknown inverter_type '{inverter_type}', "
-                            f"expected one of {list(platform_map)}",
-                        )
-                    new_platform = platform_map[inverter_type]
-                    bess_controller.system.switch_inverter_platform(new_platform)
-                    # Persist it as well: the vendor service domain resolves
-                    # from inverter.platform, so switching the live controller
-                    # without writing the store leaves service calls addressing
-                    # the previous platform's integration until a restart.
-                    inv = bess_controller.settings_store.get_section("inverter")
-                    inv["platform"] = new_platform
-                    bess_controller.settings_store.save_section("inverter", inv)
 
             elif store_key == "inverter":
                 # device_id here is the Huawei battery device (the Growatt

@@ -252,41 +252,21 @@ class BatterySystemManager:
         "huawei_solar_luna2000",
     }
 
-    _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
-        "growatt_server_min": "growatt_server_min",
-        "solax_modbus_growatt_min": "solax_modbus_growatt_min",
-        "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
-        "growatt_server_sph": "growatt_server_sph",
-        "solax_modbus_native": "solax_modbus_native",
-        "solis_modbus": "solis_modbus",
-        "huawei_solar_luna2000": "huawei_solar_luna2000",
-        # Legacy values stored in growatt.inverter_type
-        "MIN": "growatt_server_min",
-        "SPH": "growatt_server_sph",
-    }
-
     @staticmethod
     def _resolve_initial_platform(options: dict) -> str | None:
         """Determine inverter platform from startup config.
 
-        Checks ``inverter.platform`` first, then falls back to the legacy
-        ``growatt.inverter_type`` key.  Returns None on a fresh install.
+        ``inverter.platform`` is the source of truth; installs predating it are
+        rewritten by ``SettingsStore._migrate_schema()`` before this runs.
+        Returns None on a fresh install.
         """
         platform = options.get("inverter", {}).get("platform")
         if not platform:
-            inverter_type = options.get("growatt", {}).get("inverter_type", "")
-            if not inverter_type:
-                logger.info(
-                    "No inverter platform configured — "
-                    "system will start in unconfigured mode"
-                )
-                return None
-            assert inverter_type in BatterySystemManager._INVERTER_TYPE_TO_PLATFORM, (
-                f"Unknown inverter_type '{inverter_type}', "
-                f"expected one of "
-                f"{list(BatterySystemManager._INVERTER_TYPE_TO_PLATFORM)}"
+            logger.info(
+                "No inverter platform configured — "
+                "system will start in unconfigured mode"
             )
-            platform = BatterySystemManager._INVERTER_TYPE_TO_PLATFORM[inverter_type]
+            return None
 
         assert platform in BatterySystemManager.VALID_PLATFORMS, (
             f"Unknown inverter platform '{platform}', "

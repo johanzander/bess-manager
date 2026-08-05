@@ -105,9 +105,6 @@ LEGACY_INVERTER_PLATFORM_MAP: dict[str, str] = {
     "SPH": "growatt_server_sph",
 }
 
-# Keep old name as alias for backward compat with PATCH /api/settings handler
-UI_TYPE_TO_PLATFORM = LEGACY_INVERTER_PLATFORM_MAP
-
 
 def build_system_settings(options: dict) -> dict:
     """Validate settings options and return the snake_case dict for update_settings().

@@ -1171,14 +1171,41 @@ def _charge_candidate(
 # *decisions* rather than two power levels of the same decision, when
 # measuring how ambiguous a period's choice is (#450). See _tie_margin.
 #
-# Calibrated against the fixture suite (core/bess/tests/unit/data): #450's
-# own reproduction fixture has its genuine alternative 1.25-1.5 kWh away
-# from the chosen action's next_soe -- charging in a different window --
-# while the mass of spurious near-ties across every other fixture sits
-# below 1 kWh, i.e. nudging the same plan's power level. Sweeping this
-# constant over 0.05 -> 1.5 kWh moves suite-wide flagging from 15.6% of
-# periods to 0.4% with #450's case still caught the whole way up to
-# 1.25 kWh; 1.0 kWh keeps a comfortable margin on both sides.
+# This is a behavioural-DISTINCTNESS threshold, empirically calibrated --
+# not a duplicate-removal tolerance, despite the duplicate candidates
+# (IDLE vs the SOLAR_EXPORT-below-max bypass, which land on the identical
+# next_soe) being what first exposed the problem. Removing literal
+# duplicates needs only ~SOE_STEP_KWH (0.05 kWh); 1.0 kWh is 20x that, and
+# per the calibration sweep it is the DOMINANT lever on the trigger rate,
+# not a safety margin around a smaller principled value. Sweeping it over
+# 0.05 -> 1.5 kWh moves suite-wide flagging from 15.6% of periods to 0.4%.
+#
+# It is set where it is because #450's own reproduction fixture has its
+# genuine alternative 1.25-1.5 kWh away from the chosen action's next_soe
+# -- charging in a different window -- while the mass of spurious
+# near-ties across every other fixture sits below 1 kWh, i.e. nudging the
+# same plan's power level. #450's case is still caught the whole way up to
+# 1.25 kWh, so 1.0 kWh keeps margin on both sides.
+#
+# Two consequences worth knowing before touching this:
+#
+# 1. It suppresses the charge side almost entirely. _charge_candidate
+#    returns a single POWER_STEP_KW (0.2 kW) gradient probe, which moves
+#    SOE by only ~0.05 kWh at dt=0.25h (~0.19 kWh at dt=1h) -- always well
+#    under this threshold. So the charge candidate can essentially never
+#    be the runner-up, and "charge now vs charge later" (the case the
+#    _tie_margin docstring names as the target) can only register as a tie
+#    when the CHOSEN action is a large discharge and the alternative is
+#    the far-away no-discharge state, never when the chosen action is
+#    itself a charge.
+# 2. TODO: it is an absolute kWh figure that scales with neither battery
+#    capacity nor dt. Every fixture in the suite uses a similar-sized
+#    battery, so no test can catch this. On a much smaller battery (say
+#    5 kWh usable) a 1.0 kWh separation is a fifth of the whole range and
+#    the detector would likely go silent -- and silently, since a missed
+#    tie reproduces #450's bug rather than raising. Making it relative to
+#    usable capacity needs a fixture with a small battery to calibrate
+#    against.
 TIE_DEDUP_SOE_KWH = 1.0
 
 
@@ -1817,9 +1844,14 @@ def optimize_battery_schedule(
     # exact continuous-SOE PWL DP, pinned to the grid DP's own SOE at both
     # ends so everything outside the window is untouched.
     #
-    # When no window is flagged -- the overwhelmingly common case -- nothing
-    # below this point runs and the schedule built above is returned bit-for-
-    # bit unchanged. Imported here rather than at module scope because
+    # When no window is flagged, nothing below this point runs and the
+    # schedule built above is returned bit-for-bit unchanged. That is rare
+    # per period (1% of periods flag across the fixture suite) but NOT rare
+    # per solve: 8 of 32 fixtures -- a quarter of runs -- flag at least one
+    # window, and those runs pay roughly 20-40x the grid DP's latency (e.g.
+    # 0.05s -> 1.6s on the #450 fixture). Budget for the slow path being hit
+    # on a meaningful fraction of real optimizations, not for it being
+    # exceptional. Imported here rather than at module scope because
     # pwl_window_dp imports this module (it reuses this file's reward and
     # transition primitives), so a top-level import would be circular.
     from core.bess.pwl_window_dp import (

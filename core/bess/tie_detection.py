@@ -22,7 +22,10 @@ the actual lookup error, and flagged 50-100% of periods on every fixture.
 The DP already computes dV/dSoE, so the stand-in is unnecessary.
 """
 
+import logging
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 # Fraction of the worst-case grid-snap noise below which a margin counts as
 # a tie. 1.0 would be the worst case itself -- two independent half-step
@@ -32,6 +35,20 @@ from dataclasses import dataclass
 # own reproduction case with roughly 2x headroom (its critical period's
 # margin is 0.053 of the worst-case noise). Measured suite-wide flag rates:
 # k=0.05 -> 0.6%, k=0.1 -> 1.0%, k=0.2 -> 2.2%, k=0.5 -> 6.0%, k=1.0 -> 10.7%.
+#
+# THIS IS AN ACCEPTED FALSE-NEGATIVE RISK, not a tightening of the theory.
+# Every period whose margin falls between 0.1x and 1.0x the snap noise is a
+# decision grid-snapping could genuinely have flipped, and this threshold
+# knowingly leaves all of them unresolved -- roughly 10% of periods, traded
+# away because re-solving them costs 20-40x the DP's latency and because
+# their measured cost impact on the fixture suite is a few hundredths of a
+# SEK. The trade is deliberately lopsided towards speed.
+#
+# The failure mode when the trade goes wrong is SILENT: a missed tie is not
+# an error, it is #450's original bug reproducing unnoticed -- the grid DP
+# keeps a schedule its own snapped value table mis-ranked, and nothing
+# downstream can tell. Raising this constant is the first thing to try if a
+# new #450-class report appears; the k-sweep above is the cost of doing so.
 TIE_NOISE_FACTOR = 0.1
 
 
@@ -60,11 +77,39 @@ def detect_tie_windows(
             f"value_slopes has {len(value_slopes)} entries but tie_margins has "
             f"{horizon} -- they must be recorded per period in the same pass"
         )
-    flagged = [
-        t
-        for t in range(horizon)
-        if tie_margins[t] < _epsilon_for_period(value_slopes[t], soe_step_kwh)
-    ]
+    epsilons = [_epsilon_for_period(s, soe_step_kwh) for s in value_slopes]
+    flagged = [t for t in range(horizon) if tie_margins[t] < epsilons[t]]
+
+    # Two structural blind spots, logged rather than left invisible because
+    # a period this detector cannot flag is a period where #450's bug can
+    # reproduce silently. Neither is a defect -- both are consequences of
+    # the definitions above -- but their prevalence is worth seeing in a
+    # debug bundle when a near-tie is suspected and nothing was flagged.
+    #
+    # - epsilon == 0: a flat value function (dV/dSoE == 0) makes the snap
+    #   noise exactly zero, so the strict `<` can never fire no matter how
+    #   tied the period is. Measured at ~12.4% of periods across the
+    #   fixture suite. Defensible (nothing to lose where stored energy has
+    #   no marginal value) but it is a hard exclusion, not a soft one.
+    # - margin == inf: no candidate landed more than TIE_DEDUP_SOE_KWH from
+    #   the chosen action, so no comparison happened at all. ~4.8% of
+    #   periods suite-wide, but 83% on synthetic_clear_sky_ac_clipping --
+    #   it concentrates heavily on horizons where the battery is pinned by
+    #   AC-cap or capacity limits.
+    blind_zero_epsilon = sum(1 for e in epsilons if e == 0.0)
+    blind_inf_margin = sum(1 for m in tie_margins if m == float("inf"))
+    if blind_zero_epsilon or blind_inf_margin:
+        logger.debug(
+            "Tie detection blind spots (#450): %d/%d periods had zero epsilon "
+            "(flat value function, can never be flagged) and %d/%d had an "
+            "infinite margin (no candidate more than the dedup distance from "
+            "the chosen action, so no comparison was possible)",
+            blind_zero_epsilon,
+            horizon,
+            blind_inf_margin,
+            horizon,
+        )
+
     if not flagged:
         return []
 

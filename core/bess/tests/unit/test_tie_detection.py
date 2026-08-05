@@ -74,7 +74,14 @@ def test_epsilon_scales_with_the_local_marginal_value_of_energy():
 def test_zero_marginal_value_periods_are_never_flagged():
     """A flat value function means grid-snapping cannot mis-rank anything
     there, so even an exactly-zero margin is not an ambiguity worth an
-    exact re-solve."""
+    exact re-solve.
+
+    This pins a KNOWN BLIND SPOT, not just an edge case: zero epsilon makes
+    the strict `<` unfirable, so ~12.4% of periods across the fixture suite
+    are excluded from tie detection by construction. If a #450-class report
+    ever traces to a period with a flat local value function, this test is
+    the assumption to revisit -- detect_tie_windows logs the per-solve count
+    at debug level so that is at least observable in a bundle."""
     assert detect_tie_windows([0.0] * 6, [0.0] * 6, soe_step_kwh=STEP) == []
 
 

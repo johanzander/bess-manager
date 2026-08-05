@@ -132,6 +132,25 @@ def near_miss_segment(
     period would have been worth") instead of an arbitrary slice's economics.
     """
     horizon = len(tie_margins)
+    best_period, _ratio = _best_near_miss(tie_margins, value_slopes, soe_step_kwh)
+    if best_period is None:
+        return None
+    return Window(
+        start=max(0, best_period - pad),
+        end=min(horizon, best_period + pad + 1),
+    )
+
+
+def _best_near_miss(
+    tie_margins: list[float], value_slopes: list[float], soe_step_kwh: float
+) -> tuple[int | None, float]:
+    """Shared core of `near_miss_segment`/`best_near_miss_ratio`: the period
+    and ratio of the closest miss the detector did not flag (see
+    `near_miss_segment`'s docstring for the full selection rules). Split out
+    so a caller can report *how close* the closest miss was, not just which
+    periods it spans.
+    """
+    horizon = len(tie_margins)
     if len(value_slopes) != horizon:
         raise ValueError(
             f"value_slopes has {len(value_slopes)} entries but tie_margins has "
@@ -152,11 +171,34 @@ def near_miss_segment(
             best_ratio = ratio
             best_period = t
 
-    if best_period is None:
-        return None
-    return Window(
-        start=max(0, best_period - pad),
-        end=min(horizon, best_period + pad + 1),
+    return best_period, best_ratio
+
+
+def best_near_miss_ratio(
+    tie_margins: list[float], value_slopes: list[float], soe_step_kwh: float
+) -> float | None:
+    """The smallest formable `tie_margin / epsilon` ratio across periods the
+    detector did not already flag -- the same selection `near_miss_segment`
+    uses to pick its segment, exposed on its own so a caller can report how
+    close the closest miss actually was (1.0 is the detector's own
+    threshold; large values mean the "closest" miss was nowhere near being
+    flagged). `None` when no period yields a formable ratio, mirroring
+    `near_miss_segment` returning `None` for the same input.
+    """
+    best_period, best_ratio = _best_near_miss(tie_margins, value_slopes, soe_step_kwh)
+    return best_ratio if best_period is not None else None
+
+
+def count_zero_epsilon_periods(value_slopes: list[float], soe_step_kwh: float) -> int:
+    """Periods whose value function is flat (`dV/dSoE == 0`), so
+    `epsilon_for_period` is exactly zero and the detector can never flag them
+    no matter how tied the period is -- mirrors `detect_tie_windows`' own
+    `blind_zero_epsilon` count (`core/bess/tie_detection.py`). When this
+    equals the scenario's horizon, the whole scenario is detector-blind, not
+    merely lacking a close call.
+    """
+    return sum(
+        1 for slope in value_slopes if epsilon_for_period(slope, soe_step_kwh) == 0.0
     )
 
 
@@ -421,10 +463,26 @@ class ScenarioMeasurement:
     """One scenario's coverage measurement: how close every period's margin
     ratio sat to the theoretical snap-noise floor, plus the SEK value of the
     single closest near miss (`None` if the scenario had nothing measurable --
-    see `near_miss_segment`)."""
+    see `near_miss_segment`).
+
+    `near_miss_ratio` is the `tie_margin / epsilon` distance of that same
+    closest miss to the detector's own flagging threshold (1.0) -- `None`
+    under the same condition as `financial_impact_sek`. It exists because a
+    financial impact of 0.0 is ambiguous on its own: it could mean "the
+    closest miss was a genuine near-tie (ratio close to 1.0) that happened to
+    cost nothing" or "the closest formable miss was nowhere near the
+    threshold (ratio far above 1.0), so this scenario tells us little about
+    detector coverage". `zero_epsilon_periods` / `total_periods` distinguish
+    a scenario that is fully detector-blind (every period has a flat value
+    function, so no ratio can ever form) from one that simply had no close
+    call.
+    """
 
     margin_ratio_counts: dict[str, int]
     financial_impact_sek: float | None
+    near_miss_ratio: float | None
+    zero_epsilon_periods: int
+    total_periods: int
 
 
 def measure_scenario(scenario: dict) -> ScenarioMeasurement:
@@ -447,13 +505,24 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     margin_ratio_counts = classify_margin_ratios(
         diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
     )
+    near_miss_ratio = best_near_miss_ratio(
+        diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
+    )
+    zero_epsilon_periods = count_zero_epsilon_periods(
+        diagnostics["value_slopes"], SOE_STEP_KWH
+    )
+    total_periods = len(diagnostics["value_slopes"])
 
     segment = near_miss_segment(
         diagnostics["tie_margins"], diagnostics["value_slopes"], SOE_STEP_KWH
     )
     if segment is None:
         return ScenarioMeasurement(
-            margin_ratio_counts=margin_ratio_counts, financial_impact_sek=None
+            margin_ratio_counts=margin_ratio_counts,
+            financial_impact_sek=None,
+            near_miss_ratio=near_miss_ratio,
+            zero_epsilon_periods=zero_epsilon_periods,
+            total_periods=total_periods,
         )
 
     period_costs, cost_bases = replay_schedule(
@@ -491,4 +560,7 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     return ScenarioMeasurement(
         margin_ratio_counts=margin_ratio_counts,
         financial_impact_sek=max(0.0, delta),
+        near_miss_ratio=near_miss_ratio,
+        zero_epsilon_periods=zero_epsilon_periods,
+        total_periods=total_periods,
     )

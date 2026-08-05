@@ -15,6 +15,42 @@ export interface InverterForm {
   /** Growatt-via-solax_modbus control strategy. GEN4 default "tou"; GEN3 is
    * always "vpp" server-side regardless of this value. */
   controlMode?: 'tou' | 'vpp';
+  /** Override for the HA integration domain vendor service calls target
+   * (set_tou_periods, update_time_segment). Empty = the platform's standard
+   * domain; set it for an integration exposing the same services under its
+   * own domain name. */
+  serviceDomain?: string;
+  /** Domain currently in effect, computed server-side — display only. */
+  resolvedServiceDomain?: string;
+}
+
+/** Service-domain override input, shown for the platforms that make vendor
+ * service calls at all (Growatt cloud and Huawei). Every other platform
+ * drives entities directly, where the domain comes from the entity_id. */
+function ServiceDomainField({
+  inverterForm,
+  onInverterChange,
+}: {
+  inverterForm: InverterForm;
+  onInverterChange: (f: InverterForm) => void;
+}) {
+  return (
+    <label className="block mt-3">
+      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Service domain</span>
+      <input
+        type="text"
+        value={inverterForm.serviceDomain ?? ''}
+        placeholder={inverterForm.resolvedServiceDomain || 'integration default'}
+        onChange={e => onInverterChange({ ...inverterForm, serviceDomain: e.target.value })}
+        className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      />
+      <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
+        Leave empty unless another integration provides the same services under
+        its own domain — then enter that domain (e.g. a bridge exposing
+        <span className="font-mono"> set_tou_periods</span>).
+      </span>
+    </label>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -23,11 +59,13 @@ export interface InverterForm {
 
 export interface DiscoveryResult {
   growattFound: boolean;
-  deviceSn: string | null;
   growattDeviceId: string | null;
   solaxFound: boolean;
   solaxHasGrowattTou: boolean;
   solaxHasGrowattGen3: boolean;
+  solisFound: boolean;
+  huaweiFound: boolean;
+  huaweiDeviceId: string | null;
   nordpoolFound: boolean;
   nordpoolArea: string | null;
   nordpoolCustomArea: string | null;
@@ -79,6 +117,8 @@ function isIntegrationFound(
   if (id === 'solax_modbus_growatt_min') return discovery.solaxHasGrowattTou;
   if (id === 'solax_modbus_growatt_sph') return discovery.solaxHasGrowattGen3;
   if (id === 'solax_modbus_native') return discovery.solaxFound;
+  if (id === 'solis_modbus') return discovery.solisFound;
+  if (id === 'huawei_solar_luna2000') return discovery.huaweiFound;
   if (id === 'nordpool') return discovery.nordpoolFound;
   if (id === 'phase_current') {
     return !!(shared['current_l1'] || shared['current_l2'] || shared['current_l3']);
@@ -149,7 +189,7 @@ function healthDot(
 // ---------------------------------------------------------------------------
 
 // IDs of inverter integrations — only one should be visible at a time.
-const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native']);
+const INVERTER_IDS = new Set(['growatt_server_min', 'growatt_server_sph', 'solax_modbus_growatt_min', 'solax_modbus_growatt_sph', 'solax_modbus_native', 'solis_modbus', 'huawei_solar_luna2000']);
 
 interface Props {
   sensors: PerPlatformSensors;
@@ -199,6 +239,9 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const solaxDetected = wizardMode
     ? Boolean(discovery.solaxFound && !discovery.solaxHasGrowattTou && !discovery.solaxHasGrowattGen3)
     : Boolean((sensors.solax_modbus_native ?? {})['solax_power_control_mode'] || (sensors.solax_modbus_native ?? {})['solax_active_power']);
+  const solisDetected = wizardMode
+    ? discovery.solisFound
+    : Boolean((sensors.solis_modbus ?? {})['solis_charge_start_1']);
 
   /** Update a sensor value in the correct sub-dict (platform or shared). */
   const handleSensorChange = (integrationId: string, sensorKey: string, value: string) => {
@@ -222,19 +265,47 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
   const isModbusActive = inverterForm.inverterPlatform === 'solax_modbus_growatt_min'
     || inverterForm.inverterPlatform === 'solax_modbus_growatt_sph'
     || inverterForm.inverterPlatform === 'solax_modbus_native';
+  const isSolisActive = inverterForm.inverterPlatform === 'solis_modbus';
+  const isHuaweiActive = inverterForm.inverterPlatform === 'huawei_solar_luna2000';
 
-  const handleIntegrationChange = (integration: 'cloud' | 'modbus') => {
+  const huaweiDetected = wizardMode
+    ? discovery.huaweiFound
+    : Boolean((sensors.huawei_solar_luna2000 ?? {})['huawei_working_mode']);
+
+  /** Select a platform, dropping any settings that belong to the previous one.
+   *
+   * deviceId is a single shared form field but names a different thing per
+   * platform (a Growatt cloud serial vs the Huawei battery's HA device_id),
+   * and each is persisted to its own settings section. Carrying a value
+   * across a switch writes one platform's ID into the other's section, where
+   * it is applied to the live controller and addresses a device that does not
+   * exist. serviceDomain is platform-specific for the same reason. */
+  const selectPlatform = (newType: string) => {
+    const changed = newType !== inverterForm.inverterPlatform;
+    onInverterChange({
+      ...inverterForm,
+      inverterPlatform: newType,
+      ...(changed ? { deviceId: '', serviceDomain: '' } : {}),
+    });
+    onChange({ ...sensors, platform: newType });
+  };
+
+  const handleIntegrationChange = (integration: 'cloud' | 'modbus' | 'solis' | 'huawei') => {
     if (integration === 'cloud') {
       const newType = 'growatt_server_min';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
+    } else if (integration === 'solis') {
+      const newType = 'solis_modbus';
+      selectPlatform(newType);
+    } else if (integration === 'huawei') {
+      const newType = 'huawei_solar_luna2000';
+      selectPlatform(newType);
     } else {
       // Default to solax_modbus_growatt_min if Growatt TOU detected, otherwise native
       const newType = growattModbusDetected ? 'solax_modbus_growatt_min'
         : growattModbusGen3Detected ? 'solax_modbus_growatt_sph'
         : 'solax_modbus_native';
-      onInverterChange({ ...inverterForm, inverterPlatform: newType });
-      onChange({ ...sensors, platform: newType });
+      selectPlatform(newType);
     }
   };
 
@@ -263,14 +334,14 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
           Inverter Platform
         </p>
 
-        {/* Level 1: Integration tabs — Growatt Cloud vs SolaX Modbus */}
+        {/* Level 1: Integration tabs — Growatt Cloud vs SolaX Modbus vs Solis Modbus */}
         {(() => {
           const cloudDetected = growattDetected;
           const modbusDetected = growattModbusDetected || growattModbusGen3Detected || solaxDetected;
-          const activeTab = isCloudActive ? 'cloud' : 'modbus';
+          const activeTab = isCloudActive ? 'cloud' : isSolisActive ? 'solis' : isHuaweiActive ? 'huawei' : 'modbus';
 
           return (
-            <Tabs value={activeTab} onValueChange={(v) => handleIntegrationChange(v as 'cloud' | 'modbus')}>
+            <Tabs value={activeTab} onValueChange={(v) => handleIntegrationChange(v as 'cloud' | 'modbus' | 'solis' | 'huawei')}>
               <TabsList className="bg-gray-100 dark:bg-gray-700/60">
                 <TabsTrigger
                   value="cloud"
@@ -296,6 +367,30 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     SolaX Modbus
                   </span>
                 </TabsTrigger>
+                <TabsTrigger
+                  value="solis"
+                  disabled={wizardMode && !solisDetected}
+                  className="data-[state=active]:bg-white dark:data-[state=active]:bg-gray-600 dark:text-gray-300 dark:data-[state=active]:text-white"
+                >
+                  <span className="flex items-center gap-1.5">
+                    {wizardMode && (
+                      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${solisDetected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-500'}`} />
+                    )}
+                    Solis Modbus
+                  </span>
+                </TabsTrigger>
+                <TabsTrigger
+                  value="huawei"
+                  disabled={wizardMode && !huaweiDetected}
+                  className="data-[state=active]:bg-white dark:data-[state=active]:bg-gray-600 dark:text-gray-300 dark:data-[state=active]:text-white"
+                >
+                  <span className="flex items-center gap-1.5">
+                    {wizardMode && (
+                      <span className={`h-2 w-2 rounded-full flex-shrink-0 ${huaweiDetected ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-500'}`} />
+                    )}
+                    Huawei
+                  </span>
+                </TabsTrigger>
               </TabsList>
 
               {/* Level 2: Model variant pills under each tab */}
@@ -311,8 +406,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                         key={opt.value}
                         type="button"
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
-                          onChange({ ...sensors, platform: opt.value });
+                          selectPlatform(opt.value);
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                           selected
@@ -337,6 +431,8 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
                   />
                 </label>
+
+                <ServiceDomainField inverterForm={inverterForm} onInverterChange={onInverterChange} />
               </TabsContent>
 
               <TabsContent value="modbus">
@@ -354,8 +450,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                         type="button"
                         disabled={disabled}
                         onClick={() => {
-                          onInverterChange({ ...inverterForm, inverterPlatform: opt.value });
-                          onChange({ ...sensors, platform: opt.value });
+                          selectPlatform(opt.value);
                         }}
                         className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                           disabled
@@ -411,6 +506,36 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                     Control mode: <span className="font-medium">VPP Remote Power</span> — GEN3 has no working TOU path, so VPP is the only control mode.
                   </p>
                 )}
+              </TabsContent>
+
+              <TabsContent value="solis">
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  Solis hybrid inverter via the Pho3niX90/solis_modbus integration
+                  (Grid Time of Use v2, local Modbus). Experimental — not yet
+                  validated against a real Solis installation.
+                </p>
+              </TabsContent>
+
+              <TabsContent value="huawei">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-1 rounded-full text-xs font-medium border bg-blue-50 dark:bg-blue-900/30 border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300">
+                    LUNA2000
+                  </span>
+                  <span className="text-[9px] text-orange-500 dark:text-orange-400 font-medium">experimental</span>
+                </div>
+
+                <label className="block mt-3">
+                  <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Device ID</span>
+                  <input
+                    type="text"
+                    value={inverterForm.deviceId}
+                    placeholder="Huawei battery device ID"
+                    onChange={e => onInverterChange({ ...inverterForm, deviceId: e.target.value })}
+                    className="mt-0.5 block w-full sm:w-72 rounded-lg border border-gray-200 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                  />
+                </label>
+
+                <ServiceDomainField inverterForm={inverterForm} onInverterChange={onInverterChange} />
               </TabsContent>
             </Tabs>
           );

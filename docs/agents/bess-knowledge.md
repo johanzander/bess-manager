@@ -65,19 +65,32 @@ horizon's end is valued at:
 
     terminal_value = median(buy_prices) * efficiency_discharge - cycle_cost
 
-where `buy_prices`/`sell_prices` are already truncated to whatever the
-current horizon is, capped at `max(sell_prices) * efficiency_discharge -
-cycle_cost` — an **arbitrage-consistency cap** that prevents the estimate
-from exceeding what could actually be realized by selling right now at the
-best available price (`core/bess/battery_system_manager.py:1841-1921`,
-`_calculate_terminal_value`; see issues #126/#244/#246/#345). This is the
-mechanism to check first for "why didn't the battery discharge everything
-right before midnight" or "why does it hold charge near the end of the
-horizon" — it applies at both the today-only and today+tomorrow boundary,
-so this remains the first thing to check even after tomorrow's prices have
-arrived (until #345, it was incorrectly zeroed in that case; see the #345/
-#126 threads for the "tonight's export moves a day later" symptom this was
-suspected of, and ultimately ruled out for a specific bundle).
+where `buy_prices` is the median over the full remaining horizon, capped at
+`max(sell_prices) * efficiency_discharge - cycle_cost` — an
+**arbitrage-consistency cap** that prevents the estimate from exceeding what
+could actually be realized by selling at the best available price
+(`core/bess/battery_system_manager.py:1841-1921`, `_calculate_terminal_value`;
+see issues #126/#244/#246/#345). This is the mechanism to check first for
+"why didn't the battery discharge everything right before midnight" or "why
+does it hold charge near the end of the horizon" — it applies at both the
+today-only and today+tomorrow boundary, so this remains the first thing to
+check even after tomorrow's prices have arrived (until #345, it was
+incorrectly zeroed in that case; see the #345/#126 threads for the "tonight's
+export moves a day later" symptom this was suspected of, and ultimately
+ruled out for a specific bundle).
+
+Unlike `buy_prices`, the `sell_prices` fed into the cap are **not** the full
+remaining-horizon window — the caller (`_run_optimization`,
+`battery_system_manager.py:~2050-2075`) scopes them to periods on the
+terminal boundary's own calendar day only (issue #422). On a 48h-extended
+horizon, using the full window let an already-committed near-term peak
+(e.g. today's still-upcoming best sell slot) inflate the cap for tomorrow's
+terminal boundary, making the DP hold charge through all of tomorrow's own
+(lower but still profitable) export opportunities instead of exporting into
+them — this was the actual mechanism behind the long-reported #126 "tonight
+exports, tomorrow evening doesn't" symptom. `buy_prices` is unaffected by
+this scoping — a median is already resistant to a single-period outlier, so
+only the cap's `max()` needed the day boundary.
 
 The cap is skipped entirely on a fixed/flat export tariff (`max(sell_prices)
 == min(sell_prices)`, e.g. UK Octopus Outgoing Fixed) — there, every period
@@ -220,12 +233,23 @@ implementation detail that can change independently of this doc.
 
 **Hardware mapping**: Intents control actual inverter behavior (register-
 based platforms — Growatt TOU/cloud/SPH; VPP-style platforms select
-`grid_first`/`load_first` per-period instead of via a persistent mode, see
-the SOLAR_EXPORT hardware-mapping note below):
+`grid_first`/`battery_first`/`load_first` per-period instead of via a
+persistent mode, see the SOLAR_EXPORT and IDLE hardware-mapping notes below):
 - GRID_CHARGING → battery_first mode + grid charge ON
 - LOAD_SUPPORT → load_first mode
 - BATTERY_EXPORT → grid_first mode (battery discharge to grid)
 - SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
+
+This `load_first` mapping is what register-based platforms (Growatt
+TOU/cloud/SPH) use for all three. **VPP-style platforms diverge for IDLE**
+(issue #466): `load_first` self-use discharges the battery to cover house
+load, but IDLE's own DP cost model (`_idle_battery_flows` in
+`dp_battery_algorithm.py`) never credits battery discharge — only passive
+solar absorption. VPP-mode IDLE instead maps to `remote_control=Enabled`,
+`vpp_power=+1` (`battery_first` hold), keeping self-consumption on
+grid/solar. See `docs/INVERTER_PLATFORMS.md`'s "IDLE semantics" section for
+the full mapping and why `grid_first` (the SOLAR_EXPORT pattern) doesn't
+also fix this.
 
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
 
@@ -275,6 +299,38 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
+**LOAD_SUPPORT does NOT use this gate (#393 — reverted #384/#385).** #384
+briefly extended this gate to LOAD_SUPPORT (`discharge_rate =
+max(planned_rate, gate_result)`, raising but never lowering the plan-scaled
+ceiling), reasoning that `load_first`'s physical self-limiting to the real
+house deficit made an open ceiling safe. Two problems surfaced:
+
+- #385's own validation against the reporting user's real captured data found
+  the gate does **not** open during the sustained overnight near-tie regime it
+  was built to fix — `shadow_price` sits within a cent or two of `buy_price`
+  for the whole stretch there (that near-tie is close to the defining
+  condition for choosing LOAD_SUPPORT at all), so the strict inequality rarely
+  trips in exactly the case that motivated the change.
+- Replaying a full day of real captured data from a second, independent
+  report showed the same gate condition evaluating **true for the large
+  majority of LOAD_SUPPORT periods (51/67, ~76%)** — not the rare "reserve
+  genuinely not needed elsewhere" case the gate was designed for. In
+  practice this meant a broad, mostly-untested override of the #147
+  reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
+  later, pricier period rather than dumping at full rate).
+
+LOAD_SUPPORT is back to its plan-scaled cap unconditionally, matching
+pre-#384/v9.9.0b23 behavior — no shadow-price gate at all. The original
+overnight-leak problem #381/#384 described (small real grid imports, 0.1–0.2
+kWh/night, while SOE has ample headroom above the floor) remains open and
+tracked in #393, to be revisited with a mechanism actually validated against
+real captured data across representative regimes (not just the motivating
+case) before it ships again. See
+`core/bess/tests/unit/test_load_support_gate_regression_393.py`, which
+replays real captured data (`regression_2026_07_26_203726.json`) reproducing
+the 76% figure and asserting LOAD_SUPPORT's discharge_rate never exceeds the
+plan-scaled baseline regardless of shadow_price.
+
 ### The inverter AC output cap (solar clipping avoidance)
 
 `inverter_max_ac_power_kw` (BatterySettings, default 0 = disabled) models a
@@ -317,6 +373,57 @@ battery has room.  With the cap set:
 - Requires per-period charge-rate control (Growatt MIN).  On platforms
   without it (SPH, SolaX native) the plan is cap-aware but deferred
   absorption is not hardware-enforceable.
+
+### The grid import (fuse) cap (#429)
+
+`HomeSettings.power_monitoring_enabled` (default False) makes the DP model the
+house's fuse service limit as a **grid-import** energy cap, the input-side
+counterpart to the AC output cap above — the two are independent constraints
+on opposite sides of the same AC stage and both apply simultaneously when
+configured.
+
+- **Derivation**: `voltage × max_fuse_current × safety_margin × phase_count`
+  (`_effective_import_cap_kwh`, `dp_battery_algorithm.py`) — each phase is an
+  independent fuse, so a balanced house can import up to `phase_count` times
+  a single phase's ceiling before any individual phase is stressed.
+  `HomePowerMonitor` (`core/bess/power_monitor.py`) relies on the same
+  balanced-load assumption at runtime: on a fully unloaded 3-phase house it
+  authorizes the battery up to its full `max_charge_power_w` (not a single
+  phase's worth), since `available_pct` is computed relative to
+  `max_charge_power_w / phase_count` per phase. `HomePowerMonitor` remains
+  the real-time backstop against *unbalanced* loads — it measures actual
+  per-phase current and throttles battery charging against the single
+  worst-loaded phase (a deliberate fix for that case, commit `37201cb9`,
+  #11) — but the DP's `home_consumption` forecast is a single household-total
+  figure with no per-phase breakdown, so it cannot reproduce that live check
+  and instead plans against the balanced-load assumption. Off (`None`) when
+  `power_monitoring_enabled` is False, matching the AC cap's own
+  `<= 0.0 → None` convention.
+- **Total import, not charging-only**: the cap bounds `grid_imported` (house
+  load + battery grid-charging) jointly, not just the charging component —
+  `HomePowerMonitor` only throttles charging today because that is the only
+  lever a runtime monitor has; the DP has discharge as a second lever and must
+  use it, or it just reproduces the runtime blind spot inside the plan too.
+- **Constrain, never raise**: same convention as the AC cap and temperature
+  derating (mask actions, don't except). A period whose forecast load alone
+  exceeds the cap forces the battery to cover the excess via discharge; if
+  even full discharge can't bring total import under the cap, the DP falls
+  back to the minimum-import action available rather than erroring — a real
+  fuse would also just run hot, not crash the planner.
+- **Grid-charging is throttled, not blocked outright**: when serving the load
+  already consumes the cap's headroom, `grid_to_battery` is reduced to
+  whatever room is left (`_state_transition`'s STORE branch) rather than the
+  charge action being excluded wholesale — the model-side equivalent of
+  `HomePowerMonitor.calculate_available_charging_power`'s runtime throttle.
+- **Absent/implausible settings**: hard failure at settings-validation time
+  (`HomeSettings.__post_init__` raises if `power_monitoring_enabled` is set
+  with non-positive `max_fuse_current`/`voltage`/`safety_margin`), never a
+  silent no-op inside the DP — matches `BatterySettings.__post_init__`'s
+  existing validation pattern for `inverter_max_ac_power_kw`.
+- **Out of scope**: export-side/feed-in capacity limits (a different
+  regulatory concept), and any change to `HomePowerMonitor`'s own runtime
+  behavior — it remains the real-time safety net; this constraint just makes
+  the *plan* agree with it.
 
 
 ## Execution Layer: What Can Override the Schedule
@@ -390,7 +497,7 @@ A second, related noise source lives one level up: even after #342's
 zero-aggregate cap, a `battery_to_grid` residual can still survive when its
 governing aggregate (`battery_discharged`) is itself nonzero — the residual
 is then indistinguishable from ordinary lifetime-counter quantization
-(documented 0.1 kWh resolution, `sensor_collector.py:231`) rather than a real
+(documented 0.1 kWh resolution, `sensor_collector.py:235`) rather than a real
 export, and it corrupts `infer_intent_from_flows`'s `observed_intent`
 (`BATTERY_EXPORT` requires an inverter mode change; a residual this small
 proves nothing about mode). Fixed in #350: `_calculate_detailed_flows` folds
@@ -461,6 +568,16 @@ The optimizer needs a consumption forecast.  Four strategies exist:
 - **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
   prediction (same value all day).
 - **fixed**: A single fixed kWh/hour value.  Does not adapt.
+
+**Refresh cadence** (issue #395): the quarterly optimization job (every 15
+min) refreshes the consumption forecast on a strategy-aware basis, not just
+at startup/23:55.  `sensor` and `fixed` refetch every quarterly cycle — cheap
+and, for `sensor`, actually intraday-moving.  `ha_statistics` and
+`influxdb_7d_avg` average a window of full calendar days ending at today's
+midnight, so that value is provably unchanged until the date rolls over —
+they're cached and only refetched once the date changes, not on a clock
+timer.  Solar has no cache at all: it's fetched live from the HA forecast
+sensor on every quarterly run.
 
 
 ## Savings Calculation

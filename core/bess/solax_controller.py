@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class SolaxController(InverterController):
     """SolaX inverter controller using VPP active-power commands.
 
-    SolaX does not use a persistent TOU schedule.  ``write_schedule_to_hardware``
+    SolaX does not use a persistent TOU schedule.  ``write_to_hardware``
     is a no-op; the actual hardware writes happen period-by-period via
     ``_write_period_to_hardware``, called from
     ``BatterySystemManager._apply_period_schedule``.
@@ -55,6 +55,8 @@ class SolaxController(InverterController):
     # never a load-following ceiling. See #324.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    CONTROL_MODEL: ClassVar[str] = "vpp_power"
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""
         super().__init__(battery_settings)
@@ -68,26 +70,30 @@ class SolaxController(InverterController):
 
     # ── Schedule creation ─────────────────────────────────────────────────────
 
-    def create_schedule(
-        self,
-        schedule: DPSchedule,
-        current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
-    ) -> None:
+    def _build_candidate(self, schedule: DPSchedule) -> list[str]:
+        """Return the candidate intent list for a schedule.
+
+        SolaX requires no TOU conversion — the candidate IS the raw strategic
+        intent list. Kept as a named method for interface symmetry with the
+        other inverter controller subclasses, even though it does no
+        transformation.
+        """
+        return schedule.original_dp_results["strategic_intent"]
+
+    def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
         """Store strategic intents from a DPSchedule.
 
-        SolaX requires no TOU conversion.  Intents are applied period-by-period
+        SolaX requires no TOU conversion. Intents are applied period-by-period
         via ``_write_period_to_hardware`` and are not pushed as a batch to the
         inverter hardware.
 
         Args:
             schedule: DPSchedule containing strategic_intent list.
             current_period: Unused for SolaX.
-            previous_tou_intervals: Unused for SolaX.
         """
         logger.info("Creating SolaX schedule from strategic intents")
 
-        self.strategic_intents = schedule.original_dp_results["strategic_intent"]
+        self.strategic_intents = self._build_candidate(schedule)
         self.current_schedule = schedule
 
         logger.info(
@@ -146,7 +152,37 @@ class SolaxController(InverterController):
             logger.error("FAILED: SolaX VPP period write: %s", e)
             return False, str(e)
 
-    def write_schedule_to_hardware(
+    def _vpp_display_state(
+        self,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
+        strategic_intent: str = "",
+    ) -> tuple[int, bool]:
+        """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
+        for display, mirroring _write_period_to_hardware()'s three branches
+        exactly. Unlike SolaxModbusGrowattController._intent_to_vpp(), this
+        ignores block_passive_charging and strategic_intent -- SolaX's
+        actual hardware write logic doesn't use them either (see the
+        TODO.md gap note: SolaX never received the #355/#413 Growatt VPP
+        fixes, so its real behavior for SOLAR_EXPORT/LOAD_SUPPORT differs).
+        The two extra parameters exist only so the base class's
+        _mode_display_fields() can call _vpp_display_state() with a single
+        unified signature across all vpp_power controllers -- they do not
+        change SolaxController's own behavior.
+
+        Returns:
+            (power_pct, remote_control_enabled) -- power_pct expressed as a
+            percent of max charge/discharge power, matching discharge_rate's
+            own convention (not raw watts).
+        """
+        if not grid_charge and discharge_rate == 0:
+            return 0, False
+        if grid_charge:
+            return 100, True
+        return -discharge_rate, True
+
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -160,8 +196,11 @@ class SolaxController(InverterController):
         Returns:
             (0, 0) — no writes or disables performed.
         """
-        logger.debug("SolaX: write_schedule_to_hardware is a no-op (per-period VPP)")
+        logger.debug("SolaX: write_to_hardware is a no-op (per-period VPP)")
         return 0, 0
+
+    def initialize_hardware(self, controller) -> None:
+        self.sync_soc_limits(controller)
 
     def sync_soc_limits(self, controller) -> None:
         """Sync battery minimum SOC from config to the SolaX inverter.
@@ -204,24 +243,14 @@ class SolaxController(InverterController):
 
     # ── Schedule comparison ───────────────────────────────────────────────────
 
-    def compare_schedules(
-        self, other_schedule: "SolaxController", from_period: int = 0
+    def _diff_intents(
+        self, current: list[str], new: list[str], from_period: int
     ) -> tuple[bool, str]:
-        """Compare SolaX schedules by strategic-intent list.
+        """Compare two strategic-intent lists from ``from_period`` onward.
 
-        Two schedules differ when any period at or after ``from_period`` has a
-        different strategic intent.
-
-        Args:
-            other_schedule: Another SolaxController to compare against.
-            from_period: First period to compare (earlier periods are ignored).
-
-        Returns:
-            Tuple of (schedules_differ, reason).
+        Used by ``evaluate_intents`` (compares against a candidate built
+        from a ``DPSchedule``).
         """
-        current = self.strategic_intents
-        new = other_schedule.strategic_intents
-
         if not current and not new:
             return False, ""
 
@@ -241,6 +270,24 @@ class SolaxController(InverterController):
 
         logger.info("DECISION: SolaX schedules match")
         return False, ""
+
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
+    ) -> tuple[bool, str]:
+        """Compare the committed intents against a candidate schedule.
+
+        Two schedules differ when any period at or after ``current_period``
+        has a different strategic intent.
+
+        Args:
+            schedule: DPSchedule to evaluate against the committed intents.
+            current_period: First period to compare (earlier periods ignored).
+
+        Returns:
+            Tuple of (schedules_differ, reason).
+        """
+        candidate = self._build_candidate(schedule)
+        return self._diff_intents(self.strategic_intents, candidate, current_period)
 
     # ── TOU display ───────────────────────────────────────────────────────────
 
@@ -340,7 +387,6 @@ class SolaxController(InverterController):
                     "segment_id": 0,
                     "start_time": "00:00",
                     "end_time": "23:59",
-                    "batt_mode": "load_first",
                     "enabled": False,
                     "is_default": True,
                 }
@@ -353,7 +399,8 @@ class SolaxController(InverterController):
                     "segment_id": i,
                     "start_time": group["start_time"],
                     "end_time": group["end_time"],
-                    "batt_mode": group["mode"],
+                    "vpp_power_pct": group["vpp_power_pct"],
+                    "vpp_remote_control": group["vpp_remote_control"],
                     "enabled": True,
                     "strategic_intent": group["intent"],
                 }

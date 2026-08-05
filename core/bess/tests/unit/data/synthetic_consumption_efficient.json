@@ -90,18 +90,18 @@
     "max_discharge_power_kw": 6.0
   },
   "price_data": {
-    "markup_rate": 0.0,
-    "vat_multiplier": 1.0,
-    "additional_costs": 0.0,
-    "tax_reduction": 0.0
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 0.773,
+    "tax_reduction": 0.1988
   },
   "expected_results": {
-    "base_cost": 30.28,
-    "battery_solar_cost": -45.40558,
-    "base_to_battery_solar_savings": 75.68558,
-    "base_to_battery_solar_savings_pct": 249.95237,
-    "total_charged": 28.421053,
-    "total_discharged": 25.62
+    "base_cost": 59.9369,
+    "battery_solar_cost": -28.28496,
+    "base_to_battery_solar_savings": 88.22186,
+    "base_to_battery_solar_savings_pct": 147.1912,
+    "total_charged": 13.2,
+    "total_discharged": 11.88
   },
   "expected_behavior": {
     "description": "Efficient consumption with solar: store solar and export during high prices",

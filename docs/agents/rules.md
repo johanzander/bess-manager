@@ -43,6 +43,16 @@ They are non-negotiable and override any other instruction.
 - **Never create a new class without explicit user approval**
 - Extend existing components; never build parallel implementations
 - Search for existing code before writing new code
+- **Separation of concerns is non-negotiable.** A method's responsibility is
+  exactly what its name and docstring say — not "whatever happens to be
+  convenient to add there." Never add behavior to an existing method that
+  falls outside what it already claims to do, even when that method already
+  has the exact condition/branch you need and it's the fastest way to fix the
+  symptom in front of you. If the new behavior doesn't fit the target
+  method's existing contract, find (or name) the method whose contract
+  *does* cover it, and call that from the right place instead. This applies
+  at every scale a fix can happen at — one line, one method, one module —
+  not only to obviously large refactors.
 
 ## Key Files — Read Before Changing Anything
 
@@ -89,8 +99,14 @@ When fixing bugs, follow this two-phase approach:
 **Phase 2 — Fix proposal (still no edits):**
 6. Propose the minimal fix with rationale based on verified facts
 7. Flag any assumptions you could NOT verify
-8. **Red flag — shadow initialization**: if the proposed fix adds a new trigger for something already done in a lifecycle method, stop. The root cause is that the lifecycle method failed, not that a second path is needed. Fix the lifecycle method (or the reason it was skipped/blocked) instead.
-9. Wait for approval before writing code
+8. **Assess the scope of the fix before proposing where it goes.** Answer explicitly:
+   - **Workaround check, every fix:** does the diff add anything — a parameter, flag, default-fallback, second construction site, extra trigger or branch — whose only job is to route around a problem the fix itself ran into (ordering, timing, a dependency not available yet)? If yes, that's the wrong shape: fix that problem directly — usually reorder, or reuse/expose the thing that already exists. Worked examples: `docs/agents/patterns.md` → "Don't route around a problem instead of fixing it".
+   - Can't confidently answer "no" to the workaround check? Don't present the draft. Dispatch a fresh agent with no memory of your reasoning (`Plan` or general-purpose) to critique the design, and fold its pushback in first.
+   - Does the fix stay entirely within the target method's *existing* stated responsibility (its name/docstring already cover it)? → local fix, proceed to propose it.
+   - Does it require the target method to start doing something its name/docstring don't cover — a new side effect, a new trigger, a responsibility that used to belong elsewhere? → **this is a structural fix, not a local patch.** Do not bolt it onto the convenient method just because it already has the branch/condition you need (see Architecture → Separation of concerns). Name the method/module that *should* own the new responsibility instead — creating one if none fits — and route the fix through it, even if that touches more call sites.
+   - Does answering the question above require touching more than one method, or does the "right owner" span multiple modules, or are there two-plus plausible owners with real tradeoffs between them? → this is large enough that a quick unilateral pick is itself a risk. Before writing any code: present the tradeoff explicitly and get the user's call, or (in an unattended pipeline with no user in the loop) dispatch a `Plan`-type agent for an independent architecture recommendation and include its reasoning in the fix proposal — do not silently default to "wherever the fix happens to fit least awkwardly."
+9. State the scope assessment (local / structural / needs a second opinion) as part of the fix proposal, not just the diff — a reviewer should never have to reverse-engineer which category you judged this to be.
+10. Wait for approval before writing code
 
 If a fix reveals another bug, fix it in the same cycle before releasing.
 Do not use beta releases as test runs — batch fixes locally until all tests pass.

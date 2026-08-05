@@ -19,6 +19,8 @@ Ask before writing:
 - Should this method be called from this caller at all, or is there a better owner?
 - Is there an existing lifecycle path (`start()`, `__init__`) that already handles this? Why is it failing there?
 - Does the test assert a specific internal call chain — and if so, is that call chain the right architecture?
+- **Does the method you're about to modify have more than one caller?** `grep` for every call site first. If the callers sit at different points in a lifecycle (e.g. one runs during `start()` before some other init step, another runs later from a periodic job or a manual endpoint), a change scoped to "make caller A's symptom go away" can silently change behavior for caller B too. See `docs/agents/rules.md` → Architecture → Separation of concerns, and the Debugging Protocol's fix-scope-assessment step, for the general rule this falls under.
+- **If the method has multiple callers with different lifecycle timing, write one test per caller context**, not just one test for the behavior the fix motivates. A test on the wrapper/most-visible caller passing is not evidence the other callers are unaffected.
 
 If you can't answer these, stop and reason through the design first. A test that says "call `_foo()` from layer X" may be specifying bad architecture, not good behavior.
 
@@ -157,6 +159,12 @@ reproduce the exact conditions that caused the bug. Mock HA replays it identical
 python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md>
 # Outputs: scripts/mock_ha/scenarios/<timestamp>.json
 
+# For a DP/control-mapping fix that needs a fast, no-container plan-faithfulness
+# regression test (see .claude/skills/implement-issue/SKILL.md's TDD step),
+# also tag the log with the issue it diagnoses -- this additionally writes a
+# lean fixture to core/bess/tests/unit/data/regression_<timestamp>.json:
+python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md> --issue <N>
+
 # 2. Start mock HA + BESS (runs at the frozen timestamp from the log)
 ./mock-run.sh <timestamp>
 # e.g. ./mock-run.sh 2026-03-24-225535
@@ -207,6 +215,46 @@ Scenarios may carry `expected_results` (plan economics) and `expected_behavior`
 (intent presence/absence, `savings_positive`). When the optimizer legitimately
 changes behavior, regenerate these **from the optimizer** (store `expected_results`
 at ≥4 decimals to avoid 1-dp rounding-boundary flips) rather than hand-editing.
+Optional per-scenario overrides beyond the standard price/consumption/battery
+fields are supported ad hoc as they come up — e.g. `terminal_value_per_kwh`
+(added for #422) lets a fixture pin the DP's terminal-value input directly,
+for bugs whose defect lives in how that input is *computed* upstream (in
+`BatterySystemManager`) rather than in the DP itself.
+
+**For a bug fix that changes optimizer economics or behavior: pin the
+regression into this fixture system before reaching for a standalone test
+file.** `test_scenarios.py::test_all_scenarios` auto-discovers every `*.json`
+here and is already the codebase's canonical, always-run regression harness
+(the "N pinned fixtures" referenced across the changelog for prior DP
+changes) — a bespoke Python file re-deriving `_scenario_inputs` and hand-
+asserting cost numbers duplicates it. Concretely, after generating a fixture
+from a debug log (`from_debug_log.py --issue N`, see below), the next step
+is always to set that fixture's `expected_results`/`expected_behavior` from
+the *fixed* code's output, not to write a separate test around the same
+data. Reserve a standalone test file for what the fixture system genuinely
+cannot express: a private method's internal formula (e.g. the exact
+terminal-value cap numbers), or plan-faithfulness (`R == P`, see below) —
+`test_all_scenarios` never runs the inverter simulator.
+
+**`expected_behavior.intents_present`/`intents_absent` only discriminates
+on an engineered/isolated scenario** — one deliberately built so the intent
+under test has no other legitimate source (e.g. zero consumption, so any
+`BATTERY_EXPORT` can only come from the mechanism being tested). On a real
+multi-purpose debug-log fixture, "is this intent present *anywhere* in the
+whole result" is usually satisfiable by something unrelated elsewhere in
+the horizon and proves nothing — pinning `expected_results` (aggregate
+economics) is almost always the right choice for those instead, since a
+suppressed/wrong intent still shows up in the total cost even when it's
+masked at the presence-check level. Full per-period intent pinning is the
+maximally deterministic alternative but is usually not worth the
+brittleness — an unrelated DP tie-break shifting one period elsewhere in a
+100+ period horizon shouldn't fail the test.
+
+**Before trusting a pinned `expected_results`/`expected_behavior`, prove it
+actually discriminates**: temporarily feed the fixture the pre-fix
+(buggy) input and confirm the test fails, not just that it passes with the
+fix. A pin that passes under both the bug and the fix isn't a regression
+guard.
 
 ## Red Flags
 

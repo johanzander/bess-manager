@@ -106,13 +106,8 @@ class DailyViewBuilder:
 
         # 2. Get data sources
         historical_periods = self.historical_store.get_today_periods()
-        predicted_schedule = self.schedule_store.get_latest_schedule()
-
-        if not predicted_schedule:
+        if self.schedule_store.get_latest_schedule() is None:
             raise ValueError("No optimization schedule available")
-
-        predicted_periods = predicted_schedule.optimization_result.period_data
-        optimization_period = predicted_schedule.optimization_period
 
         # 3. Merge: past = actual, future = predicted
         periods = []
@@ -123,11 +118,17 @@ class DailyViewBuilder:
                 # Past: use actual sensor data
                 periods.append(historical_periods[i])
             else:
-                # Future: use predicted optimization data
-                # Period indices and timestamps are already correct from BatterySystemManager
-                predicted_index = i - optimization_period
-                if 0 <= predicted_index < len(predicted_periods):
-                    periods.append(predicted_periods[predicted_index])
+                # Future: use predicted optimization data. Resolved by exact
+                # timestamp (not positional index - optimization_period) so a
+                # standalone next-day schedule (period_data[0] anchored to
+                # tomorrow 00:00 despite optimization_period=0) can never be
+                # misread as today's periods -- it simply has no entry at
+                # today's timestamp, so lookup naturally falls back to the
+                # most recent schedule that actually covers this moment.
+                target_timestamp = time_utils.period_index_to_timestamp(i)
+                period_data = self.schedule_store.get_period_data_at(target_timestamp)
+                if period_data is not None:
+                    periods.append(period_data)
                 else:
                     # No historical data AND no predicted data for this period
                     # This can happen when HA restarts and sensor data is unavailable

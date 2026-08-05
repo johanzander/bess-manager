@@ -91,3 +91,25 @@ TypeScript interface in the same PR.
 | New file `api_models.py` | Use `api_dataclasses.py` |
 | Hardcoded `"sensor.battery_soc_..."` | `METHOD_SENSOR_MAP` lookup |
 | `except Exception as e: log(e); pass` | Let it propagate |
+| Adding a side effect to a method whose name doesn't cover it (e.g. a schedule-build call inside `_run_health_check()`) | Put the orchestration in the caller; the checked-thing's own method only does what its name says |
+| Fallback-constructed dependency to dodge init order (`tracker=None` → `tracker or Tracker()`) | Fix the ordering — one construction site per object |
+
+### Don't route around a problem instead of fixing it
+
+The rule is the *question* in `rules.md`'s Debugging Protocol step 8 —
+"does this diff add anything whose only job is to route around a problem
+instead of fixing it?" — not this list. The next violation will have a new
+shape; re-ask the question, don't grep for these.
+
+- **Issue #399 (second trigger):** a schedule-build retry was bolted into
+  `_run_health_check()` (contract: check and report). Its *other* caller,
+  `start()`, then fired hardware writes on every restart. Shipped fix: retry
+  in the public `refresh_health_check()` wrapper; the checked method restored
+  to doing only what its name says. Tests can't catch this — a test against
+  the widened method asserts the widened behavior as if it were the contract.
+- **Issue #440 (second construction site):** first draft added
+  `runtime_failure_tracker: ... | None = None` to
+  `BatterySystemManager.__init__` with a fallback self-construction — two
+  construction sites papering over an ordering gap (`app.py` fetched the
+  timezone *before* constructing the manager, which owns the tracker).
+  Shipped fix: move the fetch after construction — no parameter, no fallback.

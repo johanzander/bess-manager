@@ -39,6 +39,7 @@ def ctrl():
             "grid_charge": "switch.grid_charge",
             "discharge_inhibit": "binary_sensor.discharge_inhibit",
         },
+        service_domain="growatt_server",
     )
     c.max_attempts = 1
     c.retry_base_delay = 0
@@ -193,6 +194,17 @@ class TestServiceCallWithRetry:
             mock.assert_called_once()
             assert result == {"data": []}
 
+    def test_input_number_domain_categorized_as_battery_control(self, ctrl):
+        """Regression test for #372: input_number writes must be classified
+        the same as number writes, or a failed write to a user-configured
+        input_number.* entity silently degrades to the generic 'other'
+        category in the runtime failure alert UI."""
+        with patch.object(ctrl, "_api_request", return_value=None) as mock:
+            ctrl._service_call_with_retry(
+                "input_number", "set_value", entity_id="input_number.x", value=1
+            )
+            assert mock.call_args.kwargs["category"] == "battery_control"
+
 
 # ── _get_raw_state / _get_sensor_value / _get_binary_state ───────────────────
 
@@ -293,6 +305,53 @@ class TestSetOperations:
         with patch.object(ctrl, "_service_call_with_retry") as mock:
             ctrl.set_charge_stop_soc(90)
             assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_input_number_entity(self, ctrl):
+        """Regression test for #372: a user-overridden input_number.* entity
+        must be written via input_number.set_value, not number.set_value —
+        the latter is scoped to the number platform and silently fails
+        against an input_number entity."""
+        ctrl.sensors["battery_charge_stop_soc"] = "input_number.charge_stop_soc"
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("input_number", "set_value")
+            assert mock.call_args[1]["value"] == 90
+
+    def test_set_charge_stop_soc_number_entity_still_uses_number_domain(self, ctrl):
+        with patch.object(ctrl, "_service_call_with_retry") as mock:
+            ctrl.set_charge_stop_soc(90)
+            assert mock.call_args[0][:2] == ("number", "set_value")
+
+
+class TestSetGrowattExportLimit:
+    """Export-limit curtailment writes (registers 122/123, #269)."""
+
+    @pytest.fixture
+    def export_ctrl(self, ctrl):
+        ctrl.sensors["growatt_export_limit_mode"] = "select.limit_grid_export"
+        ctrl.sensors["growatt_export_limit_value"] = "number.grid_export_limit"
+        return ctrl
+
+    def test_curtail_writes_meter_1_and_zero_percent(self, export_ctrl):
+        with patch.object(export_ctrl, "_service_call_with_retry") as mock:
+            export_ctrl.set_growatt_export_limit(curtail=True)
+            calls = mock.call_args_list
+            assert ("select", "select_option") in [c[0] for c in calls]
+            assert ("number", "set_value") in [c[0] for c in calls]
+            select_call = next(c for c in calls if c[0] == ("select", "select_option"))
+            assert select_call[1]["option"] == "Meter 1"
+            number_call = next(c for c in calls if c[0] == ("number", "set_value"))
+            assert number_call[1]["value"] == 0
+
+    def test_release_writes_disabled(self, export_ctrl):
+        with patch.object(export_ctrl, "_service_call_with_retry") as mock:
+            export_ctrl.set_growatt_export_limit(curtail=False)
+            select_call = next(
+                c for c in mock.call_args_list if c[0] == ("select", "select_option")
+            )
+            assert select_call[1]["option"] == "Disabled"
+            # Release does not touch the percentage register — only the mode.
+            assert ("number", "set_value") not in [c[0] for c in mock.call_args_list]
 
 
 class TestSetTouSegmentViaEntities:

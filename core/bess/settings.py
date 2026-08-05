@@ -7,7 +7,7 @@ The values in this file serve as:
 2. Internal algorithm parameters not exposed to users
 
 All user-facing settings should be configured and overridden via config.yaml:
-- Battery settings (capacity, power, cycle_cost, min_action_profit_threshold)
+- Battery settings (capacity, power, cycle_cost)
 - Electricity price settings (area, markup_rate, vat_multiplier, additional_costs, tax_reduction)
 - Home settings (consumption, voltage, fuse_current, safety_margin_factor)
 
@@ -38,9 +38,6 @@ BATTERY_MIN_SOC = 10  # percentage
 BATTERY_MAX_SOC = 100  # percentage
 BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW = 15.0
 BATTERY_CHARGE_CYCLE_COST = 0.40  # per kWh excl. VAT
-BATTERY_MIN_ACTION_PROFIT_THRESHOLD = (
-    0.0  # fixed minimum profit threshold for any battery action (0.0 for tests)
-)
 BATTERY_DEFAULT_CHARGING_POWER_RATE = 40  # percentage
 BATTERY_EFFICIENCY_CHARGE = 0.97  # Mix of solar (98%) and grid (95%) charging
 BATTERY_EFFICIENCY_DISCHARGE = 0.95  # DC-AC conversion losses
@@ -126,13 +123,14 @@ class BatterySettings:
     max_discharge_power_kw: float = BATTERY_MAX_CHARGE_DISCHARGE_POWER_KW
     charging_power_rate: float = BATTERY_DEFAULT_CHARGING_POWER_RATE
     cycle_cost_per_kwh: float = BATTERY_CHARGE_CYCLE_COST
-    min_action_profit_threshold: float = (
-        BATTERY_MIN_ACTION_PROFIT_THRESHOLD  # NEW FIELD
-    )
     efficiency_charge: float = BATTERY_EFFICIENCY_CHARGE
     efficiency_discharge: float = BATTERY_EFFICIENCY_DISCHARGE
     inverter_max_ac_power_kw: float = INVERTER_MAX_AC_POWER_KW
     inverter_ac_power_margin: float = INVERTER_AC_POWER_MARGIN
+    # PV export-limit curtailment (issue #269) — opt-in, requires a grid
+    # CT/smart meter and a platform with supports_export_limit_control.
+    export_curtailment_enabled: bool = False
+    export_curtailment_price_floor: float = 0.0
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)
@@ -187,9 +185,6 @@ class BatterySettings:
             self.cycle_cost_per_kwh = battery_config.get(
                 "cycle_cost_per_kwh", BATTERY_CHARGE_CYCLE_COST
             )
-            self.min_action_profit_threshold = battery_config.get(
-                "min_action_profit_threshold", BATTERY_MIN_ACTION_PROFIT_THRESHOLD
-            )
             self.__post_init__()
         return self
 
@@ -213,6 +208,22 @@ class HomeSettings:
             1,
             3,
         ), f"phase_count must be 1 or 3, got {self.phase_count}"
+        if self.power_monitoring_enabled:
+            if self.max_fuse_current <= 0:
+                raise ValueError(
+                    f"max_fuse_current must be positive when power_monitoring_enabled, "
+                    f"got {self.max_fuse_current}"
+                )
+            if self.voltage <= 0:
+                raise ValueError(
+                    f"voltage must be positive when power_monitoring_enabled, "
+                    f"got {self.voltage}"
+                )
+            if self.safety_margin <= 0:
+                raise ValueError(
+                    f"safety_margin must be positive when power_monitoring_enabled, "
+                    f"got {self.safety_margin}"
+                )
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from a snake_case dict — the store's native format.

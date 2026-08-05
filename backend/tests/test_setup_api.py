@@ -43,7 +43,6 @@ _PRE_EXISTING_STORE: dict = {
         "max_charge_power_kw": 5.0,
         "max_discharge_power_kw": 5.0,
         "cycle_cost_per_kwh": 0.3,
-        "min_action_profit_threshold": 0.0,
         "efficiency_charge": 0.97,
         "efficiency_discharge": 0.95,
         "temperature_derating": {"enabled": False, "weather_entity": ""},
@@ -135,7 +134,6 @@ def _full_wizard_payload(**overrides) -> dict:
         "maxSoc": 95.0,
         "maxChargeDischargePower": 15.0,
         "cycleCost": 0.50,
-        "minActionProfitThreshold": 8.0,
         "currency": "SEK",
         "consumption": 3.5,
         "consumptionStrategy": "sensor",
@@ -347,7 +345,6 @@ class TestSetupComplete:
         assert bat["max_charge_power_kw"] == 15.0
         assert bat["max_discharge_power_kw"] == 15.0
         assert bat["cycle_cost_per_kwh"] == 0.50
-        assert bat["min_action_profit_threshold"] == 8.0
 
     def test_battery_preserves_keys_not_in_wizard(self, complete_controller):
         """Keys like efficiency_charge and temperature_derating must survive."""
@@ -503,6 +500,45 @@ class TestSetupComplete:
         )
         call_args = complete_controller.settings_store.save_all.call_args[0][0]
         assert call_args["inverter"]["platform"] == "solax_modbus_growatt_sph"
+
+    def test_huawei_device_id_persisted_to_inverter_section(self, complete_controller):
+        """Huawei device_id is stored on the generic inverter section, not a
+        dedicated top-level section (mirrors the growatt migration target)."""
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                huaweiDeviceId="huawei-dev-456",
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["platform"] == "huawei_solar_luna2000"
+        assert call_args["inverter"]["device_id"] == "huawei-dev-456"
+
+    def test_service_domain_override_persisted(self, complete_controller):
+        """An install whose integration exposes the vendor services under its
+        own domain (e.g. huawei_emma_management, PR #412) configures that
+        here rather than needing a separate inverter platform."""
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                inverterServiceDomain="huawei_emma_management",
+            ),
+        )
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["inverter"]["service_domain"] == "huawei_emma_management"
+
+    def test_malformed_service_domain_rejected(self, complete_controller):
+        """The value is interpolated into /api/services/<domain>/<service>."""
+        resp = _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                inverterServiceDomain="switch.some_entity",
+            ),
+        )
+        assert resp.status_code == 422
 
     def test_growatt_inverter_type_not_written(self, complete_controller):
         """Setup should not write legacy growatt.inverter_type for any platform."""
@@ -698,6 +734,16 @@ class TestSetupComplete:
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         assert complete_controller.ha_controller.growatt_device_id == "dev-123"
 
+    def test_huawei_device_id_applied_to_ha_controller(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(
+                inverterPlatform="huawei_solar_luna2000",
+                huaweiDeviceId="huawei-dev-456",
+            ),
+        )
+        assert complete_controller.ha_controller.huawei_device_id == "huawei-dev-456"
+
     def test_scheduler_started(self, complete_controller):
         _client.post("/api/setup/complete", json=_full_wizard_payload())
         complete_controller.start_scheduler.assert_called_once()
@@ -713,6 +759,20 @@ class TestSetupComplete:
             nordpool_area="SE4",
             nordpool_config_entry_id="entry-abc",
             growatt_device_id="dev-123",
+            huawei_device_id=None,
+        )
+
+    def test_discovered_config_applied_with_huawei_device_id(self, complete_controller):
+        _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(huaweiDeviceId="huawei-dev-456"),
+        )
+        complete_controller.apply_discovered_config.assert_called_once_with(
+            sensor_map={},
+            nordpool_area="SE4",
+            nordpool_config_entry_id="entry-abc",
+            growatt_device_id="dev-123",
+            huawei_device_id="huawei-dev-456",
         )
 
     # -- Partial payloads --
@@ -803,7 +863,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -837,7 +896,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -871,7 +929,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": True,
@@ -902,7 +959,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -934,7 +990,6 @@ class TestDiscoverLocaleDefaults:
         ctrl = _make_discover_controller(store)
         integrations = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,
@@ -990,7 +1045,6 @@ class TestDiscoverPricingDefaults:
     def _integrations(self, **overrides) -> dict:
         base = {
             "growatt_found": False,
-            "device_sn": None,
             "growatt_device_id": None,
             "solax_found": False,
             "nordpool_found": False,

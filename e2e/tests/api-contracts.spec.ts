@@ -222,7 +222,25 @@ test.describe('API Contracts: /api/growatt/inverter_status', () => {
     expect(typeof body.batterySoe).toBe('number');
     expect(typeof body.batteryChargePower).toBe('number');
     expect(typeof body.batteryDischargePower).toBe('number');
-    expect(typeof body.batteryMode).toBe('string');
+    // batteryMode is a real TOU register label only for tou_register
+    // platforms -- vpp_power/period_list controllers have no such register,
+    // so the backend must not fabricate one (#415).
+    //
+    // For non-tou_register platforms it must always be absent. For
+    // tou_register it is normally present, but /api/growatt/inverter_status
+    // derives it from the DP schedule's strategic intents
+    // (get_period_settings() in core/bess/inverter_controller.py), which
+    // raises until the background startup optimization cycle has produced a
+    // schedule (mirrors the same startup race /api/dashboard guards against
+    // with its "initializing" response). The backend correctly omits the
+    // field rather than fabricating a value in that window, so the field
+    // may legitimately be absent here too if this request lands before the
+    // first schedule is ready.
+    if (body.controlModel === 'tou_register') {
+      expect(['string', 'undefined']).toContain(typeof body.batteryMode);
+    } else {
+      expect(body.batteryMode).toBeUndefined();
+    }
     expect(typeof body.gridChargeEnabled).toBe('boolean');
     expect(typeof body.chargeStopSoc).toBe('number');
     expect(typeof body.dischargeStopSoc).toBe('number');
@@ -251,7 +269,13 @@ test.describe('API Contracts: /api/growatt/detailed_schedule', () => {
     // Each hour entry (camelCase keys)
     const hour = body.scheduleData[0];
     expect(typeof hour.hour).toBe('number');
-    expect(typeof hour.batteryMode).toBe('string');
+    // batteryMode is only a real value for tou_register platforms -- see
+    // the /api/growatt/inverter_status batteryMode assertion above (#415).
+    if (body.controlModel === 'tou_register') {
+      expect(typeof hour.batteryMode).toBe('string');
+    } else {
+      expect(hour.batteryMode).toBeUndefined();
+    }
     expect(typeof hour.strategicIntent).toBe('string');
     expect(typeof hour.action).toBe('string');
     expect(hour).toHaveProperty('price');

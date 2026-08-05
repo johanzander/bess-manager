@@ -87,12 +87,23 @@ _CONFIG_ENTRY_DATA_ALLOWLIST: dict[str, frozenset[str]] = {
     "growatt": frozenset({"name", "plant_id", "url"}),
     "solax_modbus": frozenset({"name"}),
     "solax": frozenset({"name"}),
+    "solis_modbus": frozenset({"name"}),
+    "huawei_solar": frozenset({"name"}),
     "entsoe": frozenset({"area", "currency", "energy_scale", "name"}),
 }
 
 # Domains whose config entries are captured in the WS discovery dump.
 _WS_TARGET_DOMAINS = frozenset(
-    {"nordpool", "growatt", "growatt_server", "solax_modbus", "solax", "entsoe"}
+    {
+        "nordpool",
+        "growatt",
+        "growatt_server",
+        "solax_modbus",
+        "solax",
+        "solis_modbus",
+        "huawei_solar",
+        "entsoe",
+    }
 )
 
 # Domains whose entities are captured from the entity registry.
@@ -101,6 +112,8 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
         "growatt_server",
         "solax_modbus",
         "solax",
+        "solis_modbus",
+        "huawei_solar",
         "nordpool",
         "octopus_energy",
         "entsoe",
@@ -114,6 +127,8 @@ _ENTITY_REGISTRY_DOMAINS = frozenset(
 _ENTITY_REGISTRY_KEYWORDS = (
     "growatt",
     "solax",
+    "solis",
+    "huawei",
     "nordpool",
     "octopus",
     "entsoe",
@@ -650,7 +665,7 @@ class DebugDataAggregator:
                     )
 
         try:
-            resolved = controller.discover_ha_metadata(device_sn=None)
+            resolved = controller.discover_ha_metadata()
         except Exception as e:
             resolved = {"error": str(e)}
 

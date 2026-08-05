@@ -42,6 +42,10 @@ const SetupWizardPage: React.FC = () => {
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [controlMode, setControlMode] = useState<'demo' | 'live' | null>(null);
   const existingSensorsRef = useRef<PerPlatformSensors>(emptyPerPlatformSensors());
+  // Only true on a genuinely new install (no prior setup) -- gates the
+  // fuse-protection auto-enable below so re-running the wizard on an
+  // already-configured system never overrides an explicit user choice.
+  const wizardNeededRef = useRef<boolean>(false);
 
   const [batteryForm, setBatteryForm] = useState<BatteryForm>({
     totalCapacity: 30.0,
@@ -52,9 +56,10 @@ const SetupWizardPage: React.FC = () => {
     efficiencyCharge: 97,
     efficiencyDischarge: 97,
     temperatureDeratingEnabled: false,
-    minActionProfit: 8.0,
     inverterMaxAcPowerKw: 0,
     inverterAcPowerMargin: 0.05,
+    exportCurtailmentEnabled: false,
+    exportCurtailmentPriceFloor: 0,
   });
 
   const [inverterForm, setInverterForm] = useState<InverterForm>({
@@ -70,7 +75,9 @@ const SetupWizardPage: React.FC = () => {
     voltage: 230,
     safetyMarginFactor: 1.0,
     phaseCount: 3,
-    powerMonitoringEnabled: true,
+    // Turned on in handleScan only once its required sensors are actually
+    // detected on a new install -- see wizardNeededRef.
+    powerMonitoringEnabled: false,
   });
 
   const [pricingForm, setPricingForm] = useState<PricingForm>({
@@ -158,6 +165,9 @@ const SetupWizardPage: React.FC = () => {
       if (d.growattDeviceId) {
         setInverterForm(f => ({ ...f, deviceId: d.growattDeviceId! }));
       }
+      if (d.huaweiDeviceId) {
+        setInverterForm(f => ({ ...f, deviceId: d.huaweiDeviceId! }));
+      }
 
       // Build per-platform sensor structure from discovery results.
       // platformSensors has per-platform dicts; shared sensors come from d.sensors.
@@ -198,6 +208,16 @@ const SetupWizardPage: React.FC = () => {
       }
 
       setSensors(newSensors);
+
+      // On a genuinely new install, pre-enable fuse protection once its
+      // required sensors are actually present -- never on a wizard re-run
+      // for an already-configured system, where this could silently
+      // override a choice the user already made.
+      const chargeRateSensorFound = !!getActiveSensorsFlat(newSensors).battery_charging_power_rate;
+      if (wizardNeededRef.current && chargeRateSensorFound && d.detectedPhaseCount) {
+        setHomeForm(f => ({ ...f, powerMonitoringEnabled: true }));
+      }
+
       setStep(1);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Discovery failed';
@@ -208,10 +228,19 @@ const SetupWizardPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
+    // Record whether this is a genuinely new install (no prior setup) before
+    // the settings/scan sequence below runs, so handleScan can gate the
+    // fuse-protection auto-enable on it. Awaited alongside the settings load
+    // (both feed into the same .finally() below) so it's always resolved
+    // before handleScan reads it.
+    const statusPromise = api.get('/api/setup/status').then(res => {
+      wizardNeededRef.current = !!res.data.wizardNeeded;
+    }).catch(() => {});
+
     // Load existing settings so re-running the wizard preserves user config,
     // then run the sensor scan. Sequencing via .finally() ensures the scan
     // never overwrites the loaded values (scan seeds only auto-detected hints).
-    api.get('/api/settings').then(res => {
+    const settingsPromise = api.get('/api/settings').then(res => {
       const s = res.data;
       const bat = s.battery ?? {};
       const home = s.home ?? {};
@@ -232,7 +261,6 @@ const SetupWizardPage: React.FC = () => {
         maxSoc:                   bat.maxSoc                   ?? f.maxSoc,
         maxChargeDischargePowerKw: bat.maxChargePowerKw        ?? f.maxChargeDischargePowerKw,
         cycleCostPerKwh:          bat.cycleCostPerKwh          ?? f.cycleCostPerKwh,
-        minActionProfit:          bat.minActionProfitThreshold ?? f.minActionProfit,
         efficiencyCharge:         bat.efficiencyCharge         ?? f.efficiencyCharge,
         efficiencyDischarge:      bat.efficiencyDischarge      ?? f.efficiencyDischarge,
         temperatureDeratingEnabled: bat.temperatureDeratingEnabled ?? f.temperatureDeratingEnabled,
@@ -283,7 +311,9 @@ const SetupWizardPage: React.FC = () => {
       if (status !== 404) {
         console.error('Failed to load existing settings:', err);
       }
-    }).finally(() => {
+    });
+
+    Promise.all([statusPromise, settingsPromise]).finally(() => {
       handleScan();
     });
   }, [handleScan]);
@@ -304,14 +334,22 @@ const SetupWizardPage: React.FC = () => {
         nordpoolArea: discovery.nordpoolArea || discovery.nordpoolCustomArea || pricingForm.area,
         // Prefer the user-entered form value; fall back to auto-detected value
         nordpoolConfigEntryId: pricingForm.nordpoolConfigEntryId || discovery.nordpoolConfigEntryId,
-        growattDeviceId: inverterForm.deviceId || discovery.growattDeviceId,
+        // deviceId is a single shared form field reused across platforms; only
+        // attribute it to the platform actually selected, or a stale value
+        // typed for one platform gets cross-written into the other's device_id
+        // (backend persists whichever field is non-null unconditionally).
+        growattDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? discovery.growattDeviceId
+          : inverterForm.deviceId || discovery.growattDeviceId,
+        huaweiDeviceId: inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+          ? inverterForm.deviceId || discovery.huaweiDeviceId
+          : discovery.huaweiDeviceId,
         // Battery
         totalCapacity: batteryForm.totalCapacity,
         minSoc: batteryForm.minSoc,
         maxSoc: batteryForm.maxSoc,
         maxChargeDischargePower: batteryForm.maxChargeDischargePowerKw,
         cycleCost: batteryForm.cycleCostPerKwh,
-        minActionProfitThreshold: batteryForm.minActionProfit,
         // Home
         currency: pricingForm.currency,
         consumption: homeForm.consumption,
@@ -342,6 +380,7 @@ const SetupWizardPage: React.FC = () => {
         // Inverter
         inverterPlatform: inverterForm.inverterPlatform,
         inverterControlMode: inverterForm.controlMode ?? 'tou',
+        inverterServiceDomain: inverterForm.serviceDomain ?? '',
         // Control mode
         demoMode: controlMode === 'demo',
       });

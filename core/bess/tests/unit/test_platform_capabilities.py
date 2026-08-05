@@ -11,7 +11,7 @@ from core.bess.inverter_controller import InverterController
 from core.bess.settings import BatterySettings
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
-from core.bess.tests.conftest import MockSensorCollector
+from core.bess.tests.conftest import MockHomeAssistantController, MockSensorCollector
 
 # ── Capability declarations ──────────────────────────────────────────────────
 
@@ -60,6 +60,73 @@ class TestChargeRateControlCapability:
             control_mode="vpp",
         )
         assert controller.supports_charge_rate_control is False
+
+
+class TestExportLimitControlCapability:
+    """Verify supports_export_limit_control is declared correctly per platform (#269)."""
+
+    def test_base_class_defaults_to_false(self):
+        assert InverterController.supports_export_limit_control is False
+
+    def test_growatt_sph_cloud_does_not_support_export_limit(self):
+        # growatt_server exposes no export-limit service/entity — see #269.
+        assert GrowattSphController.supports_export_limit_control is False
+
+    def test_solax_native_does_not_support_export_limit(self):
+        assert SolaxController.supports_export_limit_control is False
+
+    def test_solax_modbus_growatt_supports_export_limit(self):
+        # Registers 122/123 exist independent of control_mode (tou vs vpp).
+        controller = SolaxModbusGrowattController(
+            BatterySettings(
+                total_capacity=50.0,
+                max_charge_power_kw=5.0,
+                max_discharge_power_kw=5.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            ),
+            control_mode="tou",
+        )
+        assert controller.supports_export_limit_control is True
+
+
+class TestApplyExportLimit:
+    """Verify apply_export_limit dispatches (or no-ops) correctly (#269)."""
+
+    def test_base_class_is_a_noop(self):
+        controller = GrowattSphController(
+            BatterySettings(
+                total_capacity=50.0,
+                max_charge_power_kw=5.0,
+                max_discharge_power_kw=5.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            )
+        )
+        ha = MockHomeAssistantController()
+        controller.apply_export_limit(ha, curtail=True)
+        assert ha.calls["growatt_export_limit"] == []
+
+    def test_solax_modbus_growatt_curtails(self):
+        controller = SolaxModbusGrowattController(
+            BatterySettings(
+                total_capacity=50.0,
+                max_charge_power_kw=5.0,
+                max_discharge_power_kw=5.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            ),
+            control_mode="tou",
+        )
+        ha = MockHomeAssistantController()
+        controller.apply_export_limit(ha, curtail=True)
+        assert ha.calls["growatt_export_limit"] == [True]
+
+        controller.apply_export_limit(ha, curtail=False)
+        assert ha.calls["growatt_export_limit"] == [True, False]
 
 
 class TestDischargeRateLoadFollowingCapability:

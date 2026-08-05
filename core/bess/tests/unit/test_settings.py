@@ -103,27 +103,6 @@ def test_battery_settings_from_ha_config():
     assert settings.reserved_capacity == 4.0  # 10% of 40
 
 
-def test_battery_settings_action_threshold():
-    """Test action threshold setting is properly handled."""
-    settings = BatterySettings()
-
-    # Test default value (should be 0.0 to not affect existing tests)
-    assert settings.min_action_profit_threshold == 0.0
-
-    # Test update
-    settings.update(min_action_profit_threshold=1.5)
-    assert settings.min_action_profit_threshold == 1.5
-
-    # Test from_ha_config
-    config = {
-        "battery": {
-            "min_action_profit_threshold": 2.0,
-        }
-    }
-    settings.from_ha_config(config)
-    assert settings.min_action_profit_threshold == 2.0
-
-
 def test_battery_settings_inverter_max_ac_power_defaults_off():
     """The AC cap defaults to 0 (disabled) so existing installs are unaffected."""
     settings = BatterySettings()

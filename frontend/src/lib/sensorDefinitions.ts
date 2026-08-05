@@ -27,6 +27,8 @@ export const INVERTER_INTEGRATION_IDS: Record<string, string> = {
   solax_modbus_growatt_min: 'solax_modbus_growatt_min',
   solax_modbus_growatt_sph: 'solax_modbus_growatt_sph',
   solax_modbus_native: 'solax_modbus_native',
+  solis_modbus: 'solis_modbus',
+  huawei_solar_luna2000: 'huawei_solar_luna2000',
 };
 
 // Platform IDs are now used consistently at all layers — no conversion needed.
@@ -38,6 +40,8 @@ export const VALID_PLATFORMS = [
   'solax_modbus_growatt_min',
   'solax_modbus_growatt_sph',
   'solax_modbus_native',
+  'solis_modbus',
+  'huawei_solar_luna2000',
 ] as const;
 
 export type PlatformId = typeof VALID_PLATFORMS[number];
@@ -55,6 +59,8 @@ export interface PerPlatformSensors {
   solax_modbus_growatt_min: Record<string, string>;
   solax_modbus_growatt_sph: Record<string, string>;
   solax_modbus_native: Record<string, string>;
+  solis_modbus: Record<string, string>;
+  huawei_solar_luna2000: Record<string, string>;
   shared: Record<string, string>;
 }
 
@@ -73,6 +79,8 @@ export function emptyPerPlatformSensors(platform = ''): PerPlatformSensors {
     solax_modbus_growatt_min: {},
     solax_modbus_growatt_sph: {},
     solax_modbus_native: {},
+    solis_modbus: {},
+    huawei_solar_luna2000: {},
     shared: {},
   };
 }
@@ -296,6 +304,13 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'growatt_vpp_power', label: 'VPP Power', required: false },
         ],
       },
+      {
+        name: 'Export Limit Curtailment (optional — requires a grid CT/smart meter)',
+        sensors: [
+          { key: 'growatt_export_limit_mode', label: 'Limit Grid Export', required: false },
+          { key: 'growatt_export_limit_value', label: 'Grid Export Limit', required: false },
+        ],
+      },
     ],
   },
   {
@@ -350,6 +365,125 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'growatt_vpp_allow_ac_charging', label: 'VPP Allow AC Charging', required: true },
           { key: 'growatt_vpp_time', label: 'VPP Time (Fallback Timer)', required: true },
           { key: 'growatt_vpp_power', label: 'VPP Power', required: true },
+        ],
+      },
+      {
+        name: 'Export Limit Curtailment (optional — requires a grid CT/smart meter)',
+        sensors: [
+          { key: 'growatt_export_limit_mode', label: 'Limit Grid Export', required: false },
+          { key: 'growatt_export_limit_value', label: 'Grid Export Limit', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'solis_modbus',
+    name: 'Solis Modbus',
+    required: true,
+    description: 'Solis hybrid inverter controlled via the Pho3niX90/solis_modbus integration (local Modbus, Grid Time of Use v2 schedule — 6 charge + 6 discharge periods). Experimental — not yet validated against a real Solis installation.',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'Battery SOC', required: true },
+          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
+          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'pv_power', label: 'PV Power (string 1)', required: false },
+          { key: 'local_load_power', label: 'Household Load Power', required: false },
+          { key: 'import_power', label: 'Grid Power (net, signed)', required: false },
+        ],
+      },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_battery_charged', label: 'Total Battery Charge Energy', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharge Energy', required: false },
+          { key: 'lifetime_solar_energy', label: 'PV Total Energy Generation', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Total Energy Imported From Grid', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Total Energy Fed Into Grid', required: false },
+        ],
+      },
+      {
+        name: 'Grid Time of Use — Charge Slots',
+        sensors: [
+          { key: 'solis_charge_start_1', label: 'Charge Slot 1 Start', required: true },
+          { key: 'solis_charge_end_1', label: 'Charge Slot 1 End', required: true },
+          { key: 'solis_charge_enable_1', label: 'Charge Slot 1 Enable', required: true },
+          { key: 'solis_charge_start_2', label: 'Charge Slot 2 Start', required: false },
+          { key: 'solis_charge_end_2', label: 'Charge Slot 2 End', required: false },
+          { key: 'solis_charge_enable_2', label: 'Charge Slot 2 Enable', required: false },
+          { key: 'solis_charge_start_3', label: 'Charge Slot 3 Start', required: false },
+          { key: 'solis_charge_end_3', label: 'Charge Slot 3 End', required: false },
+          { key: 'solis_charge_enable_3', label: 'Charge Slot 3 Enable', required: false },
+          { key: 'solis_charge_start_4', label: 'Charge Slot 4 Start', required: false },
+          { key: 'solis_charge_end_4', label: 'Charge Slot 4 End', required: false },
+          { key: 'solis_charge_enable_4', label: 'Charge Slot 4 Enable', required: false },
+          { key: 'solis_charge_start_5', label: 'Charge Slot 5 Start', required: false },
+          { key: 'solis_charge_end_5', label: 'Charge Slot 5 End', required: false },
+          { key: 'solis_charge_enable_5', label: 'Charge Slot 5 Enable', required: false },
+          { key: 'solis_charge_start_6', label: 'Charge Slot 6 Start', required: false },
+          { key: 'solis_charge_end_6', label: 'Charge Slot 6 End', required: false },
+          { key: 'solis_charge_enable_6', label: 'Charge Slot 6 Enable', required: false },
+        ],
+      },
+      {
+        name: 'Grid Time of Use — Discharge Slots',
+        sensors: [
+          { key: 'solis_discharge_start_1', label: 'Discharge Slot 1 Start', required: true },
+          { key: 'solis_discharge_end_1', label: 'Discharge Slot 1 End', required: true },
+          { key: 'solis_discharge_enable_1', label: 'Discharge Slot 1 Enable', required: true },
+          { key: 'solis_discharge_start_2', label: 'Discharge Slot 2 Start', required: false },
+          { key: 'solis_discharge_end_2', label: 'Discharge Slot 2 End', required: false },
+          { key: 'solis_discharge_enable_2', label: 'Discharge Slot 2 Enable', required: false },
+          { key: 'solis_discharge_start_3', label: 'Discharge Slot 3 Start', required: false },
+          { key: 'solis_discharge_end_3', label: 'Discharge Slot 3 End', required: false },
+          { key: 'solis_discharge_enable_3', label: 'Discharge Slot 3 Enable', required: false },
+          { key: 'solis_discharge_start_4', label: 'Discharge Slot 4 Start', required: false },
+          { key: 'solis_discharge_end_4', label: 'Discharge Slot 4 End', required: false },
+          { key: 'solis_discharge_enable_4', label: 'Discharge Slot 4 Enable', required: false },
+          { key: 'solis_discharge_start_5', label: 'Discharge Slot 5 Start', required: false },
+          { key: 'solis_discharge_end_5', label: 'Discharge Slot 5 End', required: false },
+          { key: 'solis_discharge_enable_5', label: 'Discharge Slot 5 Enable', required: false },
+          { key: 'solis_discharge_start_6', label: 'Discharge Slot 6 Start', required: false },
+          { key: 'solis_discharge_end_6', label: 'Discharge Slot 6 End', required: false },
+          { key: 'solis_discharge_enable_6', label: 'Discharge Slot 6 Enable', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'huawei_solar_luna2000',
+    name: 'Huawei LUNA2000',
+    required: true,
+    description: 'Huawei LUNA2000 battery controlled via the huawei_solar integration (local Modbus)',
+    sensorGroups: [
+      {
+        name: 'Battery Monitoring',
+        sensors: [
+          { key: 'battery_soc', label: 'State of Capacity', required: true },
+          { key: 'battery_charge_power', label: 'Charge/Discharge Power', required: true },
+        ],
+      },
+      {
+        name: 'Battery Control',
+        sensors: [
+          { key: 'huawei_working_mode', label: 'Working Mode (select)', required: true },
+          { key: 'battery_charging_power_rate', label: 'Maximum Charging Power', required: false },
+          { key: 'battery_discharging_power_rate', label: 'Maximum Discharging Power', required: false },
+          { key: 'battery_charge_stop_soc', label: 'Charging Cutoff Capacity', required: true },
+          { key: 'battery_discharge_stop_soc', label: 'Grid-Charge Cutoff SOC', required: true },
+          { key: 'grid_charge', label: 'Charge From Grid Function', required: false },
+        ],
+      },
+      {
+        name: 'Power Monitoring',
+        sensors: [
+          { key: 'local_load_power', label: 'Inverter Active Power', required: false },
         ],
       },
     ],

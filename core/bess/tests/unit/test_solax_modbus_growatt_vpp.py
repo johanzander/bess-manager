@@ -29,9 +29,9 @@ def hourly_to_quarterly(
     return quarterly
 
 
-def make_schedule(intents: list[str]) -> DPSchedule:
+def make_schedule(intents: list[str], actions: list[float] | None = None) -> DPSchedule:
     return DPSchedule(
-        actions=[0.0] * len(intents),
+        actions=actions if actions is not None else [0.0] * len(intents),
         state_of_energy=[25.0] * (len(intents) + 1),
         prices=[0.1] * len(intents),
         original_dp_results={"strategic_intent": intents},
@@ -67,6 +67,7 @@ def _apply_at_period(
     grid_charge,
     discharge_rate,
     block_passive_charging=False,
+    strategic_intent="",
 ):
     hour = period // 4
     minute = (period % 4) * 15
@@ -74,7 +75,11 @@ def _apply_at_period(
         with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
             mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
             controller.apply_period(
-                mock_ha, grid_charge, discharge_rate, block_passive_charging
+                mock_ha,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
 
 
@@ -96,13 +101,33 @@ class TestIntentToVpp:
         assert power_pct == 100
         assert enabled is True
 
-    def test_idle_disables_remote_control(self, controller):
-        """SOLAR_STORAGE/IDLE (block_passive_charging=False) -> self-use."""
+    def test_solar_storage_disables_remote_control(self, controller):
+        """SOLAR_STORAGE (block_passive_charging=False) -> self-use, battery
+        may absorb solar surplus."""
         power_pct, enabled = controller._intent_to_vpp(
-            grid_charge=False, discharge_rate=0, block_passive_charging=False
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="SOLAR_STORAGE",
         )
         assert power_pct == 0
         assert enabled is False
+
+    def test_idle_enables_battery_first_hold(self, controller):
+        """#466: IDLE must not fall back to native load_first self-use --
+        load_first discharges the battery to cover house load, but the DP's
+        own cost model (_idle_battery_flows) never credits battery discharge
+        during IDLE. remote_control=Enabled, vpp_power=+1 (battery first)
+        keeps self-consumption on grid/solar instead of draining the
+        battery, per the Growatt VPP protocol V2.01 section 3.5."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="IDLE",
+        )
+        assert power_pct == 1
+        assert enabled is True
 
     def test_solar_export_keeps_remote_control_enabled(self, controller):
         """SOLAR_EXPORT (block_passive_charging=True) -> grid-first hold,
@@ -121,11 +146,50 @@ class TestIntentToVpp:
         assert power_pct == -60
         assert enabled is True
 
+    def test_battery_export_still_forces_fixed_rate(self, controller):
+        """BATTERY_EXPORT must keep forcing a fixed grid_first rate --
+        only LOAD_SUPPORT releases control (#413)."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False, discharge_rate=60, strategic_intent="BATTERY_EXPORT"
+        )
+        assert power_pct == -60
+        assert enabled is True
+
+    def test_load_support_releases_vpp_control(self, controller):
+        """#413: LOAD_SUPPORT must release VPP control (fall back to the
+        inverter's own load-following self-use) instead of forcing a fixed
+        discharge rate via grid_first -- a fixed rate causes unnecessary
+        grid imports/exports whenever the schedule's load prediction misses.
+        """
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False, discharge_rate=60, strategic_intent="LOAD_SUPPORT"
+        )
+        assert power_pct == 0
+        assert enabled is False
+
+    def test_load_support_releases_vpp_control_at_zero_discharge_rate(self, controller):
+        """PR #414 review: LOAD_SUPPORT's INTENT_TO_CONTROL charge_rate is 0
+        (same as BATTERY_EXPORT/SOLAR_EXPORT), so block_passive_charging is
+        True for it in production (compute_rates_for_period). Whenever the
+        DP plan calls for no net discharge, or discharge-inhibit forces the
+        rate to 0, discharge_rate is 0 too -- both common, not edge cases.
+        The discharge_rate==0 branch must not take priority over the
+        LOAD_SUPPORT release for real block_passive_charging=True callers.
+        """
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=True,
+            strategic_intent="LOAD_SUPPORT",
+        )
+        assert power_pct == 0
+        assert enabled is False
+
 
 class TestApplyPeriodVpp:
     def test_no_tou_segments_written(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
 
@@ -136,7 +200,7 @@ class TestApplyPeriodVpp:
     def test_vpp_status_enabled_once(self, controller, mock_ha):
         """VPP Status/AC-charging are written once, not on every period."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING", 4: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
@@ -146,7 +210,7 @@ class TestApplyPeriodVpp:
 
     def test_charge_period_writes_positive_power(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
 
@@ -157,18 +221,49 @@ class TestApplyPeriodVpp:
 
     def test_discharge_period_writes_negative_power(self, controller, mock_ha):
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
-        _apply_at_period(controller, mock_ha, 40, grid_charge=False, discharge_rate=70)
+        _apply_at_period(
+            controller,
+            mock_ha,
+            40,
+            grid_charge=False,
+            discharge_rate=70,
+            strategic_intent="BATTERY_EXPORT",
+        )
 
         period = mock_ha.calls["growatt_vpp_periods"][-1]
         assert period["remote_control_enabled"] is True
         assert period["power_pct"] == -70
 
-    def test_idle_disables_remote_control_on_hardware(self, controller, mock_ha):
-        intents = hourly_to_quarterly({0: "IDLE"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+    def test_load_support_releases_remote_control_on_hardware(
+        self, controller, mock_ha
+    ):
+        """#413: unlike BATTERY_EXPORT, LOAD_SUPPORT must disable
+        vpp_remote_control on the hardware write, not force a fixed rate."""
+        intents = hourly_to_quarterly({10: "LOAD_SUPPORT"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
         controller._last_written_vpp_remote_control = True  # force a change
+
+        _apply_at_period(
+            controller,
+            mock_ha,
+            40,
+            grid_charge=False,
+            discharge_rate=70,
+            strategic_intent="LOAD_SUPPORT",
+        )
+
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["remote_control_enabled"] is False
+        assert period["power_pct"] == 0
+
+    def test_idle_enables_battery_first_hold_on_hardware(self, controller, mock_ha):
+        """#466: IDLE must write remote_control=Enabled, power=+1 (battery
+        first) instead of falling back to native load_first self-use."""
+        intents = hourly_to_quarterly({0: "IDLE"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+        controller._last_written_vpp_remote_control = False  # force a change
 
         _apply_at_period(
             controller,
@@ -177,10 +272,12 @@ class TestApplyPeriodVpp:
             grid_charge=False,
             discharge_rate=0,
             block_passive_charging=False,
+            strategic_intent="IDLE",
         )
 
         period = mock_ha.calls["growatt_vpp_periods"][-1]
-        assert period["remote_control_enabled"] is False
+        assert period["remote_control_enabled"] is True
+        assert period["power_pct"] == 1
 
     def test_solar_export_keeps_remote_control_enabled_on_hardware(
         self, controller, mock_ha
@@ -188,7 +285,7 @@ class TestApplyPeriodVpp:
         """#355: SOLAR_EXPORT must not fall back to self-use, which lets
         solar surplus recharge the battery instead of exporting it."""
         intents = hourly_to_quarterly({0: "SOLAR_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
         controller._last_written_vpp_remote_control = False  # force a change
 
         _apply_at_period(
@@ -204,22 +301,36 @@ class TestApplyPeriodVpp:
         assert period["remote_control_enabled"] is True
         assert period["power_pct"] == 0
 
-    def test_unchanged_command_skips_write(self, controller, mock_ha):
+    def test_unchanged_active_command_refreshes_timer(self, controller, mock_ha):
+        """#404: a stable run of identical active periods must still write,
+        or the inverter's fallback timer lapses and it reverts to load_first."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
         writes_after_first = len(mock_ha.calls["growatt_vpp_periods"])
 
-        # Same command again — should not write again
+        # Same active command again — must still write to refresh the timer
         _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
+        assert len(mock_ha.calls["growatt_vpp_periods"]) == writes_after_first + 1
+
+    def test_unchanged_disabled_command_skips_write(self, controller, mock_ha):
+        intents = hourly_to_quarterly({2: "SOLAR_STORAGE"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        _apply_at_period(controller, mock_ha, 8, grid_charge=False, discharge_rate=0)
+        writes_after_first = len(mock_ha.calls["growatt_vpp_periods"])
+
+        # Same disabled (load_first) command again — nothing active, no
+        # timer to protect, so the write is still skipped.
+        _apply_at_period(controller, mock_ha, 9, grid_charge=False, discharge_rate=0)
         assert len(mock_ha.calls["growatt_vpp_periods"]) == writes_after_first
 
     def test_power_change_within_active_control_triggers_write(
         self, controller, mock_ha
     ):
         intents = hourly_to_quarterly({0: "BATTERY_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        controller.apply_intents(make_schedule(intents), current_period=0)
 
         _apply_at_period(controller, mock_ha, 0, grid_charge=False, discharge_rate=50)
         _apply_at_period(controller, mock_ha, 1, grid_charge=False, discharge_rate=80)
@@ -229,35 +340,63 @@ class TestApplyPeriodVpp:
 
 
 class TestWriteScheduleToHardwareVpp:
-    def test_writes_initial_command_only(self, controller, mock_ha):
-        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+    """VPP has no persistent/bulk schedule to push — write_to_hardware is a
+    no-op for power (like SolaxController's), same as its class docstring
+    already claims. The real per-period power command always comes from
+    apply_period via BatterySystemManager._apply_period_schedule, which runs
+    immediately after write_to_hardware in the same update_battery_schedule
+    cycle (#421)."""
 
-        writes, disables = controller.write_schedule_to_hardware(
+    def test_returns_zero_writes_zero_disables(self, controller, mock_ha):
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        writes, disables = controller.write_to_hardware(
             mock_ha, effective_period=8, current_tou=[]
         )
 
-        assert writes == 1
+        assert writes == 0
         assert disables == 0
-        assert mock_ha.calls["tou_segments"] == []
-        assert len(mock_ha.calls["growatt_vpp_periods"]) == 1
 
-    def test_solar_export_initial_write_keeps_remote_control_enabled(
+    def test_no_vpp_power_command_written(self, controller, mock_ha):
+        """#421: write_to_hardware previously computed power from a
+        hardcoded battery_action_kw=0.0 stub, sending a spurious power=0%
+        command that briefly preceded the correct value written moments
+        later by apply_period. It must not write any VPP power at all."""
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
+
+        assert mock_ha.calls["growatt_vpp_periods"] == []
+
+    def test_no_vpp_power_command_written_for_real_discharge_action(
         self, controller, mock_ha
     ):
-        """#355: the initial write_schedule_to_hardware path must apply the
-        same block_passive_charging distinction as per-period apply_period."""
-        intents = hourly_to_quarterly({2: "SOLAR_EXPORT"})
-        controller.create_schedule(make_schedule(intents), current_period=0)
+        """Reproduces the exact #421 scenario: a BATTERY_EXPORT period with a
+        real nonzero planned discharge (period 77, -2.48 kWh / -9.90 kW in
+        the reported debug log) must not produce a spurious power=0% write
+        from write_to_hardware — the stub battery_action_kw=0.0 previously
+        made this look like "no action", forcing discharge_rate=0."""
+        intents = hourly_to_quarterly({19: "BATTERY_EXPORT"})
+        actions = [0.0] * 96
+        actions[77] = -2.48
+        controller.apply_intents(make_schedule(intents, actions), current_period=77)
 
-        writes, _disables = controller.write_schedule_to_hardware(
-            mock_ha, effective_period=8, current_tou=[]
-        )
+        controller.write_to_hardware(mock_ha, effective_period=77, current_tou=[])
 
-        assert writes == 1
-        period = mock_ha.calls["growatt_vpp_periods"][-1]
-        assert period["remote_control_enabled"] is True
-        assert period["power_pct"] == 0
+        assert mock_ha.calls["growatt_vpp_periods"] == []
+
+    def test_vpp_status_enabled_via_write_to_hardware(self, controller, mock_ha):
+        """The one-time VPP Status/AC-charging enable sequence is still
+        write_to_hardware's job, per the class docstring."""
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule(intents), current_period=0)
+
+        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
+
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
 
 
 class TestReadAndInitializeVpp:
@@ -284,6 +423,27 @@ class TestReadAndInitializeVpp:
 
         assert mock_ha.calls["growatt_vpp_status"] == []
         assert mock_ha.calls["growatt_vpp_periods"] == []
+
+
+class TestNoRedundantWritesAcrossCycles:
+    """#329: applying the same intents twice in a row on the SAME controller
+    instance (no recreation at all, unlike #368's simulated-recreation test)
+    must not re-write VPP status/allow-AC-charging the second time."""
+
+    def test_apply_intents_twice_writes_vpp_status_once(self, controller, mock_ha):
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        schedule = make_schedule(intents)
+
+        controller.apply_intents(schedule, current_period=0)
+        _apply_at_period(controller, mock_ha, 8, grid_charge=True, discharge_rate=0)
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+
+        # Re-apply the identical schedule -- same instance, no recreation
+        controller.apply_intents(schedule, current_period=0)
+        _apply_at_period(controller, mock_ha, 9, grid_charge=True, discharge_rate=0)
+
+        assert len(mock_ha.calls["growatt_vpp_status"]) == 1
+        assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
 
 
 class TestCheckHealthVpp:
@@ -348,3 +508,17 @@ class TestVppInitDoesNotTouchTou:
         controller.initialize_hardware(mock_ha)
 
         assert mock_ha.calls["tou_segments"] == []
+
+
+class TestGetAllTouSegmentsVppMode:
+    def test_get_all_tou_segments_vpp_mode_solar_export_has_no_batt_mode(
+        self, controller
+    ):
+        controller.strategic_intents = ["SOLAR_EXPORT"] * 96
+        controller.current_schedule = None
+        segments = controller.get_all_tou_segments()
+        assert len(segments) >= 1
+        segment = segments[0]
+        assert "batt_mode" not in segment
+        assert segment["vpp_power_pct"] == 0
+        assert segment["vpp_remote_control"] is True

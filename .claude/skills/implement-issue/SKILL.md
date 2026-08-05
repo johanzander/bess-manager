@@ -29,6 +29,26 @@ the `bess-analyst` sub-agent.
   graduation across multiple beta cycles. Use `implement-issue` for
   single-PR bug fixes and small enhancements.
 
+## CI mode (GitHub Actions)
+
+`issue-fix.yml` runs this skill on `claude-code-action` instead of duplicating
+its instructions. The numbered Process below applies verbatim **except** where
+an interactive-session mechanism has a pipeline equivalent, per this table.
+User-level plugins (`superpowers:*`, `code-review`) are not installed on CI
+runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
+
+| Step | CI mode |
+|---|---|
+| 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
+| 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
+| 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
+| 5. TDD | The substance applies verbatim (RED test first, required test shape); there is just no `superpowers:test-driven-development` skill to invoke — follow this section's own rules. |
+| 6. Quality gate + code review | Run inline, no background agent (CI is one throwaway session — the cost-discipline reason to background doesn't exist). The `code-review` plugin is unavailable; the Stage-4 `@claude-bot` PR review covers it. Checks 1–3 (fast suite, slow suite, required-test-shape) still apply. |
+| 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
+| 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
+| 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
+| 10. Hard constraints | Apply verbatim. |
+
 ## Process
 
 ### 1. Fetch & scope
@@ -60,13 +80,30 @@ with `## Root cause` / `## Evidence` / `## Proposed fix` sections (label
 
 ### 3. Confirm gate
 
-Present the root cause and proposed fix to the user. Wait for explicit
-go-ahead before touching code. One message — cheap insurance against
-building an entire implementation on a wrong diagnosis.
+Present the root cause, proposed fix, AND its scope assessment per
+`docs/agents/rules.md`'s Debugging Protocol step 8. That includes the
+**workaround check**: state explicitly that the diff adds nothing — no
+parameter, flag, default-fallback, second construction site, extra trigger
+or branch — whose only job is to route around an ordering/timing/dependency
+problem instead of fixing it. If you can't state that confidently, dispatch
+a fresh `Plan`/general-purpose agent to critique the design before
+presenting anything. Then the scope category: does the fix stay within
+the target method's existing contract (local), does it need a different/new
+owner (structural), or does it have multiple plausible owners worth a second
+opinion? State which, explicitly — don't let the user infer it from the diff
+description. A structural assessment with no stated reason for the chosen
+owner is not ready to present. Wait for explicit go-ahead before touching
+code. One message — cheap insurance against building an entire
+implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 
-Invoke `superpowers:using-git-worktrees`.
+`git fetch origin main` first — `using-git-worktrees`' git fallback branches
+from the current local `HEAD`, not `origin/main`, so a stale local checkout
+silently cuts the branch behind main (missed release cuts, changelog
+rewrites, other merged fixes), surfacing later as an avoidable merge
+conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
+branch on `origin/main`.
 
 ### 5. TDD implementation
 
@@ -74,6 +111,54 @@ Invoke `superpowers:test-driven-development`. Write a test that reproduces
 the bug (from the diagnosis's evidence — the specific period/scenario/input)
 and watch it fail, then write the minimal fix. No refactors outside the bug
 — match `docs/agents/patterns.md`.
+
+**Required test shape — checked against the diff, not optional:**
+
+If the fix touches the DP (`dp_battery_algorithm.py`), intent classification
+(`decision_intelligence.py`), or control/rate mapping (`inverter_controller.py`
+/ `battery_system_manager.py`), the PRIMARY RED test — not an extra test
+alongside it, the one that proves the bug — is a plan-faithfulness scenario,
+not a unit test calling the changed function with hand-built arguments. Write
+it as:
+
+```python
+from core.bess.tests.helpers import run_scenario_realized
+# scenario is a full DP-optimized schedule, not a hand-built period/decision
+result, realized_cost = run_scenario_realized(scenario)
+assert realized_cost == pytest.approx(result.total_cost, ...)  # R == P
+```
+
+A unit test on the changed function directly (e.g. calling
+`_apply_period_schedule` or `intra_period_discharge_gate` with stubbed
+arguments) can pass while the new branch is unreachable by any real
+DP-produced schedule — that is exactly the coverage gap that shipped
+undetected in PR #385 (`docs/agents/simulator.md`). Add such a unit test only
+as a supplement, never as the sole RED test, for this category of fix.
+
+If the diagnosis's evidence is a user-supplied debug log/bundle, build the
+scenario from that real data instead of a hand-assembled fixture:
+
+```bash
+python scripts/mock_ha/scenarios/from_debug_log.py <bundle.md>
+```
+
+(`docs/agents/testing.md` → Bug Reproduction with Mock HA). Do this before
+writing the RED test — the bundle already contains the exact conditions that
+reproduced the bug.
+
+**If the fix changes optimizer economics or behavior, the fixture from
+`from_debug_log.py --issue <N>` also needs its `expected_results`/
+`expected_behavior` set from the fixed code's output** (`docs/agents/testing.md`
+→ Test Data) — this wires it into `test_scenarios.py::test_all_scenarios`,
+the codebase's existing auto-discovered, always-run regression harness for
+every `*.json` fixture in `core/bess/tests/unit/data/`. Do this instead of
+writing a standalone test file that re-derives `_scenario_inputs` and
+hand-asserts cost numbers — that duplicates a mechanism the codebase already
+has and runs on every test invocation. Verify the pin actually discriminates
+(temporarily feed it the pre-fix/buggy input, confirm it fails) before
+trusting it. Reserve a standalone test file for what that harness genuinely
+can't express: a private method's internal formula, or plan-faithfulness
+(`R == P`) — `test_all_scenarios` never runs the inverter simulator.
 
 ### 6. Quality gate + code review (background)
 
@@ -87,8 +172,16 @@ self-contained prompt covering:
 1. `./scripts/quality-check.sh` (fast suite) — if it fails, fix and re-run,
    do not proceed with failures.
 2. `.venv/bin/pytest -m slow` (slow suite) — same failure handling.
-3. Invoke the `code-review` skill on the diff.
-4. Report back: pass/fail on both suites, and any CONFIRMED code-review
+3. If the diff touches the DP, intent classification, or control/rate
+   mapping (the Step 5 table): confirm the diff's new/changed tests include
+   a `run_scenario_realized` / `verify_plan_faithfulness` call, not only a
+   unit test on the changed function with hand-built arguments. If missing,
+   this is a required-before-continuing gap, not a nice-to-have — report it
+   as a blocking finding alongside the suite results, same severity as a
+   failing test.
+4. Invoke the `code-review` skill on the diff.
+5. Report back: pass/fail on both suites, whether check 3 passed, and any
+   CONFIRMED code-review
    findings verbatim (everything else goes to `TODO.md`).
 
 Do not poll — you'll be notified on completion. This is a hard session
@@ -116,8 +209,12 @@ not satisfied by re-stating that `quality-check.sh` passed.
 
 Add a `CHANGELOG.md` entry under `## [Unreleased]` (create that heading at
 the top if it's not already there), in the matching `### Added` / `### Changed`
-/ `### Fixed` subsection, following the existing entries' style (bold summary
-line, link to the issue/PR). This is a normal part of the PR, not a release
+/ `### Fixed` subsection — one line, per `docs/agents/workflow.md`'s CHANGELOG
+Format (bold lead-in, issue/PR link, ~25-word cap; no root cause or
+file/function names — that's the PR description's job, not the changelog's).
+Match existing entries' *format* only, never their *length* — several past
+entries are multi-sentence root-cause essays; do not use those as a length
+precedent. This is a normal part of the PR, not a release
 step — per `docs/superpowers/specs/2026-07-09-release-workflow-design.md`,
 `Unreleased` entries accumulate as each PR merges; the release skill only
 ever renames or copies that section, it never authors it. Skipping this here
@@ -219,6 +316,8 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
 | "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
+| "a unit test on the changed function is enough" | Not for DP/intent/control-mapping changes — a synthetic-input unit test can pass while the new branch is unreachable by any real optimizer-derived scenario. `docs/agents/simulator.md` requires `R == P` for exactly this class of change. |
+| "the existing suite still passes, so nothing broke" | Passing unchanged means the new code path may simply be untested, not unbroken — check whether any existing fixture actually reaches the new branch before treating a green suite as coverage. |
 
 ## Red Flags — Stop and Go Back
 
@@ -233,6 +332,10 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
   dispatching the Step 6 background agent.
 - About to open the PR without checking whether the fix invalidates a claim
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
+- About to write only a synthetic-input unit test for a DP/intent/control-
+  mapping change instead of a plan-faithfulness (`R == P`) scenario test.
+- About to write a repro test from hand-built data when a user debug log/
+  bundle is available and `from_debug_log.py` could build it from real data.
 
 ## Quick Reference
 

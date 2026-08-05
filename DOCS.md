@@ -65,7 +65,7 @@ All other configuration is done in the **Settings** page:
 
 - **Home** — Currency, consumption baseline, fuse, voltage, phase count, safety margin
 - **Pricing** — Energy provider (Nordpool/Octopus), price area, VAT, markup, additional costs
-- **Battery** — Capacity, power limits, SOC range, cycle cost, min action profit threshold
+- **Battery** — Capacity, power limits, SOC range, cycle cost
 - **Sensors** — All sensor entity IDs grouped by integration, with live health status per sensor
 - **Health** — Full component health check with refresh and debug export
 

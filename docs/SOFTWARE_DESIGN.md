@@ -91,6 +91,12 @@ def start() -> None
 - Consumption predictions (one entry per period, matching price array length)
 - Solar production forecast (one entry per period, matching price array length)
 - Current battery state and cost basis
+- Home electrical settings (fuse current, voltage, phase count) when
+  `power_monitoring_enabled` — derives a per-period grid-import cap that
+  constrains total import (load + battery charging), forcing the battery to
+  cover a load spike via discharge rather than importing past the house's
+  fuse limit. See `docs/agents/bess-knowledge.md`'s "grid import (fuse) cap"
+  section (#429).
 
 **Outputs**:
 
@@ -171,7 +177,7 @@ class StoredSchedule:
 
 **Per-period control** (shared across all platforms): At each 15-minute period boundary, `_write_period_to_hardware()` issues generic HA entity calls:
 - `switch.turn_on` / `switch.turn_off` — grid charge enable/disable
-- `number.set_value` — charge/discharge power rate
+- `number.set_value` (or `input_number.set_value` if the configured entity is a user-provided `input_number.*` helper) — charge/discharge power rate
 
 These resolve to platform-specific entities via the sensor config (e.g. `grid_charge` → `switch.rkm…_charge_from_grid` on Growatt cloud, or `switch.solax_charger_switch` on solax_modbus).
 
@@ -353,7 +359,7 @@ The InverterController converts action intents into hardware-specific schedules.
 
 **Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
 
-**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) threaded through `InverterController.apply_period`. See
+**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from signals threaded through `InverterController.apply_period`: a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) distinguishes `SOLAR_EXPORT` from `SOLAR_STORAGE`/`IDLE`, and a `strategic_intent` signal distinguishes `LOAD_SUPPORT` from `BATTERY_EXPORT` — both intents share identical `(grid_charge, discharge_rate)` values from the table above, but `SolaxModbusGrowattController`'s VPP mode releases control entirely for `LOAD_SUPPORT` (`vpp_remote_control` disabled, falling back to the inverter's own `load_first` self-consumption) rather than forcing a fixed `grid_first` rate the way `BATTERY_EXPORT` still does (issue #413). See
 [`docs/INVERTER_PLATFORMS.md`](INVERTER_PLATFORMS.md)'s "SOLAR_EXPORT semantics" section and
 [`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
 for the full VPP-mode design (issue #355).
@@ -385,7 +391,7 @@ influxdb:
 
 All other settings are stored in this file and managed via the settings API. Top-level sections:
 
-- **`battery`**: `total_capacity`, `min_soc`, `max_soc`, `max_charge_power_kw`, `max_discharge_power_kw`, `cycle_cost_per_kwh`, `min_action_profit_threshold`, `charging_power_rate`, `efficiency_charge`, `efficiency_discharge`
+- **`battery`**: `total_capacity`, `min_soc`, `max_soc`, `max_charge_power_kw`, `max_discharge_power_kw`, `cycle_cost_per_kwh`, `charging_power_rate`, `efficiency_charge`, `efficiency_discharge`
 - **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `min_profit`, `use_actual_price`
 - **`home`**: `max_fuse_current`, `voltage`, `safety_margin`, `phase_count`, `default_hourly`, `currency`, `consumption_strategy`, `power_monitoring_enabled`
 - **`growatt`**: Inverter device ID and integration settings
@@ -402,8 +408,17 @@ The system supports multiple inverter platforms, each with a dedicated controlle
 | `growatt_solax_modbus` | Growatt MIC/MIN/MOD/MID | `solax_modbus` (local Modbus) | TOU entity writes | `SolaxModbusGrowattController` |
 | `growatt_sph` | Growatt SPH | `growatt_server` (cloud) | AC charge/discharge periods | `GrowattSphController` |
 | `solax` | SolaX | `solax_modbus` (local Modbus) | VPP active-power commands | `SolaxController` |
+| `huawei_solar_luna2000` | Huawei LUNA2000 | `huawei_solar` (local Modbus) | TOU period-list writes | `HuaweiController` |
 
 The active platform is stored in `inverter.platform`. Switching platform at runtime calls `BatterySystemManager.switch_inverter_platform()`, which destroys the current `InverterController` and creates the correct subclass. No restart is required.
+
+#### Vendor service domain
+
+Two platforms make service calls into a *vendor* integration domain rather than driving entities: Growatt cloud (`update_time_segment`, `write/read_ac_charge_times`, `write/read_ac_discharge_times`) and Huawei (`set_tou_periods`). Every other service call BESS makes infers its domain from the entity_id prefix — `number` vs `input_number`, `switch` vs `select` — but these target a *device*, so there is no prefix to read.
+
+That domain is configuration, not a platform constant. `SettingsStore.get_service_domain()` resolves it: `inverter.service_domain` when set, otherwise the platform's entry in `PLATFORM_SERVICE_DOMAIN` (`growatt_server`, `huawei_solar`, or `""` for the modbus platforms, which make no vendor calls). The resolved value is held on `HomeAssistantAPIController.service_domain` and re-synced by `BESSController.refresh_service_domain()` whenever the inverter section changes.
+
+This is what lets an integration that exposes the same services under its own domain name work as a *configuration* of an existing platform instead of requiring a new one — see PR #412 (Huawei EMMA via `huawei_emma_management`, where the EMMA dials out over TLS because a third party owns the Modbus socket). It carries no compatibility guarantee: the payload format is still the platform's (`HH:MM-HH:MM/<days>/<+|->` for Huawei), and an integration claiming the domain must implement those services with the same signatures.
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 

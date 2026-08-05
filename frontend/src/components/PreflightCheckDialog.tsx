@@ -1,11 +1,26 @@
 import { useState, useEffect } from 'react';
-import { CheckCircle, XCircle } from 'lucide-react';
+import { CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import api from '../lib/api';
 
 interface PreflightCheck {
   name: string;
-  status: 'pending' | 'ok' | 'error';
+  status: 'pending' | 'ok' | 'warning' | 'error';
   description?: string;
+}
+
+/** Map a backend health-check component onto a dialog row status.
+ *
+ * Only `error` blocks live control. Optional components (`required === false`)
+ * can never block, but a genuinely failing one still has to look different
+ * from a healthy one — `check_historical_data_access()` reports
+ * `required: false` with `status: "ERROR"` when InfluxDB is misconfigured, and
+ * that used to render as a green check.
+ */
+function toRowStatus(status: string, required?: boolean): 'ok' | 'warning' | 'error' {
+  if (status === 'OK') return 'ok';
+  // Not configuring an optional component is a deliberate choice, not a fault.
+  if (required === false && status === 'NOT_CONFIGURED') return 'ok';
+  return required === false ? 'warning' : 'error';
 }
 
 interface PreflightCheckDialogProps {
@@ -29,13 +44,11 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
       .then(({ data }) => {
         const results: PreflightCheck[] = (data.checks || []).map((c: { name: string; status: string; description?: string; required?: boolean }) => ({
           name: c.name,
-          // Optional components (required=false) never block live control,
-          // regardless of status (e.g. NOT_CONFIGURED for InfluxDB).
-          status: (c.status === 'OK' || c.required === false) ? 'ok' as const : 'error' as const,
+          status: toRowStatus(c.status, c.required),
           description: c.description,
         }));
         setChecks(results);
-        setAllPassed(results.every(c => c.status === 'ok'));
+        setAllPassed(results.every(c => c.status !== 'error'));
       })
       .catch(() => {
         setChecks([{ name: 'System Health', status: 'error', description: 'Unable to run health checks' }]);
@@ -45,6 +58,8 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
   }, [open]);
 
   if (!open) return null;
+
+  const hasWarning = checks.some(c => c.status === 'warning');
 
   const handleConfirm = async () => {
     setEnabling(true);
@@ -82,6 +97,8 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
               <div key={check.name} className="flex items-center gap-2">
                 {check.status === 'ok' ? (
                   <CheckCircle className="h-4 w-4 text-green-500" />
+                ) : check.status === 'warning' ? (
+                  <AlertTriangle className="h-4 w-4 text-amber-500" />
                 ) : (
                   <XCircle className="h-4 w-4 text-red-500" />
                 )}
@@ -91,9 +108,15 @@ export default function PreflightCheckDialog({ open, onClose, onConfirm }: Prefl
           )}
         </div>
 
-        {!loading && allPassed && (
+        {!loading && allPassed && !hasWarning && (
           <div className="mt-4 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-700 rounded-lg text-xs text-green-700 dark:text-green-400">
             All checks passed. The system will start controlling your inverter on the next optimization cycle.
+          </div>
+        )}
+
+        {!loading && allPassed && hasWarning && (
+          <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700 rounded-lg text-xs text-amber-700 dark:text-amber-400">
+            Required checks passed, but some optional components reported problems. Live control can be enabled — see Settings → System for details.
           </div>
         )}
 

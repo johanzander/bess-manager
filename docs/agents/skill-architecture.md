@@ -44,14 +44,19 @@ prompt running on `anthropics/claude-code-action@v1`, gated on an owner
 |----------|---------|------|
 | `issue-triage.yml` | auto on issue open/edit | classify + label (bug / question / enhancement / needs-info) |
 | `issue-analyze.yml` | `@claude-bot analyze` | deep root-cause; dispatches the **`bess-analyst`** subagent |
-| `issue-fix.yml` | `@claude-bot fix` | minimal bug fix → draft PR |
+| `issue-fix.yml` | `@claude-bot fix` | runs `implement-issue` in **CI mode** → draft PR |
 | `pr-review.yml` | `@claude-bot` on a PR | review the diff against the rules |
 | `issue-integrate.yml` | `@claude-bot integrate` | drive a new-integration issue through `feature-lifecycle`, one stage per invocation (resumes from the PR checklist) |
 
 The first four workflows are built for **minimal bug fixes → one PR**.
-`issue-integrate.yml` is the bridge between the GitHub pipeline and the skill
-layer: it runs `feature-lifecycle` (via read-the-file), resuming from the PR-body
-checklist, one human-gated stage at a time.
+Two workflows bridge into the skill layer instead of duplicating instructions
+(single source of truth — workflow prompts own only CI plumbing, skills own
+the process): `issue-fix.yml` runs `implement-issue` in its **CI mode** (the
+skill's own section mapping interactive steps — confirm gates, worktrees,
+background dispatch, local verify — to their pipeline equivalents), and
+`issue-integrate.yml` runs `feature-lifecycle` (via read-the-file), resuming
+from the PR-body checklist, one human-gated stage at a time. A skill edit is
+therefore also a bot-behavior change — review skill diffs with that in mind.
 
 ### Subagents
 

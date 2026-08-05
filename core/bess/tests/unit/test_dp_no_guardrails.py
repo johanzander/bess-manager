@@ -26,7 +26,7 @@ def test_discharge_no_longer_blocked_by_cost_basis_floor():
     settings = make_battery_settings()
     power = -1.0
     next_soe = 5.0 - (abs(power) * 1.0 / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -55,7 +55,7 @@ def test_small_discharge_overshoot_not_credited_as_export():
     home_consumption = 1.0
     power = -1.005  # discharges 1.005 kWh -- 0.005 kWh over consumption
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -84,7 +84,7 @@ def test_large_discharge_overshoot_still_credited_as_export():
     home_consumption = 1.0
     power = -2.0  # discharges 2.0 kWh -- 1.0 kWh over consumption
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -122,36 +122,6 @@ def test_run_dynamic_programming_returns_one_value():
     assert isinstance(
         result, np.ndarray
     ), f"expected a bare V array, got {type(result)}"
-
-
-def test_optimizer_ignores_min_action_profit_threshold():
-    """The whole-day rejection gate is gone -- setting an absurdly high
-    min_action_profit_threshold must no longer force an all-IDLE fallback
-    when the DP found a genuinely better schedule."""
-    from core.bess.dp_battery_algorithm import optimize_battery_schedule
-
-    settings = make_battery_settings(min_action_profit_threshold=1_000_000.0)
-    buy_price = [0.3, 0.3, 3.0, 3.0] * 6
-    sell_price = [0.25, 0.25, 2.8, 2.8] * 6
-    home_consumption = [1.0] * 24
-    solar_production = [0.0] * 24
-
-    result = optimize_battery_schedule(
-        buy_price=buy_price,
-        sell_price=sell_price,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=5.0,
-        battery_settings=settings,
-        period_duration_hours=1.0,
-    )
-    # A real arbitrage opportunity (0.3 -> 3.0 spread) should be captured
-    # despite the absurd threshold -- the old gate would have rejected this
-    # to an all-IDLE schedule.
-    assert result.economic_summary.grid_to_battery_solar_savings > 0.0, (
-        "optimizer fell back to all-IDLE despite a genuine arbitrage "
-        "opportunity -- min_action_profit_threshold should have no effect"
-    )
 
 
 def test_small_export_only_discharge_classified_as_battery_export():
@@ -253,7 +223,7 @@ def test_battery_export_threshold_matches_classification_boundary():
     home_consumption = 1.0
     power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _ = _compute_reward(
+    reward, _, _ = _compute_reward(
         power=power,
         soe=5.0,
         next_soe=next_soe,

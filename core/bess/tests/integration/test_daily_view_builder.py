@@ -3,11 +3,12 @@
 Tests behavior: merging actual + predicted data at different times of day.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.daily_view_builder import DailyView, DailyViewBuilder
 from core.bess.historical_data_store import HistoricalDataStore
 from core.bess.models import (
@@ -55,9 +56,18 @@ def view_builder(historical_store, schedule_store, battery_settings):
 
 
 def create_period_data(
-    period_index: int, data_source: str = "predicted", savings: float = 10.0
+    period_index: int,
+    data_source: str = "predicted",
+    savings: float = 10.0,
+    timestamp: datetime | None = None,
 ) -> PeriodData:
-    """Helper to create PeriodData for testing."""
+    """Helper to create PeriodData for testing.
+
+    Defaults timestamp to today's real wall-clock time for period_index
+    (0-95), matching how BatterySystemManager always stamps period_data
+    before storing it. Pass an explicit timestamp to build tomorrow's (or
+    any other day's) period data.
+    """
     return PeriodData(
         period=period_index,
         energy=EnergyData(
@@ -70,7 +80,11 @@ def create_period_data(
             battery_soe_start=15.0,
             battery_soe_end=15.0,
         ),
-        timestamp=datetime.now(tz=TIMEZONE),
+        timestamp=(
+            timestamp
+            if timestamp is not None
+            else time_utils.period_index_to_timestamp(period_index)
+        ),
         data_source=data_source,
         economic=EconomicData(
             buy_price=1.0,
@@ -280,3 +294,55 @@ def test_economic_data_preserved(view_builder, historical_store, schedule_store)
     assert view.periods[1].economic.hourly_savings == 67.89
     assert view.periods[1].economic.buy_price == 3.0
     assert view.periods[1].economic.sell_price == 2.0
+
+
+def test_prepare_next_day_schedule_does_not_corrupt_todays_tail(
+    view_builder, historical_store, schedule_store
+):
+    """Regression for issue #380: chart showed doubled data at the
+    today/tomorrow midnight boundary.
+
+    Around 23:55 every day, BatterySystemManager stores a standalone
+    next-day-only schedule (optimization_period=0, period_data[0]
+    timestamped tomorrow 00:00). Before this fix, build_daily_view's
+    positional arithmetic (i - optimization_period) misread that schedule's
+    tomorrow-23:45 entry as today's period-95 entry, because both landed at
+    positional index 95. Today's real period-95 forecast -- from the
+    schedule made moments earlier -- must still win.
+    """
+    # Actual data for periods 0-93 (past).
+    for i in range(94):
+        historical_store.record_period(i, create_period_data(i, "actual", savings=5.0))
+
+    # The normal schedule made earlier today (e.g. at 23:45), covering
+    # today's remaining periods with a distinctive value.
+    today_periods = [
+        create_period_data(i, "predicted", savings=10.0) for i in range(96)
+    ]
+    schedule_store.store_schedule(
+        OptimizationResult(input_data={}, period_data=today_periods),
+        optimization_period=92,
+    )
+
+    # The prepare_next_day schedule made at 23:55: optimization_period=0,
+    # but period_data[0] is tomorrow 00:00 -- a distinctive value that must
+    # NOT leak into today's period 94/95.
+    tomorrow_start = time_utils.period_index_to_timestamp(96)  # tomorrow 00:00
+    tomorrow_periods = [
+        create_period_data(
+            i,
+            "predicted",
+            savings=999.0,
+            timestamp=tomorrow_start + timedelta(minutes=15 * i),
+        )
+        for i in range(96)
+    ]
+    schedule_store.store_schedule(
+        OptimizationResult(input_data={}, period_data=tomorrow_periods),
+        optimization_period=0,
+    )
+
+    view = view_builder.build_daily_view(current_period=94)
+
+    assert view.periods[94].economic.hourly_savings == 10.0
+    assert view.periods[95].economic.hourly_savings == 10.0

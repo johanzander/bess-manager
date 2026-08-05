@@ -82,8 +82,8 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
       </SectionCard>
 
       <SectionCard
-        title="Power Monitoring"
-        description="Monitors real-time load and limits battery charge power to prevent blowing the main fuse. Enable to configure."
+        title="Fuse Protection"
+        description="Keeps the household within its fuse limit two ways: the day-ahead schedule plans grid import against it, and real-time monitoring throttles battery charging if a phase runs hot. Enable to configure."
       >
         {!chargeRateSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -111,6 +111,12 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
                 String(form.phaseCount),
                 v => onChange({ ...form, phaseCount: parseInt(v, 10) }),
               )}
+              <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+                The scheduler assumes load is spread evenly across phases when planning grid
+                import, so 3-phase raises how much it will plan to import before discharging the
+                battery to compensate. Real-time fuse protection still watches each phase
+                individually and can throttle charging further if one phase runs hot.
+              </p>
             </div>
             <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
               Configure per-phase current sensor entity IDs in the <strong>Sensors</strong> tab

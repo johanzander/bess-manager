@@ -84,6 +84,27 @@ class InverterController(ABC):
     # TOU schedule writes (SPH, SolaX native).
     supports_charge_rate_control: ClassVar[bool] = True
 
+    # Whether the platform can curtail PV export via a hardware export-limit
+    # register (issue #269), requiring a grid CT/smart meter. False by
+    # default -- most platforms' HA integrations don't expose this control
+    # at all (e.g. growatt_server exposes no export-limit service/entity).
+    supports_export_limit_control: ClassVar[bool] = False
+
+    # ── SM-Period-lists scheduling model ────────────────────────────────────
+    # Subclasses that build separate charge/discharge period lists (Growatt
+    # SPH, Solis via solis_modbus) must override these with the strategic
+    # intents that produce a charge period and a discharge period
+    # respectively. Left empty on the base class since not every controller
+    # uses the period-list model (e.g. Growatt MIN uses numbered TOU slots).
+    CHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset()
+    DISCHARGE_INTENTS: ClassVar[frozenset[str]] = frozenset()
+
+    # Maximum number of charge/discharge period-list slots. Subclasses using
+    # the SM-Period-lists model (Growatt SPH: 3+3, Solis: 6+6) override these;
+    # left at 0 on the base since not every controller uses period lists.
+    MAX_CHARGE_PERIODS: ClassVar[int] = 0
+    MAX_DISCHARGE_PERIODS: ClassVar[int] = 0
+
     # Whether discharge_rate acts as a ceiling under native load-following
     # firmware (only draws what's needed to cover an actual deficit) rather
     # than an immediate forced power command executed regardless of actual
@@ -93,6 +114,30 @@ class InverterController(ABC):
     # written by the intra-period discharge gate (#187/#318) would force a
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
+
+    # Whether the default _write_period_to_hardware() should skip re-sending
+    # a register (grid_charge/discharge_rate) that already matches the last
+    # value it successfully wrote (#402: unguarded resends from the 15-min
+    # period tick, its own retry, and the discharge-inhibit path could each
+    # independently re-trigger the same Growatt cloud API write, which was
+    # implicated in rate-limit write failures there). True by default for
+    # the base register-write path. SolaxModbusGrowattController's TOU mode
+    # overrides this to False -- it deliberately writes unconditionally
+    # pending a real-hardware test of the #166 gate revert, and must not be
+    # silently re-gated by this unrelated change.
+    dedupe_register_writes: ClassVar[bool] = True
+
+    # Real hardware control model this platform uses, driving what fields
+    # get_period_settings()/get_detailed_period_groups()/get_all_tou_segments()
+    # attach to each period (see _mode_display_fields()):
+    # - "tou_register": genuine load_first/battery_first/grid_first hardware
+    #   register exists (Growatt MIN, solax_modbus Growatt in TOU mode).
+    # - "vpp_power": no mode register; behavior is (power_pct,
+    #   remote_control) per period (solax_modbus Growatt VPP mode, native
+    #   SolaX).
+    # - "period_list": no per-period mode or power value; behavior is
+    #   discrete charge/discharge time slots (Growatt SPH, Solis, Huawei).
+    CONTROL_MODEL: ClassVar[str] = "tou_register"
 
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
@@ -125,6 +170,13 @@ class InverterController(ABC):
         self.tou_intervals: list[dict] = []
         self.corruption_detected: bool = False
 
+        # Last register values successfully written by _write_period_to_hardware,
+        # so repeat calls with an unchanged value skip the hardware write instead
+        # of re-sending it (grid_charge/discharge_rate #402). None means unknown
+        # (always write). Left unset on a failed write so the next call retries.
+        self._last_written_grid_charge: bool | None = None
+        self._last_written_discharge_rate: int | None = None
+
     # ── Period utility ────────────────────────────────────────────────────────
 
     def _period_to_time(self, period: int) -> tuple[int, int]:
@@ -134,6 +186,263 @@ class InverterController(ABC):
         Callers must handle this (e.g., cap to 23:59 for TOU schedules).
         """
         return period // 4, (period % 4) * 15
+
+    # ── SM-Period-lists grouping (Growatt SPH, Solis) ─────────────────────────
+    # Pure functions of self.strategic_intents / CHARGE_INTENTS / DISCHARGE_INTENTS
+    # / _period_to_time — shared by any subclass using the charge/discharge
+    # period-list scheduling model. Moved here from GrowattSphController so
+    # SolisModbusController can reuse them without cross-class private calls.
+
+    def _group_period_blocks(
+        self, intents: list[str] | None = None
+    ) -> tuple[list[dict], list[dict]]:
+        """Group consecutive strategic intent periods into charge and discharge blocks.
+
+        Args:
+            intents: Strategic intents to group. Defaults to ``self.strategic_intents``;
+                pass an explicit candidate list to group without mutating self.
+
+        Returns:
+            Tuple of (charge_blocks, discharge_blocks) where each block is a dict with
+            keys 'start_period', 'end_period', and 'intents'.
+        """
+        intents = self.strategic_intents if intents is None else intents
+        if not intents:
+            return [], []
+
+        charge_blocks: list[dict] = []
+        discharge_blocks: list[dict] = []
+
+        for _category, target_list, intent_set in [
+            ("charge", charge_blocks, self.CHARGE_INTENTS),
+            ("discharge", discharge_blocks, self.DISCHARGE_INTENTS),
+        ]:
+            current_block: dict | None = None
+
+            for period, intent in enumerate(intents):
+                if intent in intent_set:
+                    if current_block is None:
+                        current_block = {
+                            "start_period": period,
+                            "end_period": period,
+                            "intents": [intent],
+                        }
+                    else:
+                        current_block["end_period"] = period
+                        current_block["intents"].append(intent)
+                else:
+                    if current_block is not None:
+                        target_list.append(current_block)
+                        current_block = None
+
+            if current_block is not None:
+                target_list.append(current_block)
+
+        return charge_blocks, discharge_blocks
+
+    def _enforce_period_limit(self, blocks: list[dict], max_periods: int) -> list[dict]:
+        """Enforce maximum period count by dropping shortest blocks.
+
+        Args:
+            blocks: List of period blocks
+            max_periods: Maximum allowed blocks
+
+        Returns:
+            Trimmed list of at most max_periods blocks
+        """
+        if len(blocks) <= max_periods:
+            return blocks
+
+        logger.warning(
+            "PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — dropping shortest",
+            len(blocks),
+            max_periods,
+        )
+
+        def block_duration(b: dict) -> int:
+            return b["end_period"] - b["start_period"] + 1
+
+        # Keep the longest blocks, sorted by original order
+        sorted_by_duration = sorted(blocks, key=block_duration, reverse=True)
+        kept = sorted_by_duration[:max_periods]
+        dropped = sorted_by_duration[max_periods:]
+
+        for b in dropped:
+            sh, sm = self._period_to_time(b["start_period"])
+            eh, em = self._period_to_time(b["end_period"])
+            logger.warning(
+                "  DROPPED: %02d:%02d-%02d:%02d (%d periods) intents=%s",
+                sh,
+                sm,
+                eh,
+                em + 14,
+                block_duration(b),
+                b["intents"],
+            )
+
+        # Return kept blocks in chronological order
+        return sorted(kept, key=lambda b: b["start_period"])
+
+    def _blocks_to_period_dicts(self, blocks: list[dict]) -> list[dict]:
+        """Convert period blocks to time-string dicts for hardware and display.
+
+        Args:
+            blocks: List of period blocks from _group_period_blocks
+
+        Returns:
+            List of dicts with 'start_time', 'end_time', 'enabled' keys
+        """
+        result = []
+        for block in blocks:
+            sh, sm = self._period_to_time(block["start_period"])
+            eh, em = self._period_to_time(block["end_period"])
+
+            # Cap end time to 23:59
+            if sh >= 24:
+                continue  # Skip DST fall-back periods beyond 23:59
+            if eh >= 24:
+                eh, em = 23, 59
+            else:
+                em += 14  # Last minute of the 15-min period
+
+            result.append(
+                {
+                    "start_time": f"{sh:02d}:{sm:02d}",
+                    "end_time": f"{eh:02d}:{em:02d}",
+                    "enabled": True,
+                }
+            )
+        return result
+
+    def _build_period_list_schedule(
+        self, intents: list[str] | None = None, *, commit: bool = True
+    ) -> tuple[list[dict], list[dict], list[dict]]:
+        """Group strategic intents into charge/discharge period lists and build
+        the display TOU intervals — the shared "new schedule" build for any
+        SM-Period-lists controller (Growatt SPH, Solis).
+
+        Args:
+            intents: Strategic intents to build from. Defaults to
+                ``self.strategic_intents``; pass a candidate list to compute
+                without depending on self's committed state.
+            commit: When True (default), also assigns ``self.tou_intervals``.
+                Callers building a read-only candidate (e.g. for diffing
+                against self's current state) must pass ``commit=False``.
+
+        Returns:
+            Tuple of (charge_periods, discharge_periods, tou_intervals).
+        """
+        charge_blocks, discharge_blocks = self._group_period_blocks(intents)
+        charge_blocks = self._enforce_period_limit(
+            charge_blocks, self.MAX_CHARGE_PERIODS
+        )
+        discharge_blocks = self._enforce_period_limit(
+            discharge_blocks, self.MAX_DISCHARGE_PERIODS
+        )
+
+        charge_periods = self._blocks_to_period_dicts(charge_blocks)
+        discharge_periods = self._blocks_to_period_dicts(discharge_blocks)
+
+        tou_intervals = self._periods_to_tou_intervals(
+            charge_periods, discharge_periods, assign_segment_ids=True
+        )
+        if commit:
+            self.tou_intervals = tou_intervals
+        return charge_periods, discharge_periods, tou_intervals
+
+    @staticmethod
+    def _periods_to_tou_intervals(
+        charge_periods: list[dict],
+        discharge_periods: list[dict],
+        charge_intent: str = "GRID_CHARGING",
+        discharge_intent: str = "LOAD_SUPPORT/BATTERY_EXPORT",
+        is_default: bool = False,
+        assign_segment_ids: bool = False,
+    ) -> list[dict]:
+        """Build a unified, time-sorted tou_intervals list for display.
+
+        Shared by any SM-Period-lists controller for both the "new schedule"
+        build (assign_segment_ids=True, default intent labels) and the
+        "read existing schedule from hardware" path (assign_segment_ids=False,
+        charge_intent=discharge_intent="existing_schedule" — matching the
+        prior per-controller behavior this was extracted from).
+        """
+        intervals = []
+        for p in charge_periods:
+            intervals.append(
+                {
+                    "start_time": p["start_time"],
+                    "end_time": p["end_time"],
+                    "enabled": p.get("enabled", True),
+                    "is_default": is_default,
+                    "strategic_intent": charge_intent,
+                }
+            )
+        for p in discharge_periods:
+            intervals.append(
+                {
+                    "start_time": p["start_time"],
+                    "end_time": p["end_time"],
+                    "enabled": p.get("enabled", True),
+                    "is_default": is_default,
+                    "strategic_intent": discharge_intent,
+                }
+            )
+        intervals.sort(key=lambda x: x["start_time"])
+        if assign_segment_ids:
+            for idx, interval in enumerate(intervals):
+                interval["segment_id"] = idx + 1
+        return intervals
+
+    def _diff_period_lists(
+        self,
+        current_charge: list[dict],
+        current_discharge: list[dict],
+        new_charge: list[dict],
+        new_discharge: list[dict],
+        label: str,
+    ) -> tuple[bool, str]:
+        """Shared ``evaluate_intents`` diff body for SM-Period-lists controllers.
+
+        Args:
+            current_charge/current_discharge: Self's currently-applied periods.
+            new_charge/new_discharge: A candidate's periods (e.g. from
+                ``_build_period_list_schedule(intents, commit=False)``).
+            label: Platform label used in log/reason strings (e.g. "SPH", "Solis").
+        """
+
+        def _periods_equal(a: list[dict], b: list[dict]) -> bool:
+            if len(a) != len(b):
+                return False
+            for pa, pb in zip(a, b, strict=False):
+                if (
+                    pa.get("start_time") != pb.get("start_time")
+                    or pa.get("end_time") != pb.get("end_time")
+                    or pa.get("enabled") != pb.get("enabled")
+                ):
+                    return False
+            return True
+
+        if not _periods_equal(current_charge, new_charge):
+            logger.info(
+                "DECISION: %s charge periods differ — current=%s new=%s",
+                label,
+                current_charge,
+                new_charge,
+            )
+            return True, f"{label} charge periods differ"
+
+        if not _periods_equal(current_discharge, new_discharge):
+            logger.info(
+                "DECISION: %s discharge periods differ — current=%s new=%s",
+                label,
+                current_discharge,
+                new_discharge,
+            )
+            return True, f"{label} discharge periods differ"
+
+        logger.info("DECISION: %s schedules match", label)
+        return False, ""
 
     # ── Intent → hardware rates ───────────────────────────────────────────────
 
@@ -223,6 +532,7 @@ class InverterController(ABC):
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool = False,
+        strategic_intent: str = "",
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -239,6 +549,11 @@ class InverterController(ABC):
                 (adjust_charging_power()) and ignore this flag. Forced-power
                 platforms with no such register (VPP-style) act on it
                 directly -- see #355.
+            strategic_intent: The period's strategic intent string.
+                grid_charge/discharge_rate collapse LOAD_SUPPORT and
+                BATTERY_EXPORT to the same values, so platforms that need to
+                treat them differently (VPP-style -- see #413) require the
+                intent itself. Register-based platforms ignore this.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -246,6 +561,20 @@ class InverterController(ABC):
         return self._write_period_to_hardware(
             controller, grid_charge, discharge_rate, block_passive_charging
         )
+
+    def apply_export_limit(self, controller, curtail: bool) -> None:  # noqa: B027
+        """Enable/disable PV export curtailment for this period (issue #269).
+
+        No-op by default -- only platforms with supports_export_limit_control
+        True override this. Callers should check the capability flag before
+        relying on this doing anything; the no-op exists so BSM can call it
+        unconditionally without a per-platform branch.
+
+        Args:
+            controller: HomeAssistantAPIController instance
+            curtail: True to curtail export (write 0%/Meter mode), False to
+                release it back to normal (Disabled).
+        """
 
     def get_period_settings(self, period: int) -> dict:
         """Get control settings for a specific 15-minute period.
@@ -265,7 +594,6 @@ class InverterController(ABC):
             )
 
         intent = self.strategic_intents[period]
-        mode = self.INTENT_TO_MODE[intent]
 
         if (
             self.current_schedule is not None
@@ -276,7 +604,7 @@ class InverterController(ABC):
             num_periods = len(self.current_schedule.actions)
             period_duration_hours = 24.0 / num_periods
             battery_action_kw = battery_action_kwh / period_duration_hours
-            grid_charge, discharge_rate, _block_passive_charging = (
+            grid_charge, discharge_rate, block_passive_charging = (
                 self.compute_rates_for_period(period, battery_action_kw)
             )
             charge_rate = self._compute_charge_rate(
@@ -287,14 +615,61 @@ class InverterController(ABC):
             grid_charge = control["grid_charge"]
             charge_rate = control["charge_rate"]
             discharge_rate = control["discharge_rate"]
+            block_passive_charging = control["charge_rate"] == 0
 
         return {
             "grid_charge": grid_charge,
             "charge_rate": charge_rate,
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
-            "batt_mode": mode,
+            **self._mode_display_fields(
+                intent, grid_charge, discharge_rate, block_passive_charging
+            ),
         }
+
+    def _mode_display_fields(
+        self,
+        intent: str,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool,
+    ) -> dict:
+        """Single source of truth for what mode-related fields a period
+        gets, branching on CONTROL_MODEL. Never fabricates a label the
+        hardware doesn't back — see design spec
+        docs/superpowers/specs/2026-07-29-control-model-display-design.md.
+
+        vpp_power controllers each keep their own power-computation method
+        (SolaxModbusGrowattController._intent_to_vpp,
+        SolaxController._vpp_display_state) rather than sharing one --
+        their real hardware behavior has diverged (design spec section 1
+        correction).
+
+        Returns:
+            {"batt_mode": str} for tou_register.
+            {"vpp_power_pct": int, "vpp_remote_control": bool} for vpp_power.
+            {} for period_list.
+        """
+        if self.CONTROL_MODEL == "tou_register":
+            return {"batt_mode": self.INTENT_TO_MODE[intent]}
+
+        if self.CONTROL_MODEL == "vpp_power":
+            # Every vpp_power controller must implement _vpp_display_state()
+            # with this unified signature (SolaxController,
+            # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
+            # subclass-private method name.
+            power_pct, remote_control = self._vpp_display_state(
+                grid_charge, discharge_rate, block_passive_charging, intent
+            )
+            return {
+                "vpp_power_pct": power_pct,
+                "vpp_remote_control": remote_control,
+            }
+
+        if self.CONTROL_MODEL == "period_list":
+            return {}
+
+        raise ValueError(f"Unknown CONTROL_MODEL: {self.CONTROL_MODEL!r}")
 
     def get_strategic_intent_summary(self) -> dict:
         """Get a summary of strategic intents for the day (aggregated from quarterly periods)."""
@@ -371,7 +746,6 @@ class InverterController(ABC):
         period_settings = []
         for period in range(num_periods):
             intent = effective_intents[period]
-            mode = self.INTENT_TO_MODE.get(intent, "load_first")
             control = self.INTENT_TO_CONTROL.get(
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
@@ -384,12 +758,16 @@ class InverterController(ABC):
 
             _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
             charge_rate = self._compute_charge_rate(intent, control, action_kw)
+            block_passive_charging = control["charge_rate"] == 0
+            mode_fields = self._mode_display_fields(
+                intent, control["grid_charge"], discharge_rate, block_passive_charging
+            )
 
             period_settings.append(
                 {
                     "period": period,
                     "intent": intent,
-                    "mode": mode,
+                    **mode_fields,
                     "grid_charge": control["grid_charge"],
                     "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
@@ -400,10 +778,12 @@ class InverterController(ABC):
         groups = []
         current_group: dict | None = None
 
+        mode_field_keys = ("batt_mode", "vpp_power_pct", "vpp_remote_control")
+
         for ps in period_settings:
             if current_group is not None and (
                 ps["intent"] == current_group["intent"]
-                and ps["mode"] == current_group["mode"]
+                and all(ps.get(k) == current_group.get(k) for k in mode_field_keys)
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]
@@ -418,7 +798,7 @@ class InverterController(ABC):
                     "start_period": ps["period"],
                     "end_period": ps["period"],
                     "intent": ps["intent"],
-                    "mode": ps["mode"],
+                    **{k: ps[k] for k in mode_field_keys if k in ps},
                     "grid_charge": ps["grid_charge"],
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
@@ -448,7 +828,7 @@ class InverterController(ABC):
                     "start_period": group["start_period"],
                     "end_period": group["end_period"],
                     "intent": group["intent"],
-                    "mode": group["mode"],
+                    **{k: group[k] for k in mode_field_keys if k in group},
                     "grid_charge": group["grid_charge"],
                     "charge_rate": group["charge_rate"],
                     "discharge_rate": group["discharge_rate"],
@@ -468,16 +848,21 @@ class InverterController(ABC):
         """Return the subset of TOU intervals currently written to hardware."""
 
     @abstractmethod
-    def create_schedule(
+    def apply_intents(
         self,
         schedule: DPSchedule,
         current_period: int = 0,
-        previous_tou_intervals: list[dict] | None = None,
     ) -> None:
-        """Build hardware-specific schedule from DPSchedule."""
+        """Adopt this cycle's DP intent list as current control state.
+
+        For TOU-style platforms this rebuilds persisted hardware TOU
+        intervals; for VPP/SolaX-style ephemeral platforms this is a
+        near-passthrough of the intent list (control is applied per-period
+        elsewhere, not as a batch schedule).
+        """
 
     @abstractmethod
-    def write_schedule_to_hardware(
+    def write_to_hardware(
         self,
         controller,
         effective_period: int,
@@ -490,10 +875,16 @@ class InverterController(ABC):
         """
 
     @abstractmethod
-    def compare_schedules(
-        self, other_schedule: "InverterController", from_period: int = 0
+    def evaluate_intents(
+        self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:
-        """Compare schedules. Returns (schedules_differ, reason)."""
+        """Would applying ``schedule`` differ from what's currently in
+        effect, from ``current_period`` onwards? Returns (differs, reason).
+
+        Read-only: must not mutate self's committed state (tou_intervals,
+        strategic_intents, etc.) — only self.corruption_detected may be set
+        as an accepted diagnostic side effect on platforms that support it.
+        """
 
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
@@ -541,19 +932,29 @@ class InverterController(ABC):
         """
         errors = []
 
-        try:
-            controller.set_grid_charge(grid_charge)
-        except Exception as e:
-            logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
-            errors.append(str(e))
+        if (
+            not self.dedupe_register_writes
+            or grid_charge != self._last_written_grid_charge
+        ):
+            try:
+                controller.set_grid_charge(grid_charge)
+                self._last_written_grid_charge = grid_charge
+            except Exception as e:
+                logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
+                errors.append(str(e))
 
-        try:
-            controller.set_discharging_power_rate(discharge_rate)
-        except Exception as e:
-            logger.error(
-                "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
-            )
-            errors.append(str(e))
+        if (
+            not self.dedupe_register_writes
+            or discharge_rate != self._last_written_discharge_rate
+        ):
+            try:
+                controller.set_discharging_power_rate(discharge_rate)
+                self._last_written_discharge_rate = discharge_rate
+            except Exception as e:
+                logger.error(
+                    "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
+                )
+                errors.append(str(e))
 
         if errors:
             return False, "; ".join(errors)

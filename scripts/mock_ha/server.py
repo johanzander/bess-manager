@@ -517,7 +517,7 @@ async def call_service(domain: str, service: str, request: Request) -> JSONRespo
         else:
             _sensors[entity_id] = {"state": option, "attributes": {}}
 
-    elif domain == "number" and service == "set_value":
+    elif domain in ("number", "input_number") and service == "set_value":
         entity_id = body.get("entity_id", "")
         value = body.get("value", 0)
         if entity_id in _sensors:

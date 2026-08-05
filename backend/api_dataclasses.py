@@ -950,6 +950,8 @@ class APIDashboardResponse:
         total_daily_savings = actual_savings + predicted_savings
 
         # Battery SOE calculation
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_capacity
 
         # Create cost and savings data structure for SystemStatusCard
@@ -1051,6 +1053,9 @@ class APIRealTimePower:
 # user-defined entity IDs with uppercase letters in the object_id part).
 _ENTITY_ID_RE = re.compile(r"^[a-zA-Z][a-zA-Z0-9_]*\.[a-zA-Z0-9_-]+$")
 
+# Home Assistant integration domain (the "sensor" in "sensor.foo").
+_HA_DOMAIN_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+
 
 @dataclass
 class APIStrategyForecast:
@@ -1096,13 +1101,13 @@ class APISetupCompletePayload(BaseModel):
     nordpoolArea: str | None = None
     nordpoolConfigEntryId: str | None = None
     growattDeviceId: str | None = None
+    huaweiDeviceId: str | None = None
     # Battery settings
     totalCapacity: float | None = None
     minSoc: float | None = None
     maxSoc: float | None = None
     maxChargeDischargePower: float | None = None
     cycleCost: float | None = None
-    minActionProfitThreshold: float | None = None
     # Home settings
     currency: str | None = None
     consumption: float | None = None
@@ -1136,8 +1141,26 @@ class APISetupCompletePayload(BaseModel):
     # Growatt-via-solax_modbus control strategy ("tou" or "vpp"); ignored by
     # other platforms and forced to "vpp" server-side for GEN3.
     inverterControlMode: str | None = None
+    # HA integration domain for vendor service calls (set_tou_periods,
+    # update_time_segment, ...). Empty means the platform's standard domain
+    # (huawei_solar / growatt_server); set it only for an integration that
+    # exposes the same services under a different domain name.
+    inverterServiceDomain: str | None = None
     # Control mode
     demoMode: bool | None = None
+
+    @field_validator("inverterServiceDomain")
+    @classmethod
+    def validate_service_domain(cls, domain: str | None) -> str | None:
+        """Reject anything that isn't an HA integration domain.
+
+        This value is interpolated into the /api/services/<domain>/<service>
+        path, so a malformed one produces a confusing 404 from HA rather
+        than a clear configuration error here.
+        """
+        if domain and not _HA_DOMAIN_RE.match(domain):
+            raise ValueError(f"Invalid Home Assistant integration domain: {domain!r}")
+        return domain
 
     @field_validator("sensors")
     @classmethod

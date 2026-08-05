@@ -274,6 +274,59 @@ def _solax_native_registry() -> list[dict]:
     ]
 
 
+def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
+    """Source-derived Huawei LUNA2000 registry (verified unique_id shapes,
+    see docs/superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md).
+    """
+    return [
+        _entity(
+            "sensor.huawei_battery_state_of_capacity",
+            "huawei_solar",
+            f"{serial}_storage_state_of_capacity",
+        ),
+        _entity(
+            "sensor.huawei_battery_charge_discharge_power",
+            "huawei_solar",
+            f"{serial}_storage_charge_discharge_power",
+        ),
+        _entity(
+            "number.huawei_battery_maximum_charging_power",
+            "huawei_solar",
+            f"{serial}_storage_maximum_charging_power",
+        ),
+        _entity(
+            "number.huawei_battery_maximum_discharging_power",
+            "huawei_solar",
+            f"{serial}_storage_maximum_discharging_power",
+        ),
+        _entity(
+            "number.huawei_battery_charging_cutoff_capacity",
+            "huawei_solar",
+            f"{serial}_storage_charging_cutoff_capacity",
+        ),
+        _entity(
+            "number.huawei_battery_grid_charge_cutoff_state_of_charge",
+            "huawei_solar",
+            f"{serial}_storage_grid_charge_cutoff_state_of_charge",
+        ),
+        _entity(
+            "switch.huawei_battery_charge_from_grid_function",
+            "huawei_solar",
+            f"{serial}_storage_charge_from_grid_function",
+        ),
+        _entity(
+            "select.huawei_battery_working_mode",
+            "huawei_solar",
+            f"{serial}_storage_working_mode_settings",
+        ),
+        _entity(
+            "sensor.huawei_inverter_active_power",
+            "huawei_solar",
+            f"{serial}_active_power",
+        ),
+    ]
+
+
 # ---------------------------------------------------------------------------
 # SolaX entity registry: Growatt inverter connected via solax_modbus
 #
@@ -460,6 +513,27 @@ def _solax_growatt_vpp_entities() -> list[dict]:
     ]
 
 
+def _solax_growatt_export_limit_entities() -> list[dict]:
+    """Export-limit curtailment entities (registers 122/123, issue #269).
+
+    Present on GEN2/GEN3/GEN4 Growatt hardware via solax_modbus — verified
+    against plugin_growatt.py SELECT_TYPES/NUMBER_TYPES (allowedtypes=
+    GEN2|GEN3|GEN4), same verification method as the VPP entities above.
+    """
+    return [
+        _entity(
+            "select.growatt_inverter_solax_limit_grid_export",
+            "solax_modbus",
+            "solax_limit_grid_export",
+        ),
+        _entity(
+            "number.growatt_inverter_solax_grid_export_limit",
+            "solax_modbus",
+            "solax_grid_export_limit",
+        ),
+    ]
+
+
 def _solax_growatt_gen3_registry() -> list[dict]:
     """Entity registry for a GEN3 Growatt (MIX/SPA/SPH) via solax_modbus.
 
@@ -587,6 +661,153 @@ def _growatt_renamed_registry() -> list[dict]:
         _entity("sensor.home_load", "growatt_server", f"{sn}_local_load_power"),
         _entity("sensor.solar_production", "growatt_server", f"{sn}_internal_wattage"),
     ]
+
+
+# ---------------------------------------------------------------------------
+# Solis entity registry: solis_modbus platform (local Modbus)
+# ---------------------------------------------------------------------------
+#
+# Source-derived from github.com/Pho3niX90/solis_modbus release v4.1.6 (Phase
+# 1 fixture per the add-inverter-platform skill — will be replaced/augmented
+# with a real beta-tester registry once one arrives). Two entity shapes:
+#
+# - Clean: entities built via the *correct* unique_id_generator(controller,
+#   entity["unique"]) call path (hybrid_sensors_derived sensors, TOU time
+#   entities, TOU enable switches) -> "solis_modbus_<serial>_<key>".
+# - Dict-embedded: entities built via SolisSensorGroup.__init__'s verified
+#   bug (sensors/solis_base_sensor.py:254 passes the whole entity dict, not
+#   entity["unique"]) -> unique_id contains a Python dict repr fragment
+#   ``'unique': '<key>'`` somewhere inside it. Simulated here with a minimal
+#   dict-repr string (real ones also carry register/category/etc.) since only
+#   the `'unique': '<key>'` substring is ever matched against.
+_SOLIS_SERIAL = "SN2024ABCDEF"
+
+
+def _solis_dict_embedded_unique_id(key: str) -> str:
+    """Simulate the dict-embedded unique_id produced by the real bug."""
+    return f"solis_modbus_{_SOLIS_SERIAL}_{{'name': 'x', 'unique': '{key}', 'register': ['0']}}"
+
+
+def _solis_registry() -> list[dict]:
+    """Entity registry for a Solis hybrid inverter via solis_modbus."""
+    sn = _SOLIS_SERIAL
+    entities = [
+        # Clean, derived monitoring sensors
+        _entity(
+            "sensor.solis_battery_charge_power",
+            "solis_modbus",
+            f"solis_modbus_{sn}_solis_modbus_inverter_battery_charge_power",
+        ),
+        _entity(
+            "sensor.solis_battery_discharge_power",
+            "solis_modbus",
+            f"solis_modbus_{sn}_solis_modbus_inverter_battery_discharge_power",
+        ),
+        _entity(
+            "sensor.solis_grid_power_net",
+            "solis_modbus",
+            f"solis_modbus_{sn}_solis_modbus_inverter_grid_power_net",
+        ),
+        _entity(
+            "sensor.solis_pv_power_1",
+            "solis_modbus",
+            f"solis_modbus_{sn}_solis_modbus_inverter_dc_power_1",
+        ),
+        # Dict-embedded monitoring sensors (verified integration bug)
+        _entity(
+            "sensor.solis_battery_soc",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        ),
+        _entity(
+            "sensor.solis_household_load_power",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_household_load_power"
+            ),
+        ),
+        _entity(
+            "sensor.solis_total_battery_charge_energy",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_total_battery_charge_energy"
+            ),
+        ),
+        _entity(
+            "sensor.solis_total_battery_discharge_energy",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_total_battery_discharge_energy"
+            ),
+        ),
+        _entity(
+            "sensor.solis_pv_total_generation",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_pv_total_generation"),
+        ),
+        _entity(
+            "sensor.solis_total_energy_imported_from_grid",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_total_energy_imported_from_grid"
+            ),
+        ),
+        _entity(
+            "sensor.solis_total_energy_fed_into_grid",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_total_energy_fed_into_grid"
+            ),
+        ),
+    ]
+
+    # Grid TOU v2 charge/discharge time entities (6 slots), clean unique_id.
+    charge_registers = [43711, 43718, 43725, 43732, 43739, 43746]
+    charge_end_registers = [43713, 43720, 43727, 43734, 43741, 43748]
+    discharge_registers = [43753, 43760, 43767, 43774, 43781, 43788]
+    discharge_end_registers = [43755, 43762, 43769, 43776, 43783, 43790]
+    for i in range(6):
+        slot = i + 1
+        entities.append(
+            _entity(
+                f"time.solis_charge_start_{slot}",
+                "solis_modbus",
+                f"solis_modbus_{sn}_time_entity_{charge_registers[i]}",
+            )
+        )
+        entities.append(
+            _entity(
+                f"time.solis_charge_end_{slot}",
+                "solis_modbus",
+                f"solis_modbus_{sn}_time_entity_{charge_end_registers[i]}",
+            )
+        )
+        entities.append(
+            _entity(
+                f"time.solis_discharge_start_{slot}",
+                "solis_modbus",
+                f"solis_modbus_{sn}_time_entity_{discharge_registers[i]}",
+            )
+        )
+        entities.append(
+            _entity(
+                f"time.solis_discharge_end_{slot}",
+                "solis_modbus",
+                f"solis_modbus_{sn}_time_entity_{discharge_end_registers[i]}",
+            )
+        )
+
+    # Grid TOU v2 per-slot enable switches (register 43707, bits 0-11).
+    for bit in range(12):
+        entities.append(
+            _entity(
+                f"switch.solis_tou_slot_bit_{bit}",
+                "solis_modbus",
+                f"solis_modbus_{sn}_43707_{bit}",
+            )
+        )
+
+    return entities
 
 
 # ---------------------------------------------------------------------------
@@ -845,11 +1066,13 @@ class TestMapRegistryEntities:
 
         The solax_modbus integration has both:
         - sensor with unique_id suffix "solax_total_reverse_power" (export power sensor)
-        - select with unique_id suffix "solax_limit_grid_export" (export limiter config)
+        - select with unique_id suffix "solax_limit_grid_export" (export limiter config,
+          now intentionally mapped to growatt_export_limit_mode — #269)
 
         The old short suffix "grid_export" matched the select entity because
         "solax_limit_grid_export" ends with "_grid_export".  With exact
-        "solax_" prefixed suffixes, only the correct sensor should match.
+        "solax_" prefixed suffixes, only the correct sensor should match
+        export_power — the select entity should map to its own key instead.
         """
         # Place the select BEFORE the sensor to reproduce the original bug
         # (first-writer-wins with old short suffixes)
@@ -873,10 +1096,9 @@ class TestMapRegistryEntities:
         assert result["export_power"] == (
             "sensor.growatt_inverter_solax_total_export_power"
         )
-        # The select entity must NOT appear anywhere in the result
-        assert (
+        # The select entity must map to its own key, not steal export_power
+        assert result["growatt_export_limit_mode"] == (
             "select.growatt_inverter_solax_inverter_limit_grid_export"
-            not in result.values()
         )
 
 
@@ -1005,6 +1227,119 @@ class TestDiscoverSensorsFromRegistry:
             == "sensor.growatt_sph_solax_total_load"
         )
 
+    def test_solis_modbus_only(self):
+        """Solis hybrid via solis_modbus → detected_platform is solis_modbus."""
+        sensors, platform = self.ctrl.discover_sensors_from_registry(_solis_registry())
+        assert platform == "solis_modbus"
+        assert "solis_modbus" in sensors
+        solis = sensors["solis_modbus"]
+
+        # Clean, derived monitoring sensors matched by normal endswith suffix
+        assert solis["battery_charge_power"] == "sensor.solis_battery_charge_power"
+        assert (
+            solis["battery_discharge_power"] == "sensor.solis_battery_discharge_power"
+        )
+        assert solis["import_power"] == "sensor.solis_grid_power_net"
+        assert solis["pv_power"] == "sensor.solis_pv_power_1"
+
+        # Dict-embedded monitoring sensors matched via the Solis-scoped
+        # substring matcher (verified integration bug, see
+        # SOLIS_DICT_EMBEDDED_SUFFIX_MAP)
+        assert solis["battery_soc"] == "sensor.solis_battery_soc"
+        assert solis["local_load_power"] == "sensor.solis_household_load_power"
+        assert (
+            solis["lifetime_battery_charged"]
+            == "sensor.solis_total_battery_charge_energy"
+        )
+        assert (
+            solis["lifetime_battery_discharged"]
+            == "sensor.solis_total_battery_discharge_energy"
+        )
+        assert solis["lifetime_solar_energy"] == "sensor.solis_pv_total_generation"
+        assert (
+            solis["lifetime_import_from_grid"]
+            == "sensor.solis_total_energy_imported_from_grid"
+        )
+        assert (
+            solis["lifetime_export_to_grid"]
+            == "sensor.solis_total_energy_fed_into_grid"
+        )
+
+        # TOU v2 charge/discharge time + enable entities (6 slots each)
+        assert solis["solis_charge_start_1"] == "time.solis_charge_start_1"
+        assert solis["solis_charge_end_6"] == "time.solis_charge_end_6"
+        assert solis["solis_discharge_start_1"] == "time.solis_discharge_start_1"
+        assert solis["solis_discharge_end_6"] == "time.solis_discharge_end_6"
+        assert solis["solis_charge_enable_1"] == "switch.solis_tou_slot_bit_0"
+        assert solis["solis_discharge_enable_6"] == "switch.solis_tou_slot_bit_11"
+
+    def test_solis_modbus_detected_flag(self):
+        """detect_inverter_integrations reports solis=True for a solis_modbus registry."""
+        detected = self.ctrl.detect_inverter_integrations(_solis_registry())
+        assert detected["solis"] is True
+
+    def test_solis_without_tou_v2_entities_maps_sensors_but_not_detected(self):
+        """Monitoring-only Solis (no Grid TOU v2 marker) must not be auto-selected.
+
+        Without time_entity_43711 (or any TOU v2 entity), schedule writes
+        would fail on every attempt — solis_modbus must still be populated
+        in platform_sensors (so a user can select it manually) but must not
+        silently become detected_platform like a fully-controllable Solis.
+        """
+        sn = _SOLIS_SERIAL
+        monitoring_only = [
+            _entity(
+                "sensor.solis_battery_charge_power",
+                "solis_modbus",
+                f"solis_modbus_{sn}_solis_modbus_inverter_battery_charge_power",
+            ),
+            _entity(
+                "sensor.solis_battery_soc",
+                "solis_modbus",
+                _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+            ),
+        ]
+
+        sensors, platform = self.ctrl.discover_sensors_from_registry(monitoring_only)
+
+        assert "solis_modbus" in sensors
+        assert sensors["solis_modbus"]["battery_soc"] == "sensor.solis_battery_soc"
+        assert platform is None
+
+    def test_solis_dict_embedded_matcher_prefers_enabled_over_disabled(self):
+        """A disabled dict-embedded entity must not shadow an enabled one."""
+        disabled_entity = _entity(
+            "sensor.solis_battery_soc_old",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+        disabled_entity["disabled_by"] = "user"
+        enabled_entity = _entity(
+            "sensor.solis_battery_soc",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+
+        mapped = self.ctrl._match_solis_dict_embedded_entities(
+            [disabled_entity, enabled_entity]
+        )
+
+        assert mapped["battery_soc"] == "sensor.solis_battery_soc"
+
+    def test_solis_dict_embedded_matcher_falls_back_to_disabled_if_only_match(self):
+        """A disabled-only match is still returned (with a warning), per the
+        same deferral behavior as _map_registry_entities."""
+        disabled_entity = _entity(
+            "sensor.solis_battery_soc_old",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
+        )
+        disabled_entity["disabled_by"] = "user"
+
+        mapped = self.ctrl._match_solis_dict_embedded_entities([disabled_entity])
+
+        assert mapped["battery_soc"] == "sensor.solis_battery_soc_old"
+
     def test_solax_growatt_gen4_vpp_entities_discovered(self):
         """GEN4 VPP entities are mapped alongside TOU entities (issue #118).
 
@@ -1050,6 +1385,41 @@ class TestDiscoverSensorsFromRegistry:
         assert (
             growatt_sph["growatt_vpp_power"]
             == "number.growatt_inverter_solax_vpp_power"
+        )
+
+    def test_solax_growatt_gen4_export_limit_entities_discovered(self):
+        """GEN4 export-limit entities are mapped alongside TOU entities (#269)."""
+        registry = (
+            _solax_growatt_tou_registry() + _solax_growatt_export_limit_entities()
+        )
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_min"
+        growatt_min = sensors["solax_modbus_growatt_min"]
+        assert (
+            growatt_min["growatt_export_limit_mode"]
+            == "select.growatt_inverter_solax_limit_grid_export"
+        )
+        assert (
+            growatt_min["growatt_export_limit_value"]
+            == "number.growatt_inverter_solax_grid_export_limit"
+        )
+
+    def test_solax_growatt_gen3_export_limit_entities_discovered(self):
+        """GEN3 export-limit entities are mapped too — same registers, per
+        plugin_growatt.py's allowedtypes=GEN2|GEN3|GEN4."""
+        registry = (
+            _solax_growatt_gen3_registry() + _solax_growatt_export_limit_entities()
+        )
+        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        assert platform == "solax_modbus_growatt_sph"
+        growatt_sph = sensors["solax_modbus_growatt_sph"]
+        assert (
+            growatt_sph["growatt_export_limit_mode"]
+            == "select.growatt_inverter_solax_limit_grid_export"
+        )
+        assert (
+            growatt_sph["growatt_export_limit_value"]
+            == "number.growatt_inverter_solax_grid_export_limit"
         )
 
     def test_gen3_marker_not_detected_for_gen4(self):
@@ -1596,3 +1966,29 @@ class TestSolcastEntityRegistryDiscovery:
 
         assert "solar_forecast_today" not in result
         assert "solar_forecast_tomorrow" not in result
+
+
+# ---------------------------------------------------------------------------
+# Huawei LUNA2000 detection: huawei_solar platform
+# ---------------------------------------------------------------------------
+
+
+class TestHuaweiDiscovery:
+    def setup_method(self):
+        self.ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local", token="tok", sensor_config={}
+        )
+
+    def test_huawei_entities_detected(self):
+        detected = self.ctrl._detect_platforms(
+            _huawei_registry(), {"huawei": ["huawei_solar"]}
+        )
+        assert detected["huawei"] is True
+
+    def test_huawei_map_matches_registry(self):
+        result = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
+        assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
+        assert len(result) == 9

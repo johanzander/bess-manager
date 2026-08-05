@@ -114,5 +114,6 @@
       "soe_within_bounds": true,
       "power_within_limits": true
     }
-  }
+  },
+  "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread surfaces a genuine DP SOE-grid-snap R!=P (#145) gap (+0.52 SEK, exceeds tolerance) that zero-spread pricing happens to mask -- this is the #450 DP discretization issue itself, tracked and fixed separately (not in scope for this fixture-pinning cleanup). See docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up."
 }

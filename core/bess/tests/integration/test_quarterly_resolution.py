@@ -102,7 +102,11 @@ class TestQuarterlyOptimization:
             initial_cost_basis=data["initial_cost_basis"],
         )
 
-        # Store the schedule
+        # Store the schedule. optimize_battery_schedule() is time-agnostic
+        # (operates on relative indices) -- production always stamps real
+        # timestamps via _add_timestamps_to_period_data before storing,
+        # which DailyViewBuilder now looks periods up by.
+        manager._add_timestamps_to_period_data(optimization_result, 0)
         manager.schedule_store.store_schedule(
             optimization_result=optimization_result,
             optimization_period=0,

@@ -26,7 +26,7 @@ This is *pure simulation* (no hardware, no mock-HA), so it runs in unit tests.
 
 ```python
 from core.bess.simulation.inverter_simulator import (
-    derive_control_command,  # plan period (intent + power) -> ControlCommand
+    derive_control_command,  # plan period (intent + power [+ shadow_price, buy_price]) -> ControlCommand
     simulate,                # execute commands on conditions -> realized PeriodData + cost
 )
 from core.bess.simulation.verification import (
@@ -56,6 +56,16 @@ scenarios.
   on sunny days. Invisible to plan-only tests.
 - **Discharge can't be paced for home support** (#147): `LOAD_SUPPORT` dumps the
   battery greedily on deep evening peaks → realizes ~3–4% worse than planned.
+- **Shadow-price discharge gate was invisible to the simulator** (#388): `derive_control_command`
+  had no `shadow_price`/`buy_price` params, so it couldn't call the same
+  `intra_period_discharge_gate` production uses for SOLAR_EXPORT/SOLAR_STORAGE
+  (#187/#319) — an `R == P` test for gate-related changes was structurally
+  unsatisfiable until this was fixed. Pass both (from `pd.decision.shadow_price`
+  and the period's `buy_price`) to exercise the gate; omit both to leave it
+  closed (pre-gate behavior, the default). #384 briefly extended this gate to
+  LOAD_SUPPORT too; #393 reverted that extension after real captured data
+  showed it firing far more broadly than intended — see
+  `docs/agents/bess-knowledge.md`'s SOLAR_EXPORT discharge gate section.
 
 ## Known gaps and `xfail`
 

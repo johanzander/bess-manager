@@ -11,9 +11,10 @@ export interface BatteryForm {
   efficiencyCharge: number;
   efficiencyDischarge: number;
   temperatureDeratingEnabled: boolean;
-  minActionProfit: number;
   inverterMaxAcPowerKw: number;
   inverterAcPowerMargin: number;
+  exportCurtailmentEnabled: boolean;
+  exportCurtailmentPriceFloor: number;
 }
 
 interface Props {
@@ -67,7 +68,7 @@ export function BatteryFormSection({
           <div>
             <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Advanced settings</h3>
             <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">
-              Cycle cost, profit threshold, efficiency factors and temperature derating
+              Cycle cost, efficiency factors and temperature derating
             </p>
           </div>
           {effOpen
@@ -83,13 +84,6 @@ export function BatteryFormSection({
               Represents battery wear — a small cost added to every kWh cycled. Used by the optimizer
               to decide whether a charge/discharge cycle is worth doing given the price spread. A higher
               value makes cycles less attractive and reduces unnecessary wear.
-            </p>
-            {numField('Min Action Profit', form.minActionProfit,
-              v => onChange({ ...form, minActionProfit: v }),
-              { unit: `${currency} — skip cycles below this gain`, min: 0, step: 0.1 })}
-            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
-              Minimum profit threshold for a charge/discharge action. The optimizer skips cycles where
-              the expected gain is below this value, reducing unnecessary wear from marginal trades.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {numField('Charge Efficiency', form.efficiencyCharge,
@@ -113,6 +107,22 @@ export function BatteryFormSection({
               the midday peak. Requires per-period charge-rate control (Growatt MIN).
               The margin is a model-side haircut on the cap that compensates for hourly
               forecasts hiding short peaks; it never changes what is written to hardware.
+            </p>
+            {toggle('Curtail PV export at negative price', form.exportCurtailmentEnabled,
+              v => onChange({ ...form, exportCurtailmentEnabled: v }))}
+            {form.exportCurtailmentEnabled && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {numField('Curtailment Price Floor', form.exportCurtailmentPriceFloor,
+                  v => onChange({ ...form, exportCurtailmentPriceFloor: v }),
+                  { unit: `${currency || 'currency'}/kWh`, step: 0.01 })}
+              </div>
+            )}
+            <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+              Requires a grid CT/smart meter and hardware support (currently Growatt
+              GEN2/GEN3/GEN4 via solax_modbus only). When the sell price drops below the
+              floor and the inverter is still exporting, the export-limit register throttles
+              PV production at the panel instead of paying to export. Unsupported platforms
+              ignore this setting.
             </p>
             {toggle('Enable temperature derating', form.temperatureDeratingEnabled,
               v => onChange({ ...form, temperatureDeratingEnabled: v }))}

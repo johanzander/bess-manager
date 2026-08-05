@@ -4,8 +4,8 @@ These tests exercise orchestration methods that do NOT require the DP optimizer,
 using MockHomeAssistantController from conftest.
 """
 
-from datetime import datetime, timedelta
-from unittest.mock import patch
+from datetime import date, datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -46,6 +46,18 @@ class TestUpdateSettings:
     def test_battery_settings_updated(self, system):
         system.update_settings({"battery": {"total_capacity": 20.0}})
         assert system.battery_settings.total_capacity == 20.0
+
+    def test_max_discharge_power_synced_to_inverter_controller(self, system):
+        """Issue #398: discharge_rate% used the InverterController's stale
+        max_discharge_power_kw snapshot from construction time, so a user
+        lowering the power setting kept getting rates computed against the
+        old (higher) value."""
+        system.update_settings({"battery": {"max_discharge_power_kw": 10.0}})
+        assert system._inverter_controller.max_discharge_power_kw == 10.0
+
+    def test_max_charge_power_synced_to_inverter_controller(self, system):
+        system.update_settings({"battery": {"max_charge_power_kw": 10.0}})
+        assert system._inverter_controller.max_charge_power_kw == 10.0
 
     def test_price_settings_synced_to_price_manager(self, system):
         system.update_settings({"price": {"markup_rate": 0.05}})
@@ -160,27 +172,17 @@ class TestResolveInitialPlatform:
         )
         assert result == "growatt_server_sph"
 
-    def test_legacy_growatt_min(self):
-        result = BatterySystemManager._resolve_initial_platform(
-            {"growatt": {"inverter_type": "MIN"}}
-        )
-        assert result == "growatt_server_min"
-
-    def test_legacy_growatt_sph(self):
-        result = BatterySystemManager._resolve_initial_platform(
-            {"growatt": {"inverter_type": "SPH"}}
-        )
-        assert result == "growatt_server_sph"
-
     def test_fresh_install_returns_none(self):
         result = BatterySystemManager._resolve_initial_platform({})
         assert result is None
 
-    def test_unknown_legacy_type_asserts(self):
-        with pytest.raises(AssertionError):
-            BatterySystemManager._resolve_initial_platform(
-                {"growatt": {"inverter_type": "UNKNOWN"}}
-            )
+    def test_legacy_growatt_key_is_ignored(self):
+        """growatt.inverter_type is no longer read here — SettingsStore's
+        migration rewrites it to inverter.platform before startup."""
+        result = BatterySystemManager._resolve_initial_platform(
+            {"growatt": {"inverter_type": "MIN"}}
+        )
+        assert result is None
 
     def test_unknown_platform_asserts(self):
         with pytest.raises(AssertionError):
@@ -247,9 +249,31 @@ class TestHandleSpecialCases:
         )
         assert system._initial_soc_pct is None
 
+    def test_period_zero_actual_rollover_clears_historical_store(self, system):
+        """The true midnight boundary (00:00 quarterly job) is the only place
+        that should clear today's actuals - see issue #380 follow-up."""
+        with patch.object(system.historical_store, "clear") as mock_clear:
+            system._handle_special_cases(
+                period=0, prepare_next_day=False, is_first_run=True
+            )
+            mock_clear.assert_called_once()
+
+    def test_prepare_next_day_does_not_clear_historical_store(self, system):
+        """prepare_next_day fires at 23:55, 5 minutes before midnight, while
+        today's dashboard still needs today's actuals. Clearing here wiped
+        today's real sensor data early and produced false "missing hours"
+        and a broken chart (issue #380 follow-up)."""
+        with (
+            patch.object(system, "_fetch_predictions"),
+            patch.object(system.historical_store, "clear") as mock_clear,
+        ):
+            system._handle_special_cases(
+                period=95, prepare_next_day=True, is_first_run=False
+            )
+            mock_clear.assert_not_called()
+
     def test_prepare_next_day_clears_stores_and_refetches(self, system):
         system._consumption_predictions = [1.0] * 96
-        system._solar_predictions = [0.0] * 96
         with (
             patch.object(system, "get_current_daily_view"),
             patch.object(system.daily_view_store, "save_day"),
@@ -260,43 +284,10 @@ class TestHandleSpecialCases:
             )
             mock_fetch.assert_called_once()
 
-    def test_prepare_next_day_saves_daily_view_before_clearing(self, system, tmp_path):
-        from datetime import date as date_cls
-        from unittest.mock import patch
-
-        from core.bess.daily_view_builder import DailyView
-        from core.bess.daily_view_store import DailyViewStore
-
-        # Use a temp persist dir instead of the production default (/data/daily_views),
-        # which isn't writable in local/sandboxed test environments.
-        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
-
-        fake_view = DailyView(
-            date=date_cls(2026, 7, 9),
-            periods=[],
-            total_savings=1.5,
-            actual_count=0,
-            predicted_count=0,
-        )
-
-        with patch.object(system, "get_current_daily_view", return_value=fake_view):
-            with patch.object(system, "_fetch_predictions"):
-                system._handle_special_cases(
-                    period=0, prepare_next_day=True, is_first_run=False
-                )
-
-        saved = system.daily_view_store.load_day(date_cls(2026, 7, 9))
-        assert saved is not None
-        assert saved.total_savings == 1.5
-
-    def test_prepare_next_day_skips_save_on_first_run(self, system, tmp_path):
-        """No schedule has ever been created yet, so there is nothing to save.
-
-        This reproduces the CI failure in PR #260: build_daily_view() raises
-        ValueError("No optimization schedule available") when schedule_store
-        is empty, which previously aborted update_battery_schedule entirely
-        on the very first call of a fresh run.
-        """
+    def test_prepare_next_day_does_not_save_daily_view_itself(self, system, tmp_path):
+        """Saving today's file is now _persist_today_view()'s job (called every
+        tick from _update_energy_data), not _handle_special_cases's. Regression
+        guard against reintroducing a second, now-redundant write path."""
         from core.bess.daily_view_store import DailyViewStore
 
         system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
@@ -307,11 +298,54 @@ class TestHandleSpecialCases:
             patch.object(system, "_fetch_predictions"),
         ):
             system._handle_special_cases(
-                period=0, prepare_next_day=True, is_first_run=True
+                period=95, prepare_next_day=True, is_first_run=False
             )
 
         mock_get_view.assert_not_called()
         mock_save.assert_not_called()
+
+
+class TestPersistTodayView:
+    def test_no_op_when_no_schedule_exists_yet(self, system):
+        with patch.object(system, "get_current_daily_view") as mock_get_view:
+            system._persist_today_view()
+        mock_get_view.assert_not_called()
+
+    def test_saves_current_view_when_schedule_exists(self, system, tmp_path):
+        from datetime import date as date_cls
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        fake_view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[],
+            total_savings=4.0,
+            actual_count=0,
+            predicted_count=0,
+        )
+
+        with (
+            patch.object(
+                system.schedule_store, "get_latest_schedule", return_value=MagicMock()
+            ),
+            patch.object(system, "get_current_daily_view", return_value=fake_view),
+        ):
+            system._persist_today_view()
+
+        saved = system.daily_view_store.load_day(date_cls(2026, 7, 27))
+        assert saved is not None
+        assert saved.total_savings == 4.0
+
+
+class TestUpdateEnergyDataCallsPersist:
+    def test_update_energy_data_calls_persist_today_view(self, system):
+        with patch.object(system, "_persist_today_view") as mock_persist:
+            system._update_energy_data(
+                period=1, is_first_run=True, prepare_next_day=False
+            )
+        mock_persist.assert_called_once()
 
 
 class TestRuntimeFailureTracking:
@@ -346,6 +380,17 @@ class TestRuntimeFailureTracking:
     def test_dismiss_nonexistent_raises(self, system):
         with pytest.raises(ValueError):
             system.dismiss_runtime_failure("nonexistent-id")
+
+    def test_record_scheduler_misfire(self, system):
+        system.record_scheduler_misfire(
+            job_id="update_schedule_quarterly",
+            scheduled_run_time=datetime(2026, 7, 27, 0, 30),
+        )
+        failures = system.get_runtime_failures()
+        assert len(failures) == 1
+        assert failures[0].category == "scheduler_misfire"
+        assert "update_schedule_quarterly" in failures[0].operation
+        assert "00:30" in failures[0].operation
 
 
 class TestCriticalSensorFailures:
@@ -406,6 +451,82 @@ class TestRefreshHealthCheck:
 
         assert system.has_critical_sensor_failures()
         assert system.get_critical_sensor_failures() == ["Battery SOC"]
+
+    def test_retries_schedule_build_when_no_schedule_and_sensors_healthy(self, system):
+        """A health check that finds no critical failures but no schedule was
+        ever built (e.g. the initial startup schedule build failed while
+        sensors were unavailable) should trigger a retry. Otherwise the
+        dashboard is stuck showing "initializing" until the next quarterly
+        cron tick or a manual restart, even though the banner reports the
+        system is healthy. See debug log 2026-07-25-220017.
+        """
+        assert system._current_schedule is None
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(
+                system, "update_battery_schedule", return_value=True
+            ) as mock_update,
+        ):
+            system.refresh_health_check()
+
+        mock_update.assert_called_once()
+
+    def test_does_not_retry_schedule_build_when_schedule_already_exists(self, system):
+        system._current_schedule = MagicMock()
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(system, "update_battery_schedule") as mock_update,
+        ):
+            system.refresh_health_check()
+
+        mock_update.assert_not_called()
+
+    def test_internal_run_health_check_does_not_build_schedule(self, system):
+        """Issue #399: ``start()`` calls the private ``_run_health_check``
+        before ``_initialize_tou_schedule_from_inverter`` has read the
+        inverter's current VPP/remote-control state. If ``_run_health_check``
+        itself retries the schedule build (as it did when #394 added the
+        retry directly to the private method), the very first
+        ``update_battery_schedule`` of the process fires before the
+        controller's write-skip guards are seeded from hardware, so Growatt
+        VPP registers get written unconditionally on every restart even when
+        the hardware is already in the desired state.
+
+        The retry belongs only in the public ``refresh_health_check``
+        wrapper, which is exclusively used by the periodic post-startup
+        cron/manual-recheck path (see debug log 2026-07-27-075654 on #399,
+        showing VPP writes at 07:40:19-21 before the hardware-read log at
+        07:40:24). The private method must never trigger a schedule build.
+        """
+        assert system._current_schedule is None
+        healthy_result = {
+            "status": "OK",
+            "checks": [{"name": "Battery SOC", "status": "OK", "required": True}],
+        }
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=healthy_result,
+            ),
+            patch.object(system, "update_battery_schedule") as mock_update,
+        ):
+            system._run_health_check()
+
+        mock_update.assert_not_called()
 
 
 class TestHealthRecoveryTracking:
@@ -642,7 +763,6 @@ class TestShouldApplySchedule:
             is_first_run=False,
             period=10,
             prepare_next_day=False,
-            temp_growatt=system._inverter_controller,
             optimization_period=10,
             temp_schedule=None,
         )
@@ -743,3 +863,271 @@ class TestAddTimestampsToPeriodData:
         for pd in result.period_data:
             assert pd.timestamp is not None
             assert pd.timestamp.date() == expected_date
+
+
+class TestConsumptionForecastFreshness:
+    """Issue #395: the quarterly job (every 15 min) never refreshed the
+    consumption forecast after startup/23:55 - _gather_optimization_data
+    cached it forever (truthiness check, no expiry), so it could go stale
+    for up to ~24h. Solar is unaffected: it's fetched live every call via
+    controller.get_solar_forecast().
+
+    The refresh policy is strategy-aware, not a blanket timer: 'sensor' and
+    'fixed' read a cheap, continuously-updating source, so they refetch
+    every quarterly cycle (matching solar). 'influxdb_7d_avg' and
+    'ha_statistics' average a window of full calendar days ending at
+    today's midnight, so their value is provably unchanged intraday - they
+    only need to refetch once the date rolls over.
+    """
+
+    def test_sensor_strategy_refetches_every_call(self, system):
+        system.home_settings.consumption_strategy = "sensor"
+        # Pre-populate the cache as if a fetch just happened - it must not
+        # be reused, since 'sensor' has no intraday cache.
+        system._consumption_predictions = [1.0] * 96
+        system._consumption_predictions_date = date(2026, 7, 27)
+
+        with (
+            patch.object(
+                system, "_get_consumption_forecast", return_value=[2.0] * 96
+            ) as mock_fetch,
+            patch("core.bess.time_utils.datetime") as mock_datetime,
+        ):
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 27, 8, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=32, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][40] == 2.0
+            assert mock_fetch.call_count == 1
+
+            # Next quarterly tick, same day: still refetches.
+            _, data = system._gather_optimization_data(
+                period=33, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert mock_fetch.call_count == 2
+
+    def test_influxdb_7d_avg_strategy_caches_until_date_rollover(self, system):
+        system.home_settings.consumption_strategy = "influxdb_7d_avg"
+        system._consumption_predictions = [1.0] * 96
+        system._consumption_predictions_date = date(2026, 7, 27)
+
+        with (
+            patch.object(
+                system, "_get_consumption_forecast", return_value=[2.0] * 96
+            ) as mock_fetch,
+            patch("core.bess.time_utils.datetime") as mock_datetime,
+        ):
+            # Same day, later quarterly tick: the 7-day window can't have
+            # changed, so the cache must be reused.
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 27, 20, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=80, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][85] == 1.0
+            assert mock_fetch.call_count == 0
+
+            # Past midnight: the 7-day window has shifted, must refetch.
+            mock_datetime.now.return_value = datetime(
+                2026, 7, 28, 0, 0, tzinfo=TIMEZONE
+            )
+            _, data = system._gather_optimization_data(
+                period=0, current_soc=50.0, prepare_next_day=False, period_count=96
+            )
+            assert data["full_consumption"][5] == 2.0
+            assert mock_fetch.call_count == 1
+
+
+class TestNotApplyBranchRefreshesCurrentSchedule:
+    """Regression for issue #369 finding 1.
+
+    _apply_period_schedule (called every cycle, apply or not) reads
+    self._inverter_controller.current_schedule.actions to compute the
+    hardware battery_action_kw for the current period. Before the
+    InverterController-recreation refactor, the not-apply branch swapped in
+    a whole new controller object whose current_schedule had already been
+    set by create_schedule(); that refresh was lost when the branch was
+    rewritten to update fields individually. If current_schedule isn't
+    explicitly refreshed on the not-apply path, every not-apply cycle writes
+    hardware commands computed from a stale, previously-applied schedule's
+    action values instead of the freshly computed ones.
+    """
+
+    def test_current_schedule_refreshed_when_schedule_not_applied(self, system):
+        first_schedule = MagicMock(actions=[1.0, 2.0], strategic_intents=["IDLE"])
+        second_schedule = MagicMock(actions=[5.0, 6.0], strategic_intents=["IDLE"])
+
+        with (
+            patch.object(system, "_handle_special_cases"),
+            patch.object(
+                system, "_get_price_data", return_value=([1.0], [MagicMock()])
+            ),
+            patch.object(system, "_update_energy_data"),
+            patch.object(system, "_get_current_battery_soc", return_value=50.0),
+            patch.object(
+                system, "_gather_optimization_data", return_value=(0, MagicMock())
+            ),
+            patch.object(system, "_run_optimization", return_value=MagicMock()),
+            patch.object(
+                system,
+                "_create_updated_schedule",
+                side_effect=[first_schedule, second_schedule],
+            ),
+            patch.object(
+                system,
+                "_should_apply_schedule",
+                side_effect=[(True, "first: applied"), (False, "second: no change")],
+            ),
+            patch.object(system, "_apply_schedule") as mock_apply_schedule,
+            patch.object(system, "_apply_period_schedule"),
+            patch.object(system, "_capture_prediction_snapshot"),
+            patch.object(system, "log_battery_schedule"),
+        ):
+            # First cycle: should_apply=True. _apply_schedule is mocked out
+            # (its internals are not under test here), so emulate the one
+            # side effect this test cares about: it sets current_schedule.
+            def fake_apply_schedule(*_args, **_kwargs):
+                system._inverter_controller.current_schedule = first_schedule
+
+            mock_apply_schedule.side_effect = fake_apply_schedule
+
+            assert system.update_battery_schedule(0, prepare_next_day=False) is True
+            assert system._inverter_controller.current_schedule is first_schedule
+
+            # Second cycle: should_apply=False (TOU/VPP intents unchanged),
+            # but the DP produced different action magnitudes. The not-apply
+            # branch must still refresh current_schedule so the next
+            # _apply_period_schedule call reads the fresh actions.
+            assert system.update_battery_schedule(1, prepare_next_day=False) is True
+
+        assert system._inverter_controller.current_schedule is second_schedule
+        assert system._inverter_controller.current_schedule.actions == [5.0, 6.0]
+
+
+class TestLoadTodayFromDisk:
+    def test_seeds_only_actual_periods_within_range(self, system, tmp_path):
+        from datetime import date as date_cls
+        from datetime import datetime
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+        from core.bess.models import DecisionData, EnergyData, PeriodData
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+
+        def _period(index, data_source):
+            return PeriodData(
+                period=index,
+                energy=EnergyData(
+                    solar_production=0.0,
+                    home_consumption=0.5,
+                    battery_charged=0.0,
+                    battery_discharged=0.0,
+                    grid_imported=0.5,
+                    grid_exported=0.0,
+                    battery_soe_start=10.0,
+                    battery_soe_end=10.0,
+                ),
+                timestamp=datetime(2026, 7, 27, index // 4, (index % 4) * 15),
+                data_source=data_source,
+                decision=DecisionData(),
+            )
+
+        view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[
+                _period(0, "actual"),
+                _period(1, "actual"),
+                _period(2, "missing"),
+                _period(3, "actual"),  # out of range: current_period will be 2
+            ],
+            total_savings=0.0,
+            actual_count=2,
+            predicted_count=0,
+        )
+        system.daily_view_store.save_day(view)
+
+        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
+            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+            system._load_today_from_disk(current_period=2)
+
+        assert system.historical_store.get_period(0) is not None
+        assert system.historical_store.get_period(1) is not None
+        assert (
+            system.historical_store.get_period(2) is None
+        )  # was "missing", not seeded
+        assert system.historical_store.get_period(3) is None  # out of range, not seeded
+
+    def test_no_op_when_no_file_saved(self, system, tmp_path):
+        from core.bess.daily_view_store import DailyViewStore
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        system._load_today_from_disk(current_period=4)
+        assert system.historical_store.get_stored_count() == 0
+
+
+class TestBackfillSkipsDiskSeededPeriods:
+    def test_infludb_backfill_does_not_recollect_seeded_period(self, system, tmp_path):
+        from datetime import date as date_cls
+        from datetime import datetime
+
+        from core.bess.daily_view_builder import DailyView
+        from core.bess.daily_view_store import DailyViewStore
+        from core.bess.models import DecisionData, EnergyData, PeriodData
+
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        seeded_period = PeriodData(
+            period=0,
+            energy=EnergyData(
+                solar_production=0.0,
+                home_consumption=0.5,
+                battery_charged=0.0,
+                battery_discharged=0.0,
+                grid_imported=0.5,
+                grid_exported=0.0,
+                battery_soe_start=10.0,
+                battery_soe_end=10.0,
+            ),
+            timestamp=datetime(2026, 7, 27, 0, 0),
+            data_source="actual",
+            decision=DecisionData(),
+        )
+        # Pre-seed disk with today's view (rather than calling
+        # historical_store.record_period directly) so this test also proves
+        # _load_today_from_disk (invoked by _fetch_and_initialize_historical_data
+        # below) is what performs the seeding.
+        view = DailyView(
+            date=date_cls(2026, 7, 27),
+            periods=[seeded_period],
+            total_savings=0.0,
+            actual_count=1,
+            predicted_count=0,
+        )
+        system.daily_view_store.save_day(view)
+
+        with (
+            patch(
+                "core.bess.battery_system_manager.is_influxdb_configured",
+                return_value=True,
+            ),
+            patch.object(
+                system.sensor_collector, "collect_energy_data"
+            ) as mock_collect,
+            patch.object(
+                system.price_manager,
+                "get_available_prices",
+                return_value=([1.0] * 96, [0.5] * 96),
+            ),
+            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+        ):
+            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+            system._fetch_and_initialize_historical_data()
+
+        # Period 0 was already seeded (from disk, in this test's setup) —
+        # the backfill loop must not re-collect it.
+        collected_periods = [call.args[0] for call in mock_collect.call_args_list]
+        assert 0 not in collected_periods
+        assert 1 in collected_periods

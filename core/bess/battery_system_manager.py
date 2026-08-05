@@ -32,6 +32,7 @@ from .ha_api_controller import HomeAssistantAPIController
 from .health_check import describe_failing_checks, run_system_health_checks
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
+from .huawei_controller import HuaweiController
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
 from .models import (
@@ -58,6 +59,7 @@ from .settings import (
 )
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
+from .solis_modbus_controller import SolisModbusController
 from .time_utils import (
     format_period,
     get_period_count,
@@ -71,12 +73,15 @@ logger = logging.getLogger(__name__)
 def intra_period_discharge_gate(
     buy_price: float, shadow_price: float, eff_d: float
 ) -> int:
-    """Intra-period discharge gate for a SOLAR_EXPORT or SOLAR_STORAGE period.
+    """Intra-period discharge gate for a SOLAR_EXPORT, SOLAR_STORAGE, or
+    LOAD_SUPPORT period.
 
-    Both intents map to load_first with a planned discharge_rate=0; the battery
-    only discharges to cover an actual (sub-period) solar/load deficit. Whether
-    it SHOULD is economic: cover from battery only when the stored energy is
-    worth less than buying from grid now.
+    All three intents map to load_first; SOLAR_EXPORT/SOLAR_STORAGE plan
+    discharge_rate=0, LOAD_SUPPORT plans a nonzero plan-scaled rate. In every
+    case the battery can additionally cover an actual (sub-period) solar/load
+    deficit beyond whatever was planned. Whether it SHOULD is economic: cover
+    from battery only when the stored energy is worth less than buying from
+    grid now.
 
     Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
     ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
@@ -178,11 +183,23 @@ class BatterySystemManager:
         self._desired_discharge_rate: int = 0  # Rate from schedule before inhibit
         self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
         self._desired_block_passive_charging: bool = False  # alongside the rate above
+        self._desired_strategic_intent: str = ""  # alongside the rate above
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
-        # Prediction caches (populated by _fetch_predictions)
+        # Export-limit curtailment state (#269) — tracks whether the hardware
+        # is currently curtailed so release can fire even on a period whose
+        # own plan doesn't call for export (see _apply_period_schedule).
+        self._export_limit_curtailed: bool = False
+
+        # Consumption forecast cache. Only used for the 'influxdb_7d_avg'
+        # and 'ha_statistics' strategies, whose value is a window of full
+        # calendar days ending at today's midnight and so provably can't
+        # change intraday — the cache is invalidated on date rollover, not
+        # a clock-based TTL (see issue #395). 'sensor'/'fixed' read a cheap,
+        # continuously-updating source and always fetch fresh, same as
+        # solar's controller.get_solar_forecast() every quarterly run.
         self._consumption_predictions: list[float] | None = None
-        self._solar_predictions: list[float] | None = None
+        self._consumption_predictions_date: date | None = None
 
         # Critical sensor failure tracking for graceful degradation
         self._critical_sensor_failures = []
@@ -195,6 +212,13 @@ class BatterySystemManager:
 
         self._runtime_failure_tracker = RuntimeFailureTracker()
         self._health_recovery_tracker = HealthRecoveryTracker()
+
+        # Historical-data-incomplete warning dismissal, keyed to the day and
+        # the exact set of missing hours so a new gap (or the same gap
+        # recurring on a later day) still surfaces the banner.
+        self._dismissed_historical_warning_signature: (
+            tuple[str, tuple[int, ...]] | None
+        ) = None
 
         # Inject failure tracker into controller if available
         if self._controller:
@@ -224,41 +248,25 @@ class BatterySystemManager:
         "solax_modbus_growatt_min",
         "solax_modbus_growatt_sph",
         "solax_modbus_native",
-    }
-
-    _INVERTER_TYPE_TO_PLATFORM: ClassVar[dict[str, str]] = {
-        "growatt_server_min": "growatt_server_min",
-        "solax_modbus_growatt_min": "solax_modbus_growatt_min",
-        "solax_modbus_growatt_sph": "solax_modbus_growatt_sph",
-        "growatt_server_sph": "growatt_server_sph",
-        "solax_modbus_native": "solax_modbus_native",
-        # Legacy values stored in growatt.inverter_type
-        "MIN": "growatt_server_min",
-        "SPH": "growatt_server_sph",
+        "solis_modbus",
+        "huawei_solar_luna2000",
     }
 
     @staticmethod
     def _resolve_initial_platform(options: dict) -> str | None:
         """Determine inverter platform from startup config.
 
-        Checks ``inverter.platform`` first, then falls back to the legacy
-        ``growatt.inverter_type`` key.  Returns None on a fresh install.
+        ``inverter.platform`` is the source of truth; installs predating it are
+        rewritten by ``SettingsStore._migrate_schema()`` before this runs.
+        Returns None on a fresh install.
         """
         platform = options.get("inverter", {}).get("platform")
         if not platform:
-            inverter_type = options.get("growatt", {}).get("inverter_type", "")
-            if not inverter_type:
-                logger.info(
-                    "No inverter platform configured — "
-                    "system will start in unconfigured mode"
-                )
-                return None
-            assert inverter_type in BatterySystemManager._INVERTER_TYPE_TO_PLATFORM, (
-                f"Unknown inverter_type '{inverter_type}', "
-                f"expected one of "
-                f"{list(BatterySystemManager._INVERTER_TYPE_TO_PLATFORM)}"
+            logger.info(
+                "No inverter platform configured — "
+                "system will start in unconfigured mode"
             )
-            platform = BatterySystemManager._INVERTER_TYPE_TO_PLATFORM[inverter_type]
+            return None
 
         assert platform in BatterySystemManager.VALID_PLATFORMS, (
             f"Unknown inverter platform '{platform}', "
@@ -267,6 +275,14 @@ class BatterySystemManager:
         return platform
 
     VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
+
+    # Strategies whose forecast is a window of full calendar days ending at
+    # today's midnight — the value can't change intraday, so it's cached
+    # until the date rolls over instead of refetched every quarterly cycle.
+    _DATE_CACHED_CONSUMPTION_STRATEGIES: ClassVar[set[str]] = {
+        "influxdb_7d_avg",
+        "ha_statistics",
+    }
 
     @staticmethod
     def _resolve_control_mode(options: dict, platform: str | None) -> str:
@@ -306,6 +322,10 @@ class BatterySystemManager:
             return GrowattSphController(battery_settings=self.battery_settings)
         if self.inverter_platform == "solax_modbus_native":
             return SolaxController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "solis_modbus":
+            return SolisModbusController(battery_settings=self.battery_settings)
+        if self.inverter_platform == "huawei_solar_luna2000":
+            return HuaweiController(battery_settings=self.battery_settings)
         if self.inverter_platform in (
             "solax_modbus_growatt_min",
             "solax_modbus_growatt_sph",
@@ -650,7 +670,7 @@ class BatterySystemManager:
                 return False
 
             # Create new schedule
-            schedule_result = self._create_updated_schedule(
+            temp_schedule = self._create_updated_schedule(
                 optimization_period,
                 optimization_result,
                 prices,
@@ -659,18 +679,15 @@ class BatterySystemManager:
                 prepare_next_day,
             )
 
-            if schedule_result is None:
+            if temp_schedule is None:
                 logger.error("Failed to create updated schedule")
                 return False
-
-            temp_schedule, temp_growatt = schedule_result
 
             # Determine if we should apply the new schedule
             should_apply, reason = self._should_apply_schedule(
                 is_first_run,
                 current_period,
                 prepare_next_day,
-                temp_growatt,
                 optimization_period,
                 temp_schedule,
             )
@@ -680,25 +697,24 @@ class BatterySystemManager:
                 self._apply_schedule(
                     current_period,
                     temp_schedule,
-                    temp_growatt,
                     reason,
                     prepare_next_day,
                 )
             else:
-                # Update current schedule even when TOU doesn't change
+                # Update display data even when nothing changes on hardware.
+                # Applied TOU/VPP state on self._inverter_controller is left
+                # untouched — there's only ever one instance now (#369), so
+                # there's nothing to carry forward or swap in. current_schedule
+                # IS refreshed here (unlike TOU/VPP state) because
+                # _apply_period_schedule reads current_schedule.actions for
+                # every per-period hardware write, even on a not-apply cycle
+                # where the DP re-optimized battery-action magnitudes without
+                # changing which TOU/VPP mode is active.
                 self._current_schedule = temp_schedule
-                # Carry forward hardware TOU state so stale segment detection
-                # keeps working. temp_growatt has fresh schedule/intents/hourly
-                # settings but empty TOU intervals — without this, the in-memory
-                # record of what's on the inverter is erased every cycle.
-                temp_growatt.tou_intervals = (
-                    self._inverter_controller.tou_intervals.copy()
+                self._inverter_controller.strategic_intents = (
+                    temp_schedule.strategic_intents
                 )
-                if isinstance(self._inverter_controller, GrowattMinController):
-                    temp_growatt._active_tou_intervals = (
-                        self._inverter_controller._active_tou_intervals.copy()
-                    )
-                self._inverter_controller = temp_growatt
+                self._inverter_controller.current_schedule = temp_schedule
 
             # Capture prediction snapshot after schedule is applied
             if not prepare_next_day:
@@ -829,6 +845,36 @@ class BatterySystemManager:
         logger.info("Historical seed loaded: %d periods from '%s'", loaded, seed_file)
         return loaded > 0
 
+    def _load_today_from_disk(self, current_period: int) -> None:
+        """Seed historical_store from today's persisted DailyView, if any.
+
+        Only periods marked data_source == "actual" are trusted as real
+        recovered data. Periods the file marked "predicted" or "missing"
+        (e.g. a period a scheduler tick never got around to recording, see
+        issue #403) are deliberately left unseeded so the InfluxDB backfill
+        that runs after this can still attempt them.
+        """
+        view = self.daily_view_store.load_day(time_utils.today())
+        if view is None:
+            return
+
+        seeded = 0
+        for period_data in view.periods:
+            if period_data.data_source != "actual":
+                continue
+            if not 0 <= period_data.period < current_period:
+                continue
+            try:
+                self.historical_store.record_period(period_data.period, period_data)
+                seeded += 1
+            except ValueError as e:
+                logger.warning(
+                    "Could not seed period %d from disk: %s", period_data.period, e
+                )
+
+        if seeded:
+            logger.info("Seeded %d period(s) from today's persisted file", seeded)
+
     def _fetch_and_initialize_historical_data(self, status_callback=None) -> None:
         """Fetch and initialize historical data using quarterly resolution."""
         try:
@@ -842,6 +888,9 @@ class BatterySystemManager:
             if current_period > 0 and self._load_historical_seed(current_period):
                 self.sensor_collector.warm_readings_cache()
                 return
+
+            if current_period > 0:
+                self._load_today_from_disk(current_period)
 
             if not is_influxdb_configured():
                 logger.info(
@@ -866,6 +915,8 @@ class BatterySystemManager:
                         status_callback(
                             f"Fetching historical data ({hour}/{total_hours}h)..."
                         )
+                    if self.historical_store.get_period(period) is not None:
+                        continue
                     try:
                         # Collect cumulative sensor readings at period boundary (calculate deltas for energy flows)
                         period_energy_data = self.sensor_collector.collect_energy_data(
@@ -954,18 +1005,22 @@ class BatterySystemManager:
             logger.error(f"Failed to initialize historical data: {e}")
 
     def _fetch_predictions(self) -> None:
-        """Fetch consumption and solar predictions and store them."""
+        """Fetch the consumption forecast and store it.
+
+        Solar has no cache to warm here — _gather_optimization_data fetches
+        it live via controller.get_solar_forecast() on every quarterly run.
+        """
         try:
             if self._controller is None:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
             consumption_predictions = self._get_consumption_forecast()
-            solar_predictions = self._controller.get_solar_forecast()
 
             # Store the predictions (this was missing!)
             if consumption_predictions:
                 self._consumption_predictions = consumption_predictions
+                self._consumption_predictions_date = time_utils.today()
                 logger.debug(
                     "Fetched consumption predictions: %s",
                     [round(value, 1) for value in consumption_predictions],
@@ -974,15 +1029,6 @@ class BatterySystemManager:
                 logger.warning(
                     "Invalid consumption predictions format, keeping defaults"
                 )
-
-            if solar_predictions:
-                self._solar_predictions = solar_predictions
-                logger.info(
-                    "Fetched solar predictions: %s",
-                    [round(value, 1) for value in solar_predictions],
-                )
-            else:
-                logger.warning("Invalid solar predictions format, keeping defaults")
 
         except Exception as e:
             logger.warning(f"Failed to fetch predictions: {e}")
@@ -1396,6 +1442,13 @@ class BatterySystemManager:
     ) -> None:
         """Handle special cases like midnight transition."""
         if period == 0 and not prepare_next_day:
+            # Actual midnight rollover (the 00:00 quarterly job) - clear
+            # yesterday's actuals now that a new day has genuinely started.
+            # This must NOT happen during the 23:55 prepare_next_day run
+            # (see below): that fires 5 minutes before midnight, while today's
+            # dashboard is still showing today, and clearing there wiped
+            # today's real sensor data early (issue #380 follow-up).
+            self.historical_store.clear()
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()
@@ -1411,19 +1464,10 @@ class BatterySystemManager:
                 logger.warning(f"Failed to get initial SOC: {e}")
 
         if prepare_next_day:
-            logger.info(
-                "Preparing for next day - clearing historical store and refreshing predictions"
-            )
-            if is_first_run:
-                # No schedule has ever been created yet (fresh start/restart), so
-                # there is no completed day's view to persist.
-                logger.info(
-                    "Skipping daily view save: no schedule exists yet for today"
-                )
-            else:
-                self.daily_view_store.save_day(self.get_current_daily_view())
-            # Clear historical store to prevent yesterday's data from appearing as today's future data
-            self.historical_store.clear()
+            # Today's file is already current — _persist_today_view() (called
+            # from _update_energy_data on every tick, including this one) has
+            # been keeping it up to date all day. Nothing to save here.
+            logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 
@@ -1619,6 +1663,8 @@ class BatterySystemManager:
         else:
             logger.info("Historical store: no periods stored yet")
 
+        self._persist_today_view()
+
     def _get_planned_intent_for_period(self, period: int) -> str | None:
         """Get the DP-planned strategic intent for a period.
 
@@ -1631,18 +1677,15 @@ class BatterySystemManager:
         Returns:
             Strategic intent string if available, None otherwise
         """
-        # First try the in-memory schedule store
-        latest_schedule = self.schedule_store.get_latest_schedule()
-        if latest_schedule is not None:
-            result = latest_schedule.optimization_result
-            if result.period_data:
-                opt_period = latest_schedule.optimization_period
-
-                # Check if this period is within the optimization range
-                if opt_period <= period < opt_period + len(result.period_data):
-                    index = period - opt_period
-                    period_data = result.period_data[index]
-                    return period_data.decision.strategic_intent
+        # First try the in-memory schedule store, resolved by exact
+        # timestamp (not positional index - optimization_period) so the
+        # standalone next-day schedule (period_data[0] anchored to tomorrow
+        # 00:00 despite optimization_period=0) is never misread as today's
+        # period at the same positional index.
+        target_timestamp = time_utils.period_index_to_timestamp(period)
+        period_data = self.schedule_store.get_period_data_at(target_timestamp)
+        if period_data is not None:
+            return period_data.decision.strategic_intent
 
         # Fall back to persisted intents (loaded from disk on startup)
         return self.schedule_store.get_persisted_intent(period)
@@ -1699,14 +1742,29 @@ class BatterySystemManager:
 
         current_soe = current_soc / 100.0 * self.battery_settings.total_capacity
 
-        # --- Fetch predictions (shared, cache-first) ---
-        # Use cached predictions when available to avoid re-fetching
-        # expensive data sources (e.g. InfluxDB 7-day avg) every cycle
-        consumption_predictions = (
-            self._consumption_predictions
-            if self._consumption_predictions
-            else self._get_consumption_forecast()
-        )
+        # --- Fetch predictions (issue #395) ---
+        # 'sensor'/'fixed' read a cheap, continuously-updating source, so
+        # they refetch every quarterly cycle (same as solar, below).
+        # 'influxdb_7d_avg'/'ha_statistics' average a window of full
+        # calendar days ending at today's midnight — that value can't
+        # change intraday, so it's only refetched once the date rolls over,
+        # instead of only at startup/23:55.
+        if (
+            self.home_settings.consumption_strategy
+            in self._DATE_CACHED_CONSUMPTION_STRATEGIES
+        ):
+            consumption_predictions_fresh = (
+                self._consumption_predictions is not None
+                and self._consumption_predictions_date == time_utils.today()
+            )
+            if consumption_predictions_fresh:
+                consumption_predictions = self._consumption_predictions
+            else:
+                consumption_predictions = self._get_consumption_forecast()
+                self._consumption_predictions = consumption_predictions
+                self._consumption_predictions_date = time_utils.today()
+        else:
+            consumption_predictions = self._get_consumption_forecast()
 
         if prepare_next_day:
             # The next-day schedule must be built from tomorrow's solar forecast, not today's.
@@ -1855,6 +1913,16 @@ class BatterySystemManager:
         optimization window, so the median/cap formula reflects genuine
         future price uncertainty beyond that window regardless of where it
         ends (#345).
+
+        `sell_prices` is expected to be scoped by the caller to the terminal
+        boundary's own calendar day, not the full remaining horizon (#422):
+        on a 48h-extended horizon, using the full window lets an
+        already-committed near-term peak (e.g. today's still-upcoming best
+        sell slot) inflate the cap for a later, economically unrelated day's
+        terminal energy, making the DP hold charge through that day's own
+        (lower) export opportunities instead of exporting into them.
+        `buy_prices` is unaffected -- it feeds a median, which is already
+        resistant to a single-period outlier.
 
         The cap is required because cycle cost is only ever charged on
         charging, never on discharge (see `_compute_reward`): an uncapped
@@ -2034,9 +2102,24 @@ class BatterySystemManager:
             buy_prices = [entry["buyPrice"] for entry in remaining_entries]
             sell_prices = [entry["sellPrice"] for entry in remaining_entries]
 
+            # Scope the arbitrage-consistency cap to sell prices on the
+            # terminal boundary's own calendar day (#422): on a 48h-extended
+            # horizon, `sell_prices` above also carries today's still-
+            # remaining periods, and a near-term peak there (an opportunity
+            # the plan's own schedule is already consuming) must not inflate
+            # the cap for a later, economically unrelated day's terminal
+            # energy. Single-day horizons are unaffected -- the terminal day
+            # is the only day present, so this is identical to sell_prices.
+            terminal_date = remaining_entries[-1]["timestamp"][:10]
+            cap_sell_prices = [
+                entry["sellPrice"]
+                for entry in remaining_entries
+                if entry["timestamp"][:10] == terminal_date
+            ]
+
             # Calculate terminal value for end-of-horizon energy valuation
             terminal_value = self._calculate_terminal_value(
-                buy_prices, sell_prices, optimization_period
+                buy_prices, cap_sell_prices, optimization_period
             )
 
             # Get temperature-based charge power limits if derating is enabled.
@@ -2058,6 +2141,18 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
+            # Capability-aware, not just the raw user setting (#459 review):
+            # planning for curtailment on a platform that can't actually do
+            # it makes outcomes worse than leaving the feature off (see
+            # optimize_battery_schedule's export_curtailment_active
+            # docstring). Entity misconfiguration on a supported platform is
+            # a separate, self-correcting case surfaced by the runtime
+            # failure banner in _apply_period_schedule, not checked here.
+            export_curtailment_active = (
+                self.battery_settings.export_curtailment_enabled
+                and self._inverter_controller is not None
+                and self._inverter_controller.supports_export_limit_control
+            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2072,6 +2167,8 @@ class BatterySystemManager:
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
+                export_curtailment_active=export_curtailment_active,
+                home_settings=self.home_settings,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)
@@ -2143,7 +2240,7 @@ class BatterySystemManager:
         optimization_data: dict[str, list[float]],
         is_first_run: bool,
         prepare_next_day: bool,
-    ) -> tuple[DPSchedule, InverterController] | None:
+    ) -> DPSchedule | None:
         """Create updated schedule from OptimizationResult with strategic intents and CORRECT SOC mapping."""
 
         try:
@@ -2370,25 +2467,7 @@ class BatterySystemManager:
             # Override the strategic intents in the schedule with corrected data
             temp_schedule.strategic_intents = full_day_strategic_intents
 
-            # Create schedule manager matching current inverter type
-            temp_growatt: InverterController = self._create_inverter_controller()
-            temp_growatt.strategic_intents = full_day_strategic_intents
-
-            # Create schedule with rolling window — only future periods get TOU segments
-            effective_period = 0 if prepare_next_day else optimization_period
-            previous_tou = (
-                []
-                if prepare_next_day
-                else self._inverter_controller.active_tou_intervals.copy()
-            )
-            logger.info(f"Creating Growatt schedule for period={effective_period}")
-            temp_growatt.create_schedule(
-                temp_schedule,
-                current_period=effective_period,
-                previous_tou_intervals=previous_tou,
-            )
-
-            return temp_schedule, temp_growatt
+            return temp_schedule
 
         except Exception as e:
             logger.error(f"Failed to create schedule: {e}")
@@ -2400,7 +2479,6 @@ class BatterySystemManager:
         is_first_run: bool,
         period: int,
         prepare_next_day: bool,
-        temp_growatt: InverterController,
         optimization_period: int,
         temp_schedule: DPSchedule,
     ) -> tuple[bool, str]:
@@ -2418,8 +2496,8 @@ class BatterySystemManager:
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)
-            schedules_differ, reason = self._inverter_controller.compare_schedules(
-                other_schedule=temp_growatt, from_period=0
+            schedules_differ, reason = self._inverter_controller.evaluate_intents(
+                temp_schedule, current_period=0
             )
 
             logger.info(
@@ -2431,8 +2509,8 @@ class BatterySystemManager:
 
         # Normal case: compare TOU settings from current period onwards
         try:
-            schedules_differ, reason = self._inverter_controller.compare_schedules(
-                other_schedule=temp_growatt, from_period=period
+            schedules_differ, reason = self._inverter_controller.evaluate_intents(
+                temp_schedule, current_period=period
             )
 
             if schedules_differ:
@@ -2450,7 +2528,6 @@ class BatterySystemManager:
         self,
         period: int,
         temp_schedule: DPSchedule,
-        temp_growatt: InverterController,
         reason: str,
         prepare_next_day: bool,
     ) -> None:
@@ -2470,30 +2547,27 @@ class BatterySystemManager:
         logger.info("Schedule update required: %s", reason)
         self._current_schedule = temp_schedule
 
-        # Adopt the new controller BEFORE the hardware write so that
-        # strategic intents, period settings, and TOU state are available
-        # even when the write fails (e.g. missing TOU entity mappings,
-        # Modbus timeout).  The _hardware_write_pending flag ensures the
-        # write is retried on the next quarterly cycle.
-        current_tou = self._inverter_controller.active_tou_intervals
-        self._inverter_controller = temp_growatt
+        # Read the currently-active TOU intervals BEFORE apply_intents
+        # rebuilds them, so write_to_hardware still sees what's on hardware
+        # right now (used for stale-segment cleanup on some platforms).
+        current_tou = self._inverter_controller.active_tou_intervals.copy()
+        effective_period = 0 if prepare_next_day else period
+        self._inverter_controller.apply_intents(temp_schedule, effective_period)
 
         try:
-            effective_period = 0 if prepare_next_day else period
-
             if self._controller is None:
                 logger.error("Cannot apply schedule: controller is not available")
             else:
-                temp_growatt.write_schedule_to_hardware(
+                self._inverter_controller.write_to_hardware(
                     self._controller, effective_period, current_tou
                 )
 
             # Clear corruption flag after successful hardware write
-            if temp_growatt.corruption_detected:
+            if self._inverter_controller.corruption_detected:
                 logger.info(
                     "Corruption recovery complete - clearing corruption flag after successful hardware write"
                 )
-                temp_growatt.corruption_detected = False
+                self._inverter_controller.corruption_detected = False
 
             self._hardware_write_pending = False
             logger.info("Schedule applied successfully")
@@ -2545,42 +2619,111 @@ class BatterySystemManager:
             )
         )
 
-        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer plans hold
-        # (rate 0), but load_first lets the battery cover an intra-period
-        # solar/load dip. Allow that only when the stored energy is worth less
-        # than buying from grid now (shadow_price = DP marginal value of
-        # stored SoE). This is a sub-period hardware-robustness behaviour,
-        # invisible to the 15-min plan/sim. Only valid where discharge_rate is
-        # a load-following ceiling -- on platforms where it's an immediate
-        # forced power command (VPP-style control), opening the gate would
-        # force a full-power discharge instead of gently covering a dip (#324).
+        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer's planned
+        # rate is a 15-min average, but load_first lets the battery cover an
+        # intra-period solar/load dip beyond that average. Allow that only
+        # when the stored energy is worth less than buying from grid now
+        # (shadow_price = DP marginal value of stored SoE). This is a
+        # sub-period hardware-robustness behaviour, invisible to the 15-min
+        # plan/sim. Only valid where discharge_rate is a load-following
+        # ceiling -- on platforms where it's an immediate forced power
+        # command (VPP-style control), opening the gate would force a
+        # full-power discharge instead of gently covering a dip (#324).
+        #
+        # For SOLAR_EXPORT/SOLAR_STORAGE the planned baseline is always 0, so
+        # the gate fully determines the outcome.
+        #
+        # LOAD_SUPPORT deliberately does NOT use this gate (#393): #384/#385
+        # added it here, but #385's own validation against the reporting
+        # user's real captured data found the gate doesn't open during the
+        # sustained overnight near-tie regime it was built for (shadow_price
+        # sits within a cent or two of buy_price there), while a second,
+        # independent real-world report (different day, different price
+        # shape) showed the same gate condition evaluating true for the
+        # large majority of LOAD_SUPPORT periods -- a broad, mostly-untested
+        # override of the #147 reservation pacing, not the narrow safety
+        # valve it was meant to be. Reverted until a mechanism is validated
+        # against real captured data before shipping. LOAD_SUPPORT keeps its
+        # plan-scaled cap unconditionally, same as pre-#384.
         if (
-            strategic_intent
-            in (
-                "SOLAR_EXPORT",
-                "SOLAR_STORAGE",
-            )
+            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE")
             and self._inverter_controller.discharge_rate_is_load_following
         ):
-            stored = self.schedule_store.get_latest_schedule()
-            if stored is not None:
-                idx = period - stored.optimization_period
-                pd_list = stored.optimization_result.period_data
-                if 0 <= idx < len(pd_list):
-                    shadow = pd_list[idx].decision.shadow_price
-                    buy_prices, _ = self.price_manager.get_available_prices()
-                    if period < len(buy_prices):
-                        discharge_rate = intra_period_discharge_gate(
+            # Resolved by exact timestamp (not positional index -
+            # optimization_period) so the standalone next-day schedule
+            # (period_data[0] anchored to tomorrow 00:00 despite
+            # optimization_period=0) is never misread as today's period.
+            target_timestamp = time_utils.period_index_to_timestamp(period)
+            period_data = self.schedule_store.get_period_data_at(target_timestamp)
+            if period_data is not None:
+                shadow = period_data.decision.shadow_price
+                buy_prices, _ = self.price_manager.get_available_prices()
+                if period < len(buy_prices):
+                    discharge_rate = max(
+                        discharge_rate,
+                        intra_period_discharge_gate(
                             buy_prices[period],
                             shadow,
                             self.battery_settings.efficiency_discharge,
-                        )
+                        ),
+                    )
+
+        # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
+        # decision — curtail whenever this period is exporting at a sell
+        # price below the configured floor, regardless of strategic_intent
+        # (the reporting evidence showed the "battery full" case classifies
+        # as SOLAR_STORAGE, not SOLAR_EXPORT, since the battery is still
+        # charging at its rate limit while the surplus above that rate
+        # exports). No-op on platforms without supports_export_limit_control
+        # via InverterController.apply_export_limit's base implementation.
+        #
+        # The write is skipped only when there's genuinely nothing to assert:
+        # no export this period AND the hardware isn't currently curtailed.
+        # Any exporting period actively (re)asserts the correct state either
+        # way, and _export_limit_curtailed additionally forces a release on
+        # a later *non*-exporting period that would otherwise leave an
+        # earlier curtailment stuck on with no further write to clear it.
+        #
+        # A write failure here (e.g. an unconfigured entity) must not take
+        # down the rest of this period's hardware apply below.
+        if self.battery_settings.export_curtailment_enabled:
+            target_timestamp = time_utils.period_index_to_timestamp(period)
+            period_data = self.schedule_store.get_period_data_at(target_timestamp)
+            if period_data is not None and (
+                period_data.energy.grid_exported > 0 or self._export_limit_curtailed
+            ):
+                should_curtail = (
+                    period_data.energy.grid_exported > 0
+                    and period_data.economic.sell_price
+                    < self.battery_settings.export_curtailment_price_floor
+                )
+                try:
+                    self._inverter_controller.apply_export_limit(
+                        self.controller, should_curtail
+                    )
+                    self._export_limit_curtailed = should_curtail
+                    self._runtime_failure_tracker.dismiss_by_category(
+                        "export_limit_curtailment"
+                    )
+                except Exception as e:
+                    # ha_api_controller's own retry logic already records a
+                    # failure under this same category via record_failure_once
+                    # for HTTP-level errors, so use record_failure_once here
+                    # too (rather than record_failure) to coalesce with it
+                    # instead of producing a second banner entry for one
+                    # underlying failure.
+                    self._runtime_failure_tracker.record_failure_once(
+                        category="export_limit_curtailment",
+                        operation=f"Period {period}: apply export-limit curtailment",
+                        error=e,
+                    )
 
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
         self._desired_grid_charge = grid_charge
         self._desired_block_passive_charging = block_passive_charging
+        self._desired_strategic_intent = strategic_intent
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -2619,7 +2762,11 @@ class BatterySystemManager:
         # full TOU schedule on the next hourly cycle).  This retry targets the
         # per-period write at finer granularity within the 15-min window.
         success, error_msg = self._inverter_controller.apply_period(
-            self.controller, grid_charge, discharge_rate, block_passive_charging
+            self.controller,
+            grid_charge,
+            discharge_rate,
+            block_passive_charging,
+            strategic_intent,
         )
 
         if not success:
@@ -2634,7 +2781,11 @@ class BatterySystemManager:
                 error=Exception(error_msg),
             )
             self._schedule_period_retry(
-                period, grid_charge, discharge_rate, block_passive_charging
+                period,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
         else:
             self._last_applied_discharge_rate = discharge_rate
@@ -2653,6 +2804,7 @@ class BatterySystemManager:
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool = False,
+        strategic_intent: str = "",
         attempt: int = 1,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
@@ -2684,7 +2836,11 @@ class BatterySystemManager:
                 max_attempts + 1,
             )
             success, error_msg = self._inverter_controller.apply_period(
-                self.controller, grid_charge, discharge_rate, block_passive_charging
+                self.controller,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                strategic_intent,
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -2702,6 +2858,7 @@ class BatterySystemManager:
                         grid_charge,
                         discharge_rate,
                         block_passive_charging,
+                        strategic_intent,
                         attempt + 1,
                     )
                 else:
@@ -2986,8 +3143,30 @@ class BatterySystemManager:
         scheduler, a manual "recheck" endpoint) so the dashboard banner can
         reflect current sensor state instead of only what was true at
         startup or the last settings save.
+
+        Also retries the initial schedule build if none exists yet and all
+        required sensors are now healthy. This covers a startup schedule
+        build that failed while sensors were still unavailable (e.g. a
+        restart racing a transient HA outage) — without it, the dashboard
+        stays on "initializing" until the next quarterly cron tick even
+        though this health check now reports the system healthy. This must
+        NOT live in ``_run_health_check`` itself: ``start()`` calls that
+        method before the inverter hardware read that seeds each
+        controller's write-skip guards, so a retry there fires the
+        process's first schedule build — and therefore its first hardware
+        write — before those guards are seeded, forcing unconditional VPP
+        register writes on every restart (#399).
         """
-        return self._run_health_check()
+        health_results = self._run_health_check()
+        if not self._critical_sensor_failures and self._current_schedule is None:
+            logger.info(
+                "No schedule exists yet and all required sensors are "
+                "healthy — retrying the initial schedule build"
+            )
+            now = time_utils.now()
+            current_period = now.hour * 4 + now.minute // 15
+            self.update_battery_schedule(current_period=current_period)
+        return health_results
 
     def has_critical_sensor_failures(self) -> bool:
         """Check if the system has critical sensor failures (degraded mode)."""
@@ -3027,6 +3206,49 @@ class BatterySystemManager:
             Number of failures dismissed
         """
         return self._runtime_failure_tracker.dismiss_all()
+
+    def record_scheduler_misfire(self, job_id: str, scheduled_run_time) -> None:
+        """Record a scheduler job whose fire time was missed (dropped, not run).
+
+        APScheduler's default coalesce behavior silently drops a misfired run
+        with no log line (issue #403) — this makes it visible via the same
+        runtime-failure banner used for hardware-write failures.
+        """
+        run_time_str = scheduled_run_time.strftime("%H:%M")
+        self._runtime_failure_tracker.record_failure(
+            category="scheduler_misfire",
+            operation=(
+                f"Scheduled job '{job_id}' missed its {run_time_str} run "
+                f"(previous run still busy) and was dropped"
+            ),
+            error=Exception(f"Job '{job_id}' misfire at {run_time_str}"),
+        )
+
+    def dismiss_historical_data_warning(self, missing_hours: list[int]) -> None:
+        """Dismiss the historical-data-incomplete warning for today.
+
+        Args:
+            missing_hours: The missing hours the warning currently covers
+        """
+        today = time_utils.now().date().isoformat()
+        self._dismissed_historical_warning_signature = (
+            today,
+            tuple(sorted(missing_hours)),
+        )
+
+    def is_historical_data_warning_dismissed(self, missing_hours: list[int]) -> bool:
+        """Check if the historical-data-incomplete warning was dismissed.
+
+        The dismissal only applies to the exact day and set of missing
+        hours it was recorded for; a new gap re-surfaces the warning.
+        """
+        if self._dismissed_historical_warning_signature is None:
+            return False
+        today = time_utils.now().date().isoformat()
+        return self._dismissed_historical_warning_signature == (
+            today,
+            tuple(sorted(missing_hours)),
+        )
 
     def _get_today_price_data(self) -> list[float]:
         """Get today's price data for reports and views."""
@@ -3070,6 +3292,32 @@ class BatterySystemManager:
 
         # Build daily view with current period
         return self.daily_view_builder.build_daily_view(current_period)
+
+    def _persist_today_view(self) -> None:
+        """Best-effort snapshot of today's merged view to disk.
+
+        Write-through cache for HistoricalDataStore: called on every tick
+        that may have recorded new actuals, so a mid-day restart can seed
+        from disk instead of relying solely on InfluxDB backfill. No-op
+        until the first schedule of the day exists (build_daily_view raises
+        ValueError otherwise) — this mirrors the is_first_run skip that used
+        to gate the old 23:55-only save call.
+
+        Never lets a disk-related failure propagate: this is called from
+        _update_energy_data on every tick, and an uncaught exception here
+        would abort that tick's optimization and hardware write.
+        """
+        # Skip during BESS_HISTORICAL_SEED_FILE replay (see _load_historical_seed):
+        # persisting replayed fixture data to /data/daily_views would corrupt
+        # real disk state for a test/E2E run.
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
+        if self.schedule_store.get_latest_schedule() is None:
+            return
+        try:
+            self.daily_view_store.save_day(self.get_current_daily_view())
+        except Exception as e:
+            logger.warning("Failed to persist today's view: %s", e)
 
     def adjust_charging_power(self) -> None:
         """Adjust charging power based on house consumption.
@@ -3136,6 +3384,7 @@ class BatterySystemManager:
             self._desired_grid_charge,
             target_rate,
             self._desired_block_passive_charging,
+            self._desired_strategic_intent,
         )
         self._last_applied_discharge_rate = target_rate
 
@@ -3152,6 +3401,17 @@ class BatterySystemManager:
         try:
             if "battery" in settings:
                 self.battery_settings.update(**settings["battery"])
+                # InverterController snapshots these at construction time
+                # (see InverterController.__init__) for its discharge/charge
+                # rate-percent math -- refresh them so a live settings change
+                # doesn't leave the % calc using the old value (#398).
+                if self._inverter_controller is not None:
+                    self._inverter_controller.max_charge_power_kw = (
+                        self.battery_settings.max_charge_power_kw
+                    )
+                    self._inverter_controller.max_discharge_power_kw = (
+                        self.battery_settings.max_discharge_power_kw
+                    )
 
             if "home" in settings:
                 prev_strategy = self.home_settings.consumption_strategy

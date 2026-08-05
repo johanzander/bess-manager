@@ -52,9 +52,10 @@ test.describe('Setup Wizard', () => {
     await expect(page.getByRole('heading', { name: 'Review Sensors' })).toBeVisible();
 
     // Verify the inverter platform tabs are visible
-    // Both tabs are always rendered — check the active one matches detection
+    // All three tabs are always rendered — check the active one matches detection
     await expect(page.getByRole('tab', { name: /Growatt Cloud/i })).toBeVisible();
     await expect(page.getByRole('tab', { name: /SolaX Modbus/i })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /Solis Modbus/i })).toBeVisible();
   });
 
   test('auto-selects correct pricing provider', async ({ page }) => {
@@ -74,9 +75,10 @@ test.describe('Setup Wizard', () => {
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
-    // The UI uses Tabs (Growatt Cloud / SolaX Modbus) + pill buttons for subtypes
+    // The UI uses Tabs (Growatt Cloud / SolaX Modbus / Solis Modbus) + pill buttons for subtypes
     const isModbus = expected.inverterPlatform.startsWith('solax_modbus');
     const isCloud = expected.inverterPlatform.startsWith('growatt_server');
+    const isSolis = expected.inverterPlatform === 'solis_modbus';
 
     if (isCloud) {
       // Growatt Cloud tab should be active
@@ -84,6 +86,9 @@ test.describe('Setup Wizard', () => {
     } else if (isModbus) {
       // SolaX Modbus tab should be active
       await expect(page.getByRole('tab', { name: /SolaX Modbus/i })).toHaveAttribute('data-state', 'active');
+    } else if (isSolis) {
+      // Solis Modbus tab should be active
+      await expect(page.getByRole('tab', { name: /Solis Modbus/i })).toHaveAttribute('data-state', 'active');
     }
   });
 
@@ -261,7 +266,7 @@ test.describe('Setup Wizard', () => {
   test('home step gates features by platform capabilities', async ({ page }) => {
     // SPH lacks local_load_power; SolaX native has it (as house_load)
     const platformsWithoutLocalLoad = ['growatt_server_sph'];
-    const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native'];
+    const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus'];
     const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
     const expectFuseDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
 

@@ -76,7 +76,6 @@ def _valid_options() -> dict:
             "cycle_cost_per_kwh": 0.5,
             "max_charge_power_kw": 15.0,
             "max_discharge_power_kw": 15.0,
-            "min_action_profit_threshold": 0.0,
             # Present in every real store (added by migration) but not
             # required at startup — see BATTERY_REQUIRED_FIELDS.
             "charging_power_rate": 40,
@@ -198,7 +197,6 @@ class TestApplySettings:
         assert result["battery"]["max_charge_power_kw"] == 15.0
         assert result["battery"]["max_discharge_power_kw"] == 15.0
         assert result["battery"]["cycle_cost_per_kwh"] == 0.5
-        assert result["battery"]["min_action_profit_threshold"] == 0.0
         assert "totalCapacity" not in result["battery"]
 
     def test_valid_options_battery_passes_through_optional_fields_when_present(self):
@@ -346,6 +344,8 @@ _BATTERY_OPTIONAL_FIELDS = frozenset(
         "efficiency_discharge",
         "inverter_max_ac_power_kw",
         "inverter_ac_power_margin",
+        "export_curtailment_enabled",
+        "export_curtailment_price_floor",
     }
 )
 # min_valid is an internal algorithm parameter, never read from the settings

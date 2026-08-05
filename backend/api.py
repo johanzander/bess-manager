@@ -20,6 +20,7 @@ from api_conversion import (
 )
 from api_dataclasses import (
     _ENTITY_ID_RE,
+    _HA_DOMAIN_RE,
     APIConsumptionForecastComparison,
     APIDashboardHourlyData,
     APIDashboardResponse,
@@ -189,6 +190,15 @@ async def get_settings():
         battery["reserved_capacity"] = battery["min_soe_kwh"]
         data["battery"] = battery
 
+        # Enrich the inverter section with the domain vendor service calls
+        # actually go to, so the UI can show the platform default as a
+        # placeholder without duplicating PLATFORM_SERVICE_DOMAIN client-side.
+        inverter = data.get("inverter", {})
+        inverter["resolved_service_domain"] = (
+            bess_controller.settings_store.get_service_domain()
+        )
+        data["inverter"] = inverter
+
         # Return the full per-platform sensors structure from the store.
         # Also include a flat "activeSensors" view for backwards compatibility.
         data.pop("sensors", None)
@@ -242,6 +252,16 @@ async def patch_settings(updates: dict):
                                 detail=f"Invalid entity ID format: {value!r}",
                             )
 
+            if store_key == "inverter":
+                domain = snake_data.get("service_domain")
+                if domain and not _HA_DOMAIN_RE.match(domain):
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"Invalid Home Assistant integration domain: {domain!r}"
+                        ),
+                    )
+
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
             # nordpool_official.config_entry_id) do not erase sibling keys.
@@ -287,25 +307,22 @@ async def patch_settings(updates: dict):
                 bess_controller.system.update_settings({"energy_provider": section})
 
             elif store_key == "growatt":
+                # Platform switching lives in the "inverter" branch below;
+                # this section only carries the Growatt cloud device_id.
                 if "device_id" in section:
                     bess_controller.ha_controller.growatt_device_id = section[
                         "device_id"
                     ]
-                # Map legacy inverter_type to platform and switch controller
-                inverter_type = section.get("inverter_type")
-                if inverter_type:
-                    platform_map = bess_controller.system._INVERTER_TYPE_TO_PLATFORM
-                    if inverter_type not in platform_map:
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"Unknown inverter_type '{inverter_type}', "
-                            f"expected one of {list(platform_map)}",
-                        )
-                    bess_controller.system.switch_inverter_platform(
-                        platform_map[inverter_type]
-                    )
 
             elif store_key == "inverter":
+                # device_id here is the Huawei battery device (the Growatt
+                # cloud device_id lives in the growatt section above). Apply
+                # it live for the same reason that branch does — otherwise an
+                # edit in Settings only takes effect after a restart.
+                if "device_id" in section:
+                    bess_controller.ha_controller.huawei_device_id = section[
+                        "device_id"
+                    ]
                 platform = section.get("platform")
                 if platform:
                     bess_controller.system.switch_inverter_platform(platform)
@@ -332,6 +349,7 @@ async def patch_settings(updates: dict):
         # a platform switch) can change which sensors are active — refresh
         # unconditionally rather than only on a "sensors" key match.
         bess_controller.refresh_active_sensors()
+        bess_controller.refresh_service_domain()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -564,8 +582,9 @@ def _aggregate_quarterly_to_hourly(
 async def get_dashboard_available_dates():
     """List ISO dates that have dashboard data available (for date-picker greying).
 
-    Today is always included even though it isn't persisted to the
-    DailyViewStore until day rollover.
+    Today is always included even though it is deliberately excluded from
+    DailyViewStore.list_available_dates() by design — today's view is
+    persisted continuously, but only past days are listed as history.
     """
     from app import bess_controller
 
@@ -681,61 +700,47 @@ async def get_dashboard_data(
         tomorrow_data: list[APIDashboardHourlyData] | None = None
         if not is_historical:
             try:
-                stored_schedule = (
-                    bess_controller.system.schedule_store.get_latest_schedule()
+                today_period_count = get_period_count(time_utils.today())
+                tomorrow_period_count = get_period_count(
+                    time_utils.today() + timedelta(days=1)
                 )
-                if stored_schedule:
-                    opt_result = stored_schedule.optimization_result
-                    opt_period = stored_schedule.optimization_period
-                    today_period_count = get_period_count(time_utils.today())
-                    tomorrow_period_count = get_period_count(
-                        time_utils.today() + timedelta(days=1)
+                tomorrow_periods = []
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
+                for period_idx in range(
+                    today_period_count,
+                    today_period_count + tomorrow_period_count,
+                ):
+                    period_data = (
+                        bess_controller.system.schedule_store.get_period_data_at(
+                            time_utils.period_index_to_timestamp(period_idx)
+                        )
                     )
-                    tomorrow_periods = []
-                    # Standalone next-day schedule (prepare_next_day path): opt_period=0
-                    # and period_data[0] carries tomorrow's date. In that case
-                    # period_data[0..95] maps to tomorrow's periods 0..95, so the anchor
-                    # is today_period_count rather than opt_period.
-                    # Regular schedules (including midnight runs with extended horizon)
-                    # have opt_period > 0 or period_data large enough to include tomorrow,
-                    # so they continue to use opt_period as the anchor.
-                    is_next_day_only = (
-                        opt_period == 0
-                        and bool(opt_result.period_data)
-                        and opt_result.period_data[0].timestamp is not None
-                        and opt_result.period_data[0].timestamp.date()
-                        == time_utils.today() + timedelta(days=1)
-                    )
-                    period_data_anchor = (
-                        today_period_count if is_next_day_only else opt_period
-                    )
-                    for period_idx in range(
-                        today_period_count,
-                        today_period_count + tomorrow_period_count,
-                    ):
-                        data_idx = period_idx - period_data_anchor
-                        if 0 <= data_idx < len(opt_result.period_data):
-                            tomorrow_periods.append(opt_result.period_data[data_idx])
-                    if tomorrow_periods:
+                    if period_data is not None:
+                        tomorrow_periods.append(period_data)
+                if tomorrow_periods:
+                    tomorrow_data = [
+                        APIDashboardHourlyData.from_internal(
+                            p, battery_capacity, currency
+                        )
+                        for p in tomorrow_periods
+                    ]
+                    if resolution == "hourly":
+                        tomorrow_data = _aggregate_quarterly_to_hourly(
+                            tomorrow_data, battery_capacity, currency
+                        )
+                    else:
+                        # Tomorrow's periods are indexed relative to the start of the
+                        # optimization window (e.g. 96..191 for a 96-period day).
+                        # The frontend maps period index to wall-clock time, so period 0
+                        # must represent 00:00 of the displayed day.
                         tomorrow_data = [
-                            APIDashboardHourlyData.from_internal(
-                                p, battery_capacity, currency
-                            )
-                            for p in tomorrow_periods
+                            dataclasses.replace(p, period=i)
+                            for i, p in enumerate(tomorrow_data)
                         ]
-                        if resolution == "hourly":
-                            tomorrow_data = _aggregate_quarterly_to_hourly(
-                                tomorrow_data, battery_capacity, currency
-                            )
-                        else:
-                            # Tomorrow's periods are indexed relative to the start of the
-                            # optimization window (e.g. 96..191 for a 96-period day).
-                            # The frontend maps period index to wall-clock time, so period 0
-                            # must represent 00:00 of the displayed day.
-                            tomorrow_data = [
-                                dataclasses.replace(p, period=i)
-                                for i, p in enumerate(tomorrow_data)
-                            ]
             except (AttributeError, KeyError, ValueError) as e:
                 logger.warning(f"Failed to get tomorrow's optimization data: {e}")
                 tomorrow_data = None
@@ -1529,18 +1534,30 @@ async def get_inverter_status():
 
         battery_settings = bess_controller.system.battery_settings
 
-        # Get current battery mode from schedule for current hour
-        current_battery_mode = "load_first"  # Default
+        # Get current battery mode from schedule for current hour. Only
+        # tou_register controllers actually have a batt_mode register;
+        # vpp_power controllers surface vpp_power_pct/vpp_remote_control
+        # instead, and period_list controllers have neither -- mirrors
+        # _mode_display_fields()'s contract (see get_period_settings()).
+        current_mode_fields: dict = {}
         try:
             now = time_utils.now()
             schedule_manager = bess_controller.system._inverter_controller
             current_period = now.hour * 4 + now.minute // 15
             period_settings = schedule_manager.get_period_settings(current_period)
-            current_battery_mode = period_settings.get("batt_mode", "load_first")
+            if "batt_mode" in period_settings:
+                current_mode_fields = {"battery_mode": period_settings["batt_mode"]}
+            elif "vpp_power_pct" in period_settings:
+                current_mode_fields = {
+                    "vpp_power_pct": period_settings["vpp_power_pct"],
+                    "vpp_remote_control": period_settings["vpp_remote_control"],
+                }
         except Exception as e:
             logger.warning(f"Failed to get current battery mode: {e}")
 
         battery_soc = controller.get_battery_soc()
+        if battery_soc is None:
+            raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
         grid_charge_enabled = controller.grid_charge_enabled()
         charge_power_rate = controller.get_charging_power_rate()
@@ -1549,13 +1566,14 @@ async def get_inverter_status():
         battery_discharge_power = controller.get_battery_discharge_power()
 
         inverter_platform = bess_controller.system.inverter_platform
+        control_model = schedule_manager.CONTROL_MODEL
 
         response = {
             "battery_soc": battery_soc,
             "battery_soe": battery_soe,
             "battery_charge_power": battery_charge_power,
             "battery_discharge_power": battery_discharge_power,
-            "battery_mode": current_battery_mode,
+            **current_mode_fields,
             "grid_charge_enabled": grid_charge_enabled,
             "charge_stop_soc": battery_settings.max_soc,
             "discharge_stop_soc": battery_settings.min_soc,
@@ -1563,6 +1581,7 @@ async def get_inverter_status():
             "discharge_power_rate": discharge_power_rate,
             "discharge_inhibit_active": controller.get_discharge_inhibit_active(),
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -1584,6 +1603,7 @@ async def get_growatt_detailed_schedule():
 
     try:
         schedule_manager = bess_controller.system._inverter_controller
+        control_model = schedule_manager.CONTROL_MODEL
         battery_settings = bess_controller.system.battery_settings
         current_hour = time_utils.now().hour
 
@@ -1616,10 +1636,11 @@ async def get_growatt_detailed_schedule():
                 hourly_settings = _get_hourly_settings_from_periods(
                     schedule_manager, hour
                 )
-                battery_mode = hourly_settings.get("batt_mode", "load_first")
-                mode_distribution[battery_mode] = (
-                    mode_distribution.get(battery_mode, 0) + 1
-                )
+                battery_mode = hourly_settings.get("batt_mode")
+                if battery_mode is not None:
+                    mode_distribution[battery_mode] = (
+                        mode_distribution.get(battery_mode, 0) + 1
+                    )
 
                 strategic_intent = hourly_settings.get("strategic_intent", "IDLE")
 
@@ -1656,8 +1677,21 @@ async def get_growatt_detailed_schedule():
                     {
                         "hour": hour,
                         "mode": "idle",
-                        "batt_mode": battery_mode,
-                        "batteryMode": battery_mode,
+                        **(
+                            {"batt_mode": battery_mode, "batteryMode": battery_mode}
+                            if battery_mode is not None
+                            else {}
+                        ),
+                        **(
+                            {
+                                "vpp_power_pct": hourly_settings["vpp_power_pct"],
+                                "vpp_remote_control": hourly_settings[
+                                    "vpp_remote_control"
+                                ],
+                            }
+                            if "vpp_power_pct" in hourly_settings
+                            else {}
+                        ),
                         "grid_charge": hourly_settings.get("grid_charge", False),
                         "discharge_rate": hourly_settings.get("discharge_rate", 100),
                         "dischargePowerRate": hourly_settings.get(
@@ -1687,8 +1721,14 @@ async def get_growatt_detailed_schedule():
                     {
                         "hour": hour,
                         "mode": "idle",
-                        "batt_mode": "load_first",
-                        "batteryMode": "load_first",  # Add alias for frontend compatibility
+                        **(
+                            {
+                                "batt_mode": "load_first",
+                                "batteryMode": "load_first",  # Add alias for frontend compatibility
+                            }
+                            if control_model == "tou_register"
+                            else {}
+                        ),
                         "grid_charge": False,
                         "discharge_rate": 100,
                         "dischargePowerRate": 100,  # Add alias
@@ -1713,27 +1753,28 @@ async def get_growatt_detailed_schedule():
         # Get period groups from schedule manager (15-minute resolution)
         period_groups = []
         try:
-            stored_schedule_for_today = (
-                bess_controller.system.schedule_store.get_latest_schedule()
-            )
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
             today_reconciled_intents: list[str] | None = None
-            if stored_schedule_for_today:
-                opt_result_today = stored_schedule_for_today.optimization_result
-                opt_period_today = stored_schedule_for_today.optimization_period
+            if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
                 planned_intents = schedule_manager.strategic_intents
                 today_reconciled_intents = []
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
                 for period_idx in range(today_period_count_local):
-                    data_idx = period_idx - opt_period_today
                     planned_intent = (
                         planned_intents[period_idx]
                         if planned_intents and period_idx < len(planned_intents)
                         else "IDLE"
                     )
-                    if 0 <= data_idx < len(opt_result_today.period_data):
-                        pd_today = opt_result_today.period_data[data_idx]
+                    pd_today = bess_controller.system.schedule_store.get_period_data_at(
+                        time_utils.period_index_to_timestamp(period_idx)
+                    )
+                    if pd_today is not None:
                         soe = pd_today.energy.battery_soe_end
                         today_soc_values.append(
                             (soe / battery_settings.total_capacity * 100.0)
@@ -1775,7 +1816,18 @@ async def get_growatt_detailed_schedule():
                     {
                         "start_time": group["start_time"],
                         "end_time": group["end_time"],
-                        "mode": group["mode"],
+                        **(
+                            {
+                                "vpp_power_pct": group["vpp_power_pct"],
+                                "vpp_remote_control": group["vpp_remote_control"],
+                            }
+                            if "vpp_power_pct" in group
+                            else (
+                                {"batt_mode": group["batt_mode"]}
+                                if "batt_mode" in group
+                                else {}
+                            )
+                        ),
                         "dominant_intent": group["intent"],
                         "intent_counts": {group["intent"]: group["period_count"]},
                         "period_count": group["period_count"],
@@ -1794,12 +1846,7 @@ async def get_growatt_detailed_schedule():
         # Extract tomorrow's period groups from ScheduleStore (same source as dashboard)
         tomorrow_period_groups: list[dict] | None = None
         try:
-            stored_schedule = (
-                bess_controller.system.schedule_store.get_latest_schedule()
-            )
-            if stored_schedule:
-                opt_result = stored_schedule.optimization_result
-                opt_period = stored_schedule.optimization_period
+            if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count = get_period_count(time_utils.today())
                 tomorrow_period_count = get_period_count(
                     time_utils.today() + timedelta(days=1)
@@ -1807,24 +1854,19 @@ async def get_growatt_detailed_schedule():
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
-                # Standalone next-day schedule: same anchor adjustment as dashboard.
-                is_next_day_only = (
-                    opt_period == 0
-                    and bool(opt_result.period_data)
-                    and opt_result.period_data[0].timestamp is not None
-                    and opt_result.period_data[0].timestamp.date()
-                    == time_utils.today() + timedelta(days=1)
-                )
-                period_data_anchor = (
-                    today_period_count if is_next_day_only else opt_period
-                )
+                # Resolved by exact timestamp (not positional index -
+                # optimization_period) so a standalone next-day schedule
+                # (period_data[0] anchored to tomorrow 00:00 despite
+                # optimization_period=0) is read correctly without needing
+                # to special-case its anchor.
                 for period_idx in range(
                     today_period_count,
                     today_period_count + tomorrow_period_count,
                 ):
-                    data_idx = period_idx - period_data_anchor
-                    if 0 <= data_idx < len(opt_result.period_data):
-                        pd = opt_result.period_data[data_idx]
+                    pd = bess_controller.system.schedule_store.get_period_data_at(
+                        time_utils.period_index_to_timestamp(period_idx)
+                    )
+                    if pd is not None:
                         tomorrow_intents.append(pd.decision.strategic_intent)
                         tomorrow_actions.append(pd.decision.battery_action or 0.0)
                         soe = pd.energy.battery_soe_end
@@ -1861,7 +1903,20 @@ async def get_growatt_detailed_schedule():
                             {
                                 "start_time": group["start_time"],
                                 "end_time": group["end_time"],
-                                "mode": group["mode"],
+                                **(
+                                    {
+                                        "vpp_power_pct": group["vpp_power_pct"],
+                                        "vpp_remote_control": group[
+                                            "vpp_remote_control"
+                                        ],
+                                    }
+                                    if "vpp_power_pct" in group
+                                    else (
+                                        {"batt_mode": group["batt_mode"]}
+                                        if "batt_mode" in group
+                                        else {}
+                                    )
+                                ),
                                 "dominant_intent": group["intent"],
                                 "intent_counts": {
                                     group["intent"]: group["period_count"]
@@ -1885,6 +1940,7 @@ async def get_growatt_detailed_schedule():
         response = {
             "current_hour": current_hour,
             "inverter_platform": inverter_platform,
+            "control_model": control_model,
             "tou_intervals": tou_intervals,
             "schedule_data": schedule_data,
             "period_groups": period_groups,
@@ -2234,6 +2290,15 @@ async def get_dashboard_health_summary():
         return convert_keys_to_camel_case(error_summary)
 
 
+def _get_missing_historical_hours(bess_controller) -> list[int]:
+    """Compute today's missing historical-data hours up to the current hour."""
+    periods = bess_controller.system.historical_store.get_today_periods()
+    current_hour = time_utils.now().hour
+    current_period = current_hour * 4
+    missing_periods = [i for i in range(current_period) if periods[i] is None]
+    return list({p // 4 for p in missing_periods})
+
+
 @router.get("/api/historical-data-status")
 async def get_historical_data_status():
     """Check if historical data is incomplete and needs attention.
@@ -2254,6 +2319,7 @@ async def get_historical_data_status():
                 "total_completed": 0,
                 "message": "System is starting up.",
                 "timestamp": datetime.now().isoformat(),
+                "dismissed": False,
             }
         )
 
@@ -2274,6 +2340,12 @@ async def get_historical_data_status():
         completed_hours = list({p // 4 for p in completed_periods})
 
         is_incomplete = len(missing_periods) > 0
+        dismissed = (
+            is_incomplete
+            and bess_controller.system.is_historical_data_warning_dismissed(
+                missing_hours
+            )
+        )
 
         status = {
             "is_incomplete": is_incomplete,
@@ -2288,12 +2360,34 @@ async def get_historical_data_status():
                 else "Historical data is complete for today."
             ),
             "timestamp": datetime.now().isoformat(),
+            "dismissed": dismissed,
         }
 
         return convert_keys_to_camel_case(status)
 
     except Exception as e:
         logger.error(f"Error checking historical data status: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.post("/api/historical-data-status/dismiss")
+async def dismiss_historical_data_warning():
+    """Dismiss today's historical-data-incomplete warning.
+
+    The dismissal is keyed to today's date and the exact set of missing
+    hours, so a new gap (or the same gap recurring on a later day) still
+    surfaces the banner.
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+
+    try:
+        missing_hours = _get_missing_historical_hours(bess_controller)
+        bess_controller.system.dismiss_historical_data_warning(missing_hours)
+        return {"success": True}
+    except Exception as e:
+        logger.error(f"Error dismissing historical data warning: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -2387,7 +2481,12 @@ async def get_savings_aggregate(
         resolved_count = count or DEFAULT_COUNTS[period]
 
         today_view = None
-        if period == "day" and target_date == time_utils.today():
+        if (
+            period == "day"
+            and target_date == time_utils.today()
+            and target_date.isoformat()
+            not in bess_controller.system.daily_view_store.list_available_dates()
+        ):
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             today_view = bess_controller.system.daily_view_builder.build_daily_view(
@@ -2710,6 +2809,16 @@ async def compare_two_snapshots(
             }
             period_comparisons.append(comparison)
 
+        def _interval_display_fields(interval: dict) -> dict:
+            if "vpp_power_pct" in interval:
+                return {
+                    "vpp_power_pct": interval["vpp_power_pct"],
+                    "vpp_remote_control": interval["vpp_remote_control"],
+                }
+            if "batt_mode" in interval:
+                return {"batt_mode": interval["batt_mode"]}
+            return {}
+
         # Build response
         response = {
             "snapshotAPeriod": period_a,
@@ -2720,7 +2829,7 @@ async def compare_two_snapshots(
             "growattScheduleA": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),
@@ -2730,7 +2839,7 @@ async def compare_two_snapshots(
             "growattScheduleB": [
                 {
                     "segmentId": i + 1,
-                    "battMode": interval["batt_mode"],
+                    **_interval_display_fields(interval),
                     "startTime": interval["start_time"],
                     "endTime": interval["end_time"],
                     "enabled": interval.get("enabled", True),
@@ -3180,14 +3289,19 @@ def _pricing_defaults_for_discovery(integrations: dict) -> dict:
 async def run_setup_discovery():
     """Run auto-discovery of inverter and pricing integrations.
 
-    Uses the HA entity registry (platform field) for robust integration
-    detection, then maps entity suffixes to BESS sensor keys.  When the
-    entity registry is unavailable (e.g. older HA Core versions without
-    WebSocket support), uses states-based prefix matching instead.
+    Inverter platforms are detected from the HA entity registry alone —
+    the ``platform`` field to identify the integration, then ``unique_id``
+    suffixes to map its entities onto BESS sensor keys.  Neither changes
+    when a user renames an entity, so there is no entity_id pattern
+    matching in this path.
+
+    ``/api/states`` is still read, but only for things the registry does
+    not carry: the HACS Nordpool area, Octopus/ENTSO-e price entities, and
+    phase-current sensors.
 
     Returns:
         dict: Discovery results including found sensors, missing sensors, and
-              integration metadata (device_sn, nordpool_area)
+              integration metadata (nordpool_area)
     """
     from app import bess_controller
 
@@ -3323,8 +3437,8 @@ async def run_setup_discovery():
         result = convert_keys_to_camel_case(
             {
                 "growatt_found": integrations["growatt_found"],
-                "device_sn": integrations["device_sn"],
                 "growatt_device_id": integrations["growatt_device_id"],
+                "huawei_device_id": integrations.get("huawei_device_id"),
                 "solax_found": integrations["solax_found"],
                 "solax_has_growatt_tou": integrations.get(
                     "solax_has_growatt_tou", False
@@ -3332,6 +3446,7 @@ async def run_setup_discovery():
                 "solax_has_growatt_gen3": integrations.get(
                     "solax_has_growatt_gen3", False
                 ),
+                "solis_found": integrations.get("solis_found", False),
                 "nordpool_found": integrations["nordpool_found"],
                 "nordpool_area": integrations["nordpool_area"],
                 "nordpool_custom_area": integrations.get("nordpool_custom_area"),
@@ -3388,12 +3503,14 @@ async def setup_complete(payload: APISetupCompletePayload):
             payload.nordpoolArea
             or payload.nordpoolConfigEntryId
             or payload.growattDeviceId
+            or payload.huaweiDeviceId
         ):
             bess_controller.apply_discovered_config(
                 sensor_map={},  # sensors already in sections — avoid double-write
                 nordpool_area=payload.nordpoolArea,
                 nordpool_config_entry_id=payload.nordpoolConfigEntryId,
                 growatt_device_id=payload.growattDeviceId,
+                huawei_device_id=payload.huaweiDeviceId,
             )
 
         # All sections use read-modify-write so that keys not managed by the wizard
@@ -3411,7 +3528,6 @@ async def setup_complete(payload: APISetupCompletePayload):
             "minSoc": "min_soc",
             "maxSoc": "max_soc",
             "cycleCost": "cycle_cost_per_kwh",
-            "minActionProfitThreshold": "min_action_profit_threshold",
         }
         if any(getattr(payload, f) is not None for f in _BATTERY_MAP) or (
             payload.maxChargeDischargePower is not None
@@ -3500,6 +3616,10 @@ async def setup_complete(payload: APISetupCompletePayload):
             inv_section["platform"] = _platform
             if payload.inverterControlMode is not None:
                 inv_section["control_mode"] = payload.inverterControlMode
+            if payload.inverterServiceDomain is not None:
+                inv_section["service_domain"] = payload.inverterServiceDomain
+            if payload.huaweiDeviceId:
+                inv_section["device_id"] = payload.huaweiDeviceId
             sections["inverter"] = inv_section
             if payload.growattDeviceId:
                 growatt_section = bess_controller.settings_store.get_section("growatt")
@@ -3538,8 +3658,11 @@ async def setup_complete(payload: APISetupCompletePayload):
         # payload.sensors: an inverter platform switch above also changes
         # which per-platform sensor sub-dict is active.
         bess_controller.refresh_active_sensors()
+        bess_controller.refresh_service_domain()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
+        if payload.huaweiDeviceId:
+            bess_controller.ha_controller.huawei_device_id = payload.huaweiDeviceId
 
         def _nn(d: dict) -> dict:
             """Strip None values so update() only overwrites explicitly provided fields."""
@@ -3557,7 +3680,6 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "max_charge_power_kw": payload.maxChargeDischargePower,
                     "max_discharge_power_kw": payload.maxChargeDischargePower,
                     "cycle_cost_per_kwh": payload.cycleCost,
-                    "min_action_profit_threshold": payload.minActionProfitThreshold,
                 }
             )
         if "home" in sections:

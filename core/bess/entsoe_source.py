@@ -117,6 +117,15 @@ class EntsoeSource(PriceSource):
                 ),
             )
 
+        if all(price == 0.0 for price in hourly_or_quarterly):
+            raise PriceDataUnavailableError(
+                date=target_date,
+                message=(
+                    f"'{attribute}' from {self.entity} is all-zero for "
+                    f"{target_date} — treating as not yet available"
+                ),
+            )
+
         quarterly_prices = self._expand_to_quarterly(hourly_or_quarterly, target_date)
 
         logger.info(

@@ -5,8 +5,7 @@
     "max_soc": 100,
     "max_charge_power_kw": 5.0,
     "max_discharge_power_kw": 5.0,
-    "cycle_cost_per_kwh": 0.4,
-    "min_action_profit_threshold": 0.0
+    "cycle_cost_per_kwh": 0.4
   },
   "electricity_price": {
     "area": "SE4",

@@ -44,6 +44,11 @@ def controller(battery_settings: BatterySettings) -> SolaxController:
     return SolaxController(battery_settings=battery_settings)
 
 
+@pytest.fixture
+def solax_controller(battery_settings: BatterySettings) -> SolaxController:
+    return SolaxController(battery_settings=battery_settings)
+
+
 # ── Active TOU intervals ──────────────────────────────────────────────────────
 
 
@@ -57,33 +62,33 @@ class TestActiveTouIntervals:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         assert controller.active_tou_intervals == []
 
 
-# ── create_schedule ───────────────────────────────────────────────────────────
+# ── apply_intents ───────────────────────────────────────────────────────────
 
 
-class TestCreateSchedule:
-    def test_strategic_intents_stored_after_create_schedule(
+class TestApplyIntents:
+    def test_strategic_intents_stored_after_apply_intents(
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         assert controller.strategic_intents == intents
 
-    def test_current_schedule_stored_after_create_schedule(
+    def test_current_schedule_stored_after_apply_intents(
         self, controller: SolaxController
     ) -> None:
         schedule = make_schedule_mock(["IDLE"] * 96)
-        controller.create_schedule(schedule)
+        controller.apply_intents(schedule)
 
         assert controller.current_schedule is schedule
 
 
-# ── write_schedule_to_hardware ────────────────────────────────────────────────
+# ── write_to_hardware ────────────────────────────────────────────────
 
 
 class TestWriteScheduleToHardware:
@@ -91,7 +96,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        writes, disables = controller.write_schedule_to_hardware(mock_hw, 0, [])
+        writes, disables = controller.write_to_hardware(mock_hw, 0, [])
 
         assert writes == 0
         assert disables == 0
@@ -100,7 +105,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        controller.write_schedule_to_hardware(mock_hw, 0, [])
+        controller.write_to_hardware(mock_hw, 0, [])
 
         mock_hw.assert_not_called()
 
@@ -229,68 +234,45 @@ class TestWritePeriodToHardwareDischarge:
         mock_hw.set_solax_active_power_control.assert_not_called()
 
 
-# ── compare_schedules ─────────────────────────────────────────────────────────
+# ── evaluate_intents ──────────────────────────────────────────────────────────
 
 
-class TestCompareSchedules:
-    def test_empty_schedules_do_not_differ(
-        self, controller: SolaxController, battery_settings: BatterySettings
+class TestEvaluateIntentsSolax:
+    def test_no_change_when_intents_identical(
+        self, controller: SolaxController
     ) -> None:
-        other = SolaxController(battery_settings=battery_settings)
-        differ, _ = controller.compare_schedules(other)
-        assert not differ
+        intents = make_intents({2: "GRID_CHARGING"})
+        controller.apply_intents(make_schedule_mock(intents), current_period=0)
 
-    def test_identical_schedules_do_not_differ(
-        self, controller: SolaxController, battery_settings: BatterySettings
+        differs, _ = controller.evaluate_intents(make_schedule_mock(intents))
+
+        assert differs is False
+
+    def test_detects_change_when_intents_differ(
+        self, controller: SolaxController
     ) -> None:
-        intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        schedule = make_schedule_mock(intents)
-        controller.create_schedule(schedule)
-
-        other = SolaxController(battery_settings=battery_settings)
-        other.create_schedule(schedule)
-
-        differ, _ = controller.compare_schedules(other)
-        assert not differ
-
-    def test_different_intents_are_detected(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        controller.create_schedule(
-            make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+        controller.apply_intents(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING"})), current_period=0
         )
 
-        other = SolaxController(battery_settings=battery_settings)
-        other.create_schedule(make_schedule_mock(make_intents({4: "GRID_CHARGING"})))
+        differs, reason = controller.evaluate_intents(
+            make_schedule_mock(make_intents({10: "BATTERY_EXPORT"}))
+        )
 
-        differ, reason = controller.compare_schedules(other)
-        assert differ
+        assert differs is True
         assert reason
 
-    def test_from_period_skips_earlier_differences(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        # Period 0-3 differs, but compare_schedules starts at period 8 → no diff
-        intents_a = ["GRID_CHARGING"] * 4 + ["IDLE"] * 92
-        intents_b = ["IDLE"] * 96
+    def test_respects_from_period(self, controller: SolaxController) -> None:
+        controller.apply_intents(
+            make_schedule_mock(make_intents({0: "GRID_CHARGING"})), current_period=0
+        )
 
-        controller.strategic_intents = intents_a
+        # Period 0-3 differs, but evaluate_intents starts at period 8 -> no diff
+        differs, _ = controller.evaluate_intents(
+            make_schedule_mock(make_intents({})), current_period=8
+        )
 
-        other = SolaxController(battery_settings=battery_settings)
-        other.strategic_intents = intents_b
-
-        differ, _ = controller.compare_schedules(other, from_period=8)
-        assert not differ
-
-    def test_different_length_intents_report_difference(
-        self, controller: SolaxController, battery_settings: BatterySettings
-    ) -> None:
-        controller.strategic_intents = ["IDLE"] * 96
-        other = SolaxController(battery_settings=battery_settings)
-        other.strategic_intents = ["IDLE"] * 48
-
-        differ, _ = controller.compare_schedules(other)
-        assert differ
+        assert differs is False
 
 
 # ── sync_soc_limits ───────────────────────────────────────────────────────────
@@ -328,6 +310,22 @@ class TestSyncSocLimits:
         controller.sync_soc_limits(mock_hw)
 
         mock_hw.set_solax_min_soc.assert_not_called()
+
+
+# ── initialize_hardware ────────────────────────────────────────────────────────
+
+
+class TestInitializeHardware:
+    def test_initialize_hardware_syncs_soc_limits(
+        self, controller: SolaxController, battery_settings: BatterySettings
+    ) -> None:
+        mock_hw = MagicMock()
+        mock_hw.get_solax_power_control_mode.return_value = "Self Use Mode"
+        mock_hw.get_solax_min_soc.return_value = int(battery_settings.min_soc) + 1
+
+        controller.initialize_hardware(mock_hw)
+
+        mock_hw.set_solax_min_soc.assert_called_once_with(int(battery_settings.min_soc))
 
 
 # ── check_health ──────────────────────────────────────────────────────────────
@@ -386,7 +384,7 @@ class TestGetAllTouSegments:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         segments = controller.get_all_tou_segments()
 
@@ -398,16 +396,62 @@ class TestGetAllTouSegments:
         self, controller: SolaxController
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING"})
-        controller.create_schedule(make_schedule_mock(intents))
+        controller.apply_intents(make_schedule_mock(intents))
 
         segments = controller.get_all_tou_segments()
         required_fields = {
             "segment_id",
             "start_time",
             "end_time",
-            "batt_mode",
+            "vpp_power_pct",
+            "vpp_remote_control",
             "enabled",
         }
 
         for segment in segments:
             assert required_fields.issubset(segment.keys())
+
+    def test_get_all_tou_segments_solar_export_reflects_self_use_not_a_hold(
+        self, solax_controller
+    ) -> None:
+        solax_controller.strategic_intents = ["SOLAR_EXPORT"] * 4
+        solax_controller.current_schedule = None
+        segments = solax_controller.get_all_tou_segments()
+        assert len(segments) == 1
+        segment = segments[0]
+        assert "batt_mode" not in segment
+        assert segment["vpp_power_pct"] == 0
+        assert segment["vpp_remote_control"] is False  # SolaX's real (unfixed) behavior
+
+
+# ── _vpp_display_state ────────────────────────────────────────────────────────
+
+
+class TestVppDisplayState:
+    """_vpp_display_state must mirror _write_period_to_hardware exactly —
+    same three branches, same sign convention (power_pct as percent of
+    max, matching the discharge_rate parameter it's built from)."""
+
+    def test_grid_charge_shows_full_positive_power_remote_enabled(
+        self, solax_controller
+    ):
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=True, discharge_rate=0
+        )
+        assert (power_pct, remote_control) == (100, True)
+
+    def test_discharge_shows_negative_power_remote_enabled(self, solax_controller):
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=False, discharge_rate=60
+        )
+        assert (power_pct, remote_control) == (-60, True)
+
+    def test_idle_shows_zero_power_remote_disabled(self, solax_controller):
+        """Matches _write_period_to_hardware's `set_solax_vpp_disabled()`
+        branch (grid_charge=False, discharge_rate=0) -- self-use passthrough,
+        NOT a grid-first hold. SolaX has no block_passive_charging
+        equivalent (see TODO.md gap note)."""
+        power_pct, remote_control = solax_controller._vpp_display_state(
+            grid_charge=False, discharge_rate=0
+        )
+        assert (power_pct, remote_control) == (0, False)

@@ -13,20 +13,27 @@ communication.
 | Growatt SPH (Cloud) | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods | — |
 | Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
+| Solis (EXPERIMENTAL) | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
+| Huawei LUNA2000 (Local) | Huawei LUNA2000 | [huawei_solar](https://github.com/wlcrs/huawei_solar) | Local Modbus | TOU period-list writes | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
 > Growatt plugin classifies inverters by generation. GEN4 = MIN/MOD/MID/TL-X
 > (AC-coupled, numbered TOU slots). GEN3 = MIX/SPA/SPH (DC-coupled, mode-specific
 > time slots). BESS detects the generation automatically from entity markers.
 
+> **Why `solis_modbus` and not `solax_modbus` for Solis:** `solax_modbus`
+> (the `wills106` project) advertises multi-brand support but does **not**
+> support Solis inverters in practice, so
+> [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus) — a
+> separate, dedicated integration domain — is the only viable local-Modbus
+> option for Solis.
+
 ## Inverter Integration Patterns
 
 Inverter control is **not** a single flat list of patterns — it is **two
-orthogonal axes** plus a shared vocabulary of control primitives. (This mirrors
-how cross-inverter optimizers like Predbat abstract ~20 brands: a *transport*
-capability set × a *common control vocabulary*, not a per-brand enumeration.)
-Adding a new inverter means placing it on both axes and listing which primitives
-it supports — that determines which existing controller to model on and how much
+orthogonal axes** plus a shared vocabulary of control primitives. Adding a new
+inverter means placing it on both axes and listing which primitives it
+supports — that determines which existing controller to model on and how much
 is new.
 
 ### Axis 1 — Transport (how commands reach the inverter)
@@ -35,7 +42,7 @@ is new.
 |-----------|-------------------|-----------|-------------------|---------------------|
 | **TX-Cloud** | `growatt_server` | Vendor cloud API via HA **service calls** | ✅ | `GrowattMinController`, `GrowattSphController` |
 | **TX-Modbus** | `solax_modbus` (multi-brand: SolaX, Solis, Growatt, Sofar, AlphaESS, …) | Local Modbus **entity writes** (select/number/button) | ✅ | `SolaxModbusGrowattController`, `SolaxController` |
-| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes **+** ephemeral **service calls** (`forcible_charge`) | ❌ not yet | *(would model on `SolaxController` for the ephemeral half)* |
+| **TX-Vendor-service** | `huawei_solar` (and similar) | Local vendor integration: entity writes to persistent **TOU period lists** gated by working-mode select | ✅ | `HuaweiController` |
 | **TX-REST / TX-MQTT** | GivTCP, Solar Assistant, Sofar2mqtt | REST API / MQTT | ❌ not planned | — |
 
 `solax_modbus` is a **generic transport**, not a Growatt thing — the same channel
@@ -46,9 +53,9 @@ serves SolaX, Solis, Growatt, Sofar, etc. via per-brand register/entity names.
 | Scheduling model | Description | Implemented example |
 |------------------|-------------|---------------------|
 | **SM-TOU-numbered** | Persistent **numbered** TOU slots (start/end/mode) | Growatt MIN (cloud & GEN4 single-segment) |
-| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud) |
+| **SM-Period-lists** | Persistent **charge/discharge period lists** (≤N each), power/SOC in the write | Growatt SPH (cloud), Huawei LUNA2000 (local) |
 | **SM-Mode-slots** | Persistent **mode-specific** time slots | Growatt MIX/SPH GEN3 (monitoring-only today) |
-| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP; Huawei `forcible_charge` would land here |
+| **SM-Ephemeral** | **No persistent schedule** — push a duration-bounded command that auto-expires | SolaX VPP, Growatt VPP (GEN3+GEN4, experimental) |
 
 ### Common control primitives (the shared vocabulary)
 
@@ -58,7 +65,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 **reserve / discharge-stop SOC** · **charge rate** · **discharge rate** ·
 **grid-charge enable**.
 
-### The five existing platforms as coordinates
+### The six platforms as coordinates
 
 | Platform | Transport | Scheduling model | Controller | Detection marker / service | Suffix map |
 |----------|-----------|------------------|------------|----------------------------|-----------|
@@ -67,43 +74,47 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solax_modbus_growatt_min` | TX-Modbus | SM-TOU-numbered (single-segment) | `SolaxModbusGrowattController` | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`) | `SOLAX_GROWATT_MIN_SUFFIX_MAP` |
 | `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
 | `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
+| `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
+| `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
 
-### Worked examples for new inverters
+### Bring-your-own integration
 
-- **Solis** (issue #130) — same **scheduling model** (persistent timed
-  charge/discharge slots + charge/discharge current) regardless of integration,
-  but Solis has several HA integrations across **both** transports. We support
-  **one of two** (chosen per the reporter's actual setup; **`solax_modbus` is the
-  default priority** because we already support that transport):
-  - **`solax_modbus`** (TX-Modbus, local; 491★ multi-brand, the community
-    standard) → **most additive**: new `SolisController` + `SOLIS_SUFFIX_MAP` + a
-    detection branch **before** the `solax_modbus_native` fallback. No new
-    transport, no ABC change.
-  - **`solis-cloud-control`** (TX-Cloud, SolisCloud Control API; easiest
-    onboarding, no wiring, but a young integration) → adds a **new TX-Cloud
-    domain** (detection branch + cloud service helpers), like Growatt cloud.
-    Treat as **experimental**.
+BESS reaches your inverter through whatever Home Assistant integration you
+have installed. It is not bound to the specific integration named in the
+table above — that column records what the platform was built against, not
+a requirement. If the usual integration can't reach your hardware, or you
+run a different one that talks to it, BESS can be pointed at that instead.
 
-  *Not supported:* `solis-sensor` (monitoring-only) and `Pho3niX90/solis_modbus`
-  (redundant with `solax_modbus`'s local niche). **Decision: ask the reporter
-  which of the two they run, implement that one, default to `solax_modbus`.**
-- **Huawei** = **TX-Vendor-service (NEW)** × SM-Ephemeral (`forcible_charge`,
-  plus a persistent TOU working-mode). Needs a new `huawei_solar` transport
-  branch in detection + a `forcible_charge` service helper + a `HuaweiController`
-  modeled on `SolaxController`. **Additive, but the first platform to use a third
-  integration** (touches the detection dispatch).
+**The case this exists for — Huawei behind an EMMA energy manager.** Where
+a third party owns the Modbus TCP socket, [`wlcrs/huawei_solar`](https://github.com/wlcrs/huawei_solar)
+cannot connect to the inverter at all.
+[`valexi7/Huawei-Modbus-TLS-Server`](https://github.com/valexi7/Huawei-Modbus-TLS-Server)
+gets there through EMMA and exposes the same `set_tou_periods` service
+under its own domain, so BESS drives such an install as an ordinary
+`huawei_solar_luna2000` platform with one setting changed.
 
-> **Both axes new?** A coordinate that needs a **new transport AND a new
-> scheduling model** is the expensive case. The safe interim for any new inverter
-> is **monitoring-only** (detection + sensors, no schedule control), as Growatt
-> GEN3 currently is.
+What has to line up:
 
-> **Note on the controller ABC:** `InverterController`'s method names are
-> TOU-centric (`get_all_tou_segments`, `get_daily_TOU_settings`,
-> `log_current_TOU_schedule`) and `_write_period_to_hardware` defaults to the
-> Growatt register interface. SM-Ephemeral inverters (SolaX today, Huawei later)
-> implement these by synthesizing "segments." It works; renaming to neutral terms
-> is an optional future cleanup, not a prerequisite.
+- **The vendor service call.** Growatt Cloud and Huawei are the only
+  platforms with one (see Axis 1). Your integration must expose that same
+  service, with the same signature, under its own domain — set
+  `inverter.service_domain` to that domain. The exact signatures are in the
+  Growatt Cloud and Huawei LUNA2000 sections below. TX-Modbus platforms
+  (Growatt Local, SolaX, Solis) have no vendor service at all: control
+  there is plain `number`/`select`/`switch` entity writes, so only the
+  entities below matter.
+- **The entities.** Auto-discovery only recognizes the integration domains
+  in the table above, so map the sensors — and, for Huawei, the battery
+  Device ID — by hand under Settings → Integrations & Sensors.
+- **Optional entities may legitimately be missing.** Huawei's working-mode
+  select is the example: EMMA owns the mode, so nothing maps it. BESS then
+  skips both the mode write and the LUNA2000-vs-LG-RESU battery check, logs
+  that it did, and the health check reports WARNING rather than OK.
+
+BESS cannot test against an integration it doesn't ship support for, so any
+such setup is experimental by definition. If your inverter has no matching
+platform at all — a scheduling model BESS doesn't implement — configuration
+can't bridge that; open an issue describing what it needs.
 
 ## How BESS Controls Each Platform
 
@@ -164,6 +175,35 @@ register (`total_load` is GEN3, `home_consumption_energy` is SPF). BESS
 derives `lifetime_load_consumption` as `solar + grid_import − grid_export`.
 `total_yield` maps to `lifetime_system_production`.
 
+### Export-limit curtailment (GEN2/GEN3/GEN4) — *(optional, opt-in)*
+
+Registers 122/123 via the solax_modbus Growatt plugin — verified against
+`plugin_growatt.py` SELECT_TYPES/NUMBER_TYPES (`allowedtypes=GEN2|GEN3|GEN4`),
+so this is available on both GEN3 and GEN4 hardware, not GEN4-only. Requires
+a grid CT/smart meter; disabled (`BatterySettings.export_curtailment_enabled
+= False`) by default.
+
+When enabled and a period is exporting solar surplus at a sell price below
+`export_curtailment_price_floor`, BESS writes:
+```
+select.select_option(entity: limit_grid_export, option: "Meter 1")
+number.set_value(entity: grid_export_limit, value: 0)
+```
+This throttles PV/MPPT production at the panel via the CT meter's real-time
+export reading — genuine supply-side curtailment, not just a downstream cap
+that gets bypassed once the battery is full. Confirmed by a real user's live
+test (Meter 1 + 0% dropped measured export to 0W within seconds). Once the
+period's sell price is no longer below the floor, BESS releases the limit
+with `select.select_option(entity: limit_grid_export, option: "Disabled")`
+only — the percentage register is left untouched on release (its negative
+range means "allow this much import," never written by BESS).
+
+The decision is platform-agnostic (`grid_exported > 0 AND sell_price <
+floor`, independent of strategic intent) but the actuation itself is
+gated by the `supports_export_limit_control` capability flag — currently
+only `SolaxModbusGrowattController` implements it. `growatt_server` (cloud)
+has no equivalent HA service to hook into and stays a safe no-op.
+
 ### Growatt MIX/SPH (Local) — `growatt_solax_modbus_gen3` (GEN3)
 
 GEN3 models (MIX/SPA/SPH) connected via the solax_modbus Growatt plugin.
@@ -211,15 +251,35 @@ Verified against `wills106/homeassistant-solax-modbus`'s
 | `growatt_vpp_time` | number | 30408 | Fallback timer, minutes — reset every active period; reverts inverter to `load_first` on its own if BESS stops writing |
 | `growatt_vpp_power` | number | 30409 | Power target, -100..100% (negative=discharge/export, positive=charge) |
 
-**Intent → VPP mapping** (mirrors `SolaxController`, plus a
+**Intent → VPP mapping** (originally mirrored `SolaxController`; `LOAD_SUPPORT`
+has since diverged — see "LOAD_SUPPORT semantics" below — plus a
 `block_passive_charging` distinction at rate=0 — see "SOLAR_EXPORT
 semantics" below):
 - `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
-- `LOAD_SUPPORT`/`BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
-- `SOLAR_STORAGE`/`IDLE` (rate=0, `block_passive_charging=False`) → remote
+- `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
+- `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
+  regardless of `discharge_rate` (releases to `load_first` self-use — see
+  "LOAD_SUPPORT semantics" below)
+- `SOLAR_STORAGE` (rate=0, `block_passive_charging=False`) → remote
   control disabled (`load_first`/self-use — battery may absorb solar surplus)
+- `IDLE` (rate=0) → `vpp_power=+1%`, remote control **enabled**
+  (`battery_first` hold — see "IDLE semantics" below)
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
   remote control **enabled** (`grid_first` hold)
+
+**LOAD_SUPPORT semantics (fixed — issue [#413](https://github.com/johanzander/bess-manager/issues/413)):**
+Unlike TOU mode (where `LOAD_SUPPORT` maps to `load_first`, letting the
+inverter's own control loop follow actual house load), VPP mode previously
+forced `LOAD_SUPPORT` into the same branch as `BATTERY_EXPORT` — a fixed
+`grid_first` discharge percentage, immune to real load. Since `grid_first`'s
+power value is an immediate forced command rather than a load-following
+ceiling, this caused unnecessary grid imports/exports whenever the DP's
+average-power discharge rate for the period didn't match the real,
+fluctuating house load. `LOAD_SUPPORT` now disables `vpp_remote_control`
+outright, falling back to the inverter's native `load_first` self-consumption
+— the VPP-mode equivalent of TOU's `load_first` mapping. Reported
+independently by two real-hardware testers (Growatt MIN, control_mode=vpp)
+on issue [#118](https://github.com/johanzander/bess-manager/issues/118).
 
 **SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
 The Growatt VPP protocol
@@ -264,6 +324,29 @@ already-proven precedent to lean on).
 architectural gap but is **not** fixed here — no SolaX vendor protocol has
 been verified the way the Growatt spec was, so extending this fix there
 would be speculation, not a verified command. Tracked as a follow-up.
+
+**IDLE semantics (fixed — issue [#466](https://github.com/johanzander/bess-manager/issues/466)):**
+`IDLE` previously mapped to the same `remote_control=Disabled` → native
+`load_first` self-use as `SOLAR_STORAGE`. That is wrong for IDLE
+specifically: `load_first` self-use discharges the battery to cover house
+load before drawing from grid, but the DP's own cost model for IDLE periods
+(`_idle_battery_flows` in `dp_battery_algorithm.py`) never credits the
+battery discharging — it only ever models passive solar absorption
+(charging). A real overnight IDLE period therefore drained the battery for
+house load in a way the optimizer's schedule never priced for. Confirmed by
+a real-hardware report (Growatt MIN, control_mode=vpp) on issue #466.
+
+The `grid_first` hold used for `SOLAR_EXPORT` above is **not** a fix for
+this: per issue #118's real-hardware testing, `grid_first`
+(`vpp_power<=0`, remote control enabled) still draws self-consumption from
+the battery — it only stops the battery *absorbing* solar, not discharging
+for load. Only `battery_first` (`vpp_power>0`) releases self-consumption to
+grid/solar. `IDLE` now maps to `remote_control=Enabled`, `vpp_power=+1`
+(the minimal `battery_first` magnitude) instead. **Not yet
+real-hardware-validated**: ships experimental pending confirmation that this
+doesn't cause any grid-charge creep overnight (`vpp_power>0` is the same
+mechanism `GRID_CHARGING` uses at `+100%` to force-charge from grid, just at
+a 1% target).
 
 **Enable sequence** (real-hardware-tested, see issue #118 comments): write
 `vpp_status=Enabled` + `vpp_allow_ac_charging=Enabled`, wait ~1s, then write
@@ -325,6 +408,109 @@ button.press(trigger)
 ```
 
 **Idle/solar mode:** Disables VPP, inverter reverts to self-use.
+
+### Solis — `solis_modbus` (EXPERIMENTAL)
+
+Solis hybrids, connected via the community
+[`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
+integration (verified against release v4.1.6), share Growatt SPH's
+**SM-Period-lists** scheduling model — separate charge and discharge period
+lists — but Solis's "Grid Time of Use v2" schedule supports **6 charge
+periods and 6 discharge periods** (not SPH's 3+3), and each period is written
+directly to HA `time`/`switch` entities rather than via a cloud service call.
+Credit: based on SA7BNT's research and initial implementation in
+bess-manager-beta [PR #51](https://github.com/johanzander/bess-manager-beta/pull/51).
+
+**Schedule writes:** one `time.set_value` call for each slot's start and end,
+plus one `switch.turn_on`/`turn_off` for its enable bit — for all 6 charge
+slots and all 6 discharge slots, every time (full rewrite, unused slots get
+`00:00-00:00` + disabled):
+```
+time.set_value(entity: solis_charge_start_N, time: "HH:MM:00")
+time.set_value(entity: solis_charge_end_N,   time: "HH:MM:00")
+switch.turn_on/turn_off(entity: solis_charge_enable_N)
+# ...and the same for solis_discharge_{start,end,enable}_N, N = 1..6
+```
+
+**Per-period control:** none — Solis has no per-period charge/discharge rate
+register exposed by solis_modbus (`supports_charge_rate_control = False`,
+same limitation as SPH).
+
+**Verified integration bug (source-cited):** `SolisSensorGroup.__init__`
+(`sensors/solis_base_sensor.py:254`) calls
+`unique_id_generator(controller, entity)` — passing the **entire entity
+definition dict** instead of `entity["unique"]`. This means most read-only
+sensors and all "editable" number entities (per-slot TOU current/cutoff-SOC,
+global charge/discharge stop SOC) get a `unique_id` containing the Python
+`repr()` of their whole definition dict, e.g. ``solis_modbus_SN123_{'name':
+'Battery SOC', ..., 'unique': 'solis_modbus_inverter_battery_soc', ...}`` —
+not a clean, `endswith()`-matchable suffix. Present in v4.1.6 (stable) and
+unchanged on the integration's HEAD as of 2026-07-05. BESS works around this
+with a **Solis-only** substring matcher
+(`_match_solis_dict_embedded_entities` in `ha_api_controller.py`) that
+checks for the verified `'unique': '<key>'` fragment — this never touches
+the shared `_map_registry_entities` suffix matching every other platform
+uses. TOU period times (`time.py`) and per-slot enable switches
+(`solis_binary_sensor.py`) go through the integration's *correct*
+`unique_id_generator` call and are matched normally.
+
+**Known gaps in this first pass:**
+- Global charge/discharge stop SOC ("Max Charge SOC" / "Overdischarge SOC")
+  are affected by the same dict-embedded-unique_id bug and have no verified
+  write path yet — `sync_soc_limits()` is an explicit no-op, not a silent
+  fallback.
+- `pv_power` maps to PV string 1 only (`dc_power_1`); Solis hybrids with
+  multiple MPPT strings will under-report total PV power until a summed
+  sensor is added.
+- `import_power` and `export_power` both resolve to the single signed "Grid
+  Power Net" sensor (Solis exposes no separate import/export power
+  entities); `export_power` is left unconfigured by auto-discovery since one
+  suffix-map entry can only resolve to one BESS sensor key.
+
+### Huawei LUNA2000 (Local) — `huawei_solar_luna2000`
+
+Huawei LUNA2000 batteries use a persistent charge/discharge period list (max
+14 periods) gated behind the working-mode select entity. BESS writes a combined
+list with separate charge and discharge periods, each specifying a time range
+and the number of periods effective.
+
+**Schedule writes:** Single HA service call with atomically-deployed charge/discharge lists:
+```
+huawei_solar.set_tou_periods(device_id, charge_periods, discharge_periods, working_mode_settings="time_of_use_luna2000")
+```
+
+The service call is gated by a preflight check verifying the battery model via
+`get_huawei_working_mode_options()` — **LUNA2000 only**; LG RESU batteries are
+explicitly not supported (they use a price-bidding TOU format incompatible with
+BESS's optimization model).
+
+**When no working-mode entity is mapped**, that whole gate is skipped: BESS
+neither sets the working mode nor verifies the battery family, and logs both.
+This is the expected shape for an install behind an energy manager (EMMA),
+where the manager owns the mode. The health check reports WARNING rather than
+OK for such an install, since BESS is then trusting the operator's platform
+choice instead of checking it.
+
+**Compatible integrations under another domain.** This `set_tou_periods` call
+targets whichever domain `inverter.service_domain` resolves to (default
+`huawei_solar`) — see "Bring-your-own integration" above for when and how to
+change it.
+
+**Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
+discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.
+Periods without an explicit flag (SOLAR_STORAGE, SOLAR_EXPORT, IDLE) use the
+inverter's default self-consumption mode.
+
+**Per-period control:** None — all control (power, SOC limits, working mode) is
+embedded in the service call parameters or requires manual inverter
+configuration.
+
+**Note on open items:** The LUNA2000's `days_effective` digit convention
+(mapping "1234567" to day-of-week slots) and out-of-period battery behavior
+remain unverified on real hardware — currently specified per the `huawei_solar`
+integration's source code (`services.py`). See
+[`docs/superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md`](superpowers/specs/2026-07-22-issue-120-huawei-inverter-platform-design.md)
+for design rationale and open items.
 
 ---
 
@@ -442,6 +628,13 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_system_production` | `total_yield` | GEN4 register 3077 |
 | `lifetime_load_consumption` | — | **No native register.** BESS derives: solar + grid_import − grid_export |
 
+**Export-limit curtailment (GEN4, optional):**
+
+| BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
+|-----------------|-------------|---------------------|---------|
+| `growatt_export_limit_mode` | select | `limit_grid_export` | Meter/CT selection (Disabled/Meter 1/Meter 2/CT Clamp), register 122 |
+| `growatt_export_limit_value` | number | `grid_export_limit` | Export limit percentage, register 123 |
+
 ### Growatt MIX/SPH (Local) — GEN3 — `solax_modbus` Growatt plugin
 
 **Monitoring and EMS control (GEN3):**
@@ -472,6 +665,10 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_export_to_grid` | `total_grid_export` | Register 1050 |
 | `lifetime_load_consumption` | `total_load` | Register 1062 |
 | `lifetime_system_production` | — | **No native register.** BESS derives from `lifetime_solar_energy` |
+
+**Export-limit curtailment (GEN3, optional):** same registers/entities as
+GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
+`plugin_growatt.py` marks these `allowedtypes=GEN2|GEN3|GEN4`, not GEN4-only.
 
 ### SolaX — `solax_modbus` integration (native)
 
@@ -510,6 +707,71 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `solax_battery_min_soc` | number | `battery_minimum_capacity` | Min battery SOC (%) |
 | `solax_charger_use_mode` | select | `charger_use_mode` | Charger use mode (optional) |
 
+### Solis — `solis_modbus` integration (EXPERIMENTAL)
+
+**Monitoring:**
+
+| BESS Sensor Key | Entity Type | solis_modbus unique_id (verified) | Purpose |
+|-----------------|-------------|-----------------------------------|---------|
+| `battery_soc` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_battery_soc'` | Current battery level |
+| `battery_charge_power` | sensor | `solis_modbus_inverter_battery_charge_power` (derived, clean) | Charge power (W) |
+| `battery_discharge_power` | sensor | `solis_modbus_inverter_battery_discharge_power` (derived, clean) | Discharge power (W) |
+| `import_power` / `export_power` | sensor | `solis_modbus_inverter_grid_power_net` (derived, clean, signed) | Net grid power (W); only `import_power` is auto-mapped |
+| `pv_power` | sensor | `solis_modbus_inverter_dc_power_1` (derived, clean) | PV string 1 power (W) — see known gaps above |
+| `local_load_power` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_household_load_power'` | Home consumption (W) |
+
+**Lifetime energy (optional, all dict-embedded — see "Verified integration bug" above):**
+
+| BESS Sensor Key | solis_modbus `unique` key | Notes |
+|-----------------|---------------------------|-------|
+| `lifetime_battery_charged` | `solis_modbus_inverter_total_battery_charge_energy` | |
+| `lifetime_battery_discharged` | `solis_modbus_inverter_total_battery_discharge_energy` | |
+| `lifetime_solar_energy` | `solis_modbus_inverter_pv_total_generation` | |
+| `lifetime_import_from_grid` | `solis_modbus_inverter_total_energy_imported_from_grid` | |
+| `lifetime_export_to_grid` | `solis_modbus_inverter_total_energy_fed_into_grid` | |
+
+**Grid Time of Use v2 schedule (required, 6 charge + 6 discharge slots):**
+
+| BESS Sensor Key | Entity Type | solis_modbus unique_id | Purpose |
+|-----------------|-------------|-------------------------|---------|
+| `solis_charge_start_N` (N=1-6) | time | `time_entity_{register}` (registers 43711/43718/43725/43732/43739/43746) | Charge slot N start |
+| `solis_charge_end_N` | time | `time_entity_{register}` (43713/43720/43727/43734/43741/43748) | Charge slot N end |
+| `solis_charge_enable_N` | switch | `{register}_{bit}` = `43707_0`..`43707_5` | Charge slot N enable |
+| `solis_discharge_start_N` | time | `time_entity_{register}` (43753/43760/43767/43774/43781/43788) | Discharge slot N start |
+| `solis_discharge_end_N` | time | `time_entity_{register}` (43755/43762/43769/43776/43783/43790) | Discharge slot N end |
+| `solis_discharge_enable_N` | switch | `{register}_{bit}` = `43707_6`..`43707_11` | Discharge slot N enable |
+
+Only slot 1 of each direction is strictly required; slots 2-6 are optional
+(unused slots are simply left disabled by BESS).
+
+### Huawei LUNA2000 (Local) — `huawei_solar` integration
+
+**Monitoring and schedule control:**
+
+| BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
+|-----------------|-------------|---------------------|---------|
+| `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
+| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
+| `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
+| `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |
+| `battery_discharge_stop_soc` | number | `storage_grid_charge_cutoff_state_of_charge` | Discharge stop SOC (%) |
+| `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
+| `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
+| `local_load_power` | sensor | `active_power` | Home consumption (W) |
+
+**Lifetime energy (optional):**
+
+The `huawei_solar` integration does not expose lifetime energy counters for BESS's
+standard usage (battery input/output, solar production, grid import/export). Custom
+register reads via a separate Modbus probe are required; this is not yet
+integrated into BESS.
+
+**Auto-detection:** Presence of `huawei_solar` integration entities with the
+`storage_working_mode_settings` unique_id suffix triggers Huawei platform
+detection; the setup wizard confirms the battery model is LUNA2000 via
+`get_huawei_working_mode_options()` before proceeding.
+
 ---
 
 ## Auto-Detection
@@ -530,6 +792,18 @@ registry:
    not `entity_id` (built from display `name`). For Growatt TOU entities the
    unique_id ends with `time_1_enabled` even though the entity_id contains
    `time_1_active`.
+
+3. **solis_modbus detected** (`platform: solis_modbus`, its own dedicated
+   integration domain — no sub-variant disambiguation needed): confirmed
+   further by checking for the `time_entity_43711` unique_id suffix (Grid
+   Time of Use v2 Charge Start, Slot 1) — if absent, the installed
+   inverter/firmware lacks the v2 schedule and schedule control is
+   unavailable (monitoring sensors are still mapped).
+
+4. **huawei_solar detected** (`platform: huawei_solar`):
+   - If `storage_working_mode_settings` unique_id suffix found → Probe `get_huawei_working_mode_options(device_id)` to verify LUNA2000 model
+   - If confirmed LUNA2000 → **Huawei LUNA2000 (Local)**
+   - Else (LG RESU or other unsupported model) → **Not supported**
 
 If multiple platforms are detected (e.g. both Growatt and SolaX entities
 exist), the Settings page under Integrations & Sensors → Inverter Platform

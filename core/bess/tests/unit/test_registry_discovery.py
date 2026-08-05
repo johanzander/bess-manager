@@ -324,6 +324,31 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             "huawei_solar",
             f"{serial}_active_power",
         ),
+        _entity(
+            "sensor.huawei_inverter_accumulated_yield_energy",
+            "huawei_solar",
+            f"{serial}_accumulated_yield_energy",
+        ),
+        _entity(
+            "sensor.huawei_battery_total_charge",
+            "huawei_solar",
+            f"{serial}_storage_total_charge",
+        ),
+        _entity(
+            "sensor.huawei_battery_total_discharge",
+            "huawei_solar",
+            f"{serial}_storage_total_discharge",
+        ),
+        _entity(
+            "sensor.huawei_meter_grid_exported_energy",
+            "huawei_solar",
+            f"{serial}_grid_exported_energy",
+        ),
+        _entity(
+            "sensor.huawei_meter_grid_accumulated_energy",
+            "huawei_solar",
+            f"{serial}_grid_accumulated_energy",
+        ),
     ]
 
 
@@ -1991,4 +2016,28 @@ class TestHuaweiDiscovery:
         )
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
         assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
-        assert len(result) == 9
+        assert len(result) == 14
+
+    def test_huawei_lifetime_energy_sensors_mapped(self):
+        result = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_accumulated_yield_energy"
+        )
+        assert (
+            result["lifetime_battery_charged"] == "sensor.huawei_battery_total_charge"
+        )
+        assert (
+            result["lifetime_battery_discharged"]
+            == "sensor.huawei_battery_total_discharge"
+        )
+        assert (
+            result["lifetime_export_to_grid"]
+            == "sensor.huawei_meter_grid_exported_energy"
+        )
+        assert (
+            result["lifetime_import_from_grid"]
+            == "sensor.huawei_meter_grid_accumulated_energy"
+        )

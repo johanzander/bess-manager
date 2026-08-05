@@ -1040,6 +1040,25 @@ def _interpolate_value(
     return V_row[lo] * (1 - frac) + V_row[hi] * frac
 
 
+def _local_value_slope(
+    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
+) -> float:
+    """dV/dSoE of a value-function row at a continuous SoE, taken across the
+    grid cell containing it -- the marginal value of stored energy the grid
+    DP itself sees at that state (its local shadow price).
+
+    Used by the hybrid tie detector (#450) to convert the DP's SOE_STEP_KWH
+    grid-snapping into a value-noise magnitude in currency units, which is
+    what a decision margin has to be compared against. Same index arithmetic
+    as _interpolate_value, so the slope reported is exactly the one that
+    interpolation uses at `soe`.
+    """
+    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+    idx = min(max(idx, 0.0), len(V_row) - 1)
+    lo = min(int(idx), len(V_row) - 2)
+    return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
+
+
 def _discharge_candidates(
     soe: float,
     battery_settings: BatterySettings,
@@ -1148,6 +1167,64 @@ def _charge_candidate(
     return min(POWER_STEP_KW, max_charge_power)
 
 
+# Minimum SOE separation at which two candidate actions count as different
+# *decisions* rather than two power levels of the same decision, when
+# measuring how ambiguous a period's choice is (#450). See _tie_margin.
+#
+# Calibrated against the fixture suite (core/bess/tests/unit/data): #450's
+# own reproduction fixture has its genuine alternative 1.25-1.5 kWh away
+# from the chosen action's next_soe -- charging in a different window --
+# while the mass of spurious near-ties across every other fixture sits
+# below 1 kWh, i.e. nudging the same plan's power level. Sweeping this
+# constant over 0.05 -> 1.5 kWh moves suite-wide flagging from 15.6% of
+# periods to 0.4% with #450's case still caught the whole way up to
+# 1.25 kWh; 1.0 kWh keeps a comfortable margin on both sides.
+TIE_DEDUP_SOE_KWH = 1.0
+
+
+def _tie_margin(
+    candidates: list[tuple[float, float, float, float, float]], best_index: int
+) -> float:
+    """Value gap between the chosen candidate and the best *behaviourally
+    distinct* alternative (#450).
+
+    `candidates` are `(value, power, next_soe, new_cost_basis, reward)`
+    tuples as built by `_best_action_at_continuous_state`.
+
+    A raw best-minus-second-best gap over the full candidate list is not a
+    usable ambiguity signal, because several of those candidates are the
+    same decision expressed twice:
+
+    - IDLE and the SOLAR_EXPORT-below-max candidate coincide exactly
+      whenever there is no solar surplus to route differently (both hold
+      soe, both score identically) -- a margin of 0.0 that says nothing
+      about ambiguity;
+    - adjacent discharge breakpoints can sit a fraction of a grid step
+      apart, which the grid DP's SOE_STEP_KWH-resolution value table cannot
+      even distinguish.
+
+    The alternatives that matter for #450 are ones landing at a materially
+    different SOE -- e.g. charging in this window versus a later one. So a
+    candidate only counts as a runner-up if its next_soe differs from the
+    chosen candidate's by more than TIE_DEDUP_SOE_KWH.
+
+    Returns float("inf") when no distinct alternative is feasible ("not
+    tied, no comparison possible").
+    """
+    best_value, _, best_next_soe, _, _ = candidates[best_index]
+    runner_up = float("-inf")
+    for index, (value, _power, next_soe, _cb, _reward) in enumerate(candidates):
+        if index == best_index:
+            continue
+        if abs(next_soe - best_next_soe) <= TIE_DEDUP_SOE_KWH:
+            continue
+        if value > runner_up:
+            runner_up = value
+    if runner_up == float("-inf"):
+        return float("inf")
+    return best_value - runner_up
+
+
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -1182,11 +1259,20 @@ def _best_action_at_continuous_state(
 
     Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
     tie_margin), where tie_margin is the gap between the chosen action's
-    value and the runner-up candidate's value -- a large positive number
-    (best_value - (-inf)) if fewer than two feasible candidates were
-    considered, meaning "not tied, no comparison possible". Used by the
-    hybrid PWL tie detector (#450) to find near-tied periods without
-    re-deriving this comparison.
+    value and the best *behaviourally distinct* runner-up's value --
+    float("inf") if no distinct alternative was feasible, meaning "not
+    tied, no comparison possible". Used by the hybrid PWL tie detector
+    (#450) to find near-tied periods without re-deriving this comparison.
+
+    "Behaviourally distinct" means landing more than TIE_DEDUP_SOE_KWH away
+    in next_soe (see _tie_margin): several candidates evaluated here are
+    duplicates of each other in outcome -- most notably IDLE and the
+    SOLAR_EXPORT-below-max candidate whenever there is no solar surplus to
+    route differently, which land on the identical next_soe with the
+    identical value. Ranking those against each other reports margin 0.0
+    for a period with no ambiguity at all, which is not the situation #450
+    is about (two genuinely different battery actions being close enough
+    that the grid-snapped continuation-value lookup could flip the choice).
     """
     period_max_charge = (
         max_charge_power_per_period[t]
@@ -1197,23 +1283,23 @@ def _best_action_at_continuous_state(
     solar = solar_production[t]
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
-    best_value = float("-inf")
-    second_best_value = float("-inf")
-    best_action = 0.0
-    best_next_soe = soe
-    best_new_cost_basis = cost_basis
-    best_reward = 0.0
+    # (value, power, next_soe, new_cost_basis, reward) per feasible candidate,
+    # appended in the original consideration order so that exact value ties
+    # still resolve to the first-considered candidate exactly as before.
+    candidates: list[tuple[float, float, float, float, float]] = []
 
-    def consider(power: float) -> None:
-        nonlocal best_value, second_best_value, best_action, best_next_soe
-        nonlocal best_new_cost_basis, best_reward
-        next_soe = _state_transition(
-            soe,
-            power,
-            battery_settings,
-            dt,
-            solar_production=solar,
-            home_consumption=home,
+    def consider(power: float, forced_next_soe: float | None = None) -> None:
+        next_soe = (
+            forced_next_soe
+            if forced_next_soe is not None
+            else _state_transition(
+                soe,
+                power,
+                battery_settings,
+                dt,
+                solar_production=solar,
+                home_consumption=home,
+            )
         )
         # See _soe_floor's docstring (#233): the feasible floor for this
         # candidate is soe itself until real charging crosses back above
@@ -1238,15 +1324,7 @@ def _best_action_at_continuous_state(
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
-        if value > best_value:
-            second_best_value = best_value
-            best_value = value
-            best_action = power
-            best_next_soe = next_soe
-            best_new_cost_basis = new_cost_basis
-            best_reward = reward
-        elif value > second_best_value:
-            second_best_value = value
+        candidates.append((value, power, next_soe, new_cost_basis, reward))
 
     # IDLE -- always a feasible candidate.
     consider(0.0)
@@ -1258,30 +1336,7 @@ def _best_action_at_continuous_state(
     # power=0 branch always charges as much as room/rate permit) to force
     # next_soe == soe directly, then reuses the same _compute_reward call
     # every other candidate uses.
-    reward, new_cost_basis = _compute_reward(
-        power=0.0,
-        soe=soe,
-        next_soe=soe,
-        period=t,
-        home_consumption=home,
-        battery_settings=battery_settings,
-        dt=dt,
-        solar_production=solar,
-        buy_price=buy_price,
-        sell_price=sell_price,
-        cost_basis=cost_basis,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-    )
-    value = reward + _interpolate_value(V_next, soe, battery_settings)
-    if value > best_value:
-        second_best_value = best_value
-        best_value = value
-        best_action = 0.0
-        best_next_soe = soe
-        best_new_cost_basis = new_cost_basis
-        best_reward = reward
-    elif value > second_best_value:
-        second_best_value = value
+    consider(0.0, forced_next_soe=soe)
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
     for p in _discharge_candidates(
@@ -1302,8 +1357,26 @@ def _best_action_at_continuous_state(
     if charge_candidate is not None:
         consider(charge_candidate)
 
-    tie_margin = best_value - second_best_value
-    return best_action, best_next_soe, best_new_cost_basis, best_reward, tie_margin
+    # The SOLAR_EXPORT-below-max candidate holds soe exactly unchanged, so it
+    # is feasible at every state -- `candidates` is never empty and an
+    # IndexError below would be a real bug, not a case to defend against.
+    best_index = 0
+    best_value = float("-inf")
+    for index, candidate in enumerate(candidates):
+        if candidate[0] > best_value:
+            best_value = candidate[0]
+            best_index = index
+
+    _, best_action, best_next_soe, best_new_cost_basis, best_reward = candidates[
+        best_index
+    ]
+    return (
+        best_action,
+        best_next_soe,
+        best_new_cost_basis,
+        best_reward,
+        _tie_margin(candidates, best_index),
+    )
 
 
 def _create_idle_schedule(
@@ -1657,6 +1730,11 @@ def optimize_battery_schedule(
     _, power_levels = _discretize_state_action_space(battery_settings)
 
     tie_margins: list[float] = []
+    # Local marginal value of stored energy (dV/dSoE) at each period's chosen
+    # next state -- the scale factor that turns the DP's SOE_STEP_KWH
+    # grid-snapping into a value error in currency, which is what the tie
+    # detector compares the margins against (#450).
+    value_slopes: list[float] = []
     # Trajectory recorded alongside the inline accounting so the hybrid PWL
     # path (#450) can re-solve a tied window and splice it back in. Recording
     # is three list appends per period; nothing downstream reads them unless a
@@ -1688,6 +1766,7 @@ def optimize_battery_schedule(
             )
         )
         tie_margins.append(tie_margin)
+        value_slopes.append(_local_value_slope(V[t + 1], next_soe, battery_settings))
         cost_basis_trajectory.append(current_cost_basis)
         actions.append(action)
         soe_trajectory.append(next_soe)
@@ -1752,8 +1831,7 @@ def optimize_battery_schedule(
 
     windows = detect_tie_windows(
         tie_margins,
-        buy_price,
-        reward_sell_price,
+        value_slopes,
         soe_step_kwh=SOE_STEP_KWH,
     )
 

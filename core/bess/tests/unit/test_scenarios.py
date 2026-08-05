@@ -306,10 +306,15 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected():
     what the grid DP alone produced -- this is the core latency and
     stability guarantee of the hybrid design (#450): when detect_tie_windows
     returns nothing, none of the PWL machinery runs and the pinned
-    expected_results below stay exactly as they were before the wiring."""
+    expected_results below stay exactly as they were before the wiring.
+
+    Fixture swapped from synthetic_consumption_efficient after the tie
+    detector's recalibration (#450): that fixture does now flag one window
+    (a no-op resolve), so it no longer exercises the fast path. This one
+    flags none, and the pinned values below are the grid DP's own output."""
 
     scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("synthetic_consumption_efficient")
+        build_scenario_inputs("synthetic_consumption_ev_charging")
     )
     result = optimize_battery_schedule(
         buy_price=buy_prices,
@@ -321,8 +326,8 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected():
         period_duration_hours=period_duration_hours,
     )
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        -28.28496, abs=1e-4
+        158.52645, abs=1e-4
     )
-    assert result.economic_summary.base_to_battery_solar_savings == pytest.approx(
-        88.22186, abs=1e-3
+    assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
+        62.58805, abs=1e-3
     )

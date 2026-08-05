@@ -1,50 +1,83 @@
-from core.bess.tie_detection import Window, detect_tie_windows
+import pytest
+
+from core.bess.tie_detection import (
+    TIE_NOISE_FACTOR,
+    Window,
+    _epsilon_for_period,
+    detect_tie_windows,
+)
+
+# dV/dSoE = 1.0 currency/kWh at every period, so epsilon is a flat
+# TIE_NOISE_FACTOR * 0.05 -- comfortably between the "clear margin" and
+# "near-tie" margins used below, whatever TIE_NOISE_FACTOR is set to.
+SLOPE = 1.0
+STEP = 0.05
+CLEAR = 10.0
+TIED = 1e-9
 
 
-def _prices(n: int) -> tuple[list[float], list[float]]:
-    return [1.0] * n, [0.5] * n
+def _slopes(n: int) -> list[float]:
+    return [SLOPE] * n
 
 
 def test_no_ties_returns_empty_list():
-    buy, sell = _prices(10)
-    margins = [10.0] * 10  # every period has a large, clear margin
-    assert detect_tie_windows(margins, buy, sell, soe_step_kwh=0.05) == []
+    assert detect_tie_windows([CLEAR] * 10, _slopes(10), soe_step_kwh=STEP) == []
 
 
 def test_isolated_tie_produces_single_padded_window():
-    buy, sell = _prices(10)
-    margins = [10.0] * 10
-    margins[5] = 0.0001  # near-zero margin at period 5
-    windows = detect_tie_windows(margins, buy, sell, soe_step_kwh=0.05, pad=2)
+    margins = [CLEAR] * 10
+    margins[5] = TIED
+    windows = detect_tie_windows(margins, _slopes(10), soe_step_kwh=STEP, pad=2)
     assert windows == [
         Window(start=3, end=8)
     ]  # 5-2 .. 5+2+1, clamped to bounds by construction here
 
 
 def test_two_ties_close_together_merge_into_one_window():
-    buy, sell = _prices(10)
-    margins = [10.0] * 10
-    margins[4] = 0.0001
-    margins[5] = 0.0001
-    windows = detect_tie_windows(margins, buy, sell, soe_step_kwh=0.05, pad=2)
+    margins = [CLEAR] * 10
+    margins[4] = TIED
+    margins[5] = TIED
+    windows = detect_tie_windows(margins, _slopes(10), soe_step_kwh=STEP, pad=2)
     assert len(windows) == 1
     assert windows[0].start <= 2 and windows[0].end >= 8
 
 
 def test_two_ties_far_apart_stay_separate():
-    buy, sell = _prices(20)
-    margins = [10.0] * 20
-    margins[2] = 0.0001
-    margins[17] = 0.0001
-    windows = detect_tie_windows(margins, buy, sell, soe_step_kwh=0.05, pad=2)
+    margins = [CLEAR] * 20
+    margins[2] = TIED
+    margins[17] = TIED
+    windows = detect_tie_windows(margins, _slopes(20), soe_step_kwh=STEP, pad=2)
     assert len(windows) == 2
 
 
 def test_windows_clamped_to_horizon_bounds():
-    buy, sell = _prices(5)
-    margins = [10.0] * 5
-    margins[0] = 0.0001
-    margins[4] = 0.0001
-    windows = detect_tie_windows(margins, buy, sell, soe_step_kwh=0.05, pad=2)
+    margins = [CLEAR] * 5
+    margins[0] = TIED
+    margins[4] = TIED
+    windows = detect_tie_windows(margins, _slopes(5), soe_step_kwh=STEP, pad=2)
     for w in windows:
         assert 0 <= w.start < w.end <= 5
+
+
+def test_epsilon_scales_with_the_local_marginal_value_of_energy():
+    """Epsilon is the value error SOE_STEP_KWH grid-snapping can inject, so
+    it must scale with dV/dSoE -- a period where stored energy has no
+    marginal value has nothing a flipped decision could cost (#450)."""
+    assert _epsilon_for_period(2.0, STEP) == pytest.approx(
+        2 * _epsilon_for_period(1.0, STEP)
+    )
+    assert _epsilon_for_period(-1.0, STEP) == _epsilon_for_period(1.0, STEP)
+    assert _epsilon_for_period(0.0, STEP) == 0.0
+    assert _epsilon_for_period(1.0, STEP) == pytest.approx(TIE_NOISE_FACTOR * STEP)
+
+
+def test_zero_marginal_value_periods_are_never_flagged():
+    """A flat value function means grid-snapping cannot mis-rank anything
+    there, so even an exactly-zero margin is not an ambiguity worth an
+    exact re-solve."""
+    assert detect_tie_windows([0.0] * 6, [0.0] * 6, soe_step_kwh=STEP) == []
+
+
+def test_mismatched_input_lengths_raise():
+    with pytest.raises(ValueError, match="must be recorded per period"):
+        detect_tie_windows([CLEAR] * 4, _slopes(3), soe_step_kwh=STEP)

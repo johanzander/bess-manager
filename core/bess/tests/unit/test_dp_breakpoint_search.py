@@ -24,12 +24,14 @@ import numpy as np
 import pytest
 
 from core.bess.dp_battery_algorithm import (
+    TIE_DEDUP_SOE_KWH,
     _best_action_at_continuous_state,
     _charge_candidate,
     _discharge_candidates,
     _discretize_state_action_space,
     _interpolate_value,
     _run_dynamic_programming,
+    _tie_margin,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
 from core.bess.tests.helpers import make_battery_settings
@@ -379,6 +381,36 @@ def test_best_action_returns_tie_margin():
     assert (
         tie_margin >= 0.0
     ), "margin must be non-negative (best >= second-best by construction)"
+
+
+def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
+    """The margin must measure ambiguity between behaviourally distinct
+    actions, not the raw top-2 gap (#450).
+
+    Several candidates _best_action_at_continuous_state evaluates are the
+    same decision expressed twice -- most notably IDLE and the
+    SOLAR_EXPORT-below-max candidate whenever there is no solar surplus to
+    route differently. Ranking those against each other reported margin 0.0
+    on 50-100% of periods of every fixture, which is not ambiguity at all.
+    Candidates within TIE_DEDUP_SOE_KWH of the chosen next_soe are excluded
+    from the runner-up search.
+    """
+    # (value, power, next_soe, cost_basis, reward)
+    chosen = (10.0, 0.0, 5.0, 0.0, 0.0)
+    duplicate = (10.0, 0.0, 5.0, 0.0, 0.0)  # identical outcome -- not a tie
+    distinct = (9.0, -2.0, 5.0 + TIE_DEDUP_SOE_KWH + 0.1, 0.0, 0.0)
+
+    assert _tie_margin([chosen, duplicate], best_index=0) == float("inf")
+    assert _tie_margin([chosen, duplicate, distinct], best_index=0) == pytest.approx(
+        1.0
+    )
+
+
+def test_tie_margin_is_infinite_without_a_distinct_alternative():
+    """ "No distinct alternative was feasible" must read as "not tied", not
+    as a zero margin that the detector would flag (#450)."""
+    only = (3.0, 0.0, 5.0, 0.0, 0.0)
+    assert _tie_margin([only], best_index=0) == float("inf")
 
 
 def test_interpolate_value_extrapolates_below_min_soe():

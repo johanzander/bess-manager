@@ -20,6 +20,7 @@ from core.bess.models import (  # noqa: E402
     EnergyData,
     PeriodData,
 )
+from core.bess.settings_store import SettingsStore  # noqa: E402
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -57,9 +58,18 @@ class MockHomeAssistantController(HomeAssistantAPIController):
 
     def __init__(self) -> None:
         """Initialize with default settings."""
-        self.failure_tracker = None
-        self.growatt_device_id = None
-        self.sensors: dict[str, str] = {}
+        settings_store = SettingsStore()
+        settings_store.data["sensors"] = {
+            # SolaX VPP entity mappings (needed for entity resolution)
+            "solax_power_control_mode": "select.solax_remotecontrol_power_control",
+            "solax_active_power": "number.solax_remotecontrol_active_power",
+            "solax_autorepeat_duration": "number.solax_remotecontrol_autorepeat_duration",
+            "solax_power_control_trigger": "button.solax_remotecontrol_trigger",
+            "solax_battery_min_soc": "number.solax_battery_minimum_capacity",
+        }
+        super().__init__(
+            ha_url="http://mock", token="mock", settings_store=settings_store
+        )
         self.settings = {
             "grid_charge": False,
             "discharge_rate": 0,
@@ -92,17 +102,6 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         self.consumption_forecast = [1.125] * 96
         self.solar_forecast = [0.0] * 96
         self.solar_forecast_tomorrow = [0.0] * 96
-
-        # SolaX VPP entity mappings (needed for entity resolution)
-        self.sensors.update(
-            {
-                "solax_power_control_mode": "select.solax_remotecontrol_power_control",
-                "solax_active_power": "number.solax_remotecontrol_active_power",
-                "solax_autorepeat_duration": "number.solax_remotecontrol_autorepeat_duration",
-                "solax_power_control_trigger": "button.solax_remotecontrol_trigger",
-                "solax_battery_min_soc": "number.solax_battery_minimum_capacity",
-            }
-        )
 
         # Configurable response for HA Statistics API mock
         self._statistics_response: dict = {}

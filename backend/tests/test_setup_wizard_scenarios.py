@@ -22,6 +22,8 @@ from api import router
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from core.bess.ha_api_controller import HomeAssistantAPIController
+
 _test_app = FastAPI()
 _test_app.include_router(router)
 _client = TestClient(_test_app, raise_server_exceptions=False)
@@ -82,7 +84,6 @@ class TestWizardComplete:
         ctrl = MagicMock()
         store_data = deepcopy(bess_config)
         ctrl.settings_store.data = store_data
-        ctrl.ha_controller.sensors = {}
 
         def _get_section(name: str) -> dict:
             return dict(store_data.get(name, {}))
@@ -105,14 +106,17 @@ class TestWizardComplete:
                 result.update(platform_sensors)
             return result
 
-        def _refresh_active_sensors() -> None:
-            active = _get_active_sensors()
-            ctrl.ha_controller.sensors = {k: v for k, v in active.items() if v}
-
         ctrl.settings_store.get_section.side_effect = _get_section
         ctrl.settings_store.save_all.side_effect = _save_all
         ctrl.settings_store.get_active_sensors.side_effect = _get_active_sensors
-        ctrl.refresh_active_sensors.side_effect = _refresh_active_sensors
+
+        # Real controller (not a further mock) so ha_controller.sensors is a
+        # live view over store_data, exactly like production (#334) — no
+        # refresh call needed between setup_complete persisting and the
+        # assertion.
+        ctrl.ha_controller = HomeAssistantAPIController(
+            ha_url="http://ha.local", token="tok", settings_store=ctrl.settings_store
+        )
         sys.modules["app"].bess_controller = ctrl
 
         # POST the wizard payload

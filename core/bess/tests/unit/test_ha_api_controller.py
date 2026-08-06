@@ -13,6 +13,7 @@ import requests
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.runtime_failure_tracker import RuntimeFailureTracker
+from core.bess.settings_store import SettingsStore
 
 
 def _session_method_mock(name, return_value=None, side_effect=None):
@@ -22,23 +23,33 @@ def _session_method_mock(name, return_value=None, side_effect=None):
     return m
 
 
+def _settings_store(sensors: dict | None = None) -> SettingsStore:
+    """A bare SettingsStore carrying just a flat sensor map, for constructing
+    a HomeAssistantAPIController directly without a full settings section."""
+    store = SettingsStore()
+    store.data["sensors"] = dict(sensors or {})
+    return store
+
+
 @pytest.fixture
 def ctrl():
     """Controller with sensors configured for common operations."""
     c = HomeAssistantAPIController(
         ha_url="http://ha.local:8123",
         token="test-token",
-        sensor_config={
-            "battery_soc": "sensor.battery_soc",
-            "battery_charge_stop_soc": "number.charge_stop_soc",
-            "battery_discharge_stop_soc": "number.discharge_stop_soc",
-            "battery_charging_power_rate": "number.charging_power_rate",
-            "battery_discharging_power_rate": "number.discharging_power_rate",
-            "battery_charge_power": "sensor.charge_power",
-            "battery_discharge_power": "sensor.discharge_power",
-            "grid_charge": "switch.grid_charge",
-            "discharge_inhibit": "binary_sensor.discharge_inhibit",
-        },
+        settings_store=_settings_store(
+            {
+                "battery_soc": "sensor.battery_soc",
+                "battery_charge_stop_soc": "number.charge_stop_soc",
+                "battery_discharge_stop_soc": "number.discharge_stop_soc",
+                "battery_charging_power_rate": "number.charging_power_rate",
+                "battery_discharging_power_rate": "number.discharging_power_rate",
+                "battery_charge_power": "sensor.charge_power",
+                "battery_discharge_power": "sensor.discharge_power",
+                "grid_charge": "switch.grid_charge",
+                "discharge_inhibit": "binary_sensor.discharge_inhibit",
+            }
+        ),
         service_domain="growatt_server",
     )
     c.max_attempts = 1
@@ -288,10 +299,12 @@ def signed_grid_ctrl():
     c = HomeAssistantAPIController(
         ha_url="http://ha.local:8123",
         token="test-token",
-        sensor_config={
-            "import_power": "sensor.solis_grid_power_net",
-            "export_power": "sensor.solis_grid_power_net",
-        },
+        settings_store=_settings_store(
+            {
+                "import_power": "sensor.solis_grid_power_net",
+                "export_power": "sensor.solis_grid_power_net",
+            }
+        ),
         grid_power_polarity="import_positive",
     )
     c.max_attempts = 1
@@ -326,10 +339,12 @@ class TestSignedGridPowerSplit:
         c = HomeAssistantAPIController(
             ha_url="http://ha.local:8123",
             token="test-token",
-            sensor_config={
-                "import_power": "sensor.huawei_power_meter_active_power",
-                "export_power": "sensor.huawei_power_meter_active_power",
-            },
+            settings_store=_settings_store(
+                {
+                    "import_power": "sensor.huawei_power_meter_active_power",
+                    "export_power": "sensor.huawei_power_meter_active_power",
+                }
+            ),
             grid_power_polarity="export_positive",
         )
         c.max_attempts = 1
@@ -344,10 +359,12 @@ class TestSignedGridPowerSplit:
         c = HomeAssistantAPIController(
             ha_url="http://ha.local:8123",
             token="test-token",
-            sensor_config={
-                "import_power": "sensor.huawei_power_meter_active_power",
-                "export_power": "sensor.huawei_power_meter_active_power",
-            },
+            settings_store=_settings_store(
+                {
+                    "import_power": "sensor.huawei_power_meter_active_power",
+                    "export_power": "sensor.huawei_power_meter_active_power",
+                }
+            ),
             grid_power_polarity="export_positive",
         )
         c.max_attempts = 1
@@ -362,8 +379,11 @@ class TestSignedGridPowerSplit:
         """A platform with two distinct entities must read them independently,
         even if grid_power_polarity somehow ended up set (defense against a
         future platform reusing the field incorrectly)."""
-        ctrl.sensors["import_power"] = "sensor.import"
-        ctrl.sensors["export_power"] = "sensor.export"
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "import_power": "sensor.import",
+            "export_power": "sensor.export",
+        }
         ctrl.grid_power_polarity = "import_positive"
         ctrl.session.get = _session_method_mock(
             "get", return_value=_mock_response({"state": "42"})
@@ -388,7 +408,7 @@ class TestSetOperations:
             assert mock.call_args[0] == ("switch", "turn_off")
 
     def test_set_grid_charge_select_entity(self, ctrl):
-        ctrl.sensors["grid_charge"] = "select.grid_charge_mode"
+        ctrl.sensors = {**ctrl.sensors, "grid_charge": "select.grid_charge_mode"}
         with patch.object(ctrl, "_service_call_with_retry") as mock:
             ctrl.set_grid_charge(True)
             assert mock.call_args[0] == ("select", "select_option")
@@ -410,7 +430,10 @@ class TestSetOperations:
         must be written via input_number.set_value, not number.set_value —
         the latter is scoped to the number platform and silently fails
         against an input_number entity."""
-        ctrl.sensors["battery_charge_stop_soc"] = "input_number.charge_stop_soc"
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "battery_charge_stop_soc": "input_number.charge_stop_soc",
+        }
         with patch.object(ctrl, "_service_call_with_retry") as mock:
             ctrl.set_charge_stop_soc(90)
             assert mock.call_args[0][:2] == ("input_number", "set_value")
@@ -427,8 +450,11 @@ class TestSetGrowattExportLimit:
 
     @pytest.fixture
     def export_ctrl(self, ctrl):
-        ctrl.sensors["growatt_export_limit_mode"] = "select.limit_grid_export"
-        ctrl.sensors["growatt_export_limit_value"] = "number.grid_export_limit"
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "growatt_export_limit_mode": "select.limit_grid_export",
+            "growatt_export_limit_value": "number.grid_export_limit",
+        }
         return ctrl
 
     def test_curtail_writes_meter_1_and_zero_percent(self, export_ctrl):
@@ -461,15 +487,14 @@ class TestSetTouSegmentViaEntities:
 
     @pytest.fixture
     def tou_ctrl(self, ctrl):
-        ctrl.sensors.update(
-            {
-                "tou_time_1_enabled": "select.pv_growatt_time_1_active",
-                "tou_time_1_begin": "time.pv_growatt_time_1_begin",
-                "tou_time_1_end": "time.pv_growatt_time_1_end",
-                "tou_time_1_mode": "select.pv_growatt_time_1_mode",
-                "tou_time_1_update": "button.pv_growatt_time_1_update",
-            }
-        )
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "tou_time_1_enabled": "select.pv_growatt_time_1_active",
+            "tou_time_1_begin": "time.pv_growatt_time_1_begin",
+            "tou_time_1_end": "time.pv_growatt_time_1_end",
+            "tou_time_1_mode": "select.pv_growatt_time_1_mode",
+            "tou_time_1_update": "button.pv_growatt_time_1_update",
+        }
         return ctrl
 
     def test_begin_end_written_via_time_set_value(self, tou_ctrl):
@@ -535,7 +560,7 @@ class TestGridChargeEnabled:
         assert ctrl.grid_charge_enabled() is False
 
     def test_select_entity_enabled(self, ctrl):
-        ctrl.sensors["grid_charge"] = "select.grid_charge_mode"
+        ctrl.sensors = {**ctrl.sensors, "grid_charge": "select.grid_charge_mode"}
         ctrl.session.get = _session_method_mock(
             "get", return_value=_mock_response({"state": "Enabled"})
         )
@@ -563,7 +588,7 @@ class TestEntityResolution:
         c = HomeAssistantAPIController(
             ha_url="http://ha.local:8123",
             token="t",
-            sensor_config={"bad_sensor": ""},
+            settings_store=_settings_store({"bad_sensor": ""}),
         )
         with pytest.raises(ValueError, match="Empty entity ID"):
             c._resolve_entity_id("bad_sensor")
@@ -616,3 +641,26 @@ class TestRunRequest:
         )
         with pytest.raises(requests.ConnectionError):
             run_request(mock_method, "http://test")
+
+
+# ── sensors as a live settings_store view (issue #334) ────────────────────────
+
+
+class TestSensorsLiveView:
+    def test_sensors_reflects_settings_store_without_refresh_call(self):
+        """`.sensors` must read through to settings_store on every access —
+        no manually-synced cache, so no refresh call is ever needed."""
+        from core.bess.settings_store import SettingsStore
+
+        store = SettingsStore()
+        store.data["sensors"] = {"battery_soc": "sensor.battery_soc"}
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123", token="t", settings_store=store
+        )
+        assert c.sensors == {"battery_soc": "sensor.battery_soc"}
+
+        # Settings mutate externally (e.g. an inverter platform switch) with
+        # no call back into the controller at all.
+        store.data["sensors"] = {"battery_soc": "sensor.battery_soc_v2"}
+
+        assert c.sensors == {"battery_soc": "sensor.battery_soc_v2"}

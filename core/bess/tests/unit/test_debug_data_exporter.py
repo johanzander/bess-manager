@@ -329,8 +329,8 @@ class TestSerializeEntitySnapshot:
     registers, both resolved via _get_entity_for_service/_resolve_entity_id,
     which look up controller.sensors directly, bypassing METHOD_SENSOR_MAP.
     Fixed by capturing controller.sensors directly instead. (controller.sensors
-    itself is kept fresh by BESSController.refresh_active_sensors(), see #332
-    — the exporter can rely on it without needing its own freshness plumbing.)
+    is a live SettingsStore view, see #334 — the exporter can rely on it
+    without needing its own freshness plumbing.)
     """
 
     def _make_aggregator(self, controller):

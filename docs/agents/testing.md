@@ -99,30 +99,43 @@ CI runs automatically on every PR and push to `main` (`.github/workflows/ci.yml`
 The E2E job runs Playwright tests covering API contract validation, page-level
 rendering, and the setup wizard flow. It starts in two phases:
 1. **Normal day** — tests all pages, API contracts, and navigation
-2. **Wizard** — runs the setup wizard against 7 scenario combinations
+2. **Growatt VPP** — verifies a fresh-install VPP-mode schedule build completes without error (regression for #399, #469)
+3. **Wizard** — runs the setup wizard against every scenario combination in the table below
 
 ### Wizard Scenario Matrix
 
 Each scenario boots a fresh mock-HA + BESS stack with different integrations
 installed, validating that discovery, auto-selection, and the full wizard flow
-work for every supported configuration.
+work for every supported configuration. Generated from `e2e/tests/wizard-expectations.ts`
+(the source of truth CI actually asserts against) — do not hand-edit this table
+without re-deriving it from that file, since a wrong value here can silently
+mask a wrong value there.
 
-| # | Scenario | Pricing | Inverter | Phase | Solcast | Cons.F | Disch.Inhib | Weather |
-|---|----------|---------|----------|-------|---------|--------|-------------|---------|
-| 1 | `ci-wizard-nordpool-min` | Nordpool Official | MIN | 3 | - | - | - | - |
-| 2 | `ci-wizard-nordpool-sph` | Nordpool Official | SPH | 3 | - | - | - | - |
-| 3 | `ci-wizard-octopus` | Octopus | MIN | - | - | - | - | - |
-| 4 | `ci-wizard-full` | Nordpool Official | MIN | 3 | YES | YES | YES | YES |
-| 5 | `ci-wizard-nordpool-hacs` | Nordpool HACS | MIN | 1 | YES | - | - | YES |
-| 6 | `ci-wizard-octopus-sph` | Octopus | SPH | 3 | - | YES | YES | - |
-| 7 | `ci-wizard-both-providers` | Nordpool + Octopus | MIN | 1 | - | - | YES | YES |
+| Scenario | Pricing | Inverter | Phase | Solcast | Cons.F | Disch.Inhib | Weather |
+|----------|---------|----------|-------|---------|--------|-------------|---------|
+| `ci-wizard-nordpool-min` | Nordpool Official | MIN (Cloud) | 3 | - | - | - | - |
+| `ci-wizard-nordpool-sph` | Nordpool Official | SPH (Cloud) | 3 | - | - | - | - |
+| `ci-wizard-nordpool-solax` | Nordpool Official | SolaX Native | - | - | - | - | - |
+| `ci-wizard-octopus` | Octopus | MIN (Cloud) | - | - | - | - | - |
+| `ci-wizard-entsoe` | ENTSO-e | MIN (Cloud) | - | - | - | - | - |
+| `ci-wizard-entsoe-frank-126` | ENTSO-e | MIN (SolaX Modbus) | 3 | YES | - | - | - |
+| `ci-wizard-full` | Nordpool Official | MIN (Cloud) | 3 | YES | YES | YES | YES |
+| `ci-wizard-nordpool-hacs` | Nordpool HACS | MIN (Cloud) | 1 | YES | - | - | YES |
+| `ci-wizard-growatt-sph-cloud-octopus` | Octopus | SPH (Cloud) | - | - | - | - | - |
+| `ci-wizard-both-providers` | Nordpool + Octopus | MIN (Cloud) | 1 | - | - | YES | YES |
+| `ci-wizard-growatt-modbus` | Nordpool Official | MIN (Cloud) — auto-selects Growatt Cloud even though SolaX Modbus is also detected | - | - | - | - | - |
+| `ci-wizard-growatt-modbus-gen3` | Nordpool Official | SPH (SolaX Modbus, GEN3, no TOU) | - | - | - | - | - |
+| `ci-wizard-solis` | Nordpool Official | Solis | - | - | - | - | - |
+| `ci-wizard-growatt-vpp` | Nordpool Official | SPH (SolaX Modbus, GEN3, VPP) | 3 | - | - | - | - |
 
 **What each test validates per scenario:**
-- Correct pricing provider auto-selected (Nordpool vs Octopus)
-- Correct inverter type auto-detected (MIN vs SPH)
+- Correct pricing provider auto-selected (Nordpool vs Octopus vs ENTSO-e)
+- Correct inverter platform auto-selected — the wizard picks the backend's
+  `detectedInverterPlatforms[0]`, so when a scenario has both a Growatt Cloud
+  config entry and SolaX Modbus entities, Cloud wins (it's listed first)
 - Optional integrations shown as found/not-found with correct status
 - Provider-specific fields shown/hidden correctly
-- Can switch between providers when both are available (scenario 7)
+- Can switch between providers/platforms when more than one is available
 - Full wizard completion end-to-end
 
 Scenario expectations are defined in `e2e/tests/wizard-expectations.ts`.

@@ -801,3 +801,9 @@ the whole path (`immediate_value` included) rather than wiring it up.
 The real fix is to move construction into the FastAPI `lifespan` startup hook, which runs under uvicorn but not on bare import. That is a change to the application's entire startup path (and `api.py`'s `from app import bess_controller` would then see `None` until lifespan runs), so it needs the mock-HA E2E stack to verify — not a small cleanup.
 
 ---
+
+## From the E2E scenario fixture cleanup PR (non-blocking)
+
+**`e2e/package-lock.json` has `@playwright/test` locked at 1.59.1 while 1.62.1 is current.** `package.json`'s `^1.59.1` range already permits the newer version — the lockfile just hasn't been refreshed since it was last committed. Bumping it (`npm update @playwright/test` + commit the lockfile) also changes the pinned Chromium revision that CI/local runs download, so it's worth doing deliberately in its own PR rather than as a drive-by here.
+
+---

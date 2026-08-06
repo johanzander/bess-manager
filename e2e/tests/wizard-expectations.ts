@@ -148,14 +148,35 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     dischargeInhibitFound: true,
     weatherFound: true,
   },
+  // inverterPlatform and phaseCount confirmed against a live POST
+  // /api/setup/discover run, not the value this entry originally shipped
+  // with -- this scenario was never wired into CI, so the wizard's actual
+  // detected[0] auto-select (Growatt Cloud, since detected_inverter_platforms
+  // lists WS-detected cloud platforms before appending SolaX ones -- see
+  // ha_api_controller.py's detected_inverter_platforms assembly) had never
+  // been checked against this expectation.
   'ci-wizard-growatt-modbus': {
     growattFound: true,
     solaxFound: true,
-    inverterPlatform: 'solax_modbus_growatt_min',
+    inverterPlatform: 'growatt_server_min',
     nordpoolFound: true,
     octopusFound: false,
     autoSelectedProvider: 'nordpool_official',
-    phaseCount: 3,
+    phaseCount: null,
+    solcastFound: false,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
+  // Values confirmed against a live POST /api/setup/discover run, not guessed.
+  'ci-wizard-growatt-modbus-gen3': {
+    growattFound: false,
+    solaxFound: true,
+    inverterPlatform: 'solax_modbus_growatt_sph',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
     solcastFound: false,
     consumptionForecastFound: false,
     dischargeInhibitFound: false,

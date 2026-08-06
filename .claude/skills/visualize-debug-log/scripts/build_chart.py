@@ -356,11 +356,46 @@ def build_summary(rows: list[dict], battery_settings: dict) -> dict:
     }
 
 
-def render(rows: list[dict], summary: dict, title: str, subtitle: str) -> str:
+def render_analysis(cards: list[dict]) -> str:
+    """Render optional issue-specific analysis cards below the chart.
+
+    Each card is {"heading": str, "pill": str|None, "paragraphs": [str, ...]}.
+    Paragraph strings are trusted HTML (may contain <b>/<code>/etc.) written
+    by whoever is analyzing the bundle -- same trust level as every other
+    value this script already interpolates into the template, not user
+    input from an untrusted source. This section answers a *specific*
+    question about *this* bundle; it is never inferred from the data here,
+    only supplied by the caller (see SKILL.md: verify any decision-mechanism
+    claim via the bess-analyst sub-agent against the real DP code before
+    passing it in -- a plausible-sounding but unverified explanation is
+    worse than no explanation).
+    """
+    if not cards:
+        return ""
+    out = []
+    for card in cards:
+        paragraphs = list(card.get("paragraphs", []))
+        if card.get("pill") and paragraphs:
+            paragraphs[-1] += f' <span class="status-pill">{card["pill"]}</span>'
+        paras = "\n".join(f"<p>{p}</p>" for p in paragraphs)
+        out.append(
+            f'<h2 class="section">{card["heading"]}</h2>\n<div class="finding-card">\n{paras}\n</div>'
+        )
+    return "\n\n".join(out)
+
+
+def render(
+    rows: list[dict],
+    summary: dict,
+    title: str,
+    subtitle: str,
+    analysis_cards: list[dict] | None = None,
+) -> str:
     head = (SCRIPT_DIR / "template_head.html").read_text()
     tail = (SCRIPT_DIR / "template_tail.js").read_text()
 
     head = head.replace("{{TITLE}}", title).replace("{{SUBTITLE}}", subtitle)
+    head = head.replace("{{ANALYSIS}}", render_analysis(analysis_cards or []))
     rows_json = json.dumps(rows, separators=(",", ":"))
     summary_json = json.dumps(summary, separators=(",", ":"))
 
@@ -378,6 +413,19 @@ def main() -> None:
     ap.add_argument("-o", "--output", required=True, help="Output HTML path")
     ap.add_argument(
         "--title", default=None, help="Chart title (default: derived from bundle)"
+    )
+    ap.add_argument(
+        "--analysis",
+        default=None,
+        help=(
+            "Path to a JSON file of issue-specific analysis cards to render below the "
+            'chart: a list of {"heading": str, "pill": str|None, "paragraphs": [str, ...]}. '
+            "Optional -- omit for a plain chart. Each paragraph is trusted HTML. Verify any "
+            "claim about *why* the DP made a decision via the bess-analyst sub-agent against "
+            "the real dp_battery_algorithm.py logic before writing it here -- a plausible but "
+            "unverified mechanism (e.g. an invented minimum-deficit threshold) is worse than no "
+            "explanation."
+        ),
     )
     args = ap.parse_args()
 
@@ -399,7 +447,11 @@ def main() -> None:
         f"stored values); the remainder is the latest optimization run's own forecast."
     )
 
-    html = render(rows, summary, title, subtitle)
+    analysis_cards = (
+        json.loads(Path(args.analysis).read_text()) if args.analysis else None
+    )
+
+    html = render(rows, summary, title, subtitle, analysis_cards)
     Path(args.output).write_text(html)
     print(
         f"Wrote {args.output} ({len(rows)} periods, {summary['n_actual']} actual / {summary['n_forecast']} forecast)"

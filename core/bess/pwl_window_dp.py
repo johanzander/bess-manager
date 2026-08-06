@@ -37,6 +37,15 @@ PWL_EPS_PRUNE = 1e-6
 # `_discharge_candidates` uses for the same floor, and the two passes must
 # admit the identical level set at every state -- see the note in
 # `_pwl_candidate_values_at`.
+#
+# This constant is only load-bearing because, expressed in SOE units
+# (`DISCHARGE_LATTICE_PCT_EPS * rate_step * dt / efficiency_discharge`), it
+# stays larger than `_PWL_MERGE_EPS_KWH` (the near-duplicate-breakpoint merge
+# tolerance below) across realistic batteries -- e.g. ~1.25e-11 kWh vs 1e-12
+# on the tightest known fixture, a ~12.5x margin. If that ever inverts (a
+# very small `max_discharge_power_kw` combined with sub-hourly `dt`), the
+# merge could again keep the "wrong" side of a feasibility onset and
+# reintroduce this bug class -- see the fixed #450 bug this constant closed.
 DISCHARGE_LATTICE_PCT_EPS = 1e-9
 
 

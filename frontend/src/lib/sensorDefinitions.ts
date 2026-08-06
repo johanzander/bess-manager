@@ -486,6 +486,16 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'local_load_power', label: 'Inverter Active Power', required: false },
         ],
       },
+      {
+        name: 'Lifetime Energy',
+        sensors: [
+          { key: 'lifetime_solar_energy', label: 'Accumulated Yield Energy', required: false },
+          { key: 'lifetime_battery_charged', label: 'Battery Total Charge', required: false },
+          { key: 'lifetime_battery_discharged', label: 'Battery Total Discharge', required: false },
+          { key: 'lifetime_export_to_grid', label: 'Grid Exported Energy (power meter)', required: false },
+          { key: 'lifetime_import_from_grid', label: 'Grid Accumulated Energy (power meter)', required: false },
+        ],
+      },
     ],
   },
   {

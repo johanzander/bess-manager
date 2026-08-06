@@ -17,6 +17,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 - Editing the Huawei battery Device ID in Settings now saves to the inverter section and applies without a restart, instead of being written to the Growatt section.
 - The Savings chart's bars could flicker invisible in Safari, especially with many thin bars (e.g. quarter-hourly resolution) — Safari fails to reliably anti-alias sub-pixel-width SVG shapes. Bars now use a fixed minimum width so they stay visible regardless of window size.
+- Growatt VPP-mode IDLE periods no longer drain the battery for house self-consumption overnight — IDLE now holds the battery via `battery_first` instead of falling back to native self-use. ([#466](https://github.com/johanzander/bess-manager/issues/466))
+- Huawei LUNA2000 installs now auto-discover lifetime solar/battery energy sensors, fixing a false "SYSTEM DEGRADED" health check and zero-valued savings graphs. ([#471](https://github.com/johanzander/bess-manager/issues/471))
+- **Local E2E verification for Growatt VPP scenarios now completes a full schedule build** instead of failing partway through. ([#469](https://github.com/johanzander/bess-manager/issues/469))
+- Solis installs now auto-configure grid export power, derived from the same signed sensor as import power. Previously export power was always unconfigured. ([#475](https://github.com/johanzander/bess-manager/issues/475))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

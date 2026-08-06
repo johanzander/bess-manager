@@ -422,6 +422,10 @@ This is what lets an integration that exposes the same services under its own do
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
+#### Signed grid power sensors
+
+A platform-fixed sibling of the service-domain pattern above: some platforms (Solis) expose grid power as one signed sensor instead of separate import/export entities. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `""` elsewhere) — not user-overridable, since polarity is a hardware fact, not configuration. Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign whenever both keys resolve to the same entity_id.
+
 ### Platform Capabilities
 
 Different inverter platforms support different hardware features. The class hierarchy handles **behavioral** differences (TOU scheduling vs. period lists vs. VPP commands — genuinely different algorithms). Capabilities handle the narrower question: what does code *outside* the controller need to know about the platform?

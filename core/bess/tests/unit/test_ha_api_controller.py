@@ -273,6 +273,68 @@ class TestSensorReading:
         assert c.get_discharge_inhibit_active() is False
 
 
+# ── Signed grid power split (issue #475) ──────────────────────────────────────
+#
+# Platforms like Solis expose grid power as a single signed sensor rather than
+# separate import/export entities. When import_power and export_power are
+# both configured to the same entity_id and grid_power_polarity is set, the
+# single raw reading must be split by sign into the two internal keys instead
+# of being returned unmodified from two independent reads.
+
+
+@pytest.fixture
+def signed_grid_ctrl():
+    """Controller with import_power and export_power sharing one signed entity."""
+    c = HomeAssistantAPIController(
+        ha_url="http://ha.local:8123",
+        token="test-token",
+        sensor_config={
+            "import_power": "sensor.solis_grid_power_net",
+            "export_power": "sensor.solis_grid_power_net",
+        },
+        grid_power_polarity="import_positive",
+    )
+    c.max_attempts = 1
+    c.retry_base_delay = 0
+    return c
+
+
+class TestSignedGridPowerSplit:
+    def test_positive_raw_is_import_only(self, signed_grid_ctrl):
+        signed_grid_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "1500"})
+        )
+        assert signed_grid_ctrl.get_import_power() == 1500.0
+        assert signed_grid_ctrl.get_export_power() == 0.0
+
+    def test_negative_raw_is_export_only(self, signed_grid_ctrl):
+        signed_grid_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-1500"})
+        )
+        assert signed_grid_ctrl.get_import_power() == 0.0
+        assert signed_grid_ctrl.get_export_power() == 1500.0
+
+    def test_unavailable_raw_returns_none(self, signed_grid_ctrl):
+        signed_grid_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "unavailable"})
+        )
+        assert signed_grid_ctrl.get_import_power() is None
+        assert signed_grid_ctrl.get_export_power() is None
+
+    def test_separate_entities_unaffected_by_polarity(self, ctrl):
+        """A platform with two distinct entities must read them independently,
+        even if grid_power_polarity somehow ended up set (defense against a
+        future platform reusing the field incorrectly)."""
+        ctrl.sensors["import_power"] = "sensor.import"
+        ctrl.sensors["export_power"] = "sensor.export"
+        ctrl.grid_power_polarity = "import_positive"
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "42"})
+        )
+        assert ctrl.get_import_power() == 42.0
+        assert ctrl.get_export_power() == 42.0
+
+
 # ── set_* / grid_charge ─────────────────────────────────────────────────────
 
 

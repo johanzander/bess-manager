@@ -102,7 +102,7 @@ either a 20-slot on-device schedule (`30411-30471`, not exposed by
 | `GRID_CHARGING` | Force charge at rate | `remote_control=Enabled`, `vpp_power=+rate%`, `allow_ac_charging=Enabled` | 30407, 30409, 30410 | Implemented, correct — `>0` → `battery first`, matches spec |
 | `LOAD_SUPPORT`/`BATTERY_EXPORT` (rate>0) | Force discharge at rate | `remote_control=Enabled`, `vpp_power=-rate%` | 30407, 30409 | Implemented, correct — `≤0` → `grid first`, matches spec |
 | `SOLAR_STORAGE` | Battery opportunistically absorbs solar surplus (no forced target) | `remote_control=Disabled` → native `load first` self-use | 30407 | Implemented, correct today (already what happens at `discharge_rate=0`) |
-| `IDLE` | No strong signal; self-use is a safe default | `remote_control=Disabled` → native `load first` | 30407 | Implemented, correct today |
+| `IDLE` | No strong signal; self-use is a safe default | `remote_control=Disabled` → native `load first` | 30407 | ~~Implemented, correct today~~ **Superseded by #466**: `load first` self-use also discharges the battery to cover house load, which IDLE's own DP cost model (`_idle_battery_flows`) never credits. Fixed to `remote_control=Enabled`, `vpp_power=+1` (`battery first`) — see #466. |
 | `SOLAR_EXPORT` | Battery held flat; solar bypasses to grid | `remote_control=Enabled`, `vpp_power=0` → documented `grid first` | 30407, 30409 | **Not implemented — this is the bug.** Currently maps to the same `remote_control=Disabled` self-use as `SOLAR_STORAGE`/`IDLE`, which is what lets solar recharge the battery in #355 |
 
 The fix for `SOLAR_EXPORT` specifically is: keep `remote_control` **enabled**

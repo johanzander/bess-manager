@@ -350,6 +350,7 @@ async def patch_settings(updates: dict):
         # unconditionally rather than only on a "sensors" key match.
         bess_controller.refresh_active_sensors()
         bess_controller.refresh_service_domain()
+        bess_controller.refresh_grid_power_polarity()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -3659,6 +3660,7 @@ async def setup_complete(payload: APISetupCompletePayload):
         # which per-platform sensor sub-dict is active.
         bess_controller.refresh_active_sensors()
         bess_controller.refresh_service_domain()
+        bess_controller.refresh_grid_power_polarity()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:

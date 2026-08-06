@@ -935,12 +935,26 @@ class DebugDataAggregator:
         """Serialize prediction snapshots from today.
 
         Args:
-            compact: If True, return ALL snapshots as 5-field summary rows
-                (timestamp, period, predicted_savings, actual_count, predicted_count).
-                This enables the full-day prediction evolution table for use case 3
-                (morning prediction vs evening actual analysis) at ~6 KB instead
-                of 166 KB for the complete JSON.
-                If False, return full snapshot data for all snapshots.
+            compact: If True, return one entry per snapshot with the 5
+                summary fields (timestamp, period, predicted_savings,
+                actual_count, predicted_count) for the full-day evolution
+                table, PLUS that run's own forward-looking forecast
+                (`predicted_periods`: every period with data_source ==
+                "predicted", i.e. every period NOT already realized at that
+                run's own decision time -- exact buy/sell/solar/consumption/
+                SOE/shadow_price/intent, not the rounded box-table version).
+                Already-realized periods are deliberately excluded: they're
+                the same data every earlier snapshot that day would also
+                carry, and are already exported in full once, at exact
+                precision, in Historical Sensor Data -- repeating them per
+                snapshot would be pure duplication for no analytical value,
+                since a past period's *actual* outcome doesn't change
+                between snapshots (only the forecast for what's still ahead
+                does). This is what makes two runs' schedules actually
+                diffable: `optimize_battery_schedule()`'s own forward
+                horizon input, not a log line.
+                If False, return full snapshot data (all periods, actual and
+                predicted) for all snapshots.
 
         Returns:
             List of snapshot dictionaries
@@ -951,7 +965,8 @@ class DebugDataAggregator:
                 return []
             if not compact:
                 return [asdict(snapshot) for snapshot in snapshots]
-            # Compact: all snapshots as summary rows for the evolution table.
+            # Compact: summary fields (evolution table) + that run's own
+            # forward-looking forecast periods (cross-run diffing).
             # Use grid_only_cost - hourly_cost to match the dashboard total
             # savings definition (includes both solar and battery benefit).
             result = []
@@ -961,6 +976,11 @@ class DebugDataAggregator:
                     for p in snapshot.daily_view.periods
                     if p.economic is not None
                 )
+                predicted_periods = [
+                    asdict(p)
+                    for p in snapshot.daily_view.periods
+                    if p.data_source == "predicted"
+                ]
                 result.append(
                     {
                         "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
@@ -968,6 +988,7 @@ class DebugDataAggregator:
                         "total_savings": total_savings,
                         "actual_count": snapshot.daily_view.actual_count,
                         "predicted_count": snapshot.daily_view.predicted_count,
+                        "predicted_periods": predicted_periods,
                     }
                 )
             return result

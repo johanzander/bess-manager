@@ -649,7 +649,24 @@ Findings (top) and System Logs (bottom).*
 
         table = "\n".join(rows)
 
-        return summary_text + f"\n\n{table}"
+        # Each snapshot already carries its own forward-looking forecast
+        # (predicted_periods -- see _serialize_snapshots) at exact precision,
+        # excluding periods already realized by that run's own decision time
+        # (those are in Historical Sensor Data instead, not repeated here).
+        # This is the authoritative source for "what changed between run N
+        # and run N+1" -- diff two snapshots' predicted_periods directly,
+        # rather than reconstructing it from rounded System Logs box tables.
+        details = f"""
+<details>
+<summary>Per-run forecasts ({total} snapshots, each with its own forward-looking predicted_periods — click to expand)</summary>
+
+```json
+{self._format_json(export.snapshots)}
+```
+
+</details>"""
+
+        return summary_text + f"\n\n{table}" + details
 
     def _format_logs(self, export: DebugDataExport) -> str:
         """Format logs section with file info.

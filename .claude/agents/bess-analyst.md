@@ -78,13 +78,14 @@ concluding "only the latest run is available"):**
 
 | Section | Coverage | Precision |
 |---|---|---|
+| `## Prediction Snapshots` (`predicted_periods` per snapshot) | **The authoritative multi-run source.** Every optimization run of the day, each with its own forward-looking forecast: every period with `data_source == "predicted"` at that run's own decision time (its exact `optimize_battery_schedule()` horizon input — buy/sell price, solar, consumption, SOE, shadow_price, intent), plus the run's total predicted savings. Already-realized periods are deliberately excluded from each snapshot (they're in Historical Sensor Data instead, once, not repeated per run) — so two runs are directly diffable by comparing their `predicted_periods` arrays. Added in #481; bundles exported before that fix only have the 5-field summary row (timestamp/period/total_savings/actual_count/predicted_count), no periods. | **Exact** — the real optimizer input, not a rounded log line. |
 | `## Raw Schedule JSON (deep debugging)` | **Only the latest optimization run** — full `input_data`/`period_data`, every period in the horizon, exact floats. Its `<summary>` label reports the true run count and mode (fixed in #481 — was previously a hardcoded, misleading "(all runs)"); count the top-level array entries before assuming a bundle has more than one. | Exact |
-| `## System Logs (Today)` | **Every optimization run of the day** (one box-drawing table per run, ~15 min apart — cross-check the count against `## Prediction Snapshots`' "Total Snapshots"). This IS the multi-run data source, and covers every period in the horizon per run (log-compaction previously dropped SOLAR_EXPORT/SOLAR_STORAGE/IDLE rows — a real bug, fixed in #481; bundles exported before that fix may still be missing those rows). | Rounded — see the exact column format below. Log compaction can strip the header row; use the format below instead of re-deriving it. |
-| `## Historical Sensor Data` (`Full Historical Data JSON`) | Every **actual/realized** period so far today (not forecast) — `battery_soe_start`/`battery_soe_end` and all energy fields, per period. | Exact. This is the only place to get a run's true *starting* SOE (the DP's real `initial_soe` input at that run's decision time) — cross-reference the run's timestamp to the nearest actual period here, don't infer starting SOE from the box tables' rounded per-period `SoE` column. |
-| `## Prediction Snapshots` | Run timestamps + count only, **plus each run's predicted total daily savings** (`Total Savings` column). | Timestamps exact; savings to 4dp. A savings jump between two consecutive runs is a real, usable signal that something in the plan changed between them, even when you can't recover the period-by-period cause. |
+| `## Historical Sensor Data` (`Full Historical Data JSON`) | Every **actual/realized** period so far today (not forecast) — `battery_soe_start`/`battery_soe_end` and all energy fields, per period. | Exact. Use this for a run's true *starting* SOE (the DP's real `initial_soe` input at that run's decision time) if you're on a bundle exported before #481 and don't have `predicted_periods` — cross-reference the run's timestamp to the nearest actual period here. |
+| `## System Logs (Today)` | Every optimization run's per-period box-drawing table — now largely superseded by `predicted_periods` above (added in the same PR that fixed a real gap here: log-compaction previously dropped SOLAR_EXPORT/SOLAR_STORAGE/IDLE rows entirely). Still useful as a secondary check, or for bundles predating #481. | Rounded — see the exact column format below if you do need it. Log compaction can strip the header row. |
 
 **Per-period box-table row format** (`core/bess/dp_battery_algorithm.py:869-872`
-defines it — read the source, don't guess column meaning from the data):
+defines it — read the source, don't guess column meaning from the data), only
+needed for bundles predating #481 or as a secondary cross-check:
 ```
 ║ Hr ║  Buy/Sell ║Cons. ║ Cost  ║║Sol. ║Sol→B ║Gr→B  ║ SoE ║Action ║    Intent     ║  Grid ║ Batt ║ Save ║
 ```
@@ -95,15 +96,29 @@ grid cost, battery cost, savings (SEK, 2dp each).
 
 `scripts/extract_decision_evidence.py` already does single-slot cross-run
 reconciliation against System Logs for you — use it for "did period X change
-between runs" questions. Only hand-parse System Logs box tables yourself when
-you need a full-horizon reconstruction of an earlier run's inputs (e.g. to
-replay it through the optimizer) — and validate precision/coverage (per the
-table above) before treating the result as replay-grade, not just directional.
+between runs" questions when you don't need the full forecast diff. For "what
+changed between run N and run N+1," prefer diffing their `predicted_periods`
+arrays directly over hand-parsing System Logs box tables.
 
 **Debugging a run-to-run flip in a strategic intent (e.g. "why did period X
-change from LOAD_SUPPORT to IDLE between two runs?"):** don't guess whether
-it's numerical noise (#450-class grid-snap artifact) vs. a genuine forecast
-update vs. a real, steep-but-correct decision boundary — test it:
+change from LOAD_SUPPORT to IDLE between two runs?"):**
+
+**On a bundle with `predicted_periods` (post-#481): just diff the two runs
+directly, first.** Find both runs' `Prediction Snapshots` entries, and for
+the flipped period (and everything after it, since that's the DP's own
+forward horizon), compare `buy`, `sell`, `solar`, `load`, `soe_start`
+field-by-field between the two runs' `predicted_periods`. Whatever changed
+IS the cause — you don't need to guess or sweep. If nothing in the forward
+horizon changed but the starting SOE differs, that's the cause instead
+(compare each run's own first `predicted_periods` entry, or its
+`optimization_period`'s preceding actual in Historical Sensor Data). If
+literally nothing differs between the two runs' inputs and the decision
+still flipped, THEN it's worth suspecting a genuine algorithm inconsistency
+— proceed to the sensitivity-sweep below to characterize it.
+
+**On an older bundle without `predicted_periods`, or to characterize *why*
+a real input difference changed the decision** (numerical noise / #450-class
+grid-snap artifact vs. a real, steep-but-correct decision boundary) — test it:
 
 1. Get the flipped period's exact `buy_price`/`sell_price`/`solar_production`/
    `home_consumption` for itself and every period after it (only the *forward*
@@ -128,14 +143,9 @@ update vs. a real, steep-but-correct decision boundary — test it:
    0.4–2.2 SEK at the boundary, far above the tie-noise threshold, on both
    the production DP and the hybrid branch — genuine sensitivity to
    accumulated SOE, not #450-class noise, and #467 would not change the
-   outcome.
-4. If you need to attribute the ROOT cause of an SOE difference between two
-   real runs (not just test sensitivity to it), compare each run's actual
-   starting SOE from Historical Sensor Data (see table above) — if it's
-   identical between the two runs' timestamps, the divergence came from an
-   updated forecast (solar/consumption) for the intervening periods, not a
-   different physical starting point. A `Prediction Snapshots` savings jump
-   at the same run boundary corroborates a forecast update.
+   outcome. (This investigation predated `predicted_periods` existing, so it
+   had to reconstruct the sweep instead of diffing directly — a bundle with
+   #481 would let step 1 above answer "what changed" immediately.)
 
 1. **Pin the period.** Convert the clock time in the question to a period number and
    slot; state both. Guard the off-by-one (15-min slots).

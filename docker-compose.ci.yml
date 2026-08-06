@@ -19,6 +19,12 @@ services:
       - HA_TEST_MODE=false
       - TZ=Europe/Stockholm
       - PYTHONPATH=/app/backend:/app
+      # Empty by default (no-op). Set both to pin the container's wall clock
+      # to a scenario's mock_time, e.g. for a scenario that pins mock_time to
+      # a fixed past date and needs date-anchored price lookups to match.
+      # See backend/Dockerfile.dev for the fixed libfaketime.so.1 symlink path.
+      - LD_PRELOAD=${BESS_FAKETIME_PRELOAD:-}
+      - FAKETIME=${BESS_FAKETIME:-}
     ports:
       - "${BESS_PORT:-8080}:8080"
     volumes:

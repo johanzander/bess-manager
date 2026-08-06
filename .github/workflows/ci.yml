@@ -204,6 +204,32 @@ jobs:
         if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 
+      # Phase 1b: Growatt VPP schedule build (regression for #399, #469 --
+      # fresh install, VPP remote-control mode, official Nordpool integration).
+      # mock_time is pinned to a fixed past date, so the container's wall
+      # clock must be faked to match or date-anchored price lookups fail.
+      - name: "E2E: Start environment (Growatt VPP)"
+        if: env.RUN_E2E == 'true'
+        run: |
+          BESS_FAKETIME_PRELOAD=/usr/local/lib/libfaketime.so.1 \
+          BESS_FAKETIME="2025-01-15 08:30:00" \
+          SCENARIO=ci-growatt-vpp BESS_SETTINGS=./e2e/ci-bess-settings-growatt-vpp.json \
+          docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/settings > /dev/null 2>&1; do sleep 2; done'
+      - name: "E2E: Verify Growatt VPP schedule builds without error"
+        if: env.RUN_E2E == 'true'
+        run: |
+          sleep 5
+          curl -sf http://localhost:8080/api/dashboard-health-summary > /dev/null
+          if docker compose -f docker-compose.ci.yml logs bess | grep -q "Failed to update battery schedule"; then
+            echo "Growatt VPP schedule build failed -- see logs below"
+            docker compose -f docker-compose.ci.yml logs bess
+            exit 1
+          fi
+      - name: "E2E: Stop environment (Growatt VPP)"
+        if: always() && env.RUN_E2E == 'true'
+        run: docker compose -f docker-compose.ci.yml down
+
       # Phase 2: Setup wizard tests (all scenario combinations)
       # Each step resets bess_settings.json to empty so the wizard triggers fresh.
       - name: "E2E: Wizard — Nordpool + MIN"
@@ -335,6 +361,17 @@ jobs:
           timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
           cd e2e && SCENARIO=ci-wizard-growatt-vpp npx playwright test --project=wizard
       - name: "E2E: Stop wizard (Growatt VPP)"
+        if: always() && env.RUN_E2E == 'true'
+        run: docker compose -f docker-compose.ci.yml down
+
+      - name: "E2E: Wizard — Growatt MIN (GEN4 + SolaX Modbus)"
+        if: always() && env.RUN_E2E == 'true'
+        run: |
+          echo '{}' > ./e2e/ci-wizard-settings.json
+          SCENARIO=ci-wizard-growatt-modbus BESS_SETTINGS=./e2e/ci-wizard-settings.json BESS_OPTIONS=./e2e/ci-wizard-options.json docker compose -f docker-compose.ci.yml up -d
+          timeout 120 bash -c 'until curl -sf http://localhost:8080/api/setup/status > /dev/null 2>&1; do sleep 2; done'
+          cd e2e && SCENARIO=ci-wizard-growatt-modbus npx playwright test --project=wizard
+      - name: "E2E: Stop wizard (Growatt MIN Modbus)"
         if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down
 

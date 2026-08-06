@@ -847,6 +847,15 @@ class HomeAssistantAPIController:
     # (inverter), storage_total_charge/storage_total_discharge (battery),
     # grid_exported_energy/grid_accumulated_energy (separate power-meter device,
     # so these two resolve to "not configured" on meterless installs).
+    # input_power (inverter, real-time PV) and power_meter_active_power
+    # (separate power-meter device, real-time grid power) verified against
+    # the same source (issue #438). power_meter_active_power is a single
+    # signed register (positive = export, negative = import — confirmed
+    # against Huawei's official register description, not the integration
+    # source, which documents no sign convention); it maps to import_power
+    # here and discover_sensors_from_registry also points export_power at
+    # the same entity, same pattern as Solis's grid_power_net (#475) — see
+    # PLATFORM_GRID_POWER_POLARITY["huawei_solar_luna2000"] in settings_store.py.
     HUAWEI_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         "storage_state_of_capacity": "battery_soc",
         "storage_charge_discharge_power": "battery_charge_power",
@@ -862,6 +871,8 @@ class HomeAssistantAPIController:
         "storage_total_discharge": "lifetime_battery_discharged",
         "grid_exported_energy": "lifetime_export_to_grid",
         "grid_accumulated_energy": "lifetime_import_from_grid",
+        "input_power": "pv_power",
+        "power_meter_active_power": "import_power",
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -3612,6 +3623,24 @@ class HomeAssistantAPIController:
                     "inverter/firmware; monitoring sensors mapped but "
                     "solis_modbus is not auto-selected as detected_platform"
                 )
+
+        if inverter_detected.get("huawei"):
+            huawei_sensors = self._map_registry_entities(
+                entities, ["huawei_solar"], self.HUAWEI_SUFFIX_MAP
+            )
+            # power_meter_active_power is a single signed register — Huawei
+            # has no separate export_power entity (same situation as Solis's
+            # grid_power_net, #475). Point export_power at the same entity
+            # so HAApiController's signed split (grid_power_polarity) can
+            # derive both readings from it.
+            if (
+                "import_power" in huawei_sensors
+                and "export_power" not in huawei_sensors
+            ):
+                huawei_sensors["export_power"] = huawei_sensors["import_power"]
+            platform_sensors["huawei_solar_luna2000"] = huawei_sensors
+            if not detected_platform:
+                detected_platform = "huawei_solar_luna2000"
 
         return platform_sensors, detected_platform
 

@@ -4,10 +4,14 @@ FROM python:3.13-slim
 WORKDIR /app
 
 # Install OS-level dependencies (libfaketime enables wall-clock override in mock mode)
+# The .so lives under a multiarch-specific path (e.g. x86_64-linux-gnu on CI
+# runners, aarch64-linux-gnu on Apple Silicon dev machines) -- symlink it to a
+# fixed path so LD_PRELOAD works the same way regardless of build platform.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends gcc libfaketime \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s "$(find /usr/lib -name libfaketime.so.1 | head -1)" /usr/local/lib/libfaketime.so.1
 
 # Copy requirements and install them (as root)
 COPY backend/requirements.txt .

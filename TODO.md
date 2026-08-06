@@ -597,3 +597,11 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 The real fix is to move construction into the FastAPI `lifespan` startup hook, which runs under uvicorn but not on bare import. That is a change to the application's entire startup path (and `api.py`'s `from app import bess_controller` would then see `None` until lifespan runs), so it needs the mock-HA E2E stack to verify — not a small cleanup.
 
 ---
+
+## From the E2E scenario fixture cleanup PR (non-blocking)
+
+**`e2e/package-lock.json` has `@playwright/test` locked at 1.59.1 while 1.62.1 is current.** `package.json`'s `^1.59.1` range already permits the newer version — the lockfile just hasn't been refreshed since it was last committed. Bumping it (`npm update @playwright/test` + commit the lockfile) also changes the pinned Chromium revision that CI/local runs download, so it's worth doing deliberately in its own PR rather than as a drive-by here.
+
+**`.github/workflows/ci.yml`'s E2E job runs all ~15 phases (normal-day, growatt-vpp, 13 wizard scenarios) sequentially in one job.** Each phase is independent (its own docker-compose stack, no shared state), so this is a good candidate for a `strategy: matrix` job split — one parallel job per scenario instead of one long sequential job. Would cut wall-clock from "sum of all phases" to roughly "the slowest single phase." Since the repo is public, GitHub Actions minutes are free/unlimited on standard runners, so this is purely a turnaround-time win, not a cost tradeoff. Worth its own PR — restructuring `ci.yml`'s step list into matrix `include:` entries (scenario, settings file, options file, step label) isn't a small tweak.
+
+---

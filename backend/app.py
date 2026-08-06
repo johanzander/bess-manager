@@ -144,6 +144,7 @@ class BESSController:
             growatt_device_id,
             huawei_device_id,
             self.settings_store.get_service_domain(),
+            self.settings_store.get_grid_power_polarity(),
         )
 
         # Enable test mode from environment variable OR persisted demo_mode setting.
@@ -217,6 +218,7 @@ class BESSController:
         growatt_device_id=None,
         huawei_device_id=None,
         service_domain=None,
+        grid_power_polarity=None,
     ):
         """Initialize Home Assistant API controller based on environment.
 
@@ -225,6 +227,8 @@ class BESSController:
             growatt_device_id: Growatt device ID for TOU segment operations.
             huawei_device_id: Huawei device ID for battery operations.
             service_domain: HA integration domain for vendor service calls.
+            grid_power_polarity: Sign convention for a platform whose
+                import_power/export_power share one signed entity.
         """
         ha_token = os.getenv("HASSIO_TOKEN")
         if ha_token:
@@ -244,6 +248,7 @@ class BESSController:
             growatt_device_id=growatt_device_id,
             huawei_device_id=huawei_device_id,
             service_domain=service_domain,
+            grid_power_polarity=grid_power_polarity,
         )
 
     def _load_options(self):
@@ -299,6 +304,18 @@ class BESSController:
         the previous integration until the next restart.
         """
         self.ha_controller.service_domain = self.settings_store.get_service_domain()
+
+    def refresh_grid_power_polarity(self) -> None:
+        """Sync the live ha_controller.grid_power_polarity from persisted settings.
+
+        Like service_domain, this is a plain copy taken at init — an
+        inverter platform switch changes which sign convention (if any)
+        applies to a shared signed grid-power sensor. Call this after any
+        settings mutation that can touch the inverter section.
+        """
+        self.ha_controller.grid_power_polarity = (
+            self.settings_store.get_grid_power_polarity()
+        )
 
     def apply_discovered_config(
         self,

@@ -106,6 +106,20 @@ PLATFORM_SERVICE_DOMAIN = {
     "huawei_solar_luna2000": "huawei_solar",
 }
 
+# Sign convention for platforms exposing grid power as a single signed sensor
+# instead of separate import/export entities. Unlike PLATFORM_SERVICE_DOMAIN,
+# this is a fixed hardware/integration fact, not something an install can
+# override. "" (the default for any platform not listed) means the platform
+# has no signed-shared-sensor split to perform — every other consumer reads
+# import_power/export_power independently as always.
+#
+# "import_positive": positive raw value = importing from grid, negative = exporting.
+# "export_positive": positive raw value = exporting to grid, negative = importing.
+PLATFORM_GRID_POWER_POLARITY = {
+    "solis_modbus": "import_positive",  # Grid Power Net register 33263/33264
+    "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
+}
+
 
 class SettingsStore:
     """Read/write /data/bess_settings.json with atomic writes.
@@ -204,6 +218,16 @@ class SettingsStore:
         if override:
             return override
         return PLATFORM_SERVICE_DOMAIN.get(inverter.get("platform", ""), "")
+
+    def get_grid_power_polarity(self) -> str:
+        """Return the sign convention for this platform's grid power sensor.
+
+        "" for platforms with separate import/export entities (no split
+        needed) and for an unconfigured install. Not user-overridable —
+        see PLATFORM_GRID_POWER_POLARITY.
+        """
+        inverter = self.data.get("inverter", {})
+        return PLATFORM_GRID_POWER_POLARITY.get(inverter.get("platform", ""), "")
 
     def get_active_sensors(self) -> dict:
         """Return a flat sensor dict merging the active platform's sensors with shared sensors.

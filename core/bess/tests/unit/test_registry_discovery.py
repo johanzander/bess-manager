@@ -324,6 +324,41 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             "huawei_solar",
             f"{serial}_active_power",
         ),
+        _entity(
+            "sensor.huawei_inverter_accumulated_yield_energy",
+            "huawei_solar",
+            f"{serial}_accumulated_yield_energy",
+        ),
+        _entity(
+            "sensor.huawei_battery_total_charge",
+            "huawei_solar",
+            f"{serial}_storage_total_charge",
+        ),
+        _entity(
+            "sensor.huawei_battery_total_discharge",
+            "huawei_solar",
+            f"{serial}_storage_total_discharge",
+        ),
+        _entity(
+            "sensor.huawei_meter_grid_exported_energy",
+            "huawei_solar",
+            f"{serial}_grid_exported_energy",
+        ),
+        _entity(
+            "sensor.huawei_meter_grid_accumulated_energy",
+            "huawei_solar",
+            f"{serial}_grid_accumulated_energy",
+        ),
+        _entity(
+            "sensor.huawei_inverter_input_power",
+            "huawei_solar",
+            f"{serial}_input_power",
+        ),
+        _entity(
+            "sensor.huawei_meter_power_meter_active_power",
+            "huawei_solar",
+            f"{serial}_power_meter_active_power",
+        ),
     ]
 
 
@@ -1241,6 +1276,9 @@ class TestDiscoverSensorsFromRegistry:
         )
         assert solis["import_power"] == "sensor.solis_grid_power_net"
         assert solis["pv_power"] == "sensor.solis_pv_power_1"
+        # Single signed sensor backs both keys (issue #475) — HAApiController
+        # splits it by sign at read time via grid_power_polarity.
+        assert solis["export_power"] == "sensor.solis_grid_power_net"
 
         # Dict-embedded monitoring sensors matched via the Solis-scoped
         # substring matcher (verified integration bug, see
@@ -1991,4 +2029,58 @@ class TestHuaweiDiscovery:
         )
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
         assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
-        assert len(result) == 9
+        assert len(result) == 16
+
+    def test_huawei_power_monitoring_sensors_mapped(self):
+        """issue #438: real-time PV power and signed grid power (single
+        power-meter register, split by HAApiController.grid_power_polarity —
+        see #475's mechanism, reused here with export_positive polarity)."""
+        result = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert result["pv_power"] == "sensor.huawei_inverter_input_power"
+        assert result["import_power"] == "sensor.huawei_meter_power_meter_active_power"
+
+    def test_huawei_lifetime_energy_sensors_mapped(self):
+        result = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_accumulated_yield_energy"
+        )
+        assert (
+            result["lifetime_battery_charged"] == "sensor.huawei_battery_total_charge"
+        )
+        assert (
+            result["lifetime_battery_discharged"]
+            == "sensor.huawei_battery_total_discharge"
+        )
+        assert (
+            result["lifetime_export_to_grid"]
+            == "sensor.huawei_meter_grid_exported_energy"
+        )
+        assert (
+            result["lifetime_import_from_grid"]
+            == "sensor.huawei_meter_grid_accumulated_energy"
+        )
+
+    def test_huawei_wired_into_discover_sensors_from_registry(self):
+        """Huawei must be auto-discovered like every other platform.
+
+        HUAWEI_SUFFIX_MAP previously had no caller in
+        discover_sensors_from_registry — every Huawei sensor was manual-entry
+        only. This is the production entry point the setup wizard actually
+        calls (backend/api.py), not _map_registry_entities in isolation.
+        """
+        sensors, platform = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        assert platform == "huawei_solar_luna2000"
+        assert "huawei_solar_luna2000" in sensors
+        huawei = sensors["huawei_solar_luna2000"]
+
+        assert huawei["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
+        assert huawei["pv_power"] == "sensor.huawei_inverter_input_power"
+        assert huawei["import_power"] == "sensor.huawei_meter_power_meter_active_power"
+        # Single signed power-meter register backs both keys (same pattern
+        # as Solis, #475) — HAApiController splits it via grid_power_polarity.
+        assert huawei["export_power"] == "sensor.huawei_meter_power_meter_active_power"

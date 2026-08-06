@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Huawei LUNA2000 installs now auto-discover lifetime solar/battery energy sensors, fixing a false "SYSTEM DEGRADED" health check and zero-valued savings graphs. ([#471](https://github.com/johanzander/bess-manager/issues/471))
 - **Local E2E verification for Growatt VPP scenarios now completes a full schedule build** instead of failing partway through. ([#469](https://github.com/johanzander/bess-manager/issues/469))
 - Solis installs now auto-configure grid export power, derived from the same signed sensor as import power. Previously export power was always unconfigured. ([#475](https://github.com/johanzander/bess-manager/issues/475))
+- Huawei LUNA2000 installs now auto-discover all sensors (SOC, battery control, power monitoring) instead of requiring manual entity entry for every field, and gain real-time solar/grid power monitoring. ([#438](https://github.com/johanzander/bess-manager/issues/438))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

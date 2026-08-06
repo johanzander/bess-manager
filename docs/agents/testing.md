@@ -124,9 +124,19 @@ mask a wrong value there.
 | `ci-wizard-growatt-sph-cloud-octopus` | Octopus | SPH (Cloud) | - | - | - | - | - |
 | `ci-wizard-both-providers` | Nordpool + Octopus | MIN (Cloud) | 1 | - | - | YES | YES |
 | `ci-wizard-growatt-modbus` | Nordpool Official | MIN (Cloud) — auto-selects Growatt Cloud even though SolaX Modbus is also detected | - | - | - | - | - |
-| `ci-wizard-growatt-modbus-gen3` | Nordpool Official | SPH (SolaX Modbus, GEN3, no TOU) | - | - | - | - | - |
 | `ci-wizard-solis` | Nordpool Official | Solis | - | - | - | - | - |
-| `ci-wizard-growatt-vpp` | Nordpool Official | SPH (SolaX Modbus, GEN3, VPP) | 3 | - | - | - | - |
+| `ci-wizard-growatt-vpp` | Nordpool Official | SPH (SolaX Modbus, GEN3, VPP) — experimental, see [platform maturity](memory/project_platform_maturity.md) | 3 | - | - | - | - |
+
+**Not in this table — backend-discovery-only, not Playwright-runnable:**
+`ci-wizard-growatt-modbus-gen3.json` was meant to test a GEN3-via-SolaX-Modbus
+"no TOU" path, but GEN3 (`solax_modbus_growatt_sph`) has no TOU path at all —
+`battery_system_manager.py:291-292` documents it as VPP-only. The fixture is
+missing the 5 VPP entities the wizard requires to complete, so "Next" never
+enables and the full flow can't finish. It still gets exercised by
+`test_scenario_discovery.py` (backend-only, doesn't need wizard completion).
+GEN3-via-SolaX-Modbus is itself experimental/unvalidated in the real world —
+only Growatt Cloud SPH and GEN4-via-Modbus are — so this isn't worth forcing
+into a full-completion test by adding fabricated VPP entity IDs.
 
 **What each test validates per scenario:**
 - Correct pricing provider auto-selected (Nordpool vs Octopus vs ENTSO-e)

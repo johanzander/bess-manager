@@ -168,20 +168,13 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     dischargeInhibitFound: false,
     weatherFound: false,
   },
-  // Values confirmed against a live POST /api/setup/discover run, not guessed.
-  'ci-wizard-growatt-modbus-gen3': {
-    growattFound: false,
-    solaxFound: true,
-    inverterPlatform: 'solax_modbus_growatt_sph',
-    nordpoolFound: true,
-    octopusFound: false,
-    autoSelectedProvider: 'nordpool_official',
-    phaseCount: null,
-    solcastFound: false,
-    consumptionForecastFound: false,
-    dischargeInhibitFound: false,
-    weatherFound: false,
-  },
+  // ci-wizard-growatt-modbus-gen3 has no entry here on purpose: its fixture
+  // is missing the 5 VPP entities GEN3 (solax_modbus_growatt_sph) always
+  // requires -- battery_system_manager.py:291-292 documents GEN3 as
+  // VPP-only, no TOU path exists -- so "Next" never enables and the full
+  // wizard flow can't complete. It stays covered by test_scenario_discovery.py
+  // (backend-only, doesn't need wizard completion) instead of this Playwright
+  // suite. See docs/agents/testing.md's Wizard Scenario Matrix note.
   'ci-wizard-nordpool-solax': {
     growattFound: false,
     solaxFound: true,

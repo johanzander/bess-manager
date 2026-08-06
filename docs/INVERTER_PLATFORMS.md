@@ -464,8 +464,12 @@ uses. TOU period times (`time.py`) and per-slot enable switches
   sensor is added.
 - `import_power` and `export_power` both resolve to the single signed "Grid
   Power Net" sensor (Solis exposes no separate import/export power
-  entities); `export_power` is left unconfigured by auto-discovery since one
-  suffix-map entry can only resolve to one BESS sensor key.
+  entities). `HomeAssistantAPIController.grid_power_polarity`
+  (`"import_positive"` for `solis_modbus`, set via
+  `SettingsStore.get_grid_power_polarity()`) splits the one raw reading by
+  sign at read time: positive → `import_power`, negative → `export_power`.
+  Not user-configurable — it's a fixed property of the platform, not
+  install-specific.
 
 ### Huawei LUNA2000 (Local) — `huawei_solar_luna2000`
 
@@ -716,7 +720,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | `battery_soc` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_battery_soc'` | Current battery level |
 | `battery_charge_power` | sensor | `solis_modbus_inverter_battery_charge_power` (derived, clean) | Charge power (W) |
 | `battery_discharge_power` | sensor | `solis_modbus_inverter_battery_discharge_power` (derived, clean) | Discharge power (W) |
-| `import_power` / `export_power` | sensor | `solis_modbus_inverter_grid_power_net` (derived, clean, signed) | Net grid power (W); only `import_power` is auto-mapped |
+| `import_power` / `export_power` | sensor | `solis_modbus_inverter_grid_power_net` (derived, clean, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`) |
 | `pv_power` | sensor | `solis_modbus_inverter_dc_power_1` (derived, clean) | PV string 1 power (W) — see known gaps above |
 | `local_load_power` | sensor | dict-embedded: `'unique': 'solis_modbus_inverter_household_load_power'` | Home consumption (W) |
 

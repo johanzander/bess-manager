@@ -1058,8 +1058,18 @@ class GrowattMinController(InverterController):
             is_current = group["start_period"] <= current_period <= group["end_period"]
             marker = "*" if is_current else " "
 
+            # get_detailed_period_groups() only populates "batt_mode" for
+            # CONTROL_MODEL == "tou_register" groups; vpp_power groups carry
+            # "vpp_power_pct"/"vpp_remote_control" instead (inverter_controller.py
+            # _mode_display_fields).
+            if self.CONTROL_MODEL == "vpp_power":
+                remote = "ON" if group["vpp_remote_control"] else "OFF"
+                mode_label = f"{group['vpp_power_pct']}%/{remote}"
+            else:
+                mode_label = group["batt_mode"]
+
             row = (
-                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {group['batt_mode']:13} ║"
+                f"║{marker}{time_range:13} ║ {duration:8} ║ {group['intent']:16} ║ {mode_label:13} ║"
                 f" {group['grid_charge']!s:11} ║ {group['charge_rate']:11}% ║ {group['discharge_rate']:13}% ║"
             )
             lines.append(row)

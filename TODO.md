@@ -494,15 +494,41 @@ version is ever attempted: show the comparison, not the narration.
 - `frontend/src/components/DecisionFramework.tsx` (608 lines, imported by nothing)
 - `frontend/src/lib/decisionIntelligenceAPI.tsx` (33 lines)
 - `frontend/src/components/TableBatteryDecisionExplorer.tsx` (imported by nothing)
+- `frontend/src/types/decisionFramework.tsx` (`FlowPattern`,
+  `DecisionIntelligenceResponse`) — imported *only* by `DecisionFramework.tsx:22`
+  and `decisionIntelligenceAPI.tsx:4`, both deleted above, so it becomes a new
+  orphan if left behind
 - `backend/api.py`: `convert_real_data_to_mock_format` (876-1034),
   `get_decision_intelligence` + the `/api/decision-intelligence` route
   (1037-1084), `get_decision_intelligence_mock` (1086-1509 — 424 lines of
   hardcoded demo prices with its route decorator already commented out)
 - `core/bess/decision_intelligence.py`: `generate_advanced_flow_pattern_name`,
   `generate_strategic_pattern_name`, `generate_flow_description`,
-  `generate_economic_chain`, `calculate_detailed_flow_values`,
-  `extract_economic_values_from_reward` — all have **zero** references outside
-  the module once the above is gone
+  `generate_economic_chain`, `calculate_detailed_flow_values` — all have
+  **zero** references outside the module once the above is gone
+- `core/bess/decision_intelligence.py`: `extract_economic_values_from_reward`
+  — **delete only together with the replacement below.** It is the sole
+  producer of `future_value`, which the Keep list requires. Removing it
+  without a replacement silently reverts `future_value` to its `0.0` default
+  and reintroduces exactly the regression #353 fixed.
+
+  **Replacement**: assign `continuation_value` to `future_value` directly.
+  The two are already algebraically identical — `_compute_reward` builds
+  `reward = -(import_cost - export_revenue + battery_wear_cost)`
+  (`dp_battery_algorithm.py:795-796`), which *is*
+  `extract_economic_values_from_reward`'s `immediate_value`
+  (`decision_intelligence.py:413`), so
+  `future_value = reward - immediate_value` (`:418`) collapses to precisely
+  the `continuation_value` that `dp_battery_algorithm.py:809` adds in. The
+  extractor is a no-op round trip. `create_decision_data` should take
+  `continuation_value` and set `future_value=continuation_value`, dropping
+  its `reward`/`import_cost`/`export_revenue`/`battery_wear_cost` parameters
+  along with `immediate_value`.
+
+  **Ripples of that swap**: `dp_battery_algorithm.py:804-809`'s invariant
+  comment explains the round trip by name and must go with it; the call site
+  at `:798-812` already has `continuation_value` in scope (`:709`, passed at
+  `:1755`), so nothing new needs plumbing.
 - `core/bess/models.py` `DecisionData` fields: `pattern_name`, `description`,
   `economic_chain`, `immediate_value`, `net_strategy_value`,
   `advanced_flow_pattern`, `detailed_flow_values`, `future_target_hours` —
@@ -531,8 +557,11 @@ version is ever attempted: show the comparison, not the narration.
 
 - `e2e/tests/api-smoke.spec.ts:38` and `e2e/tests/api-contracts.spec.ts:312`
   both assert on `/api/decision-intelligence` — delete those two blocks.
-- `core/bess/tests/unit/test_data_models.py` asserts the removed fields around
-  lines 338-364 — trim to the surviving ones.
+- `core/bess/tests/unit/test_data_models.py` asserts the removed fields in
+  `TestDecisionData` (around lines 336-359) — trim to the surviving ones.
+  **Also line 390**, in `TestPeriodData`, which constructs a `DecisionData`
+  with `pattern_name=` outside that range; missing it fails the whole module
+  at collection with `TypeError: unexpected keyword argument 'pattern_name'`.
 - **PR #358 coordination**: `build_chart.py` extracts `economic_chain` and
   `immediate_value` into its ROWS (two sites each, both `dec.get(...)` with
   defaults) but renders neither. Dropping those four lines plus the `ROWS`
@@ -540,6 +569,15 @@ version is ever attempted: show the comparison, not the narration.
   **open**, either land it first and clean up after, or fold the four-line
   removal into it — do not delete the fields while the PR is in flight without
   telling it.
+- **Docs**: `docs/SOFTWARE_DESIGN.md:668` has a whole "Decision Intelligence
+  API (`/api/decision-intelligence`)" section describing the deleted endpoint —
+  remove it. Separately, moving `classify_strategic_intent()` out of
+  `decision_intelligence.py` (see Keep) invalidates the path references in
+  `docs/SOFTWARE_DESIGN.md:331`, `docs/ALGORITHM_EXPLAINED.md:252`,
+  `docs/agents/bess-knowledge.md:230` and `:502`, and
+  `docs/agents/simulator.md:47` — repoint them at the new module. Historical
+  records under `docs/superpowers/` and `docs/agents/memory/` are
+  point-in-time artefacts and stay as-is.
 - No performance change: `create_decision_data` runs once per reconstructed
   period in `_build_period_data`, not in the DP inner loop.
 
@@ -744,17 +782,9 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 
 ---
 
-## From #233 SOE-floor-clamp fix code review (non-blocking, pre-existing)
-
-**`_idle_battery_flows`'s below-floor guard now zeroes real energy, not just floor artefacts** — filed as [#295](https://github.com/johanzander/bess-manager/issues/295).
-
----
-
 ## From #353 immediate_value/future_value investigation (non-blocking)
 
 **`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
-
-**Superseded** by "Scrap the Decision Intelligence framework" (TECHNICAL DEBT), which deletes this whole path.
 
 **Superseded**: the design decision this note was waiting on has been made — see
 "Scrap the Decision Intelligence framework" under TECHNICAL DEBT, which deletes

@@ -1081,15 +1081,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1129,15 +1121,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1177,15 +1161,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1225,15 +1201,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1273,15 +1241,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1321,15 +1281,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1369,15 +1321,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1417,15 +1361,7 @@
         "observed_intent": "LOAD_SUPPORT",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1465,15 +1401,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1513,15 +1441,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1561,15 +1481,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1609,15 +1521,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1657,15 +1561,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1705,15 +1601,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1753,15 +1641,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1801,15 +1681,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1849,15 +1721,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1897,15 +1761,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1945,15 +1801,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -1993,15 +1841,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2041,15 +1881,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2089,15 +1921,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2137,15 +1961,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2185,15 +2001,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2233,15 +2041,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2281,15 +2081,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2329,15 +2121,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2377,15 +2161,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2425,15 +2201,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2473,15 +2241,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2521,15 +2281,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2569,15 +2321,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2617,15 +2361,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2665,15 +2401,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2713,15 +2441,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2761,15 +2481,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2809,15 +2521,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2857,15 +2561,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2905,15 +2601,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -2953,15 +2641,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3001,15 +2681,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3049,15 +2721,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3097,15 +2761,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3145,15 +2801,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3193,15 +2841,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3241,15 +2881,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3289,15 +2921,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     },
     {
@@ -3337,15 +2961,7 @@
         "observed_intent": "IDLE",
         "battery_action": null,
         "cost_basis": 0.0,
-        "pattern_name": "",
-        "description": "",
-        "economic_chain": "",
-        "immediate_value": 0.0,
-        "future_value": 0.0,
-        "net_strategy_value": 0.0,
-        "advanced_flow_pattern": "",
-        "detailed_flow_values": {},
-        "future_target_hours": []
+        "future_value": 0.0
       }
     }
   ],

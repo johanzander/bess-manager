@@ -81,7 +81,7 @@ frontend) — this is for a point-in-time bundle snapshot only.
 | `scripts/build_chart.py` | Parses the bundle, recomputes actual periods via real `EnergyData`, merges with forecast `period_data`, renders the final HTML |
 | `scripts/template_head.html` | CSS + page skeleton, `{{TITLE}}`/`{{SUBTITLE}}` placeholders |
 | `scripts/template_tail.js` | Chart rendering, legend/ledger toggles, tooltip — reads `ROWS` and `SUMMARY` globals the build script injects |
-| `ROWS` | One object per period: raw aggregates, detailed flows, intent, DP-reasoning fields (`shadow_price`, `cost_basis`, `economic_chain`, `immediate_value`, `future_value`), plus a `view` sub-object with every derived tooltip value (`compare`, `breakeven`, `home_profit`, `export_profit`, `reward`, `total_value`, `net_savings`, `charge_parts`, `discharge_parts`) |
+| `ROWS` | One object per period: raw aggregates, detailed flows, intent, DP-reasoning fields (`shadow_price`, `cost_basis`, `future_value`), plus a `view` sub-object with every derived tooltip value (`compare`, `breakeven`, `home_profit`, `export_profit`, `reward`, `total_value`, `net_savings`, `charge_parts`, `discharge_parts`) |
 | `SUMMARY` | Whole-trace totals: `grid_only_cost`, `actual_cost`, `savings`, `cycle_cost`, `capacity`, period counts |
 
 ## Common Mistakes

@@ -34,9 +34,4 @@ test.describe('API Smoke Tests', () => {
     const res = await request.get('/api/growatt/inverter_status');
     expect(res.status()).toBe(200);
   });
-
-  test('GET /api/decision-intelligence returns 200', async ({ request }) => {
-    const res = await request.get('/api/decision-intelligence');
-    expect(res.status()).toBe(200);
-  });
 });

@@ -8,6 +8,7 @@ detector's known coverage blind spot -- not a theoretical worst-case bound.
 
 import pytest
 
+from core.bess.pwl_window_dp import PWLEndSoeOutOfRangeError
 from core.bess.tests.synthetic.measure_tie_coverage import measure_scenario
 from core.bess.tests.synthetic.perturb_scenario import (
     PerturbationParams,
@@ -21,14 +22,20 @@ pytestmark = pytest.mark.slow
 # Every entry is deterministic -- re-running this list reproduces identical
 # scenarios and identical measurements.
 #
-# 4*3*1*2*2*2 = 96 scenarios, measured at ~85s total -- inside, but close
-# to, the 30-90s budget for this suite's addition to the existing slow
-# suite. A first pass at 4*3*2*2*2*2 = 192 measured 132.59s, well over
-# budget, so the volatility axis was traded down from 2 levels to 1
-# (volatility_jitter is a smaller perturbation layered on top of
-# price_level_multiplier, which already varies price by 5x across this
-# matrix, so it was the least differentiated axis to drop) to make room for
-# the fixture/seed/battery-override widening below.
+# 4*3*2*2*2*1 = 96 DISTINCT scenarios, inside the 30-90s budget for this
+# suite's addition to the existing slow suite. A first pass at 192 measured
+# 132.59s, well over budget, so the matrix is held at 96 measured solves --
+# runtime tracks the number of entries, so the question is only which axes
+# spend them.
+#
+# The seed axis is deliberately a single value. `perturb_scenario` consumes
+# its seeded RNG only inside `if params.volatility_jitter:`, so seeds are
+# indistinguishable at jitter 0.0 and merely resample the same distribution
+# at a fixed non-zero jitter. Spending the budget on a second *volatility
+# level* instead makes every one of the 96 entries a distinct scenario and
+# adds a real axis (flat-vs-jittered prices) rather than a second draw of an
+# existing one. An earlier revision paired `_VOLATILITY_LEVELS = [0.0]` with
+# two seeds, which silently measured 48 distinct scenarios twice.
 #
 # Fixtures must be buy_price/sell_price-format (perturb_scenario does not
 # support base_prices/price_data-format fixtures); of the fixtures in the
@@ -40,10 +47,10 @@ _BASE_FIXTURES = [
     "regression_frank_debug_before",
 ]
 _PRICE_LEVELS = [0.5, 1.0, 2.5]  # low / baseline / winter-peak-like
-_VOLATILITY_LEVELS = [0.0]
+_VOLATILITY_LEVELS = [0.0, 0.15]  # flat / +-15% per-period price jitter
 _SOLAR_LEVELS = [0.0, 1.0]
 _BATTERY_OVERRIDES = [None, 10.0]  # None = fixture's own capacity
-_SEEDS = [1, 2]
+_SEEDS = [1]  # see the axis discussion above -- seeds only matter with jitter
 
 _SCENARIO_MATRIX = [
     (
@@ -73,11 +80,13 @@ _SCENARIO_MATRIX = [
 # within [min_soe, max_soe] -- so it raises ValueError instead of measuring.
 # That is a real gap in the reference solver's handling of below-min
 # recovery trajectories, out of scope for this measurement-only task to fix.
-# Rather than drop the whole fixture (which would also drop the only
-# non-zero financial-impact measurement found anywhere in this matrix, see
-# Task 6's fix report), each scenario that hits it is caught individually
-# and counted/printed as infeasible below.
-_BELOW_FLOOR_MARKER = "outside the battery's usable range"
+# Rather than drop the whole fixture -- its other perturbations measure
+# normally and contribute real data points -- each scenario that hits it is
+# caught individually, by the solver's own `PWLEndSoeOutOfRangeError` type
+# (never by matching a substring of its prose message), and counted/printed
+# as infeasible below. The counts asserted at the end of the test are what
+# keeps that skip honest: if a regression ever made most of the matrix
+# unmeasurable, the budget gate alone would still pass on the survivors.
 
 # Ratio below this is treated as a "genuinely close call" for the
 # blind/distant/close breakdown printed below -- not a detector threshold
@@ -87,10 +96,20 @@ _BELOW_FLOOR_MARKER = "outside the battery's usable range"
 _CLOSE_CALL_RATIO = 5.0
 
 # TIE_MISS_BUDGET_SEK is now enforced: 0.05 SEK, based on the worst observed
-# financial impact of 0.017188 SEK across the 96-scenario matrix from Task 6's
-# measurement run (giving ~3x safety margin). When worst_impact exceeds this
-# budget, the assertion below fails.
+# financial impact of 0.017188 SEK across the 96 distinct scenarios of this
+# matrix (giving ~3x safety margin). When worst_impact exceeds this budget, the
+# assertion below fails.
 TIE_MISS_BUDGET_SEK = 0.05
+
+# Coverage floors on the measurement itself, not on the economics. The budget
+# assertion alone can be satisfied by a single surviving data point, so a
+# regression that made most of the matrix unmeasurable (a solver raise on more
+# perturbations, a near-miss selector that stopped forming ratios) would pass
+# silently while the suite had effectively stopped measuring. Set with real
+# headroom around the current 86-measured / 4-infeasible split so ordinary
+# fixture drift does not trip them, but a collapse does.
+_MIN_IMPACTS_MEASURED = 75
+_MAX_INFEASIBLE_SCENARIOS = 10
 
 
 def test_synthetic_scenario_tie_coverage():
@@ -114,9 +133,7 @@ def test_synthetic_scenario_tie_coverage():
         scenario = perturb_scenario(base, seed=seed, params=params)
         try:
             measurement = measure_scenario(scenario)
-        except ValueError as exc:
-            if _BELOW_FLOOR_MARKER not in str(exc):
-                raise
+        except PWLEndSoeOutOfRangeError:
             infeasible_scenarios.append((base_name, seed, params))
             continue
 
@@ -147,7 +164,7 @@ def test_synthetic_scenario_tie_coverage():
         print(f"  {bucket}: {count}")
 
     print(
-        f"\nInfeasible (below-floor initial SOE, ValueError caught): "
+        f"\nInfeasible (below-floor initial SOE, PWLEndSoeOutOfRangeError caught): "
         f"{len(infeasible_scenarios)} of {len(_SCENARIO_MATRIX)} scenarios"
     )
     for base_name, seed, params in infeasible_scenarios:
@@ -176,6 +193,19 @@ def test_synthetic_scenario_tie_coverage():
         print(
             f"Worst observed financial impact: {worst_impact:.6f} SEK ({worst_impact_scenario})"
         )
+
+    assert len(infeasible_scenarios) <= _MAX_INFEASIBLE_SCENARIOS, (
+        f"{len(infeasible_scenarios)} of {len(_SCENARIO_MATRIX)} scenarios were "
+        f"skipped as infeasible (limit {_MAX_INFEASIBLE_SCENARIOS}) -- the suite "
+        "is measuring far less of its matrix than it was calibrated on, so the "
+        "budget assertion below is no longer meaningful evidence"
+    )
+    assert impacts_measured >= _MIN_IMPACTS_MEASURED, (
+        f"financial impact was measured on only {impacts_measured} scenarios "
+        f"(floor {_MIN_IMPACTS_MEASURED}) -- the budget assertion below would "
+        "pass on the survivors while the suite had effectively stopped "
+        "measuring coverage"
+    )
 
     if TIE_MISS_BUDGET_SEK is not None:
         assert worst_impact is not None and worst_impact <= TIE_MISS_BUDGET_SEK, (

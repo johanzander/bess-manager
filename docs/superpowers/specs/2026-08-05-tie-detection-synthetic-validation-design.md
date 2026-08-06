@@ -1,9 +1,91 @@
 # Design: Synthetic scenario validation for the #450 tie detector's coverage
 
 **Date**: 2026-08-05
-**Status**: PROPOSED
+**Status**: IMPLEMENTED — see "Revision: short-segment reference" below; the
+body of this document is the original proposal and is superseded in places
 **Related**: #450, `docs/superpowers/specs/2026-08-04-hybrid-dp-pwl-tie-resolution-design.md`
 (the hybrid fix this validates), PR #467.
+
+## Revision: short-segment reference (post-implementation)
+
+**Everything below this section is the design as originally PROPOSED. Three
+of its decisions did not survive implementation.** The shipped code is
+`core/bess/tests/synthetic/measure_tie_coverage.py` and
+`core/bess/tests/unit/test_tie_detection_synthetic_coverage.py`; where this
+document and those modules disagree, the modules are correct and their
+docstrings carry the detail.
+
+**1. The reference is a short padded segment, not the full horizon.** The
+"full-horizon exact-PWL reference pinned to the DP's own final SOE" described
+under *Architecture* and *The "true optimal" reference is an approximation*
+is **abandoned as unreachable**, not merely approximated. The PWL solver's
+breakpoint set compounds per backward step (it seeds every discharge preimage
+of the next row's breakpoints), exhausting `PWL_MAX_PREIMAGE_SEED_POINTS` at
+a horizon of ~8 periods on the #450 fixture — raising the budgets does not
+buy a 78-period solve. Instead, `segment_reference_cost` re-solves exactly
+the padded window `detect_tie_windows` *would* have built (pad 2, pinned by
+`test_segment_padding_matches_the_detectors_own`) around the single period
+that came closest to the detection threshold without crossing it. Side
+benefit: measurement cost is independent of scenario length.
+
+**2. The measured number is a LOWER BOUND, and not a proven optimum.** This
+is the most important thing a reader must take from this revision:
+
+- Both segment ends are pinned to the incumbent schedule's own SOE, so the
+  reference cannot bank energy differently outside the segment. A better
+  global plan that needs a different boundary SOE is out of reach by
+  construction — the measured impact under-counts.
+- The reference is only *what the PWL solver achieves*, not the true optimum.
+  The solver is measurably suboptimal on real data (0.031 SEK worse than the
+  grid DP on one pinned segment; pinned by
+  `test_reference_can_undershoot_the_hybrid_a_known_solver_limitation`).
+  A **positive** delta is therefore still a sound constructive witness (a
+  concrete feasible schedule, replayed through the DP's own reward function,
+  that costs less). A **negative** delta is solver noise and is floored at
+  zero — never reported as a negative impact.
+- The delta credits any grid-quantization gain within those periods, not the
+  near-tie alone.
+
+**3. Financial impact is measured on every scenario, not only zero-flag
+ones.** The *Why only zero-flag scenarios get a financial-impact number*
+section below no longer applies. Because the measured segment is built around
+a period the detector explicitly did **not** flag (already-flagged periods
+are excluded from selection in `near_miss_segment`), the conflation that
+restriction was designed to avoid cannot arise — a flagged window elsewhere
+in the same scenario does not contaminate this segment's delta. So the
+measurement runs on every scenario that has a formable near-miss ratio.
+
+**4. Infeasible scenarios are skipped individually, counted, and printed.**
+The *Error handling* bullet "No silent skipping of hard scenarios" stands as
+a principle but is stated too absolutely for what shipped. `regression_2026_
+07_25_090230` starts below `min_soe_kwh` (a legitimate below-min recovery
+state), and on some of its perturbations the near-miss segment's pinned end
+SOE is still below the floor, which `segment_reference_cost` refuses to build
+a terminal row for (`PWLEndSoeOutOfRangeError`). Those scenarios are caught
+**by exception type**, appended to a list, and printed with their exact
+parameters — skipped visibly, never silently — and the test asserts floors on
+how many scenarios were actually measured (`_MIN_IMPACTS_MEASURED`) and
+ceilings on how many were skipped (`_MAX_INFEASIBLE_SCENARIOS`) so a collapse
+in coverage fails loudly instead of leaving the budget gate to pass on a
+handful of survivors. Fixing the reference solver's handling of below-min
+recovery trajectories is out of scope for this measurement-only suite.
+
+**5. Objective mismatches fail loudly rather than being assumed away.** The
+harness threads a single raw `sell_price` and `import_cap_kwh=None` into both
+the exact solve and the replay. Export curtailment
+(`_reject_unsupported_objective`) and a fixture-supplied grid import cap
+(`_reject_unsupported_import_cap`) each raise `NotImplementedError` rather
+than silently comparing two different objectives. Backing all of them,
+`measure_scenario` asserts on every scenario that the replayed per-period
+costs sum to the DP's own reported `reward_objective_cost` — the identity any
+future unthreaded objective would break first.
+
+**Calibrated outcome** (96 distinct scenarios: 4 fixtures × 3 price levels ×
+2 volatility levels × 2 solar levels × 2 battery sizes, ~66s): 4 infeasible,
+86 impacts measured, worst observed impact **0.017188 SEK**, enforced budget
+`TIE_MISS_BUDGET_SEK = 0.05` (~3x margin).
+
+---
 
 ## Why
 

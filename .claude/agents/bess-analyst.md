@@ -73,6 +73,22 @@ latest-run `SOLAR_EXPORT`). Never conclude "it didn't happen / the battery doesn
 move." Explain where it happened and WHY runs differ (usually near-threshold
 `shadow_price` volatility).
 
+**Where cross-run data actually lives (a recurring mistake — read this before
+concluding "only the latest run is available"):**
+
+| Section | Coverage | Precision |
+|---|---|---|
+| `## Raw Schedule JSON (deep debugging)` | **Only the latest optimization run** — full `input_data`/`period_data`, every period in the horizon, exact floats. Its `<summary>` label says "(all runs)" — that is misleading, not a guarantee; count the top-level array entries before assuming otherwise. | Exact |
+| `## System Logs (Today)` | **Every optimization run of the day** (one box-drawing table per run, ~15 min apart — cross-check the count against `## Prediction Snapshots`' "Total Snapshots"). This IS the multi-run data source. | Rounded to 1-2 significant digits. Log compaction (`[Compact log: N key events...]`) can strip the column-header row — infer column meaning by cross-referencing the same period's exact values in the latest run's Raw Schedule JSON. Each run's table may only cover a **tail window of periods**, not the full horizon — check what's actually printed before assuming you can reconstruct a full-horizon replay input from it. |
+| `## Prediction Snapshots` | Run timestamps + count only, no per-period data. | Use this to know how many runs happened and when, before searching System Logs for them. |
+
+`scripts/extract_decision_evidence.py` already does single-slot cross-run
+reconciliation against System Logs for you — use it for "did period X change
+between runs" questions. Only hand-parse System Logs box tables yourself when
+you need a full-horizon reconstruction of an earlier run's inputs (e.g. to
+replay it through the optimizer) — and validate precision/coverage (per the
+table above) before treating the result as replay-grade, not just directional.
+
 1. **Pin the period.** Convert the clock time in the question to a period number and
    slot; state both. Guard the off-by-one (15-min slots).
 2. **Facts before narrative.** Read that period's row in `### Period Decisions`.

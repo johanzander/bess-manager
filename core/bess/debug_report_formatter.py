@@ -703,10 +703,25 @@ Findings (top) and System Logs (bottom).*
         return summary + details
 
     def _format_raw_schedule_json(self, export: DebugDataExport) -> str:
+        # export.schedules holds exactly one entry in compact mode (see
+        # _serialize_schedules) -- the label must say so, or a reader assumes
+        # every run's full input_data/period_data is here when it isn't.
+        # schedules_summary.total_schedules is the true count regardless of
+        # compact mode (see _summarize_schedules); System Logs (Today) is the
+        # section that actually covers every run of the day, not this one.
+        n = len(export.schedules)
+        if export.compact:
+            total = export.schedules_summary.get("total_schedules", n)
+            label = (
+                f"Full Schedule JSON (latest run only, of {total} today -- "
+                "see System Logs (Today) for every run's per-period data)"
+            )
+        else:
+            label = f"Full Schedule JSON (all {n} runs today)"
         return f"""## Raw Schedule JSON (deep debugging)
 
 <details>
-<summary>Full Schedule JSON (all runs)</summary>
+<summary>{label}</summary>
 
 ```json
 {self._format_json(export.schedules)}

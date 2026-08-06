@@ -321,6 +321,43 @@ class TestSignedGridPowerSplit:
         assert signed_grid_ctrl.get_import_power() is None
         assert signed_grid_ctrl.get_export_power() is None
 
+    def test_export_positive_polarity_splits_positive_raw_to_export(self):
+        """Huawei's power_meter_active_power (#438): positive = export."""
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            sensor_config={
+                "import_power": "sensor.huawei_power_meter_active_power",
+                "export_power": "sensor.huawei_power_meter_active_power",
+            },
+            grid_power_polarity="export_positive",
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "1500"})
+        )
+        assert c.get_export_power() == 1500.0
+        assert c.get_import_power() == 0.0
+
+    def test_export_positive_polarity_splits_negative_raw_to_import(self):
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            sensor_config={
+                "import_power": "sensor.huawei_power_meter_active_power",
+                "export_power": "sensor.huawei_power_meter_active_power",
+            },
+            grid_power_polarity="export_positive",
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-1500"})
+        )
+        assert c.get_import_power() == 1500.0
+        assert c.get_export_power() == 0.0
+
     def test_separate_entities_unaffected_by_polarity(self, ctrl):
         """A platform with two distinct entities must read them independently,
         even if grid_power_polarity somehow ended up set (defense against a

@@ -114,8 +114,10 @@ PLATFORM_SERVICE_DOMAIN = {
 # import_power/export_power independently as always.
 #
 # "import_positive": positive raw value = importing from grid, negative = exporting.
+# "export_positive": positive raw value = exporting to grid, negative = importing.
 PLATFORM_GRID_POWER_POLARITY = {
     "solis_modbus": "import_positive",  # Grid Power Net register 33263/33264
+    "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
 }
 
 

@@ -763,18 +763,21 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
 | `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
 | `local_load_power` | sensor | `active_power` | Home consumption (W) |
+| `pv_power` | sensor | `input_power` | Real-time solar PV power (W) |
+| `import_power` / `export_power` | sensor | `power_meter_active_power` (separate power-meter device, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`, `"export_positive"` — issue #438) |
 
-**Lifetime energy (optional):**
+**Lifetime energy (optional):** see `HUAWEI_SUFFIX_MAP` in `ha_api_controller.py`
+for the five lifetime-energy suffixes added in #471/#473 (not reproduced here
+to avoid duplicating a list that will drift — the suffix map is the source of
+truth).
 
-The `huawei_solar` integration does not expose lifetime energy counters for BESS's
-standard usage (battery input/output, solar production, grid import/export). Custom
-register reads via a separate Modbus probe are required; this is not yet
-integrated into BESS.
-
-**Auto-detection:** Presence of `huawei_solar` integration entities with the
-`storage_working_mode_settings` unique_id suffix triggers Huawei platform
-detection; the setup wizard confirms the battery model is LUNA2000 via
-`get_huawei_working_mode_options()` before proceeding.
+**Auto-detection:** `HUAWEI_SUFFIX_MAP` is wired into `discover_sensors_from_registry`
+(the same production entity-registry scan every other platform uses — fixed
+in #438; previously this map had no caller there and every Huawei sensor
+required manual entity entry). Presence of `huawei_solar` integration entities
+with the `storage_working_mode_settings` unique_id suffix triggers Huawei
+platform detection; the setup wizard confirms the battery model is LUNA2000
+via `get_huawei_working_mode_options()` before proceeding.
 
 ---
 

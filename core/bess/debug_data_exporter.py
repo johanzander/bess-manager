@@ -283,6 +283,16 @@ def _scrub_entity_registry_entry(
 # Patterns that identify actionable log lines worth including in compact exports.
 # These cover: errors/warnings, hardware commands, key decisions, feature-specific
 # events (discharge inhibit, charge power), and intent transitions.
+#
+# All six strategic intents (not just the three battery-active ones) must be
+# listed here: each per-period box-table row in dp_battery_algorithm.py's
+# schedule log embeds its own Intent column, so a row only survives
+# compaction if its intent string matches this pattern. Dropping
+# SOLAR_EXPORT/SOLAR_STORAGE/IDLE silently discarded every earlier-run
+# schedule row for periods where the DP wasn't actively charging/discharging
+# -- typically all of a day's solar hours -- which broke bess-analyst's
+# documented cross-run reconciliation (extract_decision_evidence.py,
+# bess-analyst.md) for exactly those periods. Found investigating #466.
 _LOG_KEY_PATTERNS = re.compile(
     r"WARNING|ERROR|CRITICAL"
     r"|HARDWARE:"
@@ -290,7 +300,7 @@ _LOG_KEY_PATTERNS = re.compile(
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"
-    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING"
+    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING|SOLAR_EXPORT|SOLAR_STORAGE|IDLE"
     r"|TOU hardware|TOU conversion|schedule created"
     r"|Setting.*power rate|power rate.*set",
     re.IGNORECASE,

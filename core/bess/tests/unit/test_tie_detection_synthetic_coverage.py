@@ -22,8 +22,10 @@ pytestmark = pytest.mark.slow
 # Every entry is deterministic -- re-running this list reproduces identical
 # scenarios and identical measurements.
 #
-# 4*3*2*2*2*1 = 96 DISTINCT scenarios, inside the 30-90s budget for this
-# suite's addition to the existing slow suite. A first pass at 192 measured
+# 4*3*2*2*2*1 = 96 DISTINCT scenarios, measured at ~66s total -- inside the
+# 30-90s budget for this suite's addition to the existing slow suite (all 96
+# run the hybrid DP; 4 then fail the reference solve as infeasible, see
+# below, leaving 92 measured). A first pass at 192 measured
 # 132.59s, well over budget, so the matrix is held at 96 measured solves --
 # runtime tracks the number of entries, so the question is only which axes
 # spend them.

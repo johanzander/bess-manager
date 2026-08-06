@@ -52,6 +52,18 @@ class PWLWindowUnderRefinedError(RuntimeError):
     """
 
 
+class PWLEndSoeOutOfRangeError(ValueError):
+    """The pinned `end_soe_target` lies outside `[min_soe_kwh, max_soe_kwh]`,
+    so no terminal row can be built for it.
+
+    A `ValueError` subclass so existing callers and tests that catch
+    `ValueError` are unaffected; the distinct type exists so a caller that
+    legitimately expects this specific condition (the #450 coverage suite hits
+    it on below-min-SOE recovery trajectories) can select for it by type
+    instead of matching a substring of this module's prose error message.
+    """
+
+
 def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):
     """Drop interior breakpoints whose removal changes the PWL function by
     at most `eps` (collinearity within tolerance). Non-adjacent removals per
@@ -495,7 +507,7 @@ def _pinned_terminal_row(
         # the window would be spliced against a reconnection point that never
         # existed. A target outside the battery's own range can only come from
         # an upstream bug, so fail loudly.
-        raise ValueError(
+        raise PWLEndSoeOutOfRangeError(
             f"end_soe_target {target} kWh is outside the battery's usable "
             f"range [{min_soe}, {max_soe}] kWh"
         )

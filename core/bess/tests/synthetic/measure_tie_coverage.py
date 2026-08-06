@@ -2,6 +2,7 @@
 suite (see docs/superpowers/specs/2026-08-05-tie-detection-synthetic-
 validation-design.md)."""
 
+import math
 from dataclasses import dataclass
 
 from core.bess.dp_battery_algorithm import (
@@ -9,6 +10,7 @@ from core.bess.dp_battery_algorithm import (
     POWER_STEP_KW,
     POWER_TOLERANCE_KW,
     _compute_reward,
+    _effective_import_cap_kwh,
     optimize_battery_schedule,
 )
 from core.bess.dp_constants import SOE_STEP_KWH
@@ -28,6 +30,15 @@ from core.bess.tie_detection import Window, epsilon_for_period
 TIE_WINDOW_PAD = 2
 
 _BUCKET_ORDER = ["<0.1x", "0.1x-0.5x", "0.5x-1.0x", "1.0x-2.0x", ">2.0x"]
+
+# How far `sum(replay_schedule(...)[0])` may sit from the DP's own reported
+# `reward_objective_cost` before `measure_scenario` refuses to measure. The
+# replay is the same `_compute_reward` calls in the same order, so the only
+# expected difference is float accumulation order; anything larger means the
+# replay is not reproducing production's objective and every SEK delta built
+# on it is biased. Loose enough not to fire on accumulation noise over a
+# 192-period horizon, far tighter than the 0.05 SEK budget it protects.
+REPLAY_IDENTITY_TOLERANCE_SEK = 1e-6
 
 
 def _reject_unsupported_objective(battery_settings: BatterySettings) -> None:
@@ -64,6 +75,43 @@ def _reject_unsupported_objective(battery_settings: BatterySettings) -> None:
             "would be an objective mismatch rather than a coverage finding. "
             "Thread reward_sell_price through replay_schedule and "
             "segment_reference_cost before measuring such a scenario."
+        )
+
+
+def _reject_unsupported_import_cap(inputs: dict) -> None:
+    """Fail loudly on a scenario whose grid-import cap this harness does not
+    thread.
+
+    `_scenario_inputs` builds `home_settings` from a fixture's `home` block,
+    and `optimize_battery_schedule` turns that into a per-period import cap
+    (`_effective_import_cap_kwh`) that constrains every charge decision. This
+    module passes `import_cap_kwh=None` into both `replay_schedule` and
+    `segment_reference_cost`, so on a capped scenario the DP would solve under
+    a real cap while the replay and the reference solve ignored it -- two
+    different objectives, whose difference would be reported as a coverage
+    finding in SEK. That is exactly the silent-mismatch failure
+    `_reject_unsupported_objective` guards against for export curtailment, so
+    it gets the same treatment rather than a comment noting no fixture does it
+    today (none of the 32 current fixtures sets a `home` block).
+
+    Threading the real cap instead would be untested code on the measurement
+    rig itself, with no fixture to exercise it -- same reasoning as the
+    curtailment guard. A caller that adds such a fixture must thread the cap
+    through `replay_schedule` and `segment_reference_cost` (both already take
+    the parameter) instead of relaxing this check.
+    """
+    cap = _effective_import_cap_kwh(
+        inputs.get("home_settings"), inputs["period_duration_hours"]
+    )
+    if cap is not None:
+        raise NotImplementedError(
+            "measure_tie_coverage cannot measure a scenario with a grid import "
+            f"cap ({cap} kWh per period, from its `home` block): the DP solves "
+            "under that cap while this harness replays and re-solves with "
+            "import_cap_kwh=None, so any delta it reported would be an "
+            "objective mismatch rather than a coverage finding. Thread the "
+            "effective cap into replay_schedule and segment_reference_cost "
+            "before measuring such a scenario."
         )
 
 
@@ -490,15 +538,16 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     coverage: a margin-ratio histogram over every period, and the SEK value of
     the closest near miss the detector did not flag.
 
-    `import_cap_kwh=None` throughout: no fixture in the current suite (see
-    `core/bess/tests/unit/data/`) sets a `home` block, so `_scenario_inputs`
-    never produces an import cap for this harness to thread.
+    `import_cap_kwh=None` throughout, enforced rather than assumed: no fixture
+    in the current suite (see `core/bess/tests/unit/data/`) sets a `home`
+    block, and `_reject_unsupported_import_cap` raises if one ever does.
     """
     inputs = _scenario_inputs(scenario)
     # Fail fast on an objective this harness cannot reproduce, before paying
     # for the solve -- replay_schedule/segment_reference_cost would raise the
     # same NotImplementedError, but only after optimize_battery_schedule ran.
     _reject_unsupported_objective(inputs["battery_settings"])
+    _reject_unsupported_import_cap(inputs)
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
 
@@ -538,6 +587,25 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
         self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
+    # The identity every SEK number below rests on: the replay must reproduce
+    # the DP's own reported objective total exactly. Checked live on every
+    # scenario, not only in the one dedicated test, because ANY future
+    # objective the replay fails to thread -- an import cap, a floored sell
+    # price, a call argument not yet imagined -- shows up here as a mismatch
+    # first. Without it such a bug quietly biases every segment delta instead.
+    replayed_total = sum(period_costs)
+    if result.reward_objective_cost is None or not math.isclose(
+        replayed_total,
+        result.reward_objective_cost,
+        abs_tol=REPLAY_IDENTITY_TOLERANCE_SEK,
+    ):
+        raise AssertionError(
+            "replay_schedule did not reproduce the DP's reported "
+            f"reward_objective_cost ({result.reward_objective_cost} SEK) -- "
+            f"replayed {replayed_total} SEK. The replay is solving a different "
+            "objective than production did, so any segment delta measured from "
+            "it would be an objective mismatch reported as a coverage finding."
+        )
     hybrid_segment_cost = sum(period_costs[segment.start : segment.end])
 
     reference_cost = segment_reference_cost(

@@ -511,6 +511,50 @@ def test_measure_scenario_reports_none_when_nothing_is_measurable():
     )
 
 
+def test_refuses_to_measure_a_scenario_with_a_grid_import_cap():
+    """The symmetric objective-mismatch guard to the curtailment one above.
+
+    `_scenario_inputs` threads a fixture's `home` block into `home_settings`,
+    which `optimize_battery_schedule` turns into a per-period import cap
+    constraining every charge decision -- while this harness replays and
+    re-solves with `import_cap_kwh=None`. A capped fixture would therefore
+    compare two different objectives and report the difference in SEK as a
+    coverage finding. No fixture sets a `home` block today, which is exactly
+    why the guard is tested: the failure it prevents is silent, and it is
+    reached before the (expensive) solve.
+    """
+    scenario = load_test_scenario("regression_2026_08_02_043728")
+    scenario["home"] = {"power_monitoring_enabled": True, "max_fuse_current": 25}
+
+    with pytest.raises(NotImplementedError, match="grid import cap"):
+        measure_scenario(scenario)
+
+
+@pytest.mark.slow
+def test_measure_scenario_rejects_a_replay_that_misses_the_reported_objective(
+    monkeypatch,
+):
+    """The live identity check every SEK number in the suite rests on.
+
+    `measure_scenario` asserts that the replayed per-period costs sum to the
+    DP's own reported `reward_objective_cost`. That is the generic backstop
+    for objective drift -- any future input the replay fails to thread breaks
+    this sum first, whether or not anyone wrote a hand-enumerated guard for
+    it. Pinned by forcing the replay off by a visible amount.
+    """
+    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    real_replay = measure_tie_coverage.replay_schedule
+
+    def _biased_replay(*args, **kwargs):
+        period_costs, cost_bases = real_replay(*args, **kwargs)
+        return [cost + 0.01 for cost in period_costs], cost_bases
+
+    monkeypatch.setattr(measure_tie_coverage, "replay_schedule", _biased_replay)
+
+    with pytest.raises(AssertionError, match="reward_objective_cost"):
+        measure_scenario(scenario)
+
+
 @pytest.mark.slow
 def test_measure_scenario_floors_a_negative_delta_at_zero(monkeypatch):
     """`segment_reference_cost` can legitimately undershoot the hybrid (a

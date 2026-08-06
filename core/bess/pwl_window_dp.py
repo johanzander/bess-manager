@@ -32,6 +32,13 @@ from core.bess.dp_constants import POWER_STEP_KW
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
 
+# Slack (in integer-percent units) when flooring a discharge rate ceiling onto
+# the hardware lattice. Not a free parameter: it is the literal
+# `_discharge_candidates` uses for the same floor, and the two passes must
+# admit the identical level set at every state -- see the note in
+# `_pwl_candidate_values_at`.
+DISCHARGE_LATTICE_PCT_EPS = 1e-9
+
 
 class PWLWindowUnderRefinedError(RuntimeError):
     """The windowed PWL solve hit one of its own accuracy budgets, so the
@@ -118,6 +125,7 @@ def _pwl_candidate_values_at(
     period_max_charge: float | None,
     self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None = None,
+    discharge_resolution_kw: float | None = None,
 ) -> np.ndarray:
     """Best achievable value at each SOE in `X` for period `t`: max over the
     shared action set (IDLE, STORE, discharge grid) plus the
@@ -170,16 +178,48 @@ def _pwl_candidate_values_at(
         max_charge_power = np.minimum(max_charge_power, period_max_charge)
     feasible = ~is_charge | (max_charge_power > POWER_CLASSIFICATION_THRESHOLD_KW)
 
+    # Discharge rate ceiling, mirroring `_discharge_candidates`' arithmetic
+    # exactly: the replay caps at the energy the state affords, folds the
+    # inverter's AC headroom into that same bound, then floors the result onto
+    # the integer-percent lattice with a `+ DISCHARGE_LATTICE_PCT_EPS` slack.
+    # Reproducing every step here -- the fold and the slack, not just the
+    # bound -- is what keeps both passes on one action set (#450).
+    #
+    # The slack is load-bearing, not cosmetic. A row's breakpoint abscissae
+    # are built by adding lattice energies to the *previous* row's
+    # breakpoints, so the same mathematical onset arrives as a cluster of
+    # ULP-separated floats and near-duplicate merging keeps an arbitrary
+    # member. Against a tolerance-free comparison that member decides
+    # feasibility, so V could be evaluated a hair below an onset, silently
+    # drop the level the replay would have taken there, and record a value
+    # the replay beats -- measured at 0.042 SEK on
+    # `historical_2024_08_16_high_spread_no_solar` segment 7-12, enough to
+    # invert the window's decision. Pinned by
+    # `test_backward_pass_admits_the_discharge_levels_the_replay_admits`.
+    #
+    # Discharging past `min_soe` is not a risk the slack opens up:
+    # `_state_transition_grid` truncates `actual_discharge` at the available
+    # energy and floors the result, exactly as the replay's
+    # `_state_transition` does.
     max_discharge_power = (
         (soe_col - min_soe) / dt * battery_settings.efficiency_discharge
     )
-    feasible &= ~is_discharge | (np.abs(power_row) <= max_discharge_power)
     if ac_cap_kwh is not None:
         # Battery discharge shares the inverter's AC stage with PV
         # conversion — only the headroom the (possibly clipped) solar
         # leaves is deliverable.
         ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar_production[t], ac_cap_kwh))
-        feasible &= ~is_discharge | (np.abs(power_row) * dt <= ac_headroom_kwh)
+        max_discharge_power = np.minimum(max_discharge_power, ac_headroom_kwh / dt)
+    rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+    affordable_discharge_power = (
+        np.floor(max_discharge_power / rate_step + DISCHARGE_LATTICE_PCT_EPS)
+        * rate_step
+    )
+    feasible &= ~is_discharge | (np.abs(power_row) <= affordable_discharge_power)
     feasible &= (next_soe >= min_soe) & (next_soe <= max_soe)
 
     effective_import_cap = None
@@ -717,6 +757,7 @@ def run_pwl_window_backward_induction(
                 _pmc,
                 self_throttle_export_threshold_kwh,
                 import_cap_kwh,
+                discharge_resolution_kw,
             )
 
         X = _pwl_window_seed_points(

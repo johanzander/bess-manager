@@ -784,10 +784,43 @@ The real fix is to move construction into the FastAPI `lifespan` startup hook, w
 
 ## From the #450 synthetic tie-coverage validation suite (found while building the reference-cost measurement for PR #467's own tie detector)
 
-**The windowed PWL solver's backward induction (`core/bess/pwl_window_dp.py`) can itself return a value worse than a feasible, in-grid alternative — a real solver suboptimality, not just an approximation.** Discovered while building a short-segment "true optimal" reference to measure the tie detector's coverage: on `historical_2024_08_16_high_spread_no_solar`, an exact solve over periods (7,12) (pinned start/end SOE, identical to how production windows are solved) returns a cost of 42.679610 SEK — but the grid DP's own feasible path over the *same* periods with the *same* endpoints costs only 42.648857 SEK (0.030753 SEK cheaper), and every action on that cheaper path is inside the solver's own 99-level discharge action grid (`_backward_discharge_levels`). Localized to the backward induction itself, not the forward resolver: the solver's own `V[0]` at the start SOE matches what the forward replay actually achieves, so the value-function table's stored optimum is itself wrong, not misread. Reproduced on three overlapping segments of the same fixture — (6,11), (7,12), (8,13) — so it isn't a one-off. Root cause not yet diagnosed (working hypothesis: a real kink in the value function that adaptive refinement failed to detect/seed), and out of scope to fix as part of the validation suite that found it.
+**RESOLVED.** The windowed PWL solver's backward induction
+(`core/bess/pwl_window_dp.py`) could return a value worse than a feasible,
+in-grid alternative — on `historical_2024_08_16_high_spread_no_solar` segment
+(7,12) it returned 42.679610 SEK against a grid-DP path costing 42.648857.
 
-**Production consequence**: PR #467's hybrid path splices a window's PWL-resolved actions into the real schedule trusting the solve is exact. This bug means that trust can occasionally be wrong — a spliced window could be a small amount worse than what the grid DP would have chosen on its own, in the same direction (though much smaller magnitude, ~0.03 SEK vs #450's original bug) as the problem #467 exists to fix. Not blocking for #467 itself (the whole-branch review already found the branch's *net* effect is 0 regressions / 3 improvements / 5 no-ops across the fixture suite — this defect is a previously-unmeasured residual within that envelope, not a newly-discovered regression), but worth a dedicated investigation before relying on the windowed solver's exactness more heavily in the future (e.g. before raising `TIE_NOISE_FACTOR` to catch more near-ties, since that increases how often this defect could fire).
+Root cause: `_pwl_candidate_values_at`'s discharge-rate feasibility mask
+compared the action against the affordable power *exactly*, while the replay's
+`_discharge_candidates` floors the same bound onto the integer-percent
+hardware lattice with a `+ 1e-9` slack. Breakpoint abscissae are built by
+adding lattice energies to the previous row's breakpoints, so one mathematical
+onset arrives as a cluster of ULP-separated floats and near-duplicate merging
+keeps an arbitrary member; against a tolerance-free comparison that member
+decided feasibility. The backward pass therefore evaluated V a hair below an
+onset, dropped the discharge level the replay would have taken there, and
+recorded a value 0.042 SEK below the truth — enough to flip the window's
+decision. This broke the module's own stated invariant that both passes
+enumerate one action set.
 
-**Files**: `core/bess/pwl_window_dp.py` (the backward induction's value-function computation — likely `_pwl_candidate_values_at` or the adaptive refinement loop in `run_pwl_window_backward_induction`)
+Fixed by mirroring `_discharge_candidates`' arithmetic exactly in the backward
+mask (fold the AC headroom into the same bound, then percent-floor with the
+same slack). The segment now returns 42.639365, i.e. the reference beats the
+DP, and the value table's self-consistency improved from a 2.94 SEK worst-case
+table-vs-recompute error to ≤1e-6 SEK. Pinned by
+`test_backward_pass_admits_the_discharge_levels_the_replay_admits` and
+`test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment`.
+
+Residual (not a defect, noted for future work): the true value function is
+genuinely *discontinuous* at discharge-feasibility onsets, and a continuous PWL
+representation cannot express a jump — the refinement loop brackets each jump
+with breakpoints ~1e-8 kWh apart. Queries landing strictly inside such a
+bracket still read an interpolated intermediate value. Decision-relevant states
+sit on the lattice, so the fix removes the reachable failure mode, but the
+near-duplicate merge in `_pwl_window_seed_points` /
+`run_pwl_window_backward_induction` (first-wins, value-unaware) remains the
+mechanism that would decide such a case arbitrarily. Making that merge
+value-aware (keep the upper-semicontinuous representative) would harden it
+further.
 
 ---
+

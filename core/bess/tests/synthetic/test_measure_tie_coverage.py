@@ -248,24 +248,26 @@ def test_measures_the_closest_near_miss_on_the_450_fixture():
 
 
 @pytest.mark.slow
-def test_reference_can_undershoot_the_hybrid_a_known_solver_limitation():
-    """The PWL solver is not a proven optimum, pinned as an executable fact.
+def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
+    """Regression pin for the backward-pass feasibility defect (#450).
 
-    On this segment the solver returns a schedule 0.031 SEK *worse* than the
-    one the grid DP already found, with both endpoints identical, the pin
-    honoured exactly, and every action on the DP's cheaper path inside
-    `_backward_discharge_levels`' own action grid -- the two paths differ only
-    at a single intermediate SOE (5.46 vs 5.64 kWh). The solver's own `V[0]`
-    matches its replayed cost, so the loss is in the backward induction rather
-    than the forward resolver: a row is missing a kink that refinement did not
-    detect and `PWL_EPS_REFINE` certification did not catch.
+    This segment used to be the standing counter-example to the reference
+    being usable at all: the solver returned 42.679610 SEK against a grid-DP
+    path costing 42.648857 -- 0.031 SEK *worse* -- with both endpoints
+    identical and the pin honoured. The cause was in
+    `_pwl_candidate_values_at`, whose discharge-rate mask compared against the
+    affordable power exactly while the replay's `_discharge_candidates`
+    percent-floors the same bound with a `+ 1e-9` slack. Breakpoint abscissae
+    carry ULP-level noise (they are built by adding lattice energies to the
+    previous row's breakpoints), so V got evaluated a hair below a level's
+    onset, dropped the level the replay would have taken, and recorded a
+    value 0.042 SEK below the truth -- enough to flip period 8's action.
 
-    This is a real defect in `pwl_window_dp.py` (production code, used by the
-    hybrid path on short windows), tracked separately -- it is NOT a bug in
-    this harness, and a negative delta must not be reported as a coverage
-    finding. If this test starts failing because the delta went to zero, the
-    solver was fixed: delete the test and tighten
-    `segment_reference_cost`'s docstring accordingly.
+    With both passes on one action set the solver now *beats* the grid DP
+    here, which is the whole point of a reference: a positive delta is a
+    constructive witness that the DP left money on the table. The numbers are
+    pinned rather than just the sign so that a future regression which merely
+    shrinks the margin is caught too.
     """
     scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
     inputs = _scenario_inputs(scenario)
@@ -277,8 +279,8 @@ def test_reference_can_undershoot_the_hybrid_a_known_solver_limitation():
 
     hybrid_cost = sum(period_costs[7:12])
     assert hybrid_cost == pytest.approx(42.648857, abs=1e-5)
-    assert reference_cost == pytest.approx(42.679610, abs=1e-5)
-    assert hybrid_cost - reference_cost < 0.0
+    assert reference_cost == pytest.approx(42.639365, abs=1e-5)
+    assert hybrid_cost - reference_cost > 0.0
 
 
 @pytest.mark.slow

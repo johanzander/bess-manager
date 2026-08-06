@@ -2,11 +2,18 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
+from core.bess.dp_battery_algorithm import (
+    BATTERY_EXPORT_THRESHOLD_KWH,
+    _discharge_candidates,
+)
+from core.bess.dp_constants import POWER_STEP_KW
 from core.bess.pwl_window_dp import (
     PWLWindowUnderRefinedError,
     _backward_discharge_levels,
     _end_soe_pin_tolerance,
+    _pinned_terminal_row,
     _pwl_best_action_at_continuous_state,
+    _pwl_candidate_values_at,
     _pwl_eval_array,
     _pwl_prune,
     _pwl_window_seed_points,
@@ -591,4 +598,101 @@ def test_pwl_backward_induction_values_reflect_the_grid_import_cap():
         "the capped backward pass must not price the pinned end SOE as "
         "reachable -- getting there needs more grid import than the fuse "
         "allows, so V[0] has to carry the terminal penalty"
+    )
+
+
+def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
+    """The two passes must agree on which discharge levels a state affords.
+
+    `_backward_discharge_levels`' docstring states the module's core
+    invariant: both passes enumerate the same hardware-true integer-percent
+    action set, which is "what makes the replayed schedule achieve exactly the
+    value the backward pass promised". The replay reaches that set through
+    `_discharge_candidates`, which percent-floors its rate ceiling with an
+    explicit `+ 1e-9` slack, so a state a floating-point hair below the onset
+    of level L still affords L. The backward pass's own feasibility mask had
+    no such slack, so at exactly that state it silently dropped L.
+
+    That is not a hypothetical: the solver's breakpoint abscissae are built by
+    adding lattice energies to the *previous* row's breakpoints, so they carry
+    ULP-level noise and land on both sides of an onset. Here the two passes
+    are handed the identical continuation row and the identical state one ULP
+    below level L's onset; disagreeing means the table promises a value the
+    replay cannot deliver, or (as measured on
+    `historical_2024_08_16_high_spread_no_solar`) refuses a level the replay
+    would have taken and prices the state 26 000 SEK below its true value.
+    """
+    battery = _tiny_battery()
+    dt = 1.0
+    level = 2.5  # an exact member of this battery's 0.05 kW percent lattice
+    assert np.isclose(_backward_discharge_levels(battery, None), level).any()
+
+    # One ULP below the SOE at which `level` becomes affordable.
+    onset = battery.min_soe_kwh + level * dt / battery.efficiency_discharge
+    soe = float(np.nextafter(onset, 0.0))
+
+    buy_price, sell_price, home, solar = [1.0], [0.5], [0.5], [0.0]
+    continuation = _pinned_terminal_row(
+        battery.min_soe_kwh,
+        _end_soe_pin_tolerance(1e-6, battery, dt, None),
+        battery,
+    )
+
+    # The replay's action set affords `level` at this state...
+    replay_levels = _discharge_candidates(
+        soe,
+        battery,
+        dt,
+        home[0],
+        solar[0],
+        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+        ac_cap_kwh=None,
+    )
+    assert np.isclose(replay_levels, level).any(), (
+        "precondition: the replay must afford this level here, otherwise the "
+        "test is not measuring a backward/forward disagreement"
+    )
+
+    # ...so the replay's one-step Bellman value is the value to match.
+    _action, next_soe, _basis, reward = _pwl_best_action_at_continuous_state(
+        soe=soe,
+        t=0,
+        V_next=continuation,
+        power_levels=np.array([]),
+        home_consumption=home,
+        battery_settings=battery,
+        dt=dt,
+        solar_production=solar,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
+        import_cap_kwh=None,
+    )
+    replay_value = reward + float(_pwl_eval_array(continuation, np.asarray(next_soe)))
+
+    power_row = np.concatenate(
+        (
+            [0.0],
+            _backward_discharge_levels(battery, None) * -1,
+            [POWER_STEP_KW],
+        )
+    )
+    backward_value = _pwl_candidate_values_at(
+        np.array([soe]),
+        0,
+        continuation,
+        power_row,
+        (buy_price, sell_price, home, solar),
+        battery,
+        dt,
+        None,
+        BATTERY_EXPORT_THRESHOLD_KWH,
+        None,
+    )[0]
+
+    assert backward_value == pytest.approx(replay_value, abs=1e-9), (
+        f"backward pass priced this state at {backward_value} SEK while the "
+        f"replay achieves {replay_value} SEK from the same continuation row"
     )

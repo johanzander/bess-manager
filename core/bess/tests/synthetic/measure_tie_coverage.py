@@ -346,29 +346,32 @@ def segment_reference_cost(
 
     NOT A PROVEN OPTIMUM, and the difference is load-bearing for how a caller
     may phrase a delta. This is "what the PWL solver achieves on these
-    periods", not "what the best possible schedule costs". The PWL backward
-    induction is itself measurably suboptimal on real data: on
-    `historical_2024_08_16_high_spread_no_solar` segment 7-12 it returns
-    42.679610 SEK against a DP path costing 42.648857 -- 0.031 SEK *worse*
-    -- with both endpoints identical, the pin honoured exactly, and every
-    action on the cheaper path inside `_backward_discharge_levels`' own grid
-    (the paths differ only at one intermediate SOE, 5.46 vs 5.64 kWh). The
-    solver's `V[0]` agrees with its own replayed cost to 1e-6, so the loss is
-    in the backward induction, not the forward resolver -- i.e. a row is
-    missing a kink its refinement did not detect, which its
-    `PWL_EPS_REFINE`-based certification did not catch. Pinned by
-    `test_reference_can_undershoot_the_hybrid_a_known_solver_limitation`.
+    periods", not "what the best possible schedule costs" -- the solve is
+    exact only to the solver's own `PWL_EPS_REFINE` certification, and the
+    representation is piecewise linear over a value function that genuinely
+    jumps at discharge-feasibility onsets.
+
+    It used to be materially suboptimal on real data: on
+    `historical_2024_08_16_high_spread_no_solar` segment 7-12 it returned
+    42.679610 SEK against a DP path costing 42.648857 -- 0.031 SEK *worse*.
+    That was a defect in `_pwl_candidate_values_at`, whose discharge-rate
+    feasibility mask lacked the percent-lattice slack the replay's
+    `_discharge_candidates` applies, so the backward pass silently refused
+    levels the replay would have taken at states a floating-point hair below
+    an onset. Fixed (#450); the same segment now returns 42.639365, i.e. the
+    reference beats the DP. Pinned by
+    `test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment`.
 
     Reading a delta (`hybrid_cost - reference_cost`) in light of that:
     - POSITIVE is a sound constructive witness. The reference is a concrete
       feasible schedule with identical endpoints, replayed through the DP's
       own reward function, so a positive delta proves the DP left that much on
       the table -- whether or not the PWL solver found the true optimum.
-    - NEGATIVE means the PWL solver undershot on this segment. It is solver
-      noise, NOT a harness failure and not a signal the DP did something
-      right; there is nothing for a caller to investigate. Callers should
-      report such segments as "no measurable miss" (floor the delta at zero)
-      rather than as a negative saving.
+    - NEGATIVE means the PWL solver undershot on this segment, so there is
+      nothing for a caller to investigate and it must not be reported as a
+      negative saving. Post-fix this should only occur at certification scale
+      (~`PWL_EPS_REFINE`); a materially negative delta is now a signal that
+      the two passes have drifted apart again, not ordinary solver noise.
     - Either way the magnitude is a LOWER BOUND on the true miss cost: pinning
       both ends forbids the reference from banking energy differently outside
       the segment, so a better global plan needing a different boundary SOE is
@@ -623,8 +626,10 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
     )
 
     delta = hybrid_segment_cost - reference_cost
-    # A negative delta is solver noise (segment_reference_cost is not a
-    # proven optimum), not a real finding -- never report a negative impact.
+    # A negative delta is solver noise (segment_reference_cost is not a proven
+    # optimum, only certified to PWL_EPS_REFINE), not a real finding -- never
+    # report a negative impact. Since the #450 backward/forward action-set fix
+    # this should only ever be certification-scale; see segment_reference_cost.
     return ScenarioMeasurement(
         margin_ratio_counts=margin_ratio_counts,
         financial_impact_sek=max(0.0, delta),

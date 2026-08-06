@@ -86,11 +86,11 @@ _BELOW_FLOOR_MARKER = "outside the battery's usable range"
 # the least-far of a set of scenarios nowhere close to being flagged".
 _CLOSE_CALL_RATIO = 5.0
 
-# TIE_MISS_BUDGET_SEK is deliberately not enforced yet -- see Task 7 of
-# docs/superpowers/plans/2026-08-05-tie-detection-synthetic-validation.md.
-# This test currently only measures and reports; run it directly to produce
-# the data that sets the real budget.
-TIE_MISS_BUDGET_SEK = None
+# TIE_MISS_BUDGET_SEK is now enforced: 0.05 SEK, based on the worst observed
+# financial impact of 0.017188 SEK across the 96-scenario matrix from Task 6's
+# measurement run (giving ~3x safety margin). When worst_impact exceeds this
+# budget, the assertion below fails.
+TIE_MISS_BUDGET_SEK = 0.05
 
 
 def test_synthetic_scenario_tie_coverage():

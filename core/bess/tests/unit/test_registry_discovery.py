@@ -1266,6 +1266,9 @@ class TestDiscoverSensorsFromRegistry:
         )
         assert solis["import_power"] == "sensor.solis_grid_power_net"
         assert solis["pv_power"] == "sensor.solis_pv_power_1"
+        # Single signed sensor backs both keys (issue #475) — HAApiController
+        # splits it by sign at read time via grid_power_polarity.
+        assert solis["export_power"] == "sensor.solis_grid_power_net"
 
         # Dict-embedded monitoring sensors matched via the Solis-scoped
         # substring matcher (verified integration bug, see

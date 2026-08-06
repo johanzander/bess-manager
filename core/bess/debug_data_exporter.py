@@ -316,6 +316,24 @@ _COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent con
 _PREVIOUS_DAYS_TO_INCLUDE = 2
 
 
+def _periods_signature(predicted_periods: list) -> dict[int, tuple]:
+    """Map period -> (intent, rounded battery_action) for change detection.
+
+    Two snapshots covering the same period "agree" if the DP's decision for
+    it -- what it planned to do, not the exact float noise of the
+    surrounding forecast -- is the same. Rounding to 3dp (gram-scale on a
+    kWh quantity) avoids treating floating-point summation jitter as a real
+    schedule change.
+    """
+    return {
+        p.period: (
+            p.decision.strategic_intent,
+            round(p.decision.battery_action or 0.0, 3),
+        )
+        for p in predicted_periods
+    }
+
+
 @dataclass
 class DebugDataExport:
     """Complete debug data export containing all system state and history."""
@@ -953,8 +971,24 @@ class DebugDataAggregator:
                 does). This is what makes two runs' schedules actually
                 diffable: `optimize_battery_schedule()`'s own forward
                 horizon input, not a log line.
+
+                `predicted_periods` is further omitted (empty list) whenever
+                it's unchanged from the immediately preceding snapshot for
+                every period they both cover (same intent + battery_action,
+                see `_periods_signature`) -- most 15-min optimization cycles
+                genuinely change nothing (the real log shows this directly:
+                "DECISION: Keep current schedule" dominates; "Apply schedule"
+                is the rare event). Naively including every snapshot's full
+                remaining-day forecast measured ~6 MB/day; deduping against
+                only-if-changed bounds it to roughly the number of times the
+                plan actually moved, while still capturing every real change
+                -- including the flip investigated in #466 -- at full
+                fidelity, unlike a fixed lookback/lookahead window (which
+                would have silently excluded that exact flip). The evolution
+                table's summary fields are never deduped -- every run still
+                gets its own row there regardless.
                 If False, return full snapshot data (all periods, actual and
-                predicted) for all snapshots.
+                predicted) for all snapshots, no deduplication.
 
         Returns:
             List of snapshot dictionaries
@@ -966,21 +1000,38 @@ class DebugDataAggregator:
             if not compact:
                 return [asdict(snapshot) for snapshot in snapshots]
             # Compact: summary fields (evolution table) + that run's own
-            # forward-looking forecast periods (cross-run diffing).
+            # forward-looking forecast periods (cross-run diffing), deduped
+            # against the previous snapshot -- see docstring.
             # Use grid_only_cost - hourly_cost to match the dashboard total
             # savings definition (includes both solar and battery benefit).
             result = []
+            prev_signature: dict[int, tuple] = {}
             for snapshot in snapshots:
                 total_savings = sum(
                     p.economic.grid_only_cost - p.economic.hourly_cost
                     for p in snapshot.daily_view.periods
                     if p.economic is not None
                 )
-                predicted_periods = [
-                    asdict(p)
+                predicted = [
+                    p
                     for p in snapshot.daily_view.periods
                     if p.data_source == "predicted"
                 ]
+                signature = _periods_signature(predicted)
+                # Compare only the periods both snapshots cover -- the window
+                # rolls forward each cycle, so a brand-new period at the far
+                # end (never seen by prev_signature) is not a "change" to an
+                # existing decision, it's just newly visible. Excluding it
+                # from the comparison (rather than treating its absence from
+                # prev_signature as a mismatch) is what makes dedup actually
+                # fire on the common case of "nothing changed, window just
+                # advanced by one period."
+                overlap = signature.keys() & prev_signature.keys()
+                unchanged = bool(overlap) and all(
+                    prev_signature[p] == signature[p] for p in overlap
+                )
+                predicted_periods = [] if unchanged else [asdict(p) for p in predicted]
+                prev_signature = signature
                 result.append(
                     {
                         "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
@@ -989,6 +1040,7 @@ class DebugDataAggregator:
                         "actual_count": snapshot.daily_view.actual_count,
                         "predicted_count": snapshot.daily_view.predicted_count,
                         "predicted_periods": predicted_periods,
+                        "predicted_periods_unchanged": bool(unchanged),
                     }
                 )
             return result

@@ -658,7 +658,13 @@ Findings (top) and System Logs (bottom).*
         # rather than reconstructing it from rounded System Logs box tables.
         details = f"""
 <details>
-<summary>Per-run forecasts ({total} snapshots, each with its own forward-looking predicted_periods — click to expand)</summary>
+<summary>Per-run forecasts ({total} snapshots — click to expand)</summary>
+
+`predicted_periods` is only populated when it differs from the immediately preceding
+snapshot (same intent + battery_action for every period both cover means nothing to
+see); `predicted_periods_unchanged: true` marks a snapshot where the plan didn't move
+that cycle. This keeps every real change fully visible — including a single flipped
+period — without repeating the same unchanged forecast dozens of times a day.
 
 ```json
 {self._format_json(export.snapshots)}

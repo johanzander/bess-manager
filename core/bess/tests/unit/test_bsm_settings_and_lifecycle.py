@@ -233,6 +233,22 @@ class TestDisableVppOverride:
 
         assert mock_controller.calls["growatt_vpp_status"] == []
 
+    def test_invalidates_live_controller_confirmed_cache(self, system, mock_controller):
+        """The escape hatch must also invalidate the LIVE controller's
+        _vpp_status_confirmed cache, not just write hardware via a throwaway
+        instance -- otherwise the live controller still believes VPP Status
+        is enabled and skips re-enabling it on the next period, so its VPP
+        Remote Control write silently no-ops against the now-disabled
+        register (hardware ignores remote control while VPP Status is off)."""
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("vpp")
+        mock_controller.set_growatt_vpp_status(True)
+        system._inverter_controller._vpp_status_confirmed = True
+
+        system.disable_vpp_override()
+
+        assert system._inverter_controller._vpp_status_confirmed is False
+
     def test_works_regardless_of_tracked_control_mode(self, system, mock_controller):
         """Manual escape hatch must not rely on BESS's own control_mode
         tracker being accurate -- that's exactly what's stale/wrong for

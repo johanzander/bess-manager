@@ -440,10 +440,20 @@ class BatterySystemManager:
         -- gating on it would make the escape hatch unreachable in the case
         it exists for. A no-op if the entity isn't configured or already
         disabled (see SolaxModbusGrowattController.disable_vpp_override()).
+
+        Also invalidates self._inverter_controller's own
+        _vpp_status_confirmed cache when it happens to be a
+        SolaxModbusGrowattController (still in "vpp" control_mode) -- the
+        throwaway instance's write alone leaves the LIVE controller believing
+        VPP Status is still confirmed enabled, so it would skip re-enabling
+        it before its next VPP Remote Control write, which then silently
+        no-ops against the now-disabled register.
         """
         SolaxModbusGrowattController(
             battery_settings=self.battery_settings, control_mode="tou"
         ).disable_vpp_override(self._controller)
+        if self._inverter_controller is not None:
+            self._inverter_controller.disable_vpp_override(self._controller)
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.

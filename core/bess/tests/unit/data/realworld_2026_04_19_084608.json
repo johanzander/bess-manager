@@ -199,11 +199,12 @@
   },
   "expected_results": {
     "base_cost": 2.43248,
-    "battery_solar_cost": -7.91789,
-    "base_to_battery_solar_savings": 10.35037,
-    "base_to_battery_solar_savings_pct": 425.5065,
-    "total_charged": 2.5,
-    "total_discharged": 8.3
+    "battery_solar_cost": -7.91425,
+    "base_to_battery_solar_savings": 10.34673,
+    "base_to_battery_solar_savings_pct": 425.35685,
+    "total_charged": 4.28106,
+    "total_discharged": 10.025,
+    "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 near-tied periods flip IDLE->LOAD_SUPPORT, moving battery_solar_cost from -7.91789 to -7.91425 (a ~0.0036 SEK crossing of the rounding boundary at .1 precision, well within the harness's standard tolerance; total_charged/total_discharged were already stale pre-#466 and are out of scope here since no test asserts them). total_charged/total_discharged were re-derived from the current run as part of this refresh too."
   },
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-19, with solar, price spread 0.27 SEK",

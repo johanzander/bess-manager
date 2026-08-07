@@ -377,10 +377,12 @@ test.describe('Setup Wizard', () => {
     await expect(fuseToggle).not.toBeChecked();
     await expect(fuseToggle).toBeDisabled();
 
-    // Because fuse protection was correctly left off, the Phase Count radio
-    // group (only rendered when powerMonitoringEnabled is true) isn't shown
-    // at all -- confirming phaseCount was never seeded with the invalid
-    // raw discovery count of 2.
-    await expect(page.getByText('Phase count')).not.toBeVisible();
+    // The Phase Count radio group is always rendered (it's used by the
+    // day-ahead scheduler regardless of fuse protection), so confirm the
+    // real invariant directly: phaseCount was never seeded with the invalid
+    // raw discovery count of 2 -- it stayed at the default of 3-phase, and
+    // the 1-phase option was not selected either.
+    await expect(page.getByRole('radio', { name: '3-phase' })).toBeChecked();
+    await expect(page.getByRole('radio', { name: '1-phase' })).not.toBeChecked();
   });
 });

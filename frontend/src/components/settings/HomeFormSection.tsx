@@ -21,6 +21,9 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
   const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
   const chargeRateSensorConfigured = Boolean(sensors?.['battery_charging_power_rate']);
+  const currentSensorsConfigured = form.phaseCount === 1
+    ? Boolean(sensors?.['current_l1'])
+    : Boolean(sensors?.['current_l1']) && Boolean(sensors?.['current_l2']) && Boolean(sensors?.['current_l3']);
   return (
     <div className="space-y-3">
       <SectionCard
@@ -91,9 +94,16 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             available on all inverter platforms (e.g. Growatt SPH).
           </p>
         )}
+        {chargeRateSensorConfigured && !currentSensorsConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Fuse protection requires {form.phaseCount === 1 ? 'the' : 'all three'} phase current
+            sensor{form.phaseCount === 1 ? '' : 's'} ({form.phaseCount === 1 ? 'Current L1' : 'Current L1/L2/L3'})
+            to be configured in the <strong>Sensors</strong> tab under Phase Current Monitoring first.
+          </p>
+        )}
         {toggle('Enable fuse protection', form.powerMonitoringEnabled,
           v => onChange({ ...form, powerMonitoringEnabled: v }),
-          { disabled: !chargeRateSensorConfigured })}
+          { disabled: !chargeRateSensorConfigured || !currentSensorsConfigured })}
         {form.powerMonitoringEnabled && (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
@@ -118,10 +128,6 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
                 individually and can throttle charging further if one phase runs hot.
               </p>
             </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-              Configure per-phase current sensor entity IDs in the <strong>Sensors</strong> tab
-              under Phase Current Monitoring.
-            </p>
           </>
         )}
       </SectionCard>

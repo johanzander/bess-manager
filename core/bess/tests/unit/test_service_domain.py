@@ -75,7 +75,6 @@ class TestHuaweiTouWriteUsesConfiguredDomain:
         ctrl = HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={},
             huawei_device_id="dev-123",
             service_domain=service_domain,
         )
@@ -104,7 +103,6 @@ class TestGrowattCallsUseConfiguredDomain:
         ctrl = HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={},
             growatt_device_id="growatt-1",
             service_domain=service_domain,
         )
@@ -148,7 +146,6 @@ class TestSafeReadAllowlistFollowsConfiguredDomain:
         return HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={},
             growatt_device_id="growatt-1",
             service_domain=service_domain,
         )
@@ -202,7 +199,6 @@ class TestUnconfiguredDomainError:
         ctrl = HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={},
             huawei_device_id="dev-1",
             service_domain="",
         )
@@ -212,26 +208,32 @@ class TestUnconfiguredDomainError:
         assert "No inverter service domain configured" in str(exc.value)
 
 
+def _settings_store(sensors: dict) -> SettingsStore:
+    store = SettingsStore()
+    store.data["sensors"] = dict(sensors)
+    return store
+
+
 class TestSensorConfiguredPredicate:
     def test_reports_configured_sensor(self) -> None:
         ctrl = HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={"huawei_working_mode": "select.working_mode"},
+            settings_store=_settings_store(
+                {"huawei_working_mode": "select.working_mode"}
+            ),
         )
         assert ctrl.is_sensor_configured("huawei_working_mode") is True
 
     def test_reports_unmapped_sensor(self) -> None:
-        ctrl = HomeAssistantAPIController(
-            ha_url="http://ha.local", token="tok", sensor_config={}
-        )
+        ctrl = HomeAssistantAPIController(ha_url="http://ha.local", token="tok")
         assert ctrl.is_sensor_configured("huawei_working_mode") is False
 
     def test_reports_blank_entity_as_unconfigured(self) -> None:
         ctrl = HomeAssistantAPIController(
             ha_url="http://ha.local",
             token="tok",
-            sensor_config={"huawei_working_mode": ""},
+            settings_store=_settings_store({"huawei_working_mode": ""}),
         )
         assert ctrl.is_sensor_configured("huawei_working_mode") is False
 

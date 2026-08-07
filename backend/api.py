@@ -346,9 +346,10 @@ async def patch_settings(updates: dict):
                 bess_controller.system.set_demo_mode(enabled)
 
         # Any of the sections above (sensors directly, or growatt/inverter via
-        # a platform switch) can change which sensors are active — refresh
-        # unconditionally rather than only on a "sensors" key match.
-        bess_controller.refresh_active_sensors()
+        # a platform switch) can change service_domain/grid_power_polarity —
+        # refresh those unconditionally rather than only on a key match.
+        # ha_controller.sensors is a live settings_store view (#334) and
+        # needs no equivalent refresh.
         bess_controller.refresh_service_domain()
         bess_controller.refresh_grid_power_polarity()
         _refresh_health(bess_controller)
@@ -3014,11 +3015,11 @@ async def setup_complete(payload: APISetupCompletePayload):
             ):
                 bess_controller.system.switch_control_mode(payload.inverterControlMode)
 
-        # Apply settings to live system so BESS starts immediately
-        # without requiring a restart. Unconditional, not gated on
-        # payload.sensors: an inverter platform switch above also changes
-        # which per-platform sensor sub-dict is active.
-        bess_controller.refresh_active_sensors()
+        # Apply settings to live system so BESS starts immediately without
+        # requiring a restart. Unconditional, not gated on payload.sensors:
+        # an inverter platform switch above also changes service_domain and
+        # grid_power_polarity. ha_controller.sensors is a live settings_store
+        # view (#334) and needs no equivalent refresh.
         bess_controller.refresh_service_domain()
         bess_controller.refresh_grid_power_polarity()
         if payload.growattDeviceId:

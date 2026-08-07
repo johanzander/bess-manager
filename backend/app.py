@@ -131,16 +131,15 @@ class BESSController:
         for section, value in self.settings_store.data.items():
             merged[section] = value
 
-        # Initialize Home Assistant API Controller with flat sensor config.
-        # The store holds per-platform structure; get_active_sensors() merges
-        # the active platform + shared into a flat dict for the controller.
-        sensor_config = self.settings_store.get_active_sensors()
+        # Initialize Home Assistant API Controller with a live settings_store
+        # reference, so ha_controller.sensors always reads the active
+        # platform's sensors directly — no manually-synced cache (#334).
         growatt_config = merged.get("growatt", {})
         growatt_device_id = growatt_config.get("device_id")
         inverter_config = merged.get("inverter", {})
         huawei_device_id = inverter_config.get("device_id")
         self.ha_controller = self._init_ha_controller(
-            sensor_config,
+            self.settings_store,
             growatt_device_id,
             huawei_device_id,
             self.settings_store.get_service_domain(),
@@ -214,7 +213,7 @@ class BESSController:
 
     def _init_ha_controller(
         self,
-        sensor_config,
+        settings_store,
         growatt_device_id=None,
         huawei_device_id=None,
         service_domain=None,
@@ -223,7 +222,7 @@ class BESSController:
         """Initialize Home Assistant API controller based on environment.
 
         Args:
-            sensor_config: Sensor configuration dictionary to use for the controller.
+            settings_store: Live settings store backing ha_controller.sensors.
             growatt_device_id: Growatt device ID for TOU segment operations.
             huawei_device_id: Huawei device ID for battery operations.
             service_domain: HA integration domain for vendor service calls.
@@ -238,13 +237,14 @@ class BESSController:
             ha_url = os.environ.get("HA_URL", "http://supervisor/core")
 
         logger.info(
-            f"Initializing HA controller with {len(sensor_config)} sensor configurations"
+            "Initializing HA controller with %d sensor configurations",
+            len(settings_store.get_active_sensors()),
         )
 
         return HomeAssistantAPIController(
             ha_url=ha_url,
             token=ha_token,
-            sensor_config=sensor_config,
+            settings_store=settings_store,
             growatt_device_id=growatt_device_id,
             huawei_device_id=huawei_device_id,
             service_domain=service_domain,
@@ -277,21 +277,6 @@ class BESSController:
             options = {}
 
         return options
-
-    def refresh_active_sensors(self) -> None:
-        """Sync the live ha_controller.sensors map from persisted settings.
-
-        ha_controller.sensors is a plain dict copy, not a live view of the
-        settings store — it only reflects the sensor map that was active when
-        it was last assigned. Any settings mutation that can change which
-        sensors are active (a direct sensor edit, or an inverter/growatt
-        platform switch, which selects a different per-platform sensor
-        sub-dict) must call this afterward, or the copy goes stale until the
-        next call or a process restart. This is the single place that
-        performs the sync — call sites should not reimplement it.
-        """
-        active = self.settings_store.get_active_sensors()
-        self.ha_controller.sensors = {k: v for k, v in active.items() if v}
 
     def refresh_service_domain(self) -> None:
         """Sync the live ha_controller.service_domain from persisted settings.
@@ -342,8 +327,9 @@ class BESSController:
             huawei_device_id=huawei_device_id,
         )
 
-        # Apply to running controller so BESS starts using new sensors immediately
-        self.refresh_active_sensors()
+        # ha_controller.sensors is a live settings_store view (#334) — the
+        # settings_store.apply_discovered() call above is already enough for
+        # BESS to start using the newly discovered sensors immediately.
         if growatt_device_id:
             self.ha_controller.growatt_device_id = growatt_device_id
         if huawei_device_id:

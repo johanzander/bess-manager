@@ -6,6 +6,13 @@ import pytest
 
 from core.bess.exceptions import SystemConfigurationError
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.settings_store import SettingsStore
+
+
+def _settings_store(sensors: dict) -> SettingsStore:
+    store = SettingsStore()
+    store.data["sensors"] = dict(sensors)
+    return store
 
 
 @pytest.fixture
@@ -13,7 +20,9 @@ def controller() -> HomeAssistantAPIController:
     ctrl = HomeAssistantAPIController(
         ha_url="http://ha.local",
         token="tok",
-        sensor_config={"huawei_working_mode": "select.huawei_working_mode"},
+        settings_store=_settings_store(
+            {"huawei_working_mode": "select.huawei_working_mode"}
+        ),
         huawei_device_id="dev-123",
         service_domain="huawei_solar",
     )
@@ -46,9 +55,7 @@ class TestHuaweiServiceCalls:
             assert kwargs["json"]["periods"] == "06:00-08:00/1234567/+"
 
     def test_write_huawei_tou_periods_raises_without_device_id(self) -> None:
-        ctrl = HomeAssistantAPIController(
-            ha_url="http://ha.local", token="tok", sensor_config={}
-        )
+        ctrl = HomeAssistantAPIController(ha_url="http://ha.local", token="tok")
         with pytest.raises(SystemConfigurationError):
             ctrl.write_huawei_tou_periods("06:00-08:00/1234567/+")
 

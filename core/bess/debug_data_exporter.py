@@ -750,9 +750,8 @@ class DebugDataAggregator:
         # from a curated subset like METHOD_SENSOR_MAP, means a new
         # entity-reading code path (TOU segments, VPP registers, ...) is
         # automatically captured for replay without needing a matching
-        # special case here. BESSController.refresh_active_sensors() keeps
-        # this map synced with SettingsStore after every settings mutation,
-        # so it's never a stale startup-time copy.
+        # special case here. controller.sensors is a live SettingsStore view
+        # (#334), so it's never a stale startup-time copy.
         seen_entities: set[str] = set(controller.sensors.values())
         for entity_id in seen_entities:
             if entity_id:

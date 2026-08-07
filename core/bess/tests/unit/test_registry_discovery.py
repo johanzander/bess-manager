@@ -11,11 +11,14 @@ from typing import ClassVar
 from unittest.mock import patch
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.settings_store import SettingsStore
 
 
 def _make_controller() -> HomeAssistantAPIController:
     """Create a minimal controller instance without a real HA connection."""
-    return HomeAssistantAPIController.__new__(HomeAssistantAPIController)
+    ctrl = HomeAssistantAPIController.__new__(HomeAssistantAPIController)
+    ctrl._settings_store = SettingsStore()
+    return ctrl
 
 
 def _entity(entity_id: str, platform: str, unique_id: str) -> dict:
@@ -2013,9 +2016,7 @@ class TestSolcastEntityRegistryDiscovery:
 
 class TestHuaweiDiscovery:
     def setup_method(self):
-        self.ctrl = HomeAssistantAPIController(
-            ha_url="http://ha.local", token="tok", sensor_config={}
-        )
+        self.ctrl = HomeAssistantAPIController(ha_url="http://ha.local", token="tok")
 
     def test_huawei_entities_detected(self):
         detected = self.ctrl._detect_platforms(

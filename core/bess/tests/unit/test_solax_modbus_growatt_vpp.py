@@ -448,15 +448,14 @@ class TestNoRedundantWritesAcrossCycles:
 
 class TestCheckHealthVpp:
     def test_checks_vpp_entities_not_tou_entities(self, controller, mock_ha):
-        mock_ha.sensors.update(
-            {
-                "growatt_vpp_status": "select.growatt_vpp_status",
-                "growatt_vpp_remote_control": "select.growatt_vpp_remote_control",
-                "growatt_vpp_allow_ac_charging": "select.growatt_vpp_allow_ac_charging",
-                "growatt_vpp_time": "number.growatt_vpp_time",
-                "growatt_vpp_power": "number.growatt_vpp_power",
-            }
-        )
+        mock_ha.sensors = {
+            **mock_ha.sensors,
+            "growatt_vpp_status": "select.growatt_vpp_status",
+            "growatt_vpp_remote_control": "select.growatt_vpp_remote_control",
+            "growatt_vpp_allow_ac_charging": "select.growatt_vpp_allow_ac_charging",
+            "growatt_vpp_time": "number.growatt_vpp_time",
+            "growatt_vpp_power": "number.growatt_vpp_power",
+        }
 
         [health] = controller.check_health(mock_ha)
 
@@ -472,15 +471,14 @@ class TestCheckHealthVpp:
     def test_ems_rate_and_stop_soc_not_required(self, controller, mock_ha):
         """VPP setups commonly have these EMS entities disabled in HA
         (they're unused in VPP mode) — health check must not require them."""
-        mock_ha.sensors.update(
-            {
-                "growatt_vpp_status": "select.growatt_vpp_status",
-                "growatt_vpp_remote_control": "select.growatt_vpp_remote_control",
-                "growatt_vpp_allow_ac_charging": "select.growatt_vpp_allow_ac_charging",
-                "growatt_vpp_time": "number.growatt_vpp_time",
-                "growatt_vpp_power": "number.growatt_vpp_power",
-            }
-        )
+        mock_ha.sensors = {
+            **mock_ha.sensors,
+            "growatt_vpp_status": "select.growatt_vpp_status",
+            "growatt_vpp_remote_control": "select.growatt_vpp_remote_control",
+            "growatt_vpp_allow_ac_charging": "select.growatt_vpp_allow_ac_charging",
+            "growatt_vpp_time": "number.growatt_vpp_time",
+            "growatt_vpp_power": "number.growatt_vpp_power",
+        }
 
         [health] = controller.check_health(mock_ha)
 

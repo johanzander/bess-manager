@@ -30,8 +30,7 @@ Solis Intent Mapping (identical semantics to GrowattSphController):
 - BATTERY_EXPORT  → discharge period
 - IDLE            → nothing (inverter default / self-use mode)
 
-EXPERIMENTAL: not yet validated against a real Solis installation — see
-docs/agents/memory/project_platform_maturity.md.
+Real-world validated (issue #130) — see docs/agents/memory/project_platform_maturity.md.
 """
 
 import logging

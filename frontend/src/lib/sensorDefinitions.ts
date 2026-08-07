@@ -380,7 +380,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
     id: 'solis_modbus',
     name: 'Solis Modbus',
     required: true,
-    description: 'Solis hybrid inverter controlled via the Pho3niX90/solis_modbus integration (local Modbus, Grid Time of Use v2 schedule — 6 charge + 6 discharge periods). Experimental — not yet validated against a real Solis installation.',
+    description: 'Solis hybrid inverter controlled via the Pho3niX90/solis_modbus integration (local Modbus, Grid Time of Use v2 schedule — 6 charge + 6 discharge periods).',
     sensorGroups: [
       {
         name: 'Battery Monitoring',

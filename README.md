@@ -51,7 +51,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 - **Growatt MIC/MIN/MOD/MID** — via Growatt Server (cloud) or Modbus (local, TOU or VPP control mode *(VPP experimental)*)
 - **Growatt SPH** — via Growatt Server (cloud) or Modbus (local, VPP control mode *(experimental)*)
 - **SolaX** — via Solax modbus integration
-- **Solis** — via the [solis_modbus](https://github.com/Pho3niX90/solis_modbus) integration (local Modbus) *(experimental)*
+- **Solis** — via the [solis_modbus](https://github.com/Pho3niX90/solis_modbus) integration (local Modbus)
 - **Huawei LUNA2000** *(experimental)* — via huawei_solar integration (local Modbus)
 
 ### Electricity Markets
@@ -64,7 +64,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 - **InfluxDB** for historical data persistence
 - **Tibber** for power monitoring
 
-> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Solis, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion! [Sponsoring](https://github.com/johanzander/bess-manager#sponsorship) helps prioritize new hardware support.
+> **Want support for your inverter?** We're actively looking for testers with GivEnergy, Huawei, and other systems. [Open an issue](https://github.com/johanzander/bess-manager/issues) or join the discussion! [Sponsoring](https://github.com/johanzander/bess-manager#sponsorship) helps prioritize new hardware support.
 
 ## Installation
 

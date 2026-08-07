@@ -511,8 +511,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
               <TabsContent value="solis">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Solis hybrid inverter via the Pho3niX90/solis_modbus integration
-                  (Grid Time of Use v2, local Modbus). Experimental — not yet
-                  validated against a real Solis installation.
+                  (Grid Time of Use v2, local Modbus).
                 </p>
               </TabsContent>
 

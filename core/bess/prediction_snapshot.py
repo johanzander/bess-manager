@@ -5,7 +5,6 @@ analysis. Leverages DailyView for consistent data representation.
 Persists to disk so snapshots survive restarts within the same day.
 """
 
-import json
 import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime
@@ -16,10 +15,11 @@ from core.bess.daily_view_builder import (
     DailyView,
     _daily_view_from_dict,
 )
+from core.bess.daily_view_store import _load_container, _write_container
 
 logger = logging.getLogger(__name__)
 
-PERSIST_PATH = Path("/data/bess_prediction_snapshots.json")
+PERSIST_DIR = Path("/data/daily_views")
 
 
 @dataclass
@@ -57,12 +57,15 @@ class PredictionSnapshotStore:
     add-on restarts. Cleared at midnight like HistoricalDataStore.
     """
 
-    def __init__(self, persist_path: Path = PERSIST_PATH):
+    def __init__(self, persist_dir: Path = PERSIST_DIR):
         """Initialize the prediction snapshot store and load any persisted data."""
         self._snapshots: list[PredictionSnapshot] = []
-        self._persist_path = persist_path
+        self._persist_dir = persist_dir
         self._load_from_disk()
         logger.debug("Initialized PredictionSnapshotStore")
+
+    def _today_path(self) -> Path:
+        return self._persist_dir / f"{time_utils.today().isoformat()}.json"
 
     def store_snapshot(
         self,
@@ -151,56 +154,32 @@ class PredictionSnapshotStore:
         return len(self._snapshots)
 
     def _save_to_disk(self) -> None:
-        """Persist snapshots to disk to survive restarts."""
-        data = {
-            "date": time_utils.today().isoformat(),
-            "snapshots": [asdict(s) for s in self._snapshots],
-        }
-
+        """Persist snapshots to today's shared per-day file."""
+        path = self._today_path()
         try:
-            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Serialize with default=str to handle datetime and date objects
-            with open(self._persist_path, "w") as f:
-                json.dump(data, f, default=str)
-
+            container = _load_container(path)
+            container["snapshots"] = [asdict(s) for s in self._snapshots]
+            _write_container(path, container)
             logger.debug(
                 "Persisted %d prediction snapshots to %s",
                 len(self._snapshots),
-                self._persist_path,
+                path,
             )
-        except Exception as e:
+        except OSError as e:
             logger.warning("Failed to persist prediction snapshots: %s", e)
 
     def _load_from_disk(self) -> None:
-        """Load persisted snapshots on startup.
-
-        Only loads if the persisted file is from today.
-        """
-        if not self._persist_path.exists():
-            logger.debug("No persisted snapshots file found")
-            return
-
+        """Load today's persisted snapshots from the shared per-day file."""
+        path = self._today_path()
+        container = _load_container(path)
+        raw_snapshots = container.get("snapshots", [])
         try:
-            with open(self._persist_path) as f:
-                data = json.load(f)
-
-            # Validate date — only use if from today
-            stored_date = data.get("date")
-            today = time_utils.today().isoformat()
-            if stored_date != today:
-                logger.info(
-                    "Persisted snapshots from %s (not today %s), discarding",
-                    stored_date,
-                    today,
-                )
-                return
-
-            raw_snapshots = data.get("snapshots", [])
             self._snapshots = [_snapshot_from_dict(s) for s in raw_snapshots]
-            logger.info(
-                "Loaded %d persisted prediction snapshots from disk",
-                len(self._snapshots),
-            )
-        except Exception as e:
+            if self._snapshots:
+                logger.info(
+                    "Loaded %d persisted prediction snapshots from disk",
+                    len(self._snapshots),
+                )
+        except (KeyError, ValueError) as e:
             logger.warning("Failed to load persisted prediction snapshots: %s", e)
+            self._snapshots = []

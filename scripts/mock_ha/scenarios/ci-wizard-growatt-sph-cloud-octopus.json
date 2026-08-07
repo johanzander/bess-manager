@@ -1319,7 +1319,7 @@
   },
   "expected_wizard": {
     "growatt_cloud_3phase": {
-      "_comment": "Growatt SPH via cloud + Octopus Energy pricing. UK 3-phase user (xyz9876543 device). Covers phase_count=3 and power_monitoring_enabled=true path.",
+      "_comment": "Growatt SPH via cloud + Octopus Energy pricing. UK 3-phase user (xyz9876543 device). Covers phase_count=3. Growatt SPH has no battery_charging_power_rate sensor, so power monitoring cannot be enabled on this platform (see HomeFormSection.tsx's chargeRateSensorConfigured gate) — powerMonitoringEnabled stays false here even though phase-current sensors are mapped.",
       "payload": {
         "sensors": {
           "battery_soc": "sensor.xyz9876543_state_of_charge",
@@ -1351,7 +1351,7 @@
         "voltage": 230,
         "safetyMarginFactor": 1.0,
         "phaseCount": 3,
-        "powerMonitoringEnabled": true,
+        "powerMonitoringEnabled": false,
         "markupRate": 0.0,
         "vatMultiplier": 1.0,
         "additionalCosts": 0.0,
@@ -1378,7 +1378,7 @@
         "home": {
           "currency": "GBP",
           "phase_count": 3,
-          "power_monitoring_enabled": true
+          "power_monitoring_enabled": false
         },
         "electricity_price": {
           "vat_multiplier": 1.0,

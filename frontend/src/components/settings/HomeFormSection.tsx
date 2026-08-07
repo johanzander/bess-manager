@@ -103,32 +103,31 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
         )}
         {toggle('Enable fuse protection', form.powerMonitoringEnabled,
           v => onChange({ ...form, powerMonitoringEnabled: v }),
-          { disabled: !chargeRateSensorConfigured || !currentSensorsConfigured })}
+          { disabled: !form.powerMonitoringEnabled && (!chargeRateSensorConfigured || !currentSensorsConfigured) })}
+        <div className="pt-1">
+          {radioGroup(
+            'Phase count',
+            [{ value: '1', label: '1-phase' }, { value: '3', label: '3-phase' }],
+            String(form.phaseCount),
+            v => onChange({ ...form, phaseCount: parseInt(v, 10) }),
+          )}
+          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+            Used by the day-ahead scheduler for grid-import planning regardless of fuse
+            protection: the scheduler assumes load is spread evenly across phases, so 3-phase
+            raises how much it will plan to import before discharging the battery to compensate.
+            When fuse protection is enabled, real-time monitoring also watches each phase
+            individually and can throttle charging further if one phase runs hot.
+          </p>
+        </div>
         {form.powerMonitoringEnabled && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-              {numField('Fuse Current', form.maxFuseCurrent,
-                v => onChange({ ...form, maxFuseCurrent: Math.round(v) }), { unit: 'A', min: 1, step: 1 })}
-              {numField('Voltage', form.voltage,
-                v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
-              {numField('Safety Margin Factor', form.safetyMarginFactor,
-                v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
-            </div>
-            <div className="pt-1">
-              {radioGroup(
-                'Phase count',
-                [{ value: '1', label: '1-phase' }, { value: '3', label: '3-phase' }],
-                String(form.phaseCount),
-                v => onChange({ ...form, phaseCount: parseInt(v, 10) }),
-              )}
-              <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-                The scheduler assumes load is spread evenly across phases when planning grid
-                import, so 3-phase raises how much it will plan to import before discharging the
-                battery to compensate. Real-time fuse protection still watches each phase
-                individually and can throttle charging further if one phase runs hot.
-              </p>
-            </div>
-          </>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+            {numField('Fuse Current', form.maxFuseCurrent,
+              v => onChange({ ...form, maxFuseCurrent: Math.round(v) }), { unit: 'A', min: 1, step: 1 })}
+            {numField('Voltage', form.voltage,
+              v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
+            {numField('Safety Margin Factor', form.safetyMarginFactor,
+              v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
+          </div>
         )}
       </SectionCard>
     </div>

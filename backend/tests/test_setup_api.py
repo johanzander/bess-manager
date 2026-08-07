@@ -138,6 +138,7 @@ def _full_wizard_payload(**overrides) -> dict:
                 "current_l1": "sensor.current_l1",
                 "current_l2": "sensor.current_l2",
                 "current_l3": "sensor.current_l3",
+                "battery_charging_power_rate": "sensor.charge_rate",
             },
         },
         "nordpoolArea": "SE4",
@@ -398,6 +399,7 @@ class TestSetupComplete:
                 "current_l1": "sensor.current_l1",
                 "current_l2": "sensor.current_l2",
                 "current_l3": "sensor.current_l3",
+                "battery_charging_power_rate": "sensor.charge_rate",
             },
         }
         resp = _client.post("/api/setup/complete", json=payload)
@@ -634,6 +636,7 @@ class TestSetupComplete:
                     "current_l1": "sensor.current_l1",
                     "current_l2": "sensor.current_l2",
                     "current_l3": "sensor.current_l3",
+                    "battery_charging_power_rate": "sensor.charge_rate",
                 },
             },
             powerMonitoringEnabled=True,

@@ -670,6 +670,13 @@ class TestPatchSettingsPowerMonitoringValidation:
         assert response.status_code == 422
         detail = response.json()["detail"]
         assert "current_l1" in detail or "phase" in detail.lower()
+        # The invalid combination must never be persisted, even though the
+        # request was rejected — a prior bug wrote power_monitoring_enabled
+        # to disk BEFORE running this validation, so the 422 error message
+        # was returned but the crash-loop-inducing config was still saved.
+        assert not mock_controller.settings_store.data["home"].get(
+            "power_monitoring_enabled"
+        )
 
     def test_rejects_single_phase_without_l1_sensor(self, mock_controller):
         response = _client.patch(
@@ -683,6 +690,7 @@ class TestPatchSettingsPowerMonitoringValidation:
             "current_l1": "sensor.current_l1",
             "current_l2": "sensor.current_l2",
             "current_l3": "sensor.current_l3",
+            "battery_charging_power_rate": "sensor.charge_rate",
         }
         response = _client.patch(
             "/api/settings",

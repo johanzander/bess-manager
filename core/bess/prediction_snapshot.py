@@ -9,6 +9,7 @@ in-memory snapshot list is per-day: it rolls over on date change.
 """
 
 import logging
+import threading
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -68,6 +69,12 @@ class PredictionSnapshotStore:
         self._snapshots: list[PredictionSnapshot] = []
         self._persist_dir = persist_dir
         self._current_date: date = time_utils.today()
+        # Guards self._current_date/self._snapshots across the day-rollover
+        # check and the read/mutate/save that follows it in each public
+        # method — container_lock (daily_view_store.py) only protects the
+        # file, not this in-memory state, so scheduler-thread and
+        # request-thread calls must not interleave here either.
+        self._instance_lock = threading.Lock()
         self._load_from_disk()
         logger.debug("Initialized PredictionSnapshotStore")
 
@@ -116,8 +123,6 @@ class PredictionSnapshotStore:
         Returns:
             PredictionSnapshot: The stored snapshot object
         """
-        self._ensure_current_day()
-
         snapshot = PredictionSnapshot(
             snapshot_timestamp=snapshot_timestamp,
             optimization_period=optimization_period,
@@ -126,8 +131,10 @@ class PredictionSnapshotStore:
             predicted_daily_savings=predicted_daily_savings,
         )
 
-        self._snapshots.append(snapshot)
-        self._save_to_disk()
+        with self._instance_lock:
+            self._ensure_current_day()
+            self._snapshots.append(snapshot)
+            self._save_to_disk()
 
         logger.debug(
             "Stored snapshot at period %d: predicted savings %.2f, %d periods, %d TOU intervals",
@@ -145,8 +152,9 @@ class PredictionSnapshotStore:
         Returns:
             list[PredictionSnapshot]: All snapshots, chronologically ordered
         """
-        self._ensure_current_day()
-        return sorted(self._snapshots, key=lambda s: s.snapshot_timestamp)
+        with self._instance_lock:
+            self._ensure_current_day()
+            return sorted(self._snapshots, key=lambda s: s.snapshot_timestamp)
 
     def get_snapshot_at_period(self, period: int) -> PredictionSnapshot | None:
         """Get snapshot closest to specified period.
@@ -157,17 +165,18 @@ class PredictionSnapshotStore:
         Returns:
             PredictionSnapshot | None: Closest snapshot, or None if no snapshots
         """
-        self._ensure_current_day()
-        if not self._snapshots:
-            return None
+        with self._instance_lock:
+            self._ensure_current_day()
+            if not self._snapshots:
+                return None
 
-        # Find snapshot with optimization_period closest to target period
-        closest_snapshot = min(
-            self._snapshots,
-            key=lambda s: abs(s.optimization_period - period),
-        )
+            # Find snapshot with optimization_period closest to target period
+            closest_snapshot = min(
+                self._snapshots,
+                key=lambda s: abs(s.optimization_period - period),
+            )
 
-        return closest_snapshot
+            return closest_snapshot
 
     def clear(self) -> None:
         """Clear all stored snapshots, in memory and in today's file.
@@ -176,9 +185,10 @@ class PredictionSnapshotStore:
         rollover no longer depends on this: the store discards the previous
         day's in-memory snapshots automatically when the date changes.
         """
-        self._ensure_current_day()
-        self._snapshots.clear()
-        self._save_to_disk()
+        with self._instance_lock:
+            self._ensure_current_day()
+            self._snapshots.clear()
+            self._save_to_disk()
         logger.info("Cleared all prediction snapshots")
 
     def get_snapshot_count(self) -> int:
@@ -187,8 +197,9 @@ class PredictionSnapshotStore:
         Returns:
             int: Number of snapshots stored
         """
-        self._ensure_current_day()
-        return len(self._snapshots)
+        with self._instance_lock:
+            self._ensure_current_day()
+            return len(self._snapshots)
 
     def _save_to_disk(self) -> None:
         """Persist snapshots to today's shared per-day file."""

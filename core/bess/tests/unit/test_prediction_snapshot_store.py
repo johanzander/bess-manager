@@ -379,6 +379,76 @@ class TestConcurrentSharedFileWrites:
             assert len(container["snapshots"]) == i + 1
 
 
+class TestConcurrentDayRollover:
+    """A day-boundary race must not lose or misfile an in-flight snapshot."""
+
+    def test_in_flight_store_survives_concurrent_rollover(self, tmp_path, monkeypatch):
+        current = {"day": date(2026, 7, 8)}
+        monkeypatch.setattr(time_utils, "today", lambda: current["day"])
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+
+        day1_entered = threading.Event()
+        day1_may_append = threading.Event()
+        real_ensure_current_day = store._ensure_current_day
+
+        def slow_ensure_current_day():
+            real_ensure_current_day()
+            if current["day"] == date(2026, 7, 8):
+                # Thread A has just confirmed it's still "day 1" and is
+                # about to append; give thread B a chance to flip the day
+                # and race in before A finishes its append + save.
+                day1_entered.set()
+                day1_may_append.wait(timeout=5)
+
+        monkeypatch.setattr(store, "_ensure_current_day", slow_ensure_current_day)
+
+        errors: list[Exception] = []
+
+        def store_day1_snapshot():
+            try:
+                store.store_snapshot(
+                    snapshot_timestamp=datetime(2026, 7, 8, 23, 59),
+                    optimization_period=95,
+                    daily_view=_make_view(date(2026, 7, 8)),
+                    growatt_schedule=[],
+                    predicted_daily_savings=1.0,
+                )
+            except Exception as e:
+                errors.append(e)
+
+        def flip_day_then_store_day2_snapshot():
+            day1_entered.wait(timeout=5)
+            current["day"] = date(2026, 7, 9)
+            day1_may_append.set()
+            try:
+                store.store_snapshot(
+                    snapshot_timestamp=datetime(2026, 7, 9, 0, 0),
+                    optimization_period=0,
+                    daily_view=_make_view(date(2026, 7, 9)),
+                    growatt_schedule=[],
+                    predicted_daily_savings=2.0,
+                )
+            except Exception as e:
+                errors.append(e)
+
+        t1 = threading.Thread(target=store_day1_snapshot)
+        t2 = threading.Thread(target=flip_day_then_store_day2_snapshot)
+        t1.start()
+        t2.start()
+        t1.join(timeout=10)
+        t2.join(timeout=10)
+
+        assert not errors, f"writer thread raised: {errors[0]!r}"
+        assert not t1.is_alive() and not t2.is_alive()
+
+        day1_file = json.loads((tmp_path / "2026-07-08.json").read_text())
+        day2_file = json.loads((tmp_path / "2026-07-09.json").read_text())
+        # Thread A's snapshot must land in day 1's file, not be lost or
+        # misfiled into day 2's file by the concurrent rollover.
+        assert [s["optimization_period"] for s in day1_file["snapshots"]] == [95]
+        assert [s["optimization_period"] for s in day2_file["snapshots"]] == [0]
+
+
 class TestTempFileHousekeeping:
     def test_write_removes_orphaned_temp_files(self, tmp_path, monkeypatch):
         monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))

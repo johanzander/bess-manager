@@ -24,12 +24,14 @@ import numpy as np
 import pytest
 
 from core.bess.dp_battery_algorithm import (
+    TIE_DEDUP_SOE_KWH,
     _best_action_at_continuous_state,
     _charge_candidate,
     _discharge_candidates,
     _discretize_state_action_space,
     _interpolate_value,
     _run_dynamic_programming,
+    _tie_margin,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
 from core.bess.tests.helpers import make_battery_settings
@@ -40,7 +42,7 @@ def _prepare(scenario_name):
     scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
         scenario_name
     )
-    horizon = len(scenario["base_prices"])
+    horizon = len(buy_prices)
     home_consumption = scenario["home_consumption"][:horizon]
     solar_production = scenario["solar_production"][:horizon]
     V = _run_dynamic_programming(
@@ -76,7 +78,7 @@ def _total_value(
     sell_prices,
 ):
     _, power_levels = _discretize_state_action_space(battery_settings)
-    _, best_next_soe, _, best_reward = _best_action_at_continuous_state(
+    _, best_next_soe, _, best_reward, _, _ = _best_action_at_continuous_state(
         soe=soe,
         t=t,
         V_next=V[t + 1, :],
@@ -339,6 +341,76 @@ def test_discharge_candidates_use_injected_resolution():
     for p in finer_candidates:
         pct = p / step
         assert pct == pytest.approx(round(pct), abs=1e-6)
+
+
+def test_best_action_returns_tie_margin():
+    """_best_action_at_continuous_state must report the gap between its
+    chosen action's value and the runner-up's, so the hybrid tie detector
+    (#450) can find near-tied periods without re-deriving this comparison."""
+    (
+        battery_settings,
+        buy_prices,
+        sell_prices,
+        home_consumption,
+        solar_production,
+        V,
+        dt,
+    ) = _prepare("regression_2026_08_02_043728")
+    t = 0
+    soe = 2.0  # matches the fixture's documented initial_soe
+    result = _best_action_at_continuous_state(
+        soe,
+        t,
+        V[t + 1],
+        power_levels=np.array(
+            []
+        ),  # unused by current implementation; keep call-compatible
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        solar_production=solar_production,
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        cost_basis=0.0,
+        max_charge_power_per_period=None,
+    )
+    assert (
+        len(result) == 6
+    ), "expected (action, next_soe, cost_basis, reward, tie_margin, value_slope)"
+    _, _, _, _, tie_margin, _ = result
+    assert (
+        tie_margin >= 0.0
+    ), "margin must be non-negative (best >= second-best by construction)"
+
+
+def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
+    """The margin must measure ambiguity between behaviourally distinct
+    actions, not the raw top-2 gap (#450).
+
+    Several candidates _best_action_at_continuous_state evaluates are the
+    same decision expressed twice -- most notably IDLE and the
+    SOLAR_EXPORT-below-max candidate whenever there is no solar surplus to
+    route differently. Ranking those against each other reported margin 0.0
+    on 50-100% of periods of every fixture, which is not ambiguity at all.
+    Candidates within TIE_DEDUP_SOE_KWH of the chosen next_soe are excluded
+    from the runner-up search.
+    """
+    # (value, power, next_soe, cost_basis, reward, grid_imported)
+    chosen = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)
+    duplicate = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)  # identical outcome -- not a tie
+    distinct = (9.0, -2.0, 5.0 + TIE_DEDUP_SOE_KWH + 0.1, 0.0, 0.0, 0.0)
+
+    assert _tie_margin([chosen, duplicate], best_index=0) == float("inf")
+    assert _tie_margin([chosen, duplicate, distinct], best_index=0) == pytest.approx(
+        1.0
+    )
+
+
+def test_tie_margin_is_infinite_without_a_distinct_alternative():
+    """ "No distinct alternative was feasible" must read as "not tied", not
+    as a zero margin that the detector would flag (#450)."""
+    only = (3.0, 0.0, 5.0, 0.0, 0.0, 0.0)
+    assert _tie_margin([only], best_index=0) == float("inf")
 
 
 def test_interpolate_value_extrapolates_below_min_soe():

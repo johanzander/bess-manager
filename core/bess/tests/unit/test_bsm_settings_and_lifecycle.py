@@ -127,6 +127,28 @@ class TestSwitchInverterPlatform:
         with pytest.raises(SystemConfigurationError):
             system.switch_inverter_platform("nonexistent_platform")
 
+    def test_away_from_growatt_vpp_disables_vpp_status(self, system, mock_controller):
+        """Issue #479 (2nd entry point): switching the inverter platform
+        entirely -- not just control_mode -- also discards the Growatt
+        controller and must disable a stuck VPP register the same way
+        switch_control_mode() does, or the hardware override survives the
+        platform change too."""
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("vpp")
+        mock_controller.set_growatt_vpp_status(True)
+
+        system.switch_inverter_platform("huawei_solar_luna2000")
+
+        assert mock_controller.get_growatt_vpp_status() == "Disabled"
+
+    def test_away_from_growatt_tou_never_touches_vpp_status(
+        self, system, mock_controller
+    ):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        assert mock_controller.calls["growatt_vpp_status"] == []
+        system.switch_inverter_platform("huawei_solar_luna2000")
+        assert mock_controller.calls["growatt_vpp_status"] == []
+
 
 class TestSwitchControlMode:
     def test_gen4_defaults_to_tou(self, system):
@@ -163,6 +185,54 @@ class TestSwitchControlMode:
         original_controller = system._inverter_controller
         system.switch_control_mode("tou")
         assert system._inverter_controller is original_controller
+
+    def test_vpp_to_tou_disables_vpp_status(self, system, mock_controller):
+        """Issue #479: switching vpp -> tou left VPP Status enabled on the
+        inverter, so VPP Remote Control kept overriding TOU segment writes."""
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("vpp")
+        mock_controller.set_growatt_vpp_status(True)
+
+        system.switch_control_mode("tou")
+
+        assert mock_controller.get_growatt_vpp_status() == "Disabled"
+        assert mock_controller.calls["growatt_vpp_status"][-1] is False
+
+    def test_vpp_to_tou_skips_write_when_already_disabled(
+        self, system, mock_controller
+    ):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("vpp")
+        assert mock_controller.get_growatt_vpp_status() == "Disabled"
+        mock_controller.calls["growatt_vpp_status"].clear()
+
+        system.switch_control_mode("tou")
+
+        assert mock_controller.calls["growatt_vpp_status"] == []
+
+    def test_tou_to_tou_never_touches_vpp_status(self, system, mock_controller):
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        system.switch_control_mode("tou")
+        assert mock_controller.calls["growatt_vpp_status"] == []
+
+    def test_toggling_through_vpp_recovers_a_pre_fix_stuck_install(
+        self, system, mock_controller
+    ):
+        """A user stuck from before leave_control_mode() existed (hardware
+        VPP Status left Enabled, but BESS's stored control_mode already
+        "tou" since the buggy switch already happened) can recover by
+        selecting VPP then TOU again in Settings -- leave_control_mode()
+        reads live hardware state (get_growatt_vpp_status()), not any
+        BESS-side cache, so this works even though nothing here has ever
+        seen this particular register as "confirmed enabled"."""
+        system.switch_inverter_platform("solax_modbus_growatt_min")
+        assert system.control_mode == "tou"
+        mock_controller.set_growatt_vpp_status(True)  # stuck from before the fix
+
+        system.switch_control_mode("vpp")
+        system.switch_control_mode("tou")
+
+        assert mock_controller.get_growatt_vpp_status() == "Disabled"
 
 
 class TestResolveInitialPlatform:

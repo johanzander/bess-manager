@@ -363,6 +363,8 @@ class BatterySystemManager:
             platform,
         )
 
+        if self._inverter_controller is not None:
+            self._inverter_controller.leave_control_mode(self._controller)
         self.inverter_platform = platform
         self.control_mode = self._resolve_control_mode({}, platform)
         self._inverter_controller = self._create_inverter_controller()
@@ -415,6 +417,7 @@ class BatterySystemManager:
             self.control_mode,
             control_mode,
         )
+        self._inverter_controller.leave_control_mode(self._controller)
         self.control_mode = control_mode
         self._inverter_controller = self._create_inverter_controller()
         logger.info(

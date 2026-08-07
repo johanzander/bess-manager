@@ -21,6 +21,7 @@ from core.bess.models import EconomicSummary, PeriodData
 from core.bess.tests.helpers import (
     _scenario_inputs,
     assert_intent_absent,
+    assert_intent_at_hour,
     assert_intent_present,
     assert_physical_constraints,
     assert_savings_positive,
@@ -298,4 +299,83 @@ def test_all_scenarios(scenario_name):
     assert abs(gap) <= tol, (
         f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
         f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
+    )
+
+
+def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
+    """A fixture with no near-tied periods must produce output identical to
+    what the grid DP alone produced -- this is the core latency and
+    stability guarantee of the hybrid design (#450): when detect_tie_windows
+    returns nothing, none of the PWL machinery runs and the pinned
+    expected_results below stay exactly as they were before the wiring.
+
+    Fixture swapped from synthetic_consumption_efficient after the tie
+    detector's recalibration (#450): that fixture does now flag one window
+    (a no-op resolve), so it no longer exercises the fast path. This one
+    flags none, and the pinned values below are the grid DP's own output."""
+
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs("synthetic_consumption_ev_charging")
+    )
+    with caplog.at_level(logging.INFO, logger="core.bess.dp_battery_algorithm"):
+        result = optimize_battery_schedule(
+            buy_price=buy_prices,
+            sell_price=sell_prices,
+            home_consumption=scenario["home_consumption"],
+            solar_production=scenario["solar_production"],
+            initial_soe=scenario["battery"]["initial_soe"],
+            battery_settings=battery_settings,
+            period_duration_hours=period_duration_hours,
+        )
+
+    # Pinned costs alone would keep passing if the detector drifted and this
+    # fixture started resolving windows that happen to be no-ops -- which is
+    # exactly what happened to the fixture this test used to use. Assert the
+    # fast path was actually taken, not just that the numbers came out right.
+    assert not [
+        r for r in caplog.records if "Near-tied DP decisions detected" in r.getMessage()
+    ], "fixture now trips the tie detector -- it no longer exercises the fast path"
+
+    assert result.economic_summary.battery_solar_cost == pytest.approx(
+        158.52645, abs=1e-4
+    )
+    assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
+        62.58805, abs=1e-3
+    )
+
+
+def test_466_near_tied_evening_periods_discharge_instead_of_idle():
+    """Replays the exact optimizer input recorded in #466's debug bundle
+    (bess-debug-2026-08-06-110152.md, run at optimization_period 44, horizon
+    52 starting 11:00). Pre-fix, periods 32 (19:00, buy 0.7235/sell 0.2419)
+    and 45 (22:15, buy 0.6683/sell 0.1977) sat IDLE despite ~0.1675 kWh of
+    home load and a clearly profitable discharge spread -- a near-tied DP
+    decision resolved toward the "do nothing" action. The risk-aware
+    load-covering tie-break (#466) should now prefer LOAD_SUPPORT at both.
+
+    Reproduction was verified against the bundle: replaying this same input
+    through the pre-fix source (commit c1013fe9) reproduces the bundle's own
+    reported economics exactly (grid_only_cost 5.764893562499999,
+    battery_solar_cost -2.094315584625) with periods 32 and 45 IDLE."""
+
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs("regression_2026_08_06_466")
+    )
+    result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=scenario["home_consumption"],
+        solar_production=scenario["solar_production"],
+        initial_soe=scenario["battery"]["initial_soe"],
+        initial_cost_basis=scenario["battery"]["initial_cost_basis"],
+        battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
+    )
+
+    assert_intent_at_hour(result, 32, "LOAD_SUPPORT")  # 19:00
+    assert_intent_at_hour(result, 45, "LOAD_SUPPORT")  # 22:15
+
+    expected = scenario["expected_results"]
+    assert result.economic_summary.battery_solar_cost == pytest.approx(
+        expected["battery_solar_cost"], abs=1e-3
     )

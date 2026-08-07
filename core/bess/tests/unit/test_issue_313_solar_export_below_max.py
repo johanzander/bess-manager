@@ -67,7 +67,7 @@ def test_best_action_prefers_solar_bypass_when_stored_energy_has_no_future_value
     buy_price = [0.1]
     sell_price = [0.1]
 
-    action, next_soe, _, reward = _best_action_at_continuous_state(
+    action, next_soe, _, reward, _, _ = _best_action_at_continuous_state(
         soe=soe,
         t=0,
         V_next=v_next,

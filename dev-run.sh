@@ -143,14 +143,13 @@ if $DOCKER ps -a --format '{{.Names}}' | grep -qx "$CONTAINER_NAME"; then
   $DOCKER rm -f "$CONTAINER_NAME" >/dev/null
 fi
 
-# Only rebuild frontend if source files changed since last build
-FRONTEND_BUILD="frontend/dist"
-if [ ! -d "$FRONTEND_BUILD" ] || [ -n "$(find frontend/src frontend/index.html frontend/vite.config.ts frontend/package.json -newer "$FRONTEND_BUILD" 2>/dev/null)" ]; then
-  echo "Building frontend (changes detected)..."
-  (cd frontend && npm run build)
-else
-  echo "Frontend unchanged, skipping build."
-fi
+# Always rebuild frontend so the served bundle can never go stale. An
+# mtime-based "skip if unchanged" check used to live here, but it's a
+# fragile heuristic (git operations, interrupted runs, etc. can all leave
+# it comparing the wrong timestamps) for a ~4s build — not worth the risk
+# of silently serving an outdated bundle in a dev loop.
+echo "Building frontend..."
+(cd frontend && npm run build)
 
 echo "Building and starting development container..."
 $COMPOSE up --build -d

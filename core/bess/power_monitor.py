@@ -119,6 +119,29 @@ class HomePowerMonitor:
             all_methods=all_methods,
         )
 
+        # perform_health_check() treats an unmapped sensor as SKIPPED and
+        # excludes it from the pass/fail tally, because is_required=False
+        # above reflects that power monitoring as a whole is optional.
+        # But once power_monitoring_enabled is True (checked above), these
+        # specific sensors ARE required for the feature to function —
+        # otherwise adjust_charging_power() crashes every cycle on a None
+        # sensor read (see get_current_phase_loads_w). Promote SKIPPED to
+        # ERROR here rather than in the shared perform_health_check(), which
+        # other required-but-optional-looking call sites still rely on.
+        had_missing_sensor = False
+        for check in health_check["checks"]:
+            if check["status"] == "SKIPPED":
+                had_missing_sensor = True
+                check["status"] = "ERROR"
+                check["error"] = (
+                    "Power monitoring is enabled but this sensor is not "
+                    "configured — map it in Settings → Sensors, or disable "
+                    "fuse protection in Settings → Home."
+                )
+                check["displayValue"] = "Not configured"
+        if had_missing_sensor:
+            health_check["status"] = "ERROR"
+
         return [health_check]
 
     def get_current_phase_loads_w(self) -> tuple[float, ...]:

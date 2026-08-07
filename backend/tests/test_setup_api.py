@@ -72,7 +72,17 @@ _PRE_EXISTING_STORE: dict = {
     },
     "growatt": {"device_id": "old-dev"},
     "inverter": {"platform": "growatt_server_min"},
-    "sensors": {"battery_soc": "sensor.old_soc"},
+    # current_l1/l2/l3 are pre-mapped here because _full_wizard_payload()
+    # (below) enables power monitoring with phaseCount=3 by default — the
+    # server-side validation added for the power-monitoring sensor-gating
+    # fix (2026-08-07) would otherwise reject every setup_complete call that
+    # uses the default wizard payload with a 422.
+    "sensors": {
+        "battery_soc": "sensor.old_soc",
+        "current_l1": "sensor.old_l1",
+        "current_l2": "sensor.old_l2",
+        "current_l3": "sensor.old_l3",
+    },
 }
 
 
@@ -128,7 +138,17 @@ def _full_wizard_payload(**overrides) -> dict:
             "solax_modbus_growatt_min": {},
             "solax_modbus_growatt_sph": {},
             "solax_modbus_native": {},
-            "shared": {},
+            # phaseCount defaults to 3 and powerMonitoringEnabled defaults to
+            # True below, so the phase-current sensors it requires must be
+            # mapped here too — otherwise the API's server-side validation
+            # (added to close the gap that let power_monitoring_enabled=True
+            # crash-loop without them, 2026-08-07) rejects every payload
+            # built from this base with a 422.
+            "shared": {
+                "current_l1": "sensor.current_l1",
+                "current_l2": "sensor.current_l2",
+                "current_l3": "sensor.current_l3",
+            },
         },
         "nordpoolArea": "SE4",
         "nordpoolConfigEntryId": "entry-abc",
@@ -574,6 +594,22 @@ class TestSetupComplete:
             call_args["sensors"]["growatt_server_min"]["battery_soc"]
             == "sensor.growatt_battery_soc"
         )
+
+    def test_setup_complete_rejects_power_monitoring_without_phase_sensors(
+        self, complete_controller
+    ):
+        """Completing the wizard with power monitoring on but phase-current
+        sensors missing must fail with 422 — the server-side backstop for
+        the same gap that let power_monitoring_enabled=True crash-loop in
+        production (2026-08-07 debug bundle)."""
+        complete_controller.settings_store.data["sensors"] = {
+            "current_l1": "sensor.l1"  # L2/L3 missing
+        }
+        resp = _client.post(
+            "/api/setup/complete",
+            json={"powerMonitoringEnabled": True, "phaseCount": 3},
+        )
+        assert resp.status_code == 422
 
     def test_rejects_invalid_sensor_entity_ids(self, complete_controller):
         payload = _full_wizard_payload(

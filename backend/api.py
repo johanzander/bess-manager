@@ -113,6 +113,40 @@ def _strip_empty_sensor_values(sensors: dict) -> dict:
     return result
 
 
+def _validate_power_monitoring_sensors(
+    home_section: dict, active_sensors: dict
+) -> None:
+    """Raise HTTPException(422) if power monitoring is being enabled without
+    the phase-current sensors its phase_count requires.
+
+    Mirrors the frontend gating in HomeFormSection.tsx/SetupWizardPage.tsx —
+    this is the server-side backstop so the API itself refuses the invalid
+    combination regardless of which client called it.
+    """
+    if not home_section.get("power_monitoring_enabled"):
+        return
+    phase_count = home_section.get("phase_count", 3)
+    required_keys = (
+        ["current_l1"]
+        if phase_count == 1
+        else [
+            "current_l1",
+            "current_l2",
+            "current_l3",
+        ]
+    )
+    missing = [k for k in required_keys if not active_sensors.get(k)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cannot enable power monitoring: missing required phase "
+                f"current sensor(s) for {phase_count}-phase: {', '.join(missing)}. "
+                "Configure them in Settings → Sensors first."
+            ),
+        )
+
+
 def _require_configured_system(bess_controller) -> None:
     """Raise HTTP 503 if the BESS system has not been configured yet.
 
@@ -294,6 +328,11 @@ async def patch_settings(updates: dict):
                 # successor if a migration was ever interrupted (see
                 # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
                 # straight through would raise AttributeError.
+                effective_sensors = {
+                    **bess_controller.settings_store.get_active_sensors(),
+                    **(updates.get("sensors") or {}),
+                }
+                _validate_power_monitoring_sensors(section, effective_sensors)
                 in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
                 bess_controller.system.update_settings({"home": in_mem})
 
@@ -2919,6 +2958,11 @@ async def setup_complete(payload: APISetupCompletePayload):
             for field, key in _HOME_MAP.items():
                 if getattr(payload, field) is not None:
                     home[key] = getattr(payload, field)
+            effective_sensors = {
+                **bess_controller.settings_store.get_active_sensors(),
+                **(sections.get("sensors") or {}),
+            }
+            _validate_power_monitoring_sensors(home, effective_sensors)
             sections["home"] = home
 
         # --- electricity price ---
@@ -3124,6 +3168,10 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         logger.info(f"Setup complete: saved sections {list(sections.keys())}")
         return {"success": True, "saved_sections": list(sections.keys())}
+    except HTTPException:
+        # Preserve the original status code (e.g. 422 from sensor/platform
+        # validation) instead of masking it as a generic 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error completing setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

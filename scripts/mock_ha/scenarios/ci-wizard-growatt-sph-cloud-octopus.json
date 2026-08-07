@@ -1333,7 +1333,10 @@
           "lifetime_solar_energy": "sensor.xyz9876543_lifetime_solar_energy",
           "lifetime_import_from_grid": "sensor.xyz9876543_lifetime_import_from_grid",
           "lifetime_export_to_grid": "sensor.xyz9876543_lifetime_export_to_grid",
-          "lifetime_load_consumption": "sensor.xyz9876543_lifetime_load_consumption"
+          "lifetime_load_consumption": "sensor.xyz9876543_lifetime_load_consumption",
+          "current_l1": "sensor.xyz9876543_current_l1",
+          "current_l2": "sensor.xyz9876543_current_l2",
+          "current_l3": "sensor.xyz9876543_current_l3"
         },
         "growattDeviceId": "dev-growatt-xyz",
         "totalCapacity": 10.0,
@@ -1393,7 +1396,10 @@
         },
         "sensors": {
           "battery_soc": "sensor.xyz9876543_state_of_charge",
-          "pv_power": "sensor.xyz9876543_all_pv_wattage"
+          "pv_power": "sensor.xyz9876543_all_pv_wattage",
+          "current_l1": "sensor.xyz9876543_current_l1",
+          "current_l2": "sensor.xyz9876543_current_l2",
+          "current_l3": "sensor.xyz9876543_current_l3"
         }
       },
       "expected_absent_sections": [],

@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Inverter service domain is now configurable** — a compatible integration exposing the same TOU services under its own domain works as a setting instead of needing a new BESS platform. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 - **Grid connection import capacity modeling** — the DP now caps planned grid import at the house's fuse limit instead of planning unbounded imports, gated on `power_monitoring_enabled`. ([#429](https://github.com/johanzander/bess-manager/issues/429))
 - **Solis inverter platform (`solis_modbus`) is now stable** — confirmed working against real Solis installations by two beta testers, no longer marked experimental. ([#130](https://github.com/johanzander/bess-manager/issues/130))
+- **ENTSO-e / Belpex price provider is now stable** — confirmed working against a real Belgian Belpex/Luminus Dynamic contract over an extended live-test period, no longer marked experimental. ([#126](https://github.com/johanzander/bess-manager/issues/126))
 
 ### Fixed
 

@@ -60,10 +60,6 @@ from enum import Enum
 
 import numpy as np
 
-from core.bess.decision_intelligence import (
-    classify_strategic_intent,
-    create_decision_data,
-)
 from core.bess.dp_constants import (
     POWER_CLASSIFICATION_THRESHOLD_KW,
     POWER_STEP_KW,
@@ -78,6 +74,10 @@ from core.bess.models import (
     PeriodData,
 )
 from core.bess.settings import BatterySettings, HomeSettings
+from core.bess.strategic_intent import (
+    classify_strategic_intent,
+    create_decision_data,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -86,9 +86,9 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Algorithm parameters. SOE_STEP_KWH/POWER_STEP_KW live in dp_constants.py
-# (shared with decision_intelligence.py -- see that module's docstring for why).
+# (shared with strategic_intent.py -- see that module's docstring for why).
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
-# Matches decision_intelligence.classify_strategic_intent's own
+# Matches strategic_intent.classify_strategic_intent's own
 # battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
 # in sync: the DP's own reward search must value a discharge's export
 # credit consistently with whether that discharge will actually be
@@ -651,7 +651,7 @@ def _compute_reward(
         # Self-throttling fix (#240): load-first hardware never actually
         # exports a small discharge overshoot beyond home_consumption -- it
         # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
-        # (the same battery_to_grid boundary decision_intelligence.
+        # (the same battery_to_grid boundary strategic_intent.
         # classify_strategic_intent uses to call something BATTERY_EXPORT vs
         # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
         # credit. At or above it, it's a genuine deliberate export.
@@ -717,9 +717,8 @@ def _build_period_data(
     continuation_value: the DP's actual value-to-go from the resulting state
     (_interpolate_value(V_next, next_soe, ...), the same term
     _best_action_at_continuous_state adds to reward when choosing this
-    action) -- reported as decision.future_value. Defaults to 0.0 so this
-    function's own reporting-only `reward` still equals immediate_value for
-    any caller that hasn't been updated to pass the real continuation value
+    action) -- reported as decision.future_value. Defaults to 0.0 for any
+    caller that hasn't been updated to pass the real continuation value
     (see issue #353).
     """
     current_buy_price = buy_price[period]
@@ -790,29 +789,14 @@ def _build_period_data(
     energy_stored = max(0.0, next_soe - soe)
     battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
-    import_cost = grid_imported * current_buy_price
-    export_revenue = grid_exported * current_sell_price
-    total_cost = import_cost - export_revenue + battery_wear_cost
-    reward = -total_cost
-
     decision_data = create_decision_data(
         power=power,
         battery_action_kwh=battery_action_kwh,
         energy_data=energy_data,
-        hour=period,
         cost_basis=new_cost_basis,
-        # extract_economic_values_from_reward derives future_value as
-        # reward - immediate_value; immediate_value is built from the same
-        # import_cost/export_revenue/battery_wear_cost terms as `reward`
-        # above, so adding continuation_value here is what makes
-        # future_value equal it instead of always coming out 0.0 (#353).
-        reward=reward + continuation_value,
-        import_cost=import_cost,
-        export_revenue=export_revenue,
-        battery_wear_cost=battery_wear_cost,
-        buy_price=current_buy_price,
-        sell_price=current_sell_price,
-        currency=currency,
+        # future_value is the DP's actual value-to-go from the resulting
+        # state -- reported here as continuation_value directly (#353).
+        future_value=continuation_value,
     )
 
     economic_data = EconomicData.from_energy_data(

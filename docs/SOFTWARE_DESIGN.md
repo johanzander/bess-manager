@@ -318,17 +318,9 @@ kWh floor folds back into `battery_to_home`, but only when
 deficit) — when `battery_to_home == 0`, any nonzero export stays a real
 export, since it has no other channel to have come from.
 
-### Decision Intelligence
-
-Each optimization provides detailed economic reasoning:
-
-- **Immediate Value**: Direct economic impact of each period's decisions
-- **Future Value**: Expected benefits from strategic energy storage
-- **Economic Chain**: Step-by-step profit/loss calculation explanation
-
 ### Battery Action Intent Detection
 
-The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `decision_intelligence.py`:
+The system classifies battery action intent using the battery power action as the primary discriminator, with energy flows as secondary input. Classification is performed by `classify_strategic_intent(power, energy_data)` in `strategic_intent.py`:
 
 - **Discharging** (power < −0.1 kW):
   - **BATTERY_EXPORT**: `battery_to_grid > 0.1 kWh`
@@ -668,13 +660,6 @@ Severity Model" for the known fragility here).
 - Real-time power monitoring
 - Economic analysis and savings breakdown
 - Battery status and schedule information
-
-### Decision Intelligence API (`/api/decision-intelligence`)
-
-- Quarterly and hourly decision analysis with economic reasoning
-- Strategic intent explanation and flow patterns
-- Alternative scenario analysis
-- Confidence metrics and prediction accuracy
 
 ### Settings APIs (`/api/settings/battery`, `/api/settings/electricity`)
 

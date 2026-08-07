@@ -6,17 +6,29 @@
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #86847c;
   --mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
   --sans: -apple-system, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
-  --c-load: #2a78d6;      /* LOAD_SUPPORT */
-  --c-solar-store: #1baf7a; /* SOLAR_STORAGE */
-  --c-solar-export: #eb6834; /* SOLAR_EXPORT */
-  --c-grid-charge: #4a3aa7;  /* GRID_CHARGING */
-  --c-export: #e34948;    /* BATTERY_EXPORT */
-  --c-idle: #b6b3a8;      /* IDLE (not a categorical data color — muted ink) */
+  /* Intent tint colors match the live dashboard's own intent palette
+     (frontend/src/components/BatteryModeTimeline.tsx) so the same decision
+     reads the same color whether you're looking at the dashboard or this
+     debug chart. */
+  --c-load: #3b82f6;      /* LOAD_SUPPORT */
+  --c-solar-store: #eab308; /* SOLAR_STORAGE */
+  --c-solar-export: #84cc16; /* SOLAR_EXPORT */
+  --c-grid-charge: #a855f7;  /* GRID_CHARGING */
+  --c-export: #22c55e;    /* BATTERY_EXPORT */
+  --c-idle: #9ca3af;      /* IDLE (not a categorical data color — muted ink) */
   --sell-line: #0b0b0b; --buy-line: #86847c;
   --c-solar-flow: #eda100; --c-load-flow: #52514e;
-  /* Energy Trend panel series (categorical slots 1-6, fixed order) */
-  --s-export: #2a78d6; --s-pv: #008300; --s-dis: #e87ba4;
-  --s-imp: #eda100; --s-chg: #1baf7a; --s-load: #eb6834;
+  /* Energy Trend panel series (categorical slots 1-6, fixed order). pv/load/
+     export/chg match the live dashboard's own flow colors (frontend/src/
+     components/EnergyFlowChart.tsx's `colors` object: solar/home/grid/
+     battery), which -- like this chart -- use the same hex in light and dark
+     mode. imp/dis are a lighter tint of the same grid/battery hue: the
+     dashboard reuses one color per direction pair (Sankey arrows show
+     direction instead), but these six lines are independently toggleable and
+     can be on screen at once, so import/discharge need to stay visually
+     distinct from export/charge rather than collide on an identical color. */
+  --s-export: #3b82f6; --s-pv: #fbbf24; --s-dis: #6ee7b7;
+  --s-imp: #93c5fd; --s-chg: #10b981; --s-load: #ef4444;
   --c-shadow: #e87ba4;
 }
 @media (prefers-color-scheme: dark) {
@@ -24,12 +36,12 @@
     color-scheme: dark;
     --surface-1: #17181a; --surface-2: #1e2023; --border: #2c2f36;
     --text-primary: #f2f2f0; --text-secondary: #c3c2b7; --text-muted: #8b8980;
-    --c-load: #3987e5; --c-solar-store: #199e70; --c-solar-export: #d95926;
-    --c-grid-charge: #9085e9; --c-export: #e66767; --c-idle: #6c6a62;
+    --c-load: #60a5fa; --c-solar-store: #facc15; --c-solar-export: #a3e635;
+    --c-grid-charge: #a855f7; --c-export: #4ade80; --c-idle: #6b7280;
     --sell-line: #f2f2f0; --buy-line: #8b8980;
     --c-solar-flow: #c98500; --c-load-flow: #c3c2b7;
-    --s-export: #3987e5; --s-pv: #008300; --s-dis: #d55181;
-    --s-imp: #c98500; --s-chg: #199e70; --s-load: #d95926;
+    --s-export: #3b82f6; --s-pv: #fbbf24; --s-dis: #6ee7b7;
+    --s-imp: #93c5fd; --s-chg: #10b981; --s-load: #ef4444;
     --c-shadow: #d55181;
   }
 }
@@ -37,24 +49,24 @@
   color-scheme: dark;
   --surface-1: #17181a; --surface-2: #1e2023; --border: #2c2f36;
   --text-primary: #f2f2f0; --text-secondary: #c3c2b7; --text-muted: #8b8980;
-  --c-load: #3987e5; --c-solar-store: #199e70; --c-solar-export: #d95926;
-  --c-grid-charge: #9085e9; --c-export: #e66767; --c-idle: #6c6a62;
+  --c-load: #60a5fa; --c-solar-store: #facc15; --c-solar-export: #a3e635;
+  --c-grid-charge: #a855f7; --c-export: #4ade80; --c-idle: #6b7280;
   --sell-line: #f2f2f0; --buy-line: #8b8980;
   --c-solar-flow: #c98500; --c-load-flow: #c3c2b7;
-  --s-export: #3987e5; --s-pv: #008300; --s-dis: #d55181;
-  --s-imp: #c98500; --s-chg: #199e70; --s-load: #d95926;
+  --s-export: #3b82f6; --s-pv: #fbbf24; --s-dis: #6ee7b7;
+  --s-imp: #93c5fd; --s-chg: #10b981; --s-load: #ef4444;
   --c-shadow: #d55181;
 }
 :root[data-theme="light"] .viz-root {
   color-scheme: light;
   --surface-1: #fcfcfb; --surface-2: #f3f2ee; --border: #e2e0da;
   --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #86847c;
-  --c-load: #2a78d6; --c-solar-store: #1baf7a; --c-solar-export: #eb6834;
-  --c-grid-charge: #4a3aa7; --c-export: #e34948; --c-idle: #b6b3a8;
+  --c-load: #3b82f6; --c-solar-store: #eab308; --c-solar-export: #84cc16;
+  --c-grid-charge: #a855f7; --c-export: #22c55e; --c-idle: #9ca3af;
   --sell-line: #0b0b0b; --buy-line: #86847c;
   --c-solar-flow: #eda100; --c-load-flow: #52514e;
-  --s-export: #2a78d6; --s-pv: #008300; --s-dis: #e87ba4;
-  --s-imp: #eda100; --s-chg: #1baf7a; --s-load: #eb6834;
+  --s-export: #3b82f6; --s-pv: #fbbf24; --s-dis: #6ee7b7;
+  --s-imp: #93c5fd; --s-chg: #10b981; --s-load: #ef4444;
   --c-shadow: #e87ba4;
 }
 * { box-sizing: border-box; }
@@ -135,6 +147,13 @@ table.data-table caption { text-align: left; color: var(--text-muted); font-size
 table.data-table th, table.data-table td { padding: 3px 8px; text-align: right; border-bottom: 1px solid var(--border); }
 table.data-table th.time, table.data-table td.time { text-align: left; }
 details.table-toggle summary { cursor: pointer; color: var(--text-secondary); font-size: 0.8rem; margin-top: 6px; }
+h2.section { font-size: 0.95rem; font-weight: 650; margin: 26px 0 4px; letter-spacing: -0.005em; }
+.finding-card { background: var(--surface-2); border-radius: 10px; padding: 14px 16px; margin-bottom: 10px; font-size: 0.86rem; line-height: 1.6; }
+.finding-card p { margin: 0 0 8px; }
+.finding-card p:last-child { margin-bottom: 0; }
+.status-pill { display: inline-block; font-size: 0.68rem; font-weight: 700; padding: 2px 8px; border-radius: 999px; font-family: var(--mono); background: color-mix(in srgb, #1a8a4a 16%, transparent); color: #1a8a4a; }
+@media (prefers-color-scheme: dark) { .status-pill { background: color-mix(in srgb, #3ab873 18%, transparent); color: #3ab873; } }
+:root[data-theme="dark"] .status-pill { background: color-mix(in srgb, #3ab873 18%, transparent); color: #3ab873; }
 </style>
 
 <div class="viz-root">
@@ -149,11 +168,14 @@ details.table-toggle summary { cursor: pointer; color: var(--text-secondary); fo
 </div>
 
 <div class="legend" id="legend"></div>
-<p class="legend-hint">One ledger, every line individually toggleable — click any item (price lines, energy-trend series) to show/hide it. Price-panel lines listed first, then Energy Trend, then the (non-toggleable) intent-tint key.</p>
+<p class="legend-hint">One ledger, every line individually toggleable — click any item (price lines, energy-trend series) to show/hide it. Price-panel lines listed first, then Energy Trend, then the (non-toggleable) intent-tint key. Hover an item for its one-line definition.</p>
 
-<dl class="glossary" id="glossary"></dl>
+<details class="table-toggle">
+<summary>Glossary — full definitions by category</summary>
+<dl class="glossary" id="glossary" style="margin-top:8px;"></dl>
+</details>
 
-<p class="footnote">DP-reasoning lines (shadow price, cost basis, breakeven) only draw for periods with a recorded optimizer decision — gaps are periods with no decision data (e.g. idle periods with no beneficial action), not missing data. Dotted vertical lines mark day boundaries (00:00) when the trace spans more than one day. Hover any legend item above for its one-line definition.</p>
+<p class="footnote">DP-reasoning lines (shadow price, cost basis, breakeven) only draw for periods with a recorded optimizer decision — gaps are periods with no decision data (e.g. idle periods with no beneficial action), not missing data. Dotted vertical lines mark day boundaries (00:00) when the trace spans more than one day.</p>
 
 <details class="table-toggle">
 <summary>View as table</summary>
@@ -166,6 +188,7 @@ details.table-toggle summary { cursor: pointer; color: var(--text-secondary); fo
 </div>
 </details>
 
+{{ANALYSIS}}
 <p class="source-note">Generated by the visualize-debug-log skill. Not a live data source — a static snapshot of this debug bundle's realized sensor data plus its latest optimization run's forecast, with actual/historical periods' detailed flows and intent recomputed against this repo's current <code>core/bess/models.py</code>.</p>
 </div>
 </div>

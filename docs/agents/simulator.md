@@ -44,7 +44,7 @@ scenario.
 ## When to use it — REQUIRED for any optimizer or control change
 
 If you touch the **DP** (`dp_battery_algorithm.py`), the **intent classification**
-(`decision_intelligence.py`), or the **control mapping** (`inverter_controller.py`),
+(`strategic_intent.py`), or the **control mapping** (`inverter_controller.py`),
 you MUST verify `R == P` still holds — a passing plan-only test means nothing if
 the plan isn't executable. Add/keep an `R == P` assertion for the affected
 scenarios.

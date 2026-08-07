@@ -17,6 +17,7 @@ import websocket
 
 from .exceptions import SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
+from .settings_store import SettingsStore
 
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
@@ -73,7 +74,7 @@ class HomeAssistantAPIController:
         self,
         ha_url: str,
         token: str,
-        sensor_config: dict | None = None,
+        settings_store: SettingsStore | None = None,
         growatt_device_id: str | None = None,
         huawei_device_id: str | None = None,
         service_domain: str | None = None,
@@ -84,7 +85,11 @@ class HomeAssistantAPIController:
         Args:
             ha_url: Base URL of Home Assistant (default: "http://supervisor/core")
             token: Long-lived access token for Home Assistant
-            sensor_config: Sensor configuration mapping from options.json
+            settings_store: Live settings store backing ``.sensors`` — a
+                computed view over ``settings_store.get_active_sensors()``,
+                never a manually-synced snapshot. Defaults to a fresh, empty
+                ``SettingsStore`` for callers that don't need persistence
+                (e.g. tests).
             growatt_device_id: Growatt device ID for TOU segment operations
             huawei_device_id: Huawei battery device ID for TOU period operations
             service_domain: HA integration domain for vendor service calls
@@ -106,8 +111,7 @@ class HomeAssistantAPIController:
         self.retry_base_delay = 2  # seconds (exponential backoff: 2, 4, 8)
         self.test_mode = False
 
-        # Use provided sensor configuration
-        self.sensors = sensor_config or {}
+        self._settings_store = settings_store or SettingsStore()
 
         # Store Growatt device ID for TOU operations
         self.growatt_device_id = growatt_device_id
@@ -136,6 +140,20 @@ class HomeAssistantAPIController:
             "Initialized HomeAssistantAPIController with %d sensor mappings",
             len(self.sensors),
         )
+
+    @property
+    def sensors(self) -> dict:
+        """Active sensor_key -> entity_id map, read live from settings_store.
+
+        Computed on every access — never cached — so a settings mutation
+        (direct sensor edit, inverter platform switch, ...) is visible here
+        immediately, with no refresh call required.
+        """
+        return self._settings_store.get_active_sensors()
+
+    @sensors.setter
+    def sensors(self, value: dict) -> None:
+        self._settings_store.data["sensors"] = dict(value)
 
     # Class-level sensor mapping - immutable mapping
     METHOD_SENSOR_MAP: ClassVar[dict[str, dict[str, object]]] = {

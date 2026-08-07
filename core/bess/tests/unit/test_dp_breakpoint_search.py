@@ -208,7 +208,7 @@ def test_discharge_candidates_are_hardware_representable():
 
 
 def test_discharge_candidates_exceed_classification_threshold():
-    """Second #282 postmortem: decision_intelligence.classify_strategic_intent
+    """Second #282 postmortem: strategic_intent.classify_strategic_intent
     treats any discharge magnitude at or below POWER_CLASSIFICATION_THRESHOLD_KW
     (0.1 kW, derived from POWER_STEP_KW) as noise and falls through to a
     different classification branch -- previously safe by construction, since

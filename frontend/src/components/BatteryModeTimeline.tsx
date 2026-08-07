@@ -102,6 +102,8 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
 
   const { data, loading, error } = useDashboardData(undefined, 'quarter-hourly', REFRESH_INTERVAL_MS);
 
+  const [tooltipData, setTooltipData] = useState<{ segment: Segment; x: number; y: number } | null>(null);
+
   // useDashboardData sets loading=true on every periodic refetch too, not
   // just the first one — gate the skeleton on "no data yet" so a background
   // 60s refresh doesn't blank out an already-rendered timeline (#486).
@@ -139,8 +141,6 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
   const barHeight = 28;
   const tickHeight = 6;
   const svgHeight = barHeight + 20; // bar + tick + label
-
-  const [tooltipData, setTooltipData] = useState<{ segment: Segment; x: number; y: number } | null>(null);
 
   const tickColor = isDarkMode ? '#6b7280' : '#9ca3af';
 

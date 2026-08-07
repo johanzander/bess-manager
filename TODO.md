@@ -598,6 +598,58 @@ The real fix is to move construction into the FastAPI `lifespan` startup hook, w
 
 ---
 
+## From #450 hybrid grid-DP + windowed exact-PWL investigation (found while building the alternative to PR #461's MILP)
+
+**PR #461's MILP has a residual self-throttle export-credit bug beyond the one already fixed in that branch's `0df1d8bc`.** In that model `throttled[t]=1` means "not self-throttled, full credit allowed" and `throttled[t]=0` forces `credited_exp=0` (verified against the constraint block in `0df1d8bc`, not just its commit message). The commit added `throttled=1 ⟹ credited_exp == exp` (a genuine lower bound in the full-credit branch) and `throttled=0 ⟹ exp <= threshold` (restricting the zero-credit branch to genuinely small exports), but never added the **converse of the second**: nothing forces `throttled=0` when `exp <= threshold`. So `throttled` stays a free binary whenever `exp` is small — the solver can always choose `throttled=1` and claim full revenue credit for exports that should have been zero-credited. Measured on `regression_2026_08_02_043728.json`: 11 DISCHARGE periods export ≤ 0.01 kWh and are fully credited, worth exactly 0.031857 SEK — which is precisely the gap between the MILP's *reported* `battery_solar_cost` (-6.012542) and the MILP's *own* true DP-reward objective value for the same schedule (-5.980684), i.e. `-6.012542 = -5.980684 - 0.031857`. On the real objective the MILP's schedule (-5.980684) is in fact *worse* than the full-horizon exact PWL's (-5.984652); the headline -6.012542 is an artifact of the over-credit, not a better plan. This is separate from and additional to the four MILP bugs already documented in PR #461's own description (import/export exclusivity, AC-cap sentinel, the credited-exp lower-bound fix in `0df1d8bc`, and the shadow-price LP-dual non-uniqueness). Confirmed structurally impossible in the grid-DP/PWL approach, since self-throttle there is a deterministic formula (`if exp <= threshold: exp = 0`) with no LP slack variable to exploit — this bug class is intrinsic to the MILP's constraint-encoding paradigm, not something a future MILP fix could accidentally miss again in the same code path (it needs the converse constraint added).
+
+**`_build_period_data`'s reported `battery_solar_cost` metric drifts from the actual DP-reward optimization objective**, because it prices raw `_ac_flows` `grid_exported` without zeroing self-throttled export revenue, while `_compute_reward` (which drives the actual optimization decision) does zero it. `dp_battery_algorithm.py:1985`'s comment acknowledges the discrepancy exists but only accounts for it in the curtailment guardrail, not in the general reporting path. The drift is schedule-dependent (measured -0.0137 SEK for one PWL schedule, -0.0257 for the grid DP, -0.0319 for the MILP on the same fixture) — meaning the *reported* cost systematically favors whichever schedule happens to have more never-delivered (self-throttled) export, independent of the schedule's real economic quality. Any fixture pinning or cross-algorithm cost comparison should use the DP's real reward objective, not `battery_solar_cost`, until this is fixed.
+
+**Files**: `core/bess/milp_battery_algorithm.py` (PR #461 branch only — the converse self-throttle constraint), `core/bess/dp_battery_algorithm.py:1985` (`_build_period_data`'s reporting-vs-objective drift, this branch and main)
+
+---
+
+## From the #450 synthetic tie-coverage validation suite (found while building the reference-cost measurement for PR #467's own tie detector)
+
+**RESOLVED.** The windowed PWL solver's backward induction
+(`core/bess/pwl_window_dp.py`) could return a value worse than a feasible,
+in-grid alternative — on `historical_2024_08_16_high_spread_no_solar` segment
+(7,12) it returned 42.679610 SEK against a grid-DP path costing 42.648857.
+
+Root cause: `_pwl_candidate_values_at`'s discharge-rate feasibility mask
+compared the action against the affordable power *exactly*, while the replay's
+`_discharge_candidates` floors the same bound onto the integer-percent
+hardware lattice with a `+ 1e-9` slack. Breakpoint abscissae are built by
+adding lattice energies to the previous row's breakpoints, so one mathematical
+onset arrives as a cluster of ULP-separated floats and near-duplicate merging
+keeps an arbitrary member; against a tolerance-free comparison that member
+decided feasibility. The backward pass therefore evaluated V a hair below an
+onset, dropped the discharge level the replay would have taken there, and
+recorded a value 0.042 SEK below the truth — enough to flip the window's
+decision. This broke the module's own stated invariant that both passes
+enumerate one action set.
+
+Fixed by mirroring `_discharge_candidates`' arithmetic exactly in the backward
+mask (fold the AC headroom into the same bound, then percent-floor with the
+same slack). The segment now returns 42.639365, i.e. the reference beats the
+DP, and the value table's self-consistency improved from a 2.94 SEK worst-case
+table-vs-recompute error to ≤1e-6 SEK. Pinned by
+`test_backward_pass_admits_the_discharge_levels_the_replay_admits` and
+`test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment`.
+
+Residual (not a defect, noted for future work): the true value function is
+genuinely *discontinuous* at discharge-feasibility onsets, and a continuous PWL
+representation cannot express a jump — the refinement loop brackets each jump
+with breakpoints ~1e-8 kWh apart. Queries landing strictly inside such a
+bracket still read an interpolated intermediate value. Decision-relevant states
+sit on the lattice, so the fix removes the reachable failure mode, but the
+near-duplicate merge in `_pwl_window_seed_points` /
+`run_pwl_window_backward_induction` (first-wins, value-unaware) remains the
+mechanism that would decide such a case arbitrarily. Making that merge
+value-aware (keep the upper-semicontinuous representative) would harden it
+further.
+
+---
+
 ## From the E2E scenario fixture cleanup PR (non-blocking)
 
 **`e2e/package-lock.json` has `@playwright/test` locked at 1.59.1 while 1.62.1 is current.** `package.json`'s `^1.59.1` range already permits the newer version — the lockfile just hasn't been refreshed since it was last committed. Bumping it (`npm update @playwright/test` + commit the lockfile) also changes the pinned Chromium revision that CI/local runs download, so it's worth doing deliberately in its own PR rather than as a drive-by here.

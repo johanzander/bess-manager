@@ -458,3 +458,16 @@ class OptimizationResult:
     input_data: dict
     period_data: list[PeriodData]
     economic_summary: EconomicSummary | None = None
+    # The DP's *own* objective value for this schedule: the negated sum of
+    # each period's `_compute_reward` return, accumulated as the actions were
+    # chosen (or recomputed by `_replay_accounting_pass` when the hybrid PWL
+    # path re-solves a window). This is the quantity the optimizer actually
+    # minimises, and the only one safe to compare across algorithms or pin in
+    # a regression test -- `economic_summary.battery_solar_cost` is rebuilt
+    # from reported PeriodData and can drift from it (see TODO.md's
+    # `_build_period_data` reporting-drift entry).
+    #
+    # `None` means "not produced by an optimizer run": the all-IDLE safety-net
+    # schedule and results constructed directly in tests carry no reward
+    # accumulation. It is never a degraded stand-in for a real value.
+    reward_objective_cost: float | None = None

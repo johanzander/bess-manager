@@ -299,3 +299,45 @@ def test_all_scenarios(scenario_name):
         f"{scenario_name}: realized != planned — R={sim.realized_cost:.2f}, "
         f"P={planned_cost:.2f}, gap {gap:+.3f} SEK exceeds tolerance {tol:.2f}"
     )
+
+
+def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
+    """A fixture with no near-tied periods must produce output identical to
+    what the grid DP alone produced -- this is the core latency and
+    stability guarantee of the hybrid design (#450): when detect_tie_windows
+    returns nothing, none of the PWL machinery runs and the pinned
+    expected_results below stay exactly as they were before the wiring.
+
+    Fixture swapped from synthetic_consumption_efficient after the tie
+    detector's recalibration (#450): that fixture does now flag one window
+    (a no-op resolve), so it no longer exercises the fast path. This one
+    flags none, and the pinned values below are the grid DP's own output."""
+
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs("synthetic_consumption_ev_charging")
+    )
+    with caplog.at_level(logging.INFO, logger="core.bess.dp_battery_algorithm"):
+        result = optimize_battery_schedule(
+            buy_price=buy_prices,
+            sell_price=sell_prices,
+            home_consumption=scenario["home_consumption"],
+            solar_production=scenario["solar_production"],
+            initial_soe=scenario["battery"]["initial_soe"],
+            battery_settings=battery_settings,
+            period_duration_hours=period_duration_hours,
+        )
+
+    # Pinned costs alone would keep passing if the detector drifted and this
+    # fixture started resolving windows that happen to be no-ops -- which is
+    # exactly what happened to the fixture this test used to use. Assert the
+    # fast path was actually taken, not just that the numbers came out right.
+    assert not [
+        r for r in caplog.records if "Near-tied DP decisions detected" in r.getMessage()
+    ], "fixture now trips the tie detector -- it no longer exercises the fast path"
+
+    assert result.economic_summary.battery_solar_cost == pytest.approx(
+        158.52645, abs=1e-4
+    )
+    assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
+        62.58805, abs=1e-3
+    )

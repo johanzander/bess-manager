@@ -361,16 +361,16 @@
   },
   "expected_results": {
     "base_cost": 92.20526,
-    "battery_solar_cost": -15.85187,
-    "base_to_battery_solar_savings": 108.05712,
-    "base_to_battery_solar_savings_pct": 117.1919,
+    "battery_solar_cost": -16.01343,
+    "base_to_battery_solar_savings": 108.21868,
+    "base_to_battery_solar_savings_pct": 117.36715,
     "total_charged": 5.7,
-    "total_discharged": 8.6625
+    "total_discharged": 8.6625,
+    "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 46 periods change (mostly IDLE->LOAD_SUPPORT near-ties, plus downstream SOE-trajectory cascades into a few SOLAR_EXPORT->SOLAR_STORAGE and BATTERY_EXPORT->LOAD_SUPPORT periods), improving battery_solar_cost from -15.85187 to -16.01343."
   },
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-22, with solar, price spread 1.04 SEK",
     "intents_present": [
-      "BATTERY_EXPORT",
       "IDLE"
     ],
     "savings_positive": true,
@@ -378,6 +378,7 @@
       "soe_within_bounds": true,
       "power_within_limits": true
     },
-    "intents_absent": []
+    "intents_absent": [],
+    "_note": "BATTERY_EXPORT removed from intents_present after #466's risk-aware load-covering IDLE tie-break: the 3 periods that were BATTERY_EXPORT (96, 99, 100) are a downstream SOE-trajectory cascade of the earlier near-tied IDLE->LOAD_SUPPORT flips and now resolve to LOAD_SUPPORT instead."
   }
 }

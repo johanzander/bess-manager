@@ -11,6 +11,7 @@ from core.bess.dp_battery_algorithm import (
     _discretize_state_action_space,
     _prefer_load_covering_discharge,
 )
+from core.bess.pwl_window_dp import _pwl_best_action_at_continuous_state
 from core.bess.settings import BatterySettings
 
 # Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
@@ -140,3 +141,43 @@ def test_replay_keeps_decisive_arbitrage_hold():
     # Stored energy worth far more later than covering load now.
     action = _replay_choice(value_slope=2.0)
     assert action == 0.0
+
+
+def _pwl_replay_choice(value_slope: float) -> float:
+    """Same construction as _replay_choice, against the PWL replay: linear
+    continuation row as a two-breakpoint PWL, slope == buy -> exact tie.
+
+    max_charge_power_per_period is pinned to 0.0 for the same reason
+    documented on _replay_choice: an unconstrained charge candidate is
+    itself profitable arbitrage at slope=2.0 and would win the argmax
+    outright, masking the IDLE-vs-discharge case under test.
+    """
+    settings = _lossless_battery()
+    xs = np.array([settings.min_soe_kwh, settings.max_soe_kwh])
+    vs = value_slope * (xs - settings.min_soe_kwh)
+    _, power_levels = _discretize_state_action_space(settings)
+    action, *_rest = _pwl_best_action_at_continuous_state(
+        soe=6.0,
+        t=0,
+        V_next=(xs, vs),
+        power_levels=power_levels,
+        home_consumption=[0.25],
+        battery_settings=settings,
+        dt=0.25,
+        solar_production=[0.0],
+        buy_price=[1.0],
+        sell_price=[0.4],
+        cost_basis=0.0,
+        max_charge_power_per_period=[0.0],
+    )
+    return action
+
+
+def test_pwl_replay_swaps_exact_tie_to_load_cover():
+    action = _pwl_replay_choice(value_slope=1.0)
+    assert action < 0, f"expected load-covering discharge, got {action}"
+    assert -action == pytest.approx(1.0, abs=0.05)
+
+
+def test_pwl_replay_keeps_decisive_arbitrage_hold():
+    assert _pwl_replay_choice(value_slope=2.0) == 0.0

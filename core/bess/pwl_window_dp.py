@@ -23,12 +23,14 @@ from core.bess.dp_battery_algorithm import (
     _compute_reward_grid,
     _discharge_candidates,
     _effective_ac_cap_kwh,
+    _prefer_load_covering_discharge,
     _soe_floor,
     _state_transition,
     _state_transition_grid,
 )
-from core.bess.dp_constants import POWER_STEP_KW
+from core.bess.dp_constants import POWER_STEP_KW, SOE_STEP_KWH
 from core.bess.exceptions import PWLEndSoeOutOfRangeError, PWLWindowUnderRefinedError
+from core.bess.tie_detection import epsilon_for_period
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -414,6 +416,29 @@ def _pwl_best_action_at_continuous_state(
         if candidate[0] > best_value:
             best_value = candidate[0]
             best_index = index
+
+    # Risk-aware tie-break (#466), mirroring the grid replay so a re-solved
+    # tie window cannot silently reinstate the fail-unsafe IDLE pick. The
+    # PWL row has no grid snap; the slope for the shared epsilon definition
+    # is a central finite difference across the winner's next_soe.
+    best_next_soe_candidate = candidates[best_index][2]
+    slope = float(
+        _pwl_eval_array(V_next, np.asarray(best_next_soe_candidate + SOE_STEP_KWH))
+        - _pwl_eval_array(V_next, np.asarray(best_next_soe_candidate - SOE_STEP_KWH))
+    ) / (2 * SOE_STEP_KWH)
+    best_index = _prefer_load_covering_discharge(
+        candidates,
+        best_index,
+        epsilon=epsilon_for_period(slope, SOE_STEP_KWH),
+        home_consumption=home,
+        solar_production=solar,
+        dt=dt,
+        rate_step=(
+            discharge_resolution_kw
+            if discharge_resolution_kw is not None
+            else battery_settings.max_discharge_power_kw / 100
+        ),
+    )
 
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index

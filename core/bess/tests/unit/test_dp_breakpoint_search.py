@@ -78,7 +78,7 @@ def _total_value(
     sell_prices,
 ):
     _, power_levels = _discretize_state_action_space(battery_settings)
-    _, best_next_soe, _, best_reward, _ = _best_action_at_continuous_state(
+    _, best_next_soe, _, best_reward, _, _ = _best_action_at_continuous_state(
         soe=soe,
         t=t,
         V_next=V[t + 1, :],
@@ -375,9 +375,9 @@ def test_best_action_returns_tie_margin():
         max_charge_power_per_period=None,
     )
     assert (
-        len(result) == 5
-    ), "expected (action, next_soe, cost_basis, reward, tie_margin)"
-    _, _, _, _, tie_margin = result
+        len(result) == 6
+    ), "expected (action, next_soe, cost_basis, reward, tie_margin, value_slope)"
+    _, _, _, _, tie_margin, _ = result
     assert (
         tie_margin >= 0.0
     ), "margin must be non-negative (best >= second-best by construction)"

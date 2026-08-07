@@ -78,6 +78,7 @@ from core.bess.strategic_intent import (
     classify_strategic_intent,
     create_decision_data,
 )
+from core.bess.tie_detection import epsilon_for_period
 
 # Configure logging
 logging.basicConfig(
@@ -1174,6 +1175,20 @@ def _local_value_slope(
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
 
 
+def _discharge_rate_step_kw(
+    discharge_resolution_kw: float | None, battery_settings: BatterySettings
+) -> float:
+    """Discharge percent-grid step (kW): the hardware executes discharge as an
+    integer percent of max_discharge_power_kw unless a finer resolution is
+    configured -- single source for _discharge_candidates and both #466
+    tie-break call sites, which must stay on the same lattice."""
+    return (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+
+
 def _discharge_candidates(
     soe: float,
     battery_settings: BatterySettings,
@@ -1226,11 +1241,7 @@ def _discharge_candidates(
     if p_max <= POWER_TOLERANCE_KW:
         return []
 
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     if min_pct > max_pct:
@@ -1368,6 +1379,74 @@ def _tie_margin(
     if runner_up == float("-inf"):
         return float("inf")
     return best_value - runner_up
+
+
+def _prefer_load_covering_discharge(
+    candidates: list[tuple[float, float, float, float, float, float]],
+    best_index: int,
+    epsilon: float,
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+    rate_step: float,
+) -> int:
+    """Risk-aware tie-break (#466): if the argmax landed on an idle-like
+    action (|power| <= POWER_TOLERANCE_KW) while the house has forecast net
+    grid import this period, and a discharge candidate that covers no more
+    than that net load sits within `epsilon` of the best value, return that
+    candidate's index instead.
+
+    Rationale (spec 2026-08-07-idle-tie-break-design.md): within `epsilon`
+    -- the value noise the DP's own SOE grid-snapping injects
+    (tie_detection.epsilon_for_period) -- the DP cannot rank the two
+    options, but they are not symmetric in risk. Load-covering discharge
+    fails safe: the inverter tracks *actual* load, absorbing a consumption
+    forecast miss for free. IDLE fails unsafe: discharge is hard-disabled,
+    so the entire miss is imported at the buy price. Deliberate arbitrage
+    holds are untouched by construction -- their margin over discharging
+    exceeds `epsilon`.
+
+    `rate_step` is the discharge percent-grid step (see
+    _discharge_candidates); the load-cover breakpoint snaps to it, so the
+    eligibility cap allows half a step of round-up before a candidate
+    counts as exporting, further capped so the round-up itself can never
+    exceed BATTERY_EXPORT_THRESHOLD_KWH of real export. Among eligible
+    candidates the largest coverage wins -- fuller coverage means less
+    residual import exposed to a miss.
+
+    Economic bound: each swap forfeits at most `epsilon` (empirically
+    ~0.003-0.015 SEK per period), but a single horizon can contain many
+    swapped periods, and the aggregate is bounded only empirically, not
+    per-horizon -- fixture evidence puts the worst observed full-horizon
+    cost at +0.032 SEK, inside the #450 budget of 0.05 SEK. Separately, for
+    small net loads the eligibility band above is wide in SEK/kWh terms, so
+    swaps fire more often than #467's tie detector flags near-ties; this is
+    deliberate, since every swapped candidate is within `epsilon` --
+    value noise, not a real gap -- of the argmax winner.
+    """
+    if epsilon <= 0.0:
+        return best_index
+    best_value, best_power = candidates[best_index][0], candidates[best_index][1]
+    if abs(best_power) > POWER_TOLERANCE_KW:
+        return best_index
+    balance_zero_p = (home_consumption - solar_production) / dt
+    if balance_zero_p <= POWER_TOLERANCE_KW:
+        return best_index
+    max_cover_p = (
+        balance_zero_p + min(0.5 * rate_step, BATTERY_EXPORT_THRESHOLD_KWH / dt) + 1e-9
+    )
+    swap_index = best_index
+    swap_power = 0.0
+    for index, candidate in enumerate(candidates):
+        discharge_p = -candidate[1]
+        if discharge_p <= POWER_TOLERANCE_KW or discharge_p > max_cover_p:
+            continue
+        if best_value - candidate[0] >= epsilon:
+            continue
+        if discharge_p > swap_power:
+            swap_index = index
+            swap_power = discharge_p
+    return swap_index
 
 
 def _best_action_at_continuous_state(
@@ -1534,6 +1613,30 @@ def _best_action_at_continuous_state(
             best_value = candidate[0]
             best_index = index
 
+    # Risk-aware tie-break (#466): within the value noise grid-snapping
+    # injects at this state, prefer the load-covering discharge over an
+    # idle-like winner. Epsilon uses the slope at the argmax winner's
+    # next_soe -- the same state the margin itself is measured at.
+    argmax_index = best_index
+    argmax_value_slope = _local_value_slope(
+        V_next, candidates[argmax_index][2], battery_settings
+    )
+    best_index = _prefer_load_covering_discharge(
+        candidates,
+        argmax_index,
+        epsilon=epsilon_for_period(argmax_value_slope, SOE_STEP_KWH),
+        home_consumption=home,
+        solar_production=solar,
+        dt=dt,
+        rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
+    )
+
+    # #466 note: best_index is POST-swap here, but tie_margin and
+    # value_slope below are measured at argmax_index (PRE-swap). Tie
+    # detection (#450) measures the DP's own ambiguity at its value-argmax;
+    # a #466 swap replaces which action is executed but must not itself
+    # register as a #450 tie window, so the margin and slope describe the
+    # argmax's own runner-up gap, not the executed action's.
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index
     ]
@@ -1542,7 +1645,8 @@ def _best_action_at_continuous_state(
         best_next_soe,
         best_new_cost_basis,
         best_reward,
-        _tie_margin(candidates, best_index),
+        _tie_margin(candidates, argmax_index),
+        argmax_value_slope,
     )
 
 
@@ -1935,7 +2039,7 @@ def optimize_battery_schedule(
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, action_reward, tie_margin = (
+        action, next_soe, new_cost_basis, action_reward, tie_margin, value_slope = (
             _best_action_at_continuous_state(
                 soe=current_soe,
                 t=t,
@@ -1955,7 +2059,7 @@ def optimize_battery_schedule(
             )
         )
         tie_margins.append(tie_margin)
-        value_slopes.append(_local_value_slope(V[t + 1], next_soe, battery_settings))
+        value_slopes.append(value_slope)
         cost_basis_trajectory.append(current_cost_basis)
         actions.append(action)
         soe_trajectory.append(next_soe)
@@ -2219,6 +2323,15 @@ def optimize_battery_schedule(
         ).economic_summary.battery_solar_cost
 
     if guardrail_idle_cost < guardrail_optimized_cost:
+        logger.info(
+            "Idle-schedule guardrail fired: idle cost %.6f < optimized cost %.6f "
+            "(delta %.6f %s) -- returning the all-IDLE schedule instead of the "
+            "DP's plan.",
+            guardrail_idle_cost,
+            guardrail_optimized_cost,
+            guardrail_optimized_cost - guardrail_idle_cost,
+            currency,
+        )
         return idle_schedule
 
     return OptimizationResult(

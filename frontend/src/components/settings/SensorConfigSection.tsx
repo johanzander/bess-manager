@@ -4,54 +4,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '../ui/tabs';
 import { INTEGRATIONS, INVERTER_INTEGRATION_IDS, SHARED_INTEGRATION_IDS } from '../../lib/sensorDefinitions';
 import type { IntegrationDef, PerPlatformSensors } from '../../lib/sensorDefinitions';
 import type { HealthStatus } from '../../types';
-import api from '../../lib/api';
-
-// ---------------------------------------------------------------------------
-// Growatt VPP manual escape hatch (#479)
-// ---------------------------------------------------------------------------
-
-/** Force-disables the Growatt VPP hardware override, independent of the
- * currently-stored control_mode — usable any time, including right before
- * uninstalling BESS, for installs stuck with VPP Remote Control overriding
- * the inverter. */
-function DisableVppButton() {
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
-
-  const handleClick = async () => {
-    setState('busy');
-    try {
-      await api.post('/api/growatt/disable_vpp');
-      setState('done');
-    } catch {
-      setState('error');
-    }
-  };
-
-  return (
-    <div className="mt-3">
-      <button
-        type="button"
-        onClick={handleClick}
-        disabled={state === 'busy'}
-        className="px-3 py-1 rounded-full text-xs font-medium border border-orange-300 dark:border-orange-600 text-orange-700 dark:text-orange-300 bg-white dark:bg-gray-700 hover:border-orange-400 dark:hover:border-orange-500 disabled:opacity-50"
-      >
-        {state === 'busy' ? 'Reclaiming control…' : 'Reclaim manual control (disable VPP)'}
-      </button>
-      <span className="mt-1 block text-[11px] text-gray-500 dark:text-gray-400">
-        Forces a Growatt inverter's VPP Remote Control override off,
-        regardless of the currently selected inverter platform or control
-        mode. Use this before uninstalling BESS, or if the inverter still
-        ignores schedule writes after switching to TOU.
-      </span>
-      {state === 'done' && (
-        <span className="mt-1 block text-[11px] text-green-600 dark:text-green-400">VPP override disabled.</span>
-      )}
-      {state === 'error' && (
-        <span className="mt-1 block text-[11px] text-red-600 dark:text-red-400">Failed to disable VPP override — see logs.</span>
-      )}
-    </div>
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Inverter form (owned here — used by wizard and settings pages)
@@ -588,12 +540,6 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
             </Tabs>
           );
         })()}
-
-        {/* Platform-independent: a Growatt VPP override can be stuck enabled
-            even after switching away to a different inverter platform, so
-            this isn't gated on which platform/tab is currently selected
-            (#479). */}
-        {!wizardMode && <DisableVppButton />}
 
         {/* ── Active inverter sensor groups (inside platform section) ── */}
         {activeInverterIntegration && (() => {

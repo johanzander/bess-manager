@@ -417,22 +417,16 @@ class SolaxModbusGrowattController(GrowattMinController):
         Without this, VPP Remote Control keeps overriding TOU segment
         writes at the hardware level even after BESS's own control_mode
         has switched to "tou" -- see module docstring and
-        _ensure_vpp_status_enabled().
+        _ensure_vpp_status_enabled(). Reads live hardware state rather than
+        self._vpp_status_confirmed, so this also recovers an install stuck
+        from before this fix existed -- toggling control_mode to "vpp" and
+        back to "tou" leaves this hardware register in the same disabled
+        state a fresh install would end up in.
         """
-        if self.control_mode == "vpp":
-            self.disable_vpp_override(controller)
-
-    def disable_vpp_override(self, controller) -> None:
-        """Force-disable the Growatt VPP Status register if currently enabled.
-
-        Unlike leave_control_mode(), does not depend on self.control_mode --
-        this is also the manual escape hatch (BatterySystemManager.
-        disable_vpp_override) for installs where the hardware register was
-        left enabled from before this fix existed, or from a stale tracker.
-        """
+        if self.control_mode != "vpp":
+            return
         if controller.get_growatt_vpp_status() == "Enabled":
             controller.set_growatt_vpp_status(False)
-        self._vpp_status_confirmed = False
 
     def _apply_period_vpp(
         self,

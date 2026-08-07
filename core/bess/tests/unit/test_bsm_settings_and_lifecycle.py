@@ -215,71 +215,22 @@ class TestSwitchControlMode:
         system.switch_control_mode("tou")
         assert mock_controller.calls["growatt_vpp_status"] == []
 
-
-class TestDisableVppOverride:
-    def test_disables_when_enabled(self, system, mock_controller):
-        system.switch_inverter_platform("solax_modbus_growatt_min")
-        mock_controller.set_growatt_vpp_status(True)
-
-        system.disable_vpp_override()
-
-        assert mock_controller.get_growatt_vpp_status() == "Disabled"
-
-    def test_noop_when_already_disabled(self, system, mock_controller):
-        system.switch_inverter_platform("solax_modbus_growatt_min")
-        mock_controller.calls["growatt_vpp_status"].clear()
-
-        system.disable_vpp_override()
-
-        assert mock_controller.calls["growatt_vpp_status"] == []
-
-    def test_invalidates_live_controller_confirmed_cache(self, system, mock_controller):
-        """The escape hatch must also invalidate the LIVE controller's
-        _vpp_status_confirmed cache, not just write hardware via a throwaway
-        instance -- otherwise the live controller still believes VPP Status
-        is enabled and skips re-enabling it on the next period, so its VPP
-        Remote Control write silently no-ops against the now-disabled
-        register (hardware ignores remote control while VPP Status is off)."""
-        system.switch_inverter_platform("solax_modbus_growatt_min")
-        system.switch_control_mode("vpp")
-        mock_controller.set_growatt_vpp_status(True)
-        system._inverter_controller._vpp_status_confirmed = True
-
-        system.disable_vpp_override()
-
-        assert system._inverter_controller._vpp_status_confirmed is False
-
-    def test_works_regardless_of_tracked_control_mode(self, system, mock_controller):
-        """Manual escape hatch must not rely on BESS's own control_mode
-        tracker being accurate -- that's exactly what's stale/wrong for
-        installs stuck before this fix existed."""
+    def test_toggling_through_vpp_recovers_a_pre_fix_stuck_install(
+        self, system, mock_controller
+    ):
+        """A user stuck from before leave_control_mode() existed (hardware
+        VPP Status left Enabled, but BESS's stored control_mode already
+        "tou" since the buggy switch already happened) can recover by
+        selecting VPP then TOU again in Settings -- leave_control_mode()
+        reads live hardware state (get_growatt_vpp_status()), not any
+        BESS-side cache, so this works even though nothing here has ever
+        seen this particular register as "confirmed enabled"."""
         system.switch_inverter_platform("solax_modbus_growatt_min")
         assert system.control_mode == "tou"
-        mock_controller.set_growatt_vpp_status(True)
+        mock_controller.set_growatt_vpp_status(True)  # stuck from before the fix
 
-        system.disable_vpp_override()
-
-        assert mock_controller.get_growatt_vpp_status() == "Disabled"
-
-    def test_gen3_supported(self, system, mock_controller):
-        system.switch_inverter_platform("solax_modbus_growatt_sph")
-        mock_controller.set_growatt_vpp_status(True)
-
-        system.disable_vpp_override()
-
-        assert mock_controller.get_growatt_vpp_status() == "Disabled"
-
-    def test_works_regardless_of_current_platform(self, system, mock_controller):
-        """Escape hatch for installs already stuck from before this fix
-        shipped: the hardware register can be left Enabled even after BESS
-        has since moved to a different inverter platform, since older
-        versions never called leave_control_mode() on any transition.
-        Gating this on the currently-tracked platform would make the
-        escape hatch unreachable in exactly the case it exists for."""
-        system.switch_inverter_platform("huawei_solar_luna2000")
-        mock_controller.set_growatt_vpp_status(True)
-
-        system.disable_vpp_override()
+        system.switch_control_mode("vpp")
+        system.switch_control_mode("tou")
 
         assert mock_controller.get_growatt_vpp_status() == "Disabled"
 

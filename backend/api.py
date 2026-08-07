@@ -1457,28 +1457,6 @@ async def get_strategic_intents():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/api/growatt/disable_vpp")
-async def disable_growatt_vpp():
-    """Force-disable the Growatt VPP hardware override.
-
-    Manual escape hatch for #479: a "Reclaim manual control" action usable
-    any time, independent of the currently-stored inverter platform or
-    control_mode — for installs stuck with VPP Remote Control overriding
-    the inverter (e.g. before uninstalling BESS), including ones already
-    switched away to a different platform before this fix existed.
-    """
-    from app import bess_controller
-
-    _require_configured_system(bess_controller)
-
-    try:
-        bess_controller.system.disable_vpp_override()
-        return {"status": "ok"}
-    except Exception as e:
-        logger.error(f"Error disabling Growatt VPP override: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
 @router.get("/api/system-health")
 async def get_system_health():
     """Get comprehensive system health including detailed sensor diagnostics."""

@@ -243,3 +243,41 @@ class TestAdjustChargingPowerSkipsUnsupported:
         )
         assert system._supports_charge_rate_control is False
         system.adjust_charging_power()  # must not raise
+
+    def test_unavailable_phase_sensor_does_not_crash_adjust_charging_power(
+        self, mock_controller, arbitrage_prices, monkeypatch
+    ):
+        """A phase-current sensor that becomes unavailable after being
+        validated (HA restart, integration reload, deleted entity) must not
+        crash the 5-minute adjust_charging_power cron job with a raw
+        TypeError from `None * voltage` — HomePowerMonitor now raises
+        ValueError, which adjust_charging_power's except clause catches."""
+        from core.bess.battery_system_manager import BatterySystemManager
+        from core.bess.price_manager import MockSource
+
+        monkeypatch.setattr(
+            "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+        )
+        system = BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource(arbitrage_prices),
+            addon_options={"inverter": {"platform": "growatt_server_min"}},
+        )
+        assert system._supports_charge_rate_control is True
+
+        # Enable power monitoring after construction so the lazy-init path in
+        # update_settings() instantiates the HomePowerMonitor.
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+        assert system._power_monitor is not None
+
+        # get_period_settings requires strategic intents to have been
+        # computed by a prior schedule run; set directly rather than
+        # driving a full optimization cycle.
+        system._inverter_controller.strategic_intents = ["IDLE"] * 96
+
+        # Force the grid-charging path (calculate_available_charging_power),
+        # then simulate an unavailable phase-current sensor.
+        mock_controller.settings["grid_charge"] = True
+        mock_controller.settings["l1_current"] = None
+
+        system.adjust_charging_power()  # must not raise

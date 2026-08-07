@@ -148,21 +148,37 @@ class HomePowerMonitor:
         """Get current load on each phase in watts.
 
         Returns a tuple with one element per phase (1 for single-phase, 3 for three-phase).
+
+        Raises:
+            ValueError: If a phase current sensor read returns None (sensor
+                unavailable or unmapped) — caught by adjust_charging_power()'s
+                except clause rather than crashing on `None * voltage`.
         """
         voltage = self.home_settings.voltage
 
         if self.home_settings.phase_count == 1:
             l1_current = self.controller.get_l1_current()
+            if l1_current is None:
+                raise ValueError(
+                    "Cannot calculate phase load: current_l1 sensor read returned None"
+                )
             return (l1_current * voltage,)
 
-        l1_current = self.controller.get_l1_current()
-        l2_current = self.controller.get_l2_current()
-        l3_current = self.controller.get_l3_current()
+        readings = {
+            "current_l1": self.controller.get_l1_current(),
+            "current_l2": self.controller.get_l2_current(),
+            "current_l3": self.controller.get_l3_current(),
+        }
+        missing = [key for key, value in readings.items() if value is None]
+        if missing:
+            raise ValueError(
+                f"Cannot calculate phase load: sensor read returned None for {', '.join(missing)}"
+            )
 
         return (
-            l1_current * voltage,
-            l2_current * voltage,
-            l3_current * voltage,
+            readings["current_l1"] * voltage,
+            readings["current_l2"] * voltage,
+            readings["current_l3"] * voltage,
         )
 
     def calculate_available_charging_power(self) -> float:

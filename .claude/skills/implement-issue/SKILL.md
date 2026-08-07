@@ -164,10 +164,12 @@ can't express: a private method's internal formula, or plan-faithfulness
 
 Every PR must pass both the fast and slow suites, plus code review. This is
 the long-wait step (slow suite is ~30min) — per `CLAUDE.md`'s Cost
-Discipline, do NOT hold the session open watching it run. Dispatch a
-background `Agent` (no `isolation` — it must operate in the Step 4 worktree,
-not spawn a new one; `run_in_background: true`, the default) with a
-self-contained prompt covering:
+Discipline, do NOT hold the session open watching it run. Always a
+background `Agent` — this is not a choice to put to the user; asking
+"subagent or inline?" is itself the thing to stop doing (no `isolation` —
+it must operate in the Step 4 worktree, not spawn a new one;
+`run_in_background: true`, the default) with a self-contained prompt
+covering:
 
 1. `./scripts/quality-check.sh` (fast suite) — if it fails, fix and re-run,
    do not proceed with failures.
@@ -187,13 +189,22 @@ self-contained prompt covering:
 Do not poll — you'll be notified on completion. This is a hard session
 boundary: don't keep re-touching the diagnosis/TDD context while it runs.
 
-### 7. Confirm gate 2 (manual — mandatory)
+### 7. Confirm gate 2 (conditional)
 
-Present the background agent's report to the user: suite results and any
-CONFIRMED findings. Fix CONFIRMED findings in the same worktree before
-continuing. Wait for explicit go-ahead before Step 8 — same reasoning as
-Step 3, cheap insurance against shipping a finding-blocked or slow-suite-
-broken change.
+Fix any CONFIRMED findings and any failing suite in the same worktree,
+re-running the check if the fix was non-trivial, before this step is
+considered clean — regardless of what happens next.
+
+- **Diff is backend-only (no `frontend/**`, no `*.tsx`/`*.jsx`/`*.css`) and
+  the report is fully clean:** don't stop. State what passed in one line
+  and continue straight through Step 8 into Step 9 — this is the
+  fully-automatic path for non-UI work.
+- **Diff touches the frontend, OR the report isn't fully clean and you
+  can't get it clean yourself:** stop and present the report to the user
+  (suite results, any findings, what you fixed). Wait for explicit
+  go-ahead before Step 8 — same reasoning as Step 3, cheap insurance
+  against shipping a finding-blocked, slow-suite-broken, or unreviewed UI
+  change.
 
 ### 8. Local run & observe (never skip this)
 
@@ -235,8 +246,17 @@ the PR description rather than silently skipping — a reviewer shouldn't have
 to guess whether it was checked.
 
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
-explaining WHY). Open a draft PR against `main` via
-`superpowers:finishing-a-development-branch` (Option 2: push + PR), body:
+explaining WHY).
+
+**Frontend diffs only:** before pushing, show the user the diff and the
+Step 8 verification output (screenshot/dev-server observation) and wait for
+explicit go-ahead. This is the one point in the fully-automatic flow where a
+human looks before anything is pushed — backend-only diffs skip straight to
+push, no pause here.
+
+Open a draft PR against `main` via
+`superpowers:finishing-a-development-branch` (Option 2: push + PR) —
+go straight to executing Option 2, do not present its 3-option menu, body:
 
 ```
 ## Summary
@@ -323,7 +343,10 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 
 - About to commit or open the PR without having actually run/observed the
   fix — only ran automated tests.
-- About to skip the Step 3 or Step 7 confirm gate because of time pressure.
+- About to skip the Step 3 confirm gate, or the Step 7 gate for a frontend
+  diff or an unresolved-findings diff, because of time pressure. (Skipping
+  Step 7 for a clean, backend-only diff is the intended fully-automatic
+  path — that's not this red flag.)
 - About to open the PR before `/code-review` CONFIRMED findings are
   resolved.
 - About to re-run the full `bess-analyst` diagnosis when a verified bot
@@ -347,6 +370,6 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | 4. Worktree | `using-git-worktrees` | No |
 | 5. TDD | `test-driven-development` | No |
 | 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
-| 7. Confirm gate 2 | — | No |
+| 7. Confirm gate 2 | — | Conditional (auto-continue if backend-only + clean; otherwise No) |
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` | No |

@@ -1,5 +1,6 @@
 // Single source of truth for reading a period's battery strategic intent.
-// The backend computes both fields (core/bess/decision_intelligence.py):
+// The backend computes both fields (core/bess/strategic_intent.py,
+// core/bess/models.py's infer_intent_from_flows):
 // strategicIntent is the DP-planned intent (defaults to "IDLE" when no plan
 // covered the period), observedIntent is derived from real sensor flows and
 // is only set for actual/historical periods. Every UI surface that displays

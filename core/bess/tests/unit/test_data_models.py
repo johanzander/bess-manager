@@ -333,20 +333,12 @@ class TestDecisionData:
             strategic_intent="GRID_CHARGING",
             battery_action=2.5,  # 2.5 kW charging
             cost_basis=1.0,
-            pattern_name="Cheap Grid Arbitrage",
-            description="Store cheap grid energy for later use",
-            economic_chain="Grid(1.0) -> Battery -> Home(1.5)",
-            immediate_value=0.0,
             future_value=2.5,
         )
 
         assert decision.strategic_intent == "GRID_CHARGING"
         assert decision.battery_action == 2.5
         assert decision.cost_basis == 1.0
-        assert decision.pattern_name == "Cheap Grid Arbitrage"
-        assert decision.description == "Store cheap grid energy for later use"
-        assert decision.economic_chain == "Grid(1.0) -> Battery -> Home(1.5)"
-        assert decision.immediate_value == 0.0
         assert decision.future_value == 2.5
 
     def test_default_values(self):
@@ -356,12 +348,7 @@ class TestDecisionData:
         assert decision.strategic_intent == "IDLE"
         assert decision.battery_action is None
         assert decision.cost_basis == 0.0
-        assert decision.pattern_name == ""
-        assert decision.description == ""
-        assert decision.economic_chain == ""
-        assert decision.immediate_value == 0.0
         assert decision.future_value == 0.0
-        assert decision.net_strategy_value == 0.0
 
 
 class TestPeriodData:
@@ -387,7 +374,6 @@ class TestPeriodData:
         strategy = DecisionData(
             strategic_intent="SOLAR_STORAGE",
             battery_action=1.0,
-            pattern_name="Solar Excess Storage",
         )
 
         timestamp = datetime(2025, 6, 28, 14, 0, 0)

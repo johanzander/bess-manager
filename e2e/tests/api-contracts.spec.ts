@@ -309,34 +309,6 @@ test.describe('API Contracts: /api/system-health', () => {
   });
 });
 
-test.describe('API Contracts: /api/decision-intelligence', () => {
-  test('returns patterns or fallback with summary', async ({ request }) => {
-    const res = await request.get('/api/decision-intelligence');
-    expect(res.status()).toBe(200);
-    const body = await res.json();
-
-    expect(body).toHaveProperty('summary');
-
-    // When real data is available: patterns array with hour entries
-    if (body.patterns) {
-      expect(Array.isArray(body.patterns)).toBe(true);
-      if (body.patterns.length > 0) {
-        const p = body.patterns[0];
-        expect(typeof p.hour).toBe('number');
-        expect(p).toHaveProperty('flows');
-        expect(p).toHaveProperty('netStrategyValue');
-      }
-      // Summary has totals
-      expect(body.summary).toHaveProperty('totalNetValue');
-      expect(body.summary).toHaveProperty('bestDecisionHour');
-    } else {
-      // Fallback: empty hours array with basic summary
-      expect(body).toHaveProperty('hours');
-      expect(Array.isArray(body.hours)).toBe(true);
-    }
-  });
-});
-
 test.describe('API Contracts: PATCH /api/settings', () => {
   test('rejects unknown section names', async ({ request }) => {
     const res = await request.patch('/api/settings', {

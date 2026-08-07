@@ -17,7 +17,6 @@ from pathlib import Path
 
 import pytest
 
-from core.bess.decision_intelligence import classify_strategic_intent
 from core.bess.dp_battery_algorithm import (
     _ac_flows,
     _build_period_data,
@@ -31,6 +30,7 @@ from core.bess.simulation.inverter_simulator import (
     derive_control_command,
     simulate,
 )
+from core.bess.strategic_intent import classify_strategic_intent
 from core.bess.tests.helpers import (
     _scenario_inputs,
     make_battery_settings,

@@ -147,7 +147,7 @@ def test_build_period_data_store_disposition_flows():
 
 
 def test_idle_with_solar_surplus_classifies_as_solar_export():
-    from core.bess.decision_intelligence import classify_strategic_intent
+    from core.bess.strategic_intent import classify_strategic_intent
 
     # power 0, battery full (no passive charging), surplus exported → SOLAR_EXPORT
     ed = EnergyData(
@@ -348,7 +348,7 @@ def test_small_solar_surplus_at_idle_classifies_as_solar_export():
     """A power-0 period with solar surplus classifies as SOLAR_EXPORT (load_first).
     grid_first is only for active battery discharge — idle periods must use
     load_first so the battery can support house load when solar is insufficient."""
-    from core.bess.decision_intelligence import classify_strategic_intent
+    from core.bess.strategic_intent import classify_strategic_intent
 
     ed = EnergyData(
         solar_production=0.3,

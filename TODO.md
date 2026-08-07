@@ -60,13 +60,13 @@
 
 ### **Rename `strategic_intent` to `battery_intent` throughout the codebase**
 
-**Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`, `sph_schedule.py`, `models.py`, frontend
+**Impact**: Low | **Effort**: Low | **Dependencies**: `strategic_intent.py`, `dp_battery_algorithm.py`, `sph_schedule.py`, `models.py`, frontend
 
 **Description**: The term "strategic intent" has been replaced with "battery intent" in the software design document. Rename accordingly in code:
 
 - `StrategicIntent` enum → `BatteryIntent` (`dp_battery_algorithm.py`)
 - `strategic_intent` field → `battery_intent` in `DecisionData` (`models.py`)
-- All assignments and references in `decision_intelligence.py`, `sph_schedule.py`, `battery_system_manager.py`, and any API serialization
+- All assignments and references in `strategic_intent.py`, `sph_schedule.py`, `battery_system_manager.py`, and any API serialization
 - Frontend: any display label or type referencing `strategicIntent` / `strategic_intent`
 
 ### **Minor cleanup from issue #201 (stale health-check banner) fix**
@@ -81,9 +81,9 @@
 
 ### **Investigate redundant `power` gate in strategic intent detection**
 
-**Impact**: Low | **Effort**: Low | **Dependencies**: `decision_intelligence.py`, `dp_battery_algorithm.py`
+**Impact**: Low | **Effort**: Low | **Dependencies**: `strategic_intent.py`, `dp_battery_algorithm.py`
 
-**Description**: In `create_decision_data` (`decision_intelligence.py`), strategic intent is determined by an outer `power < -0.1` / `power > 0.1` check followed by inner energy flow checks (`battery_to_grid`, `grid_to_battery`). The `power` check is likely redundant: the detailed flows in `EnergyData` are derived automatically via `_calculate_detailed_flows()` from `battery_charged`/`battery_discharged`, so if `power < -0.1` then `battery_discharged > 0` and the flow checks already handle the distinction. The inner flow thresholds (0.1 kWh) also provide the same noise filtering as the outer power threshold. Verify whether the outer `power` gate can be removed and intent determined solely from energy flows.
+**Description**: In `create_decision_data` (`strategic_intent.py`), strategic intent is determined by an outer `power < -0.1` / `power > 0.1` check followed by inner energy flow checks (`battery_to_grid`, `grid_to_battery`). The `power` check is likely redundant: the detailed flows in `EnergyData` are derived automatically via `_calculate_detailed_flows()` from `battery_charged`/`battery_discharged`, so if `power < -0.1` then `battery_discharged > 0` and the flow checks already handle the distinction. The inner flow thresholds (0.1 kWh) also provide the same noise filtering as the outer power threshold. Verify whether the outer `power` gate can be removed and intent determined solely from energy flows.
 
 
 
@@ -116,40 +116,6 @@
 
 ---
 
-### 2. **Complete Decision Intelligence Implementation**
-
-> **Superseded — do not start.** See "Scrap the Decision Intelligence framework"
-> under TECHNICAL DEBT. The recommendation is to delete this path, not finish it.
-
-**Impact**: Medium-High | **Effort**: Medium | **Dependencies**: `decision_intelligence.py`, `sensor_collector.py`, `dp_battery_algorithm.py`
-
-**Vision**: Transform the DP battery optimization from a "black box" into a transparent, educational system that helps users understand complex energy economics and multi-hour optimization strategies. Users should see real SEK values for each energy pathway and understand *why* the optimizer made each decision — not just what it decided.
-
-**What is working** (future/predicted hours only):
-
-- Advanced flow pattern recognition: `SOLAR_TO_HOME_AND_BATTERY`, `GRID_TO_HOME_PLUS_BATTERY_TO_GRID`, etc.
-- Economic chain explanations: multi-hour strategy reasoning with real SEK values
-- Future target hours: identifies when arbitrage opportunities occur
-- Frontend `DecisionFramework.tsx` component is complete and consuming enhanced data
-
-**Gap 1: Historical hours show fallback values**
-
-Past periods (already executed) still show:
-
-- `advanced_flow_pattern: "NO_PATTERN_DETECTED"`
-- `detailed_flow_values: {}`
-- `economic_chain: "Historical data - basic strategic intent"`
-
-Root cause: the historical data pipeline (`SensorCollector` → `HistoricalDataStore`) does not run through `decision_intelligence.py`. Fix: apply `create_decision_data()` when recording historical periods, using actual energy flow data and prices from that period.
-
-**Gap 2: Future economic values showing 0.00 SEK**
-
-Future arbitrage calculations (the "expected arbitrage value" in economic chain explanations) show 0.00 SEK. Needs investigation in DP algorithm economic chain value computation and how future target hour values are propagated.
-
-**Files**: `core/bess/decision_intelligence.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/sensor_collector.py`, `frontend/src/components/DecisionFramework.tsx`
-
----
-
 ### 3. **Move Relevant Parts of Daily Summary to Dashboard**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: Dashboard layout
@@ -167,32 +133,6 @@ Future arbitrage calculations (the "expected arbitrage value" in economic chain 
 - Extract logic from `SavingsPage.tsx`
 - Add to `DashboardPage.tsx`
 - Remove duplicate information
-
----
-
-### 5. **Enhance Insights Page with Decision Detail**
-
-> **Blocked on the same decision.** See "Scrap the Decision Intelligence
-> framework" under TECHNICAL DEBT. The goal (explain DP decisions to users) is
-> still valid; the vehicle should be the AI chat panel, not another orphaned
-> component. Do not start before that decision lands.
-
-**Impact**: Medium | **Effort**: High | **Dependencies**: Backend decision logging
-
-**Current State**: `InsightsPage.tsx` renders `PredictionAnalysisView` but lacks decision reasoning, algorithm transparency, and confidence metrics
-
-**Implementation**:
-
-- **Add detailed decision analysis**: Why each battery action was chosen
-- **Algorithm transparency**: DP optimization steps, price arbitrage reasoning
-- **Alternative scenarios**: Options considered, confidence metrics
-
-**Technical Tasks**:
-
-- Extend backend to capture decision reasoning
-- Create decision timeline component
-- Add interactive decision trees
-- Include confidence metrics display
 
 ---
 
@@ -462,151 +402,17 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ## 🔧 **TECHNICAL DEBT**
 
-### Scrap the Decision Intelligence framework
-
-**Impact**: Medium (removes ~2000 lines of unreachable code) | **Effort**: Low-Medium | **Dependencies**: none — nothing routed consumes it
-
-**Decision**: the *goal* (explain DP decisions to users, because backward
-induction is opaque) is valid and unmet. This *implementation* should go. It
-narrates the chosen action from its own energy flows — a restatement of numbers
-the actions table already shows — rather than the counterfactual the user
-actually wants ("why 02:00 and not 03:00", "why 80% and not 100%"). The DP
-evaluated those alternatives; the framework never captured the comparison.
-
-Evidence it was never load-bearing: `future_value` — the one field carrying
-anything the user could not already see — was hardcoded `0.0` until #353 fixed
-it in 2026, and nobody noticed, because nothing rendered it. Two orphaned
-attempts at the same feature (`DecisionFramework.tsx`,
-`TableBatteryDecisionExplorer.tsx`) were never routed in `App.tsx`.
-
-**What did work, and why**: PR #358 (`visualize-debug-log` skill, still open on
-`feat/visualize-debug-log-skill`) is the successful version — for *maintainers*,
-not end users. It renders `shadow_price` against the price it is actually weighed
-against, `cost_basis` + cycle cost as a breakeven, and `reward + future_value` as
-"total value (top candidate)". That is the **counterfactual** framing this
-framework never had: what the DP compared, not a retelling of what it chose. It
-also deliberately skips `immediate_value`, with a comment saying it duplicates the
-dashboard's Net Grid Cost / Net Savings. Keep that as the model if the end-user
-version is ever attempted: show the comparison, not the narration.
-
-**Delete**:
-
-- `frontend/src/components/DecisionFramework.tsx` (608 lines, imported by nothing)
-- `frontend/src/lib/decisionIntelligenceAPI.tsx` (33 lines)
-- `frontend/src/components/TableBatteryDecisionExplorer.tsx` (imported by nothing)
-- `frontend/src/types/decisionFramework.tsx` (`FlowPattern`,
-  `DecisionIntelligenceResponse`) — imported *only* by `DecisionFramework.tsx:22`
-  and `decisionIntelligenceAPI.tsx:4`, both deleted above, so it becomes a new
-  orphan if left behind
-- `backend/api.py`: `convert_real_data_to_mock_format` (876-1034),
-  `get_decision_intelligence` + the `/api/decision-intelligence` route
-  (1037-1084), `get_decision_intelligence_mock` (1086-1509 — 424 lines of
-  hardcoded demo prices with its route decorator already commented out)
-- `core/bess/decision_intelligence.py`: `generate_advanced_flow_pattern_name`,
-  `generate_strategic_pattern_name`, `generate_flow_description`,
-  `generate_economic_chain`, `calculate_detailed_flow_values` — all have
-  **zero** references outside the module once the above is gone
-- `core/bess/decision_intelligence.py`: `extract_economic_values_from_reward`
-  — **delete only together with the replacement below.** It is the sole
-  producer of `future_value`, which the Keep list requires. Removing it
-  without a replacement silently reverts `future_value` to its `0.0` default
-  and reintroduces exactly the regression #353 fixed.
-
-  **Replacement**: assign `continuation_value` to `future_value` directly.
-  The two are already algebraically identical — `_compute_reward` builds
-  `reward = -(import_cost - export_revenue + battery_wear_cost)`
-  (`dp_battery_algorithm.py:795-796`), which *is*
-  `extract_economic_values_from_reward`'s `immediate_value`
-  (`decision_intelligence.py:413`), so
-  `future_value = reward - immediate_value` (`:418`) collapses to precisely
-  the `continuation_value` that `dp_battery_algorithm.py:809` adds in. The
-  extractor is a no-op round trip. `create_decision_data` should take
-  `continuation_value` and set `future_value=continuation_value`, dropping
-  its `reward`/`import_cost`/`export_revenue`/`battery_wear_cost` parameters
-  along with `immediate_value`.
-
-  **Ripples of that swap**: `dp_battery_algorithm.py:804-809`'s invariant
-  comment explains the round trip by name and must go with it; the call site
-  at `:798-812` already has `continuation_value` in scope (`:709`, passed at
-  `:1755`), so nothing new needs plumbing.
-- `core/bess/models.py` `DecisionData` fields: `pattern_name`, `description`,
-  `economic_chain`, `immediate_value`, `net_strategy_value`,
-  `advanced_flow_pattern`, `detailed_flow_values`, `future_target_hours` —
-  every consumer of these lives inside the deleted `api.py` block.
-  **Not `future_value`** — see Keep.
-
-**Keep** (live and load-bearing, despite sharing the module):
-
-- `classify_strategic_intent()` — 19 external references; drives the TOU
-  hardware mode via `INTENT_TO_CONTROL` and the intent badges in
-  `BatteryActionsTable`. Has its own postmortems (#275, #282). Move it out of
-  `decision_intelligence.py` into a module whose name reflects that it is
-  control-path code, not reporting.
-- `create_decision_data()`, reduced to the fields that survive.
-- `DecisionData.strategic_intent`, `observed_intent`, `battery_action`,
-  `cost_basis`, `shadow_price` (the last gates SOLAR_EXPORT discharge at
-  `battery_system_manager.py:2659`; `cost_basis` and `shadow_price` are also
-  both rendered by PR #358).
-- **`DecisionData.future_value` and `_build_period_data`'s `continuation_value`
-  parameter** — PR #358 consumes them: `total_value = reward + future_value`
-  ("total value (top candidate)") plus a "future value / best achievable outcome
-  from the resulting battery level onward" tooltip row. #353's fix stays. Keep
-  `core/bess/tests/unit/test_decision_intelligence.py` (its regression test) too.
-
-**Ripple**:
-
-- `e2e/tests/api-smoke.spec.ts:38` and `e2e/tests/api-contracts.spec.ts:312`
-  both assert on `/api/decision-intelligence` — delete those two blocks.
-- `core/bess/tests/unit/test_data_models.py` asserts the removed fields in
-  `TestDecisionData` (around lines 336-359) — trim to the surviving ones.
-  **Also line 390**, in `TestPeriodData`, which constructs a `DecisionData`
-  with `pattern_name=` outside that range; missing it fails the whole module
-  at collection with `TypeError: unexpected keyword argument 'pattern_name'`.
-- **PR #358 coordination**: `build_chart.py` extracts `economic_chain` and
-  `immediate_value` into its ROWS (two sites each, both `dec.get(...)` with
-  defaults) but renders neither. Dropping those four lines plus the `ROWS`
-  description in `SKILL.md` is the whole change there. Since #358 is still
-  **open**, either land it first and clean up after, or fold the four-line
-  removal into it — do not delete the fields while the PR is in flight without
-  telling it.
-- **Docs**: `docs/SOFTWARE_DESIGN.md:668` has a whole "Decision Intelligence
-  API (`/api/decision-intelligence`)" section describing the deleted endpoint —
-  remove it. Separately, moving `classify_strategic_intent()` out of
-  `decision_intelligence.py` (see Keep) invalidates the path references in
-  `docs/SOFTWARE_DESIGN.md:331`, `docs/ALGORITHM_EXPLAINED.md:252`,
-  `docs/agents/bess-knowledge.md:230` and `:502`, and
-  `docs/agents/simulator.md:47` — repoint them at the new module. Historical
-  records under `docs/superpowers/` and `docs/agents/memory/` are
-  point-in-time artefacts and stay as-is.
-- No performance change: `create_decision_data` runs once per reconstructed
-  period in `_build_period_data`, not in the DP inner loop.
-
-**Retires** TODO items 2 and 5 and the #353 `immediate_value` note below.
-
-**Cost of the decision**: none to #353 — its `future_value` fix and
-continuation-value plumbing survive, because PR #358 renders them. What is lost
-is only the templated narration and the two orphaned UIs.
-
-**Where "explain the decision" lives afterwards**: PR #358's skill for
-maintainers (bundle-level, counterfactual, already proven — it caught the
-#342/#350 discrepancy), and the AI chat panel (`backend/ai_chat.py` +
-`docs/agents/bess-knowledge.md`) for users, which can answer a specific question
-at the depth asked instead of emitting a fixed string per intent. If a
-user-facing UI is ever wanted, build it on #358's math, not on `economic_chain`.
-
----
-
 ### Decide the fate of `EnergySankeyChart.tsx`
 
 **Impact**: Low | **Effort**: Low (decision only)
 
 **Description**: `frontend/src/components/EnergySankeyChart.tsx` is imported by
-nothing — a third orphaned visualization alongside the two in the Decision
-Intelligence scope above. Unlike those, it is **energy-flow visualization, not
-decision explanation**, so it is a separate question and is deliberately left
-in place for now: a Sankey of solar → home / battery / grid may still earn a
-place on the Dashboard or Insights page in a way the decision-narration
-components never could.
+nothing — an orphaned visualization like `DecisionFramework.tsx` and
+`TableBatteryDecisionExplorer.tsx` were before their removal. Unlike those, it
+is **energy-flow visualization, not decision explanation**, so it is a
+separate question and is deliberately left in place for now: a Sankey of
+solar → home / battery / grid may still earn a place on the Dashboard or
+Insights page in a way the decision-narration components never could.
 
 **Decide**: route it (Dashboard or Insights) or delete it. Do not let it drift
 as a fourth orphan.
@@ -779,16 +585,6 @@ Both are valid given each has its own matching frontend hook, but it's an incons
 **Behavior change on cold start**: previously, if `schedule_manager.strategic_intents` was empty (e.g. right after startup, before the controller applies a schedule) but `schedule_store.get_latest_schedule()` already had a stored schedule, `get_detailed_period_groups()` returned `[]` outright (its `if not effective_intents: return []` early exit). Now the endpoint always builds a full per-period `today_reconciled_intents` list (defaulting missing planned entries to `"IDLE"`), so period_groups will render partial data (actual periods reconciled, future periods shown as `"IDLE"`) in that window instead of nothing. This looks like an improvement in line with the issue's intent (show what's real, not what's stale) but is a user-visible behavior change worth knowing about if it's ever reported as "showing IDLE for periods with no plan yet."
 
 **Files**: `backend/api.py` (`get_growatt_detailed_schedule`, ~lines 1719-1758)
-
----
-
-## From #353 immediate_value/future_value investigation (non-blocking)
-
-**`DecisionData.immediate_value` duplicates the live `EconomicData.grid_cost`/dashboard "Net Grid Cost" metric and should probably be removed.** Traced while building the debug-log visualization skill: `immediate_value = export_revenue - import_cost - battery_wear_cost` (`decision_intelligence.py:413`) is exactly `-(grid_cost + battery_wear_cost)`, where `grid_cost = import_cost - export_revenue` (`core/bess/models.py:232`) is the same figure already surfaced live as `netGridCost` (`backend/api.py:776-782` → `SystemStatusCard.tsx`'s headline tile). The only difference is a sign flip and whether wear cost is netted in — and neither `immediate_value` nor `future_value` (nor the `economic_chain` narrative string, nor `/api/decision-intelligence`) is reachable anywhere in the live app: `frontend/src/components/DecisionFramework.tsx`, the only consumer that renders any of these fields, is never imported by any routed page in `App.tsx` — it's orphaned/dead code. `future_value` (fixed in #353 to no longer be always `0.0`) doesn't have this exact duplication problem — there's no live "value-to-go" KPI to compare against — but it's equally unreachable today.
-
-**Superseded**: the design decision this note was waiting on has been made — see
-"Scrap the Decision Intelligence framework" under TECHNICAL DEBT, which deletes
-the whole path (`immediate_value` included) rather than wiring it up.
 
 ---
 

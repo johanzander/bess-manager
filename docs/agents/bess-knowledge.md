@@ -227,7 +227,7 @@ A battery discharges a small amount to grid in a slot where `sell = 0.46`,
 Every 15-minute slot gets a strategic intent based on the energy flows the
 optimizer chose: **GRID_CHARGING**, **SOLAR_STORAGE**, **LOAD_SUPPORT**,
 **BATTERY_EXPORT**, **SOLAR_EXPORT**, **IDLE**. The exact classification
-thresholds live in `core/bess/decision_intelligence.py` — read that file
+thresholds live in `core/bess/strategic_intent.py` — read that file
 directly rather than relying on a copy of the numbers here, since they are
 implementation detail that can change independently of this doc.
 
@@ -510,7 +510,7 @@ other channel to have come from and is left as a real export (see the R==P
 Bellman-guardrail regression test in `test_dp_no_guardrails.py`, which
 requires exactly this for a genuine 0.05 kWh 100%-export discharge). Note the
 DP's own planning-time classifier, `classify_strategic_intent` in
-`decision_intelligence.py`, already used `battery_to_grid > 0.1 kWh` as its
+`strategic_intent.py`, already used `battery_to_grid > 0.1 kWh` as its
 threshold — #350 brings the observational path's noise handling in line with
 that existing precedent, though the two classifiers remain otherwise
 distinct (planning vs. after-the-fact labeling).

@@ -29,7 +29,7 @@ def infer_intent_from_flows(power: float, energy_data: "EnergyData") -> str:
 
     NOTE: For OBSERVATIONAL purposes only (dashboard display of what happened).
     The authoritative intent comes from DP algorithm economics-based decision
-    in decision_intelligence.create_decision_data().
+    in strategic_intent.create_decision_data().
 
     This function looks at actual energy flows to determine what the battery
     appeared to be doing. It cannot determine economic intent (e.g., whether
@@ -345,25 +345,10 @@ class DecisionData:
         0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
         # (DP value-function gradient dV/dSoE). Used to gate SOLAR_EXPORT discharge.
     )
-
-    # Enhanced intelligence fields (optional)
-    pattern_name: str = ""  # Name of detected pattern
-    description: str = ""  # Human-readable description
-    economic_chain: str = ""  # Economic reasoning chain
-    immediate_value: float = 0.0  # Immediate economic value
-    future_value: float = 0.0  # Future economic value
-    net_strategy_value: float = 0.0  # Net strategic value
-
-    # Simple enhanced fields that we can actually implement
-    advanced_flow_pattern: str = (
-        ""  # Detailed flow pattern (e.g., SOLAR_TO_HOME_AND_BATTERY)
+    future_value: float = (
+        0.0  # DP value-to-go (continuation_value) from the resulting battery
+        # level onward -- the best achievable outcome from here forward.
     )
-    detailed_flow_values: dict[str, float] = field(
-        default_factory=dict
-    )  # Value per flow in configured currency
-    future_target_hours: list[int] = field(
-        default_factory=list
-    )  # When future opportunity occurs
 
     @classmethod
     def from_observed_flows(cls, energy_data: EnergyData) -> "DecisionData":

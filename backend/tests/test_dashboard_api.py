@@ -438,23 +438,6 @@ def test_from_totals_computes_net_savings_as_grid_only_minus_net_grid():
 
 
 # ===========================================================================
-# GET /api/decision-intelligence
-# ===========================================================================
-
-
-class TestDecisionIntelligence:
-    def test_returns_200(self):
-        sys.modules["app"].bess_controller = _make_started_controller()
-        resp = _client.get("/api/decision-intelligence")
-        assert resp.status_code == 200
-
-    def test_unconfigured_returns_503(self):
-        sys.modules["app"].bess_controller = _unconfigured_controller()
-        resp = _client.get("/api/decision-intelligence")
-        assert resp.status_code == 503
-
-
-# ===========================================================================
 # GET /api/growatt/tou_settings
 # ===========================================================================
 

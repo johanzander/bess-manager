@@ -115,7 +115,7 @@ and watch it fail, then write the minimal fix. No refactors outside the bug
 **Required test shape — checked against the diff, not optional:**
 
 If the fix touches the DP (`dp_battery_algorithm.py`), intent classification
-(`decision_intelligence.py`), or control/rate mapping (`inverter_controller.py`
+(`strategic_intent.py`), or control/rate mapping (`inverter_controller.py`
 / `battery_system_manager.py`), the PRIMARY RED test — not an extra test
 alongside it, the one that proves the bug — is a plan-faithfulness scenario,
 not a unit test calling the changed function with hand-built arguments. Write

@@ -249,7 +249,7 @@ those flows:
 | **IDLE** | No battery action clears its cost right now — nothing is cheap enough to be worth charging into, and nothing currently needs the stored energy enough to beat holding it. |
 
 The exact numeric conditions used to classify a period's flows into one of
-these labels are implementation detail (in `core/bess/decision_intelligence.py`)
+these labels are implementation detail (in `core/bess/strategic_intent.py`)
 and can change independently of this document — the table above describes
 the economic story each label represents, not a formula to reproduce.
 

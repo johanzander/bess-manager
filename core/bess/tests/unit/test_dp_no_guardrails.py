@@ -137,8 +137,8 @@ def test_small_export_only_discharge_classified_as_battery_export():
     Regression for the R == P failures traced on
     realworld_2026_04_27_211212 period 42 during Task 8's fixture
     regeneration."""
-    from core.bess.decision_intelligence import classify_strategic_intent
     from core.bess.models import EnergyData
+    from core.bess.strategic_intent import classify_strategic_intent
 
     energy_data = EnergyData(
         solar_production=3.5,

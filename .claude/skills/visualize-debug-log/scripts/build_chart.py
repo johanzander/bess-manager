@@ -64,7 +64,7 @@ def _clean_flow(v: float) -> float:
 
     Below core's own POWER_CLASSIFICATION_THRESHOLD_KW, a flow value is
     floating-point/cross-sensor noise, not a real physical transfer (same
-    threshold core.bess.decision_intelligence uses to classify flows) --
+    threshold core.bess.strategic_intent uses to classify flows) --
     reused here so the chart never displays a phantom "0.00 grid" a raw
     float epsilon would otherwise trigger.
     """
@@ -221,8 +221,6 @@ def _row_dict(
         "source": source,
         "shadow_price": dec.get("shadow_price", 0.0),
         "cost_basis": dec.get("cost_basis", 0.0),
-        "economic_chain": dec.get("economic_chain", ""),
-        "immediate_value": dec.get("immediate_value", 0.0),
         "future_value": dec.get("future_value", 0.0),
         "hourly_cost": econ.get("hourly_cost", 0.0),
         "grid_only_cost": econ.get("grid_only_cost", 0.0),

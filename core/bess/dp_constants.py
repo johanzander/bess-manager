@@ -2,11 +2,11 @@
 
 Single source of truth for the DP's state/action grid resolution. Imported by
 both dp_battery_algorithm.py (which uses them to build the state/action grid)
-and decision_intelligence.py (which needs a "is this action real or just
+and strategic_intent.py (which needs a "is this action real or just
 floating-point noise" threshold that scales with the grid, not a hardcoded
 absolute value).
 
-Postmortem (#275): decision_intelligence.py used to hardcode
+Postmortem (#275): strategic_intent.py used to hardcode
 `_POWER_THRESHOLD_KW = 0.1` with a comment noting "The DP uses
 POWER_STEP_KW=0.2" -- an implicit, unenforced assumption. Tuning
 POWER_STEP_KW to 0.1 during the #275 investigation silently collided with

@@ -66,7 +66,7 @@ export interface PerPlatformSensors {
 
 /** IDs of non-inverter (shared) integrations. */
 export const SHARED_INTEGRATION_IDS = new Set([
-  'nordpool', 'solar_forecast', 'consumption_forecast',
+  'nordpool', 'solar_forecast', 'consumption_average', 'consumption_forecast_series',
   'phase_current', 'discharge_inhibit', 'weather',
 ]);
 
@@ -523,15 +523,29 @@ export const INTEGRATIONS: IntegrationDef[] = [
     ],
   },
   {
-    id: 'consumption_forecast',
-    name: 'Consumption Forecast',
+    id: 'consumption_average',
+    name: 'Consumption Average (48h Rolling)',
     required: false,
-    description: 'Rolling 48-hour average of grid import — typically a custom helper sensor or InfluxDB-derived entity',
+    description: 'Rolling 48-hour average of grid import — typically a custom helper sensor or InfluxDB-derived entity. A flat scalar, not a real forecast — see Consumption Forecast Series for a shaped time-series input.',
     sensorGroups: [
       {
         name: 'Consumption',
         sensors: [
           { key: '48h_avg_grid_import', label: '48h Avg Grid Import', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'consumption_forecast_series',
+    name: 'Consumption Forecast Series (HA Entity)',
+    required: false,
+    description: 'A user-authored time-series consumption forecast — a template sensor with raw_today/raw_tomorrow attributes, mirroring how price data is consumed. Lets you express a shaped load (EV session, weather-driven aircon) the statistical strategies can\'t.',
+    sensorGroups: [
+      {
+        name: 'Consumption Forecast Series',
+        sensors: [
+          { key: 'consumption_forecast_series', label: 'Consumption Forecast Series', required: false },
         ],
       },
     ],

@@ -844,11 +844,14 @@ class SensorCollector:
 
         Only validates the ``get_estimated_consumption`` sensor when the
         ``sensor`` strategy is active — other strategies (fixed,
-        influxdb_7d_avg, ha_statistics) do not rely on that HA sensor.
+        influxdb_7d_avg, ha_statistics, ha_consumption_series) do not rely
+        on that HA sensor.
         """
         all_methods = ["get_solar_forecast"]
         if consumption_strategy == "sensor":
             all_methods = ["get_estimated_consumption", *all_methods]
+        elif consumption_strategy == "ha_consumption_series":
+            all_methods = ["get_consumption_forecast_series", *all_methods]
 
         return perform_health_check(
             component_name="Energy Prediction",

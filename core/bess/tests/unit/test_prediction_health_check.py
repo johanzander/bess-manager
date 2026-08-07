@@ -19,6 +19,7 @@ from core.bess.settings import BatterySettings
 def _make_controller(
     estimated_consumption_ok: bool = True,
     solar_forecast_ok: bool = True,
+    consumption_series_ok: bool = True,
 ):
     """Return a minimal controller stub with configurable sensor behaviour.
 
@@ -40,6 +41,13 @@ def _make_controller(
         "get_solar_forecast": {
             "sensor_key": "solar_forecast_today",
             "name": "Solar Forecast",
+            "unit": "list",
+            "precision": 1,
+            "conversion_threshold": None,
+        },
+        "get_consumption_forecast_series": {
+            "sensor_key": "consumption_forecast_series",
+            "name": "Consumption Forecast Series",
             "unit": "list",
             "precision": 1,
             "conversion_threshold": None,
@@ -80,6 +88,17 @@ def _make_controller(
 
         controller.get_solar_forecast.side_effect = SystemConfigurationError(
             "solar_forecast_today sensor not available"
+        )
+
+    if consumption_series_ok:
+        controller.get_consumption_forecast_series.return_value = [0.5] * 96
+    else:
+        from core.bess.exceptions import ConsumptionForecastUnavailableError
+
+        controller.get_consumption_forecast_series.side_effect = (
+            ConsumptionForecastUnavailableError(
+                "consumption_forecast_series sensor not available"
+            )
         )
 
     return controller
@@ -187,13 +206,49 @@ class TestHaStatisticsStrategy:
 
 
 # ---------------------------------------------------------------------------
+# check_prediction_health — ha_consumption_series strategy
+# ---------------------------------------------------------------------------
+
+
+class TestHaConsumptionSeriesStrategy:
+    def test_ok_when_consumption_series_available(self):
+        collector = _make_collector(_make_controller(consumption_series_ok=True))
+        result = collector.check_prediction_health("ha_consumption_series")
+        assert result["status"] == "OK"
+
+    def test_includes_consumption_series_check(self):
+        collector = _make_collector(_make_controller(consumption_series_ok=True))
+        result = collector.check_prediction_health("ha_consumption_series")
+        method_names = [c["method_name"] for c in result["checks"]]
+        assert "get_consumption_forecast_series" in method_names
+
+    def test_warning_when_consumption_series_unavailable(self):
+        collector = _make_collector(_make_controller(consumption_series_ok=False))
+        result = collector.check_prediction_health("ha_consumption_series")
+        assert result["status"] == "WARNING"
+
+    def test_does_not_check_estimated_consumption(self):
+        collector = _make_collector()
+        result = collector.check_prediction_health("ha_consumption_series")
+        method_names = [c["method_name"] for c in result["checks"]]
+        assert "get_estimated_consumption" not in method_names
+
+
+# ---------------------------------------------------------------------------
 # Solar forecast is always validated regardless of strategy
 # ---------------------------------------------------------------------------
 
 
 class TestSolarForecastAlwaysChecked:
     @pytest.mark.parametrize(
-        "strategy", ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        "strategy",
+        [
+            "sensor",
+            "fixed",
+            "influxdb_7d_avg",
+            "ha_statistics",
+            "ha_consumption_series",
+        ],
     )
     def test_solar_forecast_included_for_all_strategies(self, strategy):
         collector = _make_collector()
@@ -202,7 +257,14 @@ class TestSolarForecastAlwaysChecked:
         assert "get_solar_forecast" in method_names
 
     @pytest.mark.parametrize(
-        "strategy", ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        "strategy",
+        [
+            "sensor",
+            "fixed",
+            "influxdb_7d_avg",
+            "ha_statistics",
+            "ha_consumption_series",
+        ],
     )
     def test_warning_when_solar_forecast_unavailable(self, strategy):
         controller = _make_controller(solar_forecast_ok=False)

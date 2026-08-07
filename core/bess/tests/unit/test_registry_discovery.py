@@ -1852,7 +1852,8 @@ class TestFrontendSensorKeysMatchBackend:
             if platform_id in (
                 "nordpool",
                 "solar_forecast",
-                "consumption_forecast",
+                "consumption_average",
+                "consumption_forecast_series",
                 "phase_current",
                 "discharge_inhibit",
                 "weather",

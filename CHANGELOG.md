@@ -39,6 +39,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [10.0.1] - 2026-08-02
 
+### Added
+
+- New `ha_consumption_series` consumption-forecast strategy reading a user-authored Home Assistant time-series entity. ([#428](https://github.com/johanzander/bess-manager/issues/428))
+
 ### Fixed
 
 - `HuaweiController.sync_soc_limits` now reads before writing SOC limits, instead of writing unconditionally on every sync. ([#427](https://github.com/johanzander/bess-manager/issues/427))

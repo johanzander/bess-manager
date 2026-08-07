@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 
 from . import time_utils
-from .daily_view_builder import DailyView, DailyViewBuilder
+from .daily_view_builder import DailyView, DailyViewBuilder, _period_data_from_dict
 from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
     OptimizationResult,
@@ -45,7 +45,7 @@ from .models import (
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
 from .power_monitor import HomePowerMonitor
-from .prediction_snapshot import PredictionSnapshotStore, _period_data_from_dict
+from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore

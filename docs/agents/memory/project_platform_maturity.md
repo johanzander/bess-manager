@@ -16,14 +16,20 @@ file) is the stability flag for this codebase — see `feature-lifecycle` skill.
   scenario.
 - `solax_modbus_growatt_sph` (GEN3) — monitoring-only, schedule control not implemented.
 - `solax_modbus_native` (SolaX VPP).
-- `solis_modbus` (Solis hybrid via Pho3niX90/solis_modbus, added for issue
-  #130) — implementation is source-verified against the real integration
-  (release v4.1.6) but has not been confirmed against a real Solis
-  installation. Do not describe it as validated in user-facing docs or
-  release notes until a beta tester confirms via a debug log.
 
 ## Real-world validated
 
 (Populate as platforms/providers graduate through `feature-lifecycle` Stage 6.
 Candidates not yet formally tracked here: Growatt cloud MIN/SPH, GEN4 Growatt
 TOU via solax_modbus — all in production use prior to this file's creation.)
+
+- `solis_modbus` (Solis hybrid via Pho3niX90/solis_modbus, added for issue
+  [#130](https://github.com/johanzander/bess-manager/issues/130)) — confirmed
+  working against real Solis installations by two beta testers
+  (`tatusbar` on an S6-EH3P10K-NV-YD-L, `andys1802` on an S6-EH3P15K):
+  entities auto-detected, schedule control running successfully. A debug
+  log from the field surfaced one real bug (grid export power never
+  auto-configured,
+  [#475](https://github.com/johanzander/bess-manager/issues/475)), fixed and
+  locked into the `ci-wizard-solis` regression scenario (backend discovery
+  test + Playwright wizard E2E).

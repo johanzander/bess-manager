@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Optional PV export-limit curtailment on negative sell prices** — when enabled and a period is exporting at a sell price below a configurable floor, Growatt GEN2/GEN3/GEN4 hardware (via solax_modbus, with a grid CT/smart meter) now throttles PV production at the panel instead of paying to export. Off by default. ([#269](https://github.com/johanzander/bess-manager/issues/269))
 - **Inverter service domain is now configurable** — a compatible integration exposing the same TOU services under its own domain works as a setting instead of needing a new BESS platform. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 - **Grid connection import capacity modeling** — the DP now caps planned grid import at the house's fuse limit instead of planning unbounded imports, gated on `power_monitoring_enabled`. ([#429](https://github.com/johanzander/bess-manager/issues/429))
+- **Solis inverter platform (`solis_modbus`) is now stable** — confirmed working against real Solis installations by two beta testers, no longer marked experimental. ([#130](https://github.com/johanzander/bess-manager/issues/130))
 
 ### Fixed
 

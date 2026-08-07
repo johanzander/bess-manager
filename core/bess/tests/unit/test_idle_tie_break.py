@@ -51,6 +51,44 @@ def test_never_swaps_into_exporting_discharge():
     assert _pick(candidates, best_index=0) == 0
 
 
+def test_export_cap_bounded_by_export_threshold():
+    # rate_step=0.1 makes the old half-step admission (0.05 kW) exceed
+    # BATTERY_EXPORT_THRESHOLD_KWH/dt (0.04 kW at dt=0.25) -- with the
+    # tightened cap, eligibility is governed by the export threshold, not
+    # the rate-step half-step. balance_zero_p is 1.0 kW (home=0.25 kWh,
+    # dt=0.25h), so the cap admits discharge up to 1.04 kW.
+    home, solar, dt, rate_step = 0.25, 0.0, 0.25, 0.1
+    idle = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
+    # Overshoot = (1.045 - 1.0) * 0.25h = 0.01125 kWh > 0.01 threshold ->
+    # real export -> must NOT be selected.
+    just_over = (9.999, -1.045, 5.74, 0.0, 0.30, 0.0)
+    # Overshoot = (1.03 - 1.0) * 0.25h = 0.0075 kWh < 0.01 threshold -> may
+    # be selected.
+    just_under = (9.995, -1.03, 5.76, 0.0, 0.28, 0.0)
+
+    only_over = _prefer_load_covering_discharge(
+        [idle, just_over],
+        best_index=0,
+        epsilon=0.01,
+        home_consumption=home,
+        solar_production=solar,
+        dt=dt,
+        rate_step=rate_step,
+    )
+    assert only_over == 0, "overshoot past the export threshold must not swap"
+
+    with_under = _prefer_load_covering_discharge(
+        [idle, just_over, just_under],
+        best_index=0,
+        epsilon=0.01,
+        home_consumption=home,
+        solar_production=solar,
+        dt=dt,
+        rate_step=rate_step,
+    )
+    assert with_under == 2, "overshoot within the export threshold may swap"
+
+
 def test_non_idle_winner_is_untouched():
     candidates = [IDLE, COVER, OVER, CHARGE]
     assert _pick(candidates, best_index=3) == 3

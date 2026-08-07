@@ -1399,8 +1399,20 @@ def _prefer_load_covering_discharge(
     `rate_step` is the discharge percent-grid step (see
     _discharge_candidates); the load-cover breakpoint snaps to it, so the
     eligibility cap allows half a step of round-up before a candidate
-    counts as exporting. Among eligible candidates the largest coverage
-    wins -- fuller coverage means less residual import exposed to a miss.
+    counts as exporting, further capped so the round-up itself can never
+    exceed BATTERY_EXPORT_THRESHOLD_KWH of real export. Among eligible
+    candidates the largest coverage wins -- fuller coverage means less
+    residual import exposed to a miss.
+
+    Economic bound: each swap forfeits at most `epsilon` (empirically
+    ~0.003-0.015 SEK per period), but a single horizon can contain many
+    swapped periods, and the aggregate is bounded only empirically, not
+    per-horizon -- fixture evidence puts the worst observed full-horizon
+    cost at +0.032 SEK, inside the #450 budget of 0.05 SEK. Separately, for
+    small net loads the eligibility band above is wide in SEK/kWh terms, so
+    swaps fire more often than #467's tie detector flags near-ties; this is
+    deliberate, since every swapped candidate is within `epsilon` --
+    value noise, not a real gap -- of the argmax winner.
     """
     if epsilon <= 0.0:
         return best_index
@@ -1410,7 +1422,9 @@ def _prefer_load_covering_discharge(
     balance_zero_p = (home_consumption - solar_production) / dt
     if balance_zero_p <= POWER_TOLERANCE_KW:
         return best_index
-    max_cover_p = balance_zero_p + 0.5 * rate_step + 1e-9
+    max_cover_p = (
+        balance_zero_p + min(0.5 * rate_step, BATTERY_EXPORT_THRESHOLD_KWH / dt) + 1e-9
+    )
     swap_index = best_index
     swap_power = 0.0
     for index, candidate in enumerate(candidates):
@@ -1610,6 +1624,12 @@ def _best_action_at_continuous_state(
         ),
     )
 
+    # #466 note: best_index is POST-swap here -- the risk-aware tie-break
+    # above may already have replaced the value-argmax winner with the
+    # load-covering discharge. tie_margin (and the caller's value_slopes,
+    # which uses the next_soe returned below) therefore describe the action
+    # actually chosen, not the raw argmax; this is deliberate, but it means
+    # the #466 swap perturbs which windows the #450 tie detector flags.
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index
     ]

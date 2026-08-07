@@ -84,6 +84,19 @@ do not, stop and return with the measured margins; widening would then be a
 deliberate, documented risk-premium threshold decision (escalated, not a
 silently grown constant).
 
+### Economic bound
+
+This threshold is a per-period bound, not a horizon bound. Each swap forfeits
+at most `epsilon` (empirically ~0.003-0.015 SEK), but a single horizon can
+contain many swapped periods, and the aggregate cost is bounded only
+empirically, not analytically per-horizon — fixture evidence puts the worst
+observed full-horizon cost at +0.032 SEK, inside the #450 regression budget
+of 0.05 SEK. Separately, for small net loads the eligibility band is wide in
+SEK/kWh terms, so swaps fire more often than #467's tie detector flags
+near-ties; this is deliberate, since every swapped candidate sits within
+`epsilon` of the argmax winner and is therefore within value noise, not a
+real gap.
+
 ## Testing
 
 - **Unit, synthetic near-tie fixture:** IDLE and load-covering discharge within

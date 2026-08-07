@@ -432,15 +432,10 @@ def _pwl_best_action_at_continuous_state(
     best_next_soe_candidate = candidates[best_index][2]
     hi = min(best_next_soe_candidate + SOE_STEP_KWH, float(xs_next[-1]))
     lo = best_next_soe_candidate - SOE_STEP_KWH
-    if hi == lo:
-        # Degenerate single-breakpoint row (or hi clamped down to lo): no
-        # finite span to estimate a slope from.
-        slope = 0.0
-    else:
-        slope = float(
-            _pwl_eval_array(V_next, np.asarray(hi))
-            - _pwl_eval_array(V_next, np.asarray(lo))
-        ) / (hi - lo)
+    slope = float(
+        _pwl_eval_array(V_next, np.asarray(hi))
+        - _pwl_eval_array(V_next, np.asarray(lo))
+    ) / (hi - lo)
     best_index = _prefer_load_covering_discharge(
         candidates,
         best_index,

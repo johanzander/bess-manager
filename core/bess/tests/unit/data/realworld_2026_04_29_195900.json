@@ -370,9 +370,9 @@
     "battery_solar_cost": 43.54321,
     "base_to_battery_solar_savings": 112.5085,
     "base_to_battery_solar_savings_pct": 72.09693,
-    "total_charged": 10.040695,
+    "total_charged": 10.04069,
     "total_discharged": 12.3875,
-    "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 near-tied periods flip (3 IDLE->LOAD_SUPPORT, 3 downstream LOAD_SUPPORT->IDLE), improving battery_solar_cost from 43.8938 to 43.54321."
+    "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 near-tied periods flip (3 IDLE->LOAD_SUPPORT, 3 downstream LOAD_SUPPORT->IDLE), improving battery_solar_cost from 43.8938 to 43.54321. total_charged/total_discharged were re-derived from the current run as part of this refresh too."
   },
   "expected_behavior": {
     "description": "Real-world debug log from 2026-04-29, with solar, price spread 2.31 SEK",

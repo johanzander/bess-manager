@@ -649,7 +649,30 @@ Findings (top) and System Logs (bottom).*
 
         table = "\n".join(rows)
 
-        return summary_text + f"\n\n{table}"
+        # Each snapshot already carries its own forward-looking forecast
+        # (predicted_periods -- see _serialize_snapshots) at exact precision,
+        # excluding periods already realized by that run's own decision time
+        # (those are in Historical Sensor Data instead, not repeated here).
+        # This is the authoritative source for "what changed between run N
+        # and run N+1" -- diff two snapshots' predicted_periods directly,
+        # rather than reconstructing it from rounded System Logs box tables.
+        details = f"""
+<details>
+<summary>Per-run forecasts ({total} snapshots — click to expand)</summary>
+
+`predicted_periods` is only populated when it differs from the immediately preceding
+snapshot (same intent + battery_action for every period both cover means nothing to
+see); `predicted_periods_unchanged: true` marks a snapshot where the plan didn't move
+that cycle. This keeps every real change fully visible — including a single flipped
+period — without repeating the same unchanged forecast dozens of times a day.
+
+```json
+{self._format_json(export.snapshots)}
+```
+
+</details>"""
+
+        return summary_text + f"\n\n{table}" + details
 
     def _format_logs(self, export: DebugDataExport) -> str:
         """Format logs section with file info.
@@ -703,10 +726,25 @@ Findings (top) and System Logs (bottom).*
         return summary + details
 
     def _format_raw_schedule_json(self, export: DebugDataExport) -> str:
+        # export.schedules holds exactly one entry in compact mode (see
+        # _serialize_schedules) -- the label must say so, or a reader assumes
+        # every run's full input_data/period_data is here when it isn't.
+        # schedules_summary.total_schedules is the true count regardless of
+        # compact mode (see _summarize_schedules); System Logs (Today) is the
+        # section that actually covers every run of the day, not this one.
+        n = len(export.schedules)
+        if export.compact:
+            total = export.schedules_summary.get("total_schedules", n)
+            label = (
+                f"Full Schedule JSON (latest run only, of {total} today -- "
+                "see System Logs (Today) for every run's per-period data)"
+            )
+        else:
+            label = f"Full Schedule JSON (all {n} runs today)"
         return f"""## Raw Schedule JSON (deep debugging)
 
 <details>
-<summary>Full Schedule JSON (all runs)</summary>
+<summary>{label}</summary>
 
 ```json
 {self._format_json(export.schedules)}

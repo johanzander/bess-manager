@@ -86,6 +86,7 @@ glossary.innerHTML = [
   ...ENERGY_SERIES.map(s => glossEntry(s.label, s.color, s.def)),
   glossHeader('Battery'),
   glossEntry('SOE', null, 'Battery State of Energy, in kWh — this system tracks charge as an energy quantity, not a percentage.'),
+  glossEntry('Reserve floor / max SOC', null, 'Dotted horizontal lines on the SOE panel — the configured min_soc/max_soc limits (BatterySettings) the DP plans within. A period sitting at one of these is the most common reason for an IDLE decision.'),
   glossHeader('Decision'),
   glossEntry('Total value', null, "The winning candidate action's score: reward + future value. The optimizer tries every candidate action this period (idle, several discharge levels, one charge option) and picks whichever scores highest on this sum."),
   glossEntry('Reward', null, "This period's own grid cost/revenue for the chosen action (export revenue &minus; import cost &minus; battery wear) — one of total value's two components."),
@@ -150,13 +151,24 @@ const energyTop = priceBottom + GAP + TITLE_H, energyBottom = energyTop + ENERGY
 const soeTop = energyBottom + GAP + TITLE_H, soeBottom = soeTop + SOE_H;
 const totalH = soeBottom + PAD.bottom;
 
-const priceMax = Math.max(...ROWS.map(r => r.buy)) * 1.08;
-const yPrice = (v) => priceTop + PRICE_H - (v / priceMax) * PRICE_H;
+// Sell price can go negative (PV export-limit curtailment, #269) -- scale off
+// both buy and sell, and give negative headroom below zero, so a negative
+// sell period draws inside the panel instead of clipping off the top/bottom.
+const priceMax = Math.max(...ROWS.map(r => Math.max(r.buy, r.sell))) * 1.08;
+const priceMin = Math.min(0, ...ROWS.map(r => r.sell)) * 1.08;
+const priceSpan = priceMax - priceMin;
+const yPrice = (v) => priceTop + PRICE_H - ((v - priceMin) / priceSpan) * PRICE_H;
 
 const energyMax = Math.max(...ROWS.map(r => Math.max(...ENERGY_SERIES.map(s => s.get(r))))) * 1.15;
 const yEnergy = (v) => energyTop + ENERGY_H - (v / energyMax) * ENERGY_H;
 
-const soeCapacity = Math.ceil(Math.max(...ROWS.map(r => Math.max(r.soe_start, r.soe_end))) / 5) * 5;
+// SOE panel's scale must fit the configured reserve floor / max SOC ceiling
+// too, not just the observed trace -- otherwise a period sitting right at a
+// limit (the most common reason for an IDLE period) draws flush against the
+// panel edge with no reference line to explain it.
+const SOE_MIN = SUMMARY.soe_min || 0;
+const SOE_MAX = SUMMARY.soe_max || SUMMARY.capacity;
+const soeCapacity = Math.ceil(Math.max(SOE_MAX, ...ROWS.map(r => Math.max(r.soe_start, r.soe_end))) / 5) * 5;
 const ySoe = (v) => soeTop + SOE_H - (v / soeCapacity) * SOE_H;
 
 function yFor(panel) { return panel === 'price' ? yPrice : yEnergy; }
@@ -200,7 +212,7 @@ function soeAreaPath() {
 }
 
 const priceYTicks = [];
-for (let p = 0; p <= priceMax; p += 0.5) priceYTicks.push(+p.toFixed(2));
+for (let p = Math.ceil(priceMin / 0.5) * 0.5; p <= priceMax; p += 0.5) priceYTicks.push(+p.toFixed(2));
 const energyYTicks = [0, +(energyMax / 2).toFixed(1), +energyMax.toFixed(1)];
 const soeYTicks = [0, soeCapacity / 2, soeCapacity];
 
@@ -229,6 +241,12 @@ svg += bgRects(priceTop, PRICE_H);
 for (const t of priceYTicks) {
   svg += `<line class="gridline" x1="${PAD.left}" x2="${W - PAD.right}" y1="${yPrice(t)}" y2="${yPrice(t)}"/>`;
   svg += `<text class="axis-label" x="${PAD.left - 8}" y="${yPrice(t) + 3}" text-anchor="end">${t.toFixed(1)}</text>`;
+}
+// Zero-price reference: only meaningful to call out once the panel actually
+// extends below zero (negative sell/curtailment), otherwise it's just the
+// bottom axis line and would be redundant.
+if (priceMin < 0) {
+  svg += `<line class="zero-line" x1="${PAD.left}" x2="${W - PAD.right}" y1="${yPrice(0)}" y2="${yPrice(0)}"/>`;
 }
 PRICE_SERIES.forEach(s => {
   const hidden = activeSeries.has(s.key) ? '' : ' series-hidden';
@@ -297,6 +315,17 @@ for (const t of soeYTicks) {
 }
 svg += `<path class="soc-area" d="${soeAreaPath()}"/>`;
 svg += `<path class="soc-line" d="${soeStepPath()}"/>`;
+// Reserve floor / max SOC ceiling the DP actually plans within (BatterySettings.
+// min_soe_kwh/max_soe_kwh) -- explains an IDLE period that's really "pinned at a
+// limit," which the trace's own observed min/max can't show on its own.
+if (SOE_MIN > 0) {
+  svg += `<line class="ref-line" x1="${PAD.left}" x2="${W - PAD.right}" y1="${ySoe(SOE_MIN)}" y2="${ySoe(SOE_MIN)}"/>`;
+  svg += `<text class="ref-label" x="${W - PAD.right - 4}" y="${ySoe(SOE_MIN) - 3}" text-anchor="end">reserve floor (${SOE_MIN.toFixed(1)} kWh)</text>`;
+}
+if (SOE_MAX < soeCapacity) {
+  svg += `<line class="ref-line" x1="${PAD.left}" x2="${W - PAD.right}" y1="${ySoe(SOE_MAX)}" y2="${ySoe(SOE_MAX)}"/>`;
+  svg += `<text class="ref-label" x="${W - PAD.right - 4}" y="${ySoe(SOE_MAX) - 3}" text-anchor="end">max SOC (${SOE_MAX.toFixed(1)} kWh)</text>`;
+}
 
 // x labels (bottom of SOE panel)
 for (const i of xTickIdx) {
@@ -420,7 +449,14 @@ function renderTooltip(idx) {
     decisionRows += dotRow(c.label, `${c.price.toFixed(2)} SEK/kWh`, null);
     decisionRows += `<div class="t-row" style="display:block; white-space:normal; margin-top:2px; color:var(--text-secondary)">${DECISION_SENTENCE[c.case](c)}</div>`;
   } else {
-    decisionRows += `<div class="t-row" style="color:var(--text-muted)">no shadow price recorded this period</div>`;
+    // The single most common real reason for "no decision data": the battery
+    // was already pinned at its configured floor/ceiling, so there was
+    // nothing left to trade -- worth saying plainly rather than leaving the
+    // period looking unexplained.
+    const atFloor = SOE_MIN > 0 && r.soe_end <= SOE_MIN + 0.05;
+    const atCeiling = SOE_MAX < soeCapacity && r.soe_end >= SOE_MAX - 0.05;
+    const pinnedNote = atFloor ? ' — battery at its reserve floor.' : atCeiling ? ' — battery at its max SOC.' : '';
+    decisionRows += `<div class="t-row" style="color:var(--text-muted)">no shadow price recorded this period${pinnedNote}</div>`;
   }
 
   decisionRows += `<div class="t-row" style="opacity:0.8; margin-top:6px"><span>total value (top candidate)</span><b>${v.total_value >= 0 ? '+' : ''}${v.total_value.toFixed(2)} SEK</b></div>`;

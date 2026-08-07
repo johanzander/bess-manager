@@ -37,6 +37,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The "Enable Live Control" pre-flight dialog showed a green check for optional components that were genuinely failing (e.g. a misconfigured InfluxDB), not just ones left unconfigured. Those now show an amber warning — they still never block enabling live control.
 - Settings → Savings History silently displayed "0 days recorded" when the disk-usage request failed, and swallowed errors when clearing the history. Both now surface the actual error.
 
+### Internal
+
+- Prediction snapshot persistence now shares the same per-day file format as savings history, instead of its own bespoke file. ([#409](https://github.com/johanzander/bess-manager/issues/409))
+
 ## [10.0.1] - 2026-08-02
 
 ### Fixed

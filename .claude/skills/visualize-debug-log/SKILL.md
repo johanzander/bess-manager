@@ -66,6 +66,26 @@ frontend) — this is for a point-in-time bundle snapshot only.
    ```
    Optional `--title "..."` to override the auto-generated title.
 
+   **If the user is asking a specific question about this bundle** (not
+   just "show me the chart"), don't leave that question answered only in
+   your chat reply — add it to the chart with `--analysis <cards.json>`, a
+   JSON file of `{"heading": str, "pill": str|None, "paragraphs": [str,
+   ...]}` cards rendered below the chart:
+   ```bash
+   python3 .claude/skills/visualize-debug-log/scripts/build_chart.py /tmp/bundle.md \
+     -o /tmp/chart.html --analysis /tmp/analysis.json
+   ```
+   **Before writing a card that explains *why* the DP made a decision,
+   verify the mechanism through the `bess-analyst` sub-agent against the
+   real `dp_battery_algorithm.py` logic — do not write a plausible-sounding
+   explanation from the row data alone.** A specific number (a deficit, a
+   price gap) is real; the *causal story* around it ("too small to bother
+   with", "reserved for later") is very easy to invent and just as easy to
+   be wrong — the DP has no such concepts, only `reward + future_value`
+   comparisons across discrete candidate actions. Cite the actual code path
+   (function name, file:line) bess-analyst gives you, not a narrative that
+   merely fits the numbers.
+
 3. **Publish** the output with the `Artifact` tool (`file_path` = the
    generated HTML, pick a `favicon`, write a one-sentence `description`).
 
@@ -79,7 +99,7 @@ frontend) — this is for a point-in-time bundle snapshot only.
 | Piece | What it is |
 |---|---|
 | `scripts/build_chart.py` | Parses the bundle, recomputes actual periods via real `EnergyData`, merges with forecast `period_data`, renders the final HTML |
-| `scripts/template_head.html` | CSS + page skeleton, `{{TITLE}}`/`{{SUBTITLE}}` placeholders |
+| `scripts/template_head.html` | CSS + page skeleton, `{{TITLE}}`/`{{SUBTITLE}}`/`{{ANALYSIS}}` placeholders |
 | `scripts/template_tail.js` | Chart rendering, legend/ledger toggles, tooltip — reads `ROWS` and `SUMMARY` globals the build script injects |
 | `ROWS` | One object per period: raw aggregates, detailed flows, intent, DP-reasoning fields (`shadow_price`, `cost_basis`, `economic_chain`, `immediate_value`, `future_value`), plus a `view` sub-object with every derived tooltip value (`compare`, `breakeven`, `home_profit`, `export_profit`, `reward`, `total_value`, `net_savings`, `charge_parts`, `discharge_parts`) |
 | `SUMMARY` | Whole-trace totals: `grid_only_cost`, `actual_cost`, `savings`, `cycle_cost`, `capacity`, period counts |
@@ -103,3 +123,12 @@ frontend) — this is for a point-in-time bundle snapshot only.
 - **Forgetting `--title`.** Without it the title is auto-generated from
   period counts only (no bundle date/version) — fine for a quick look, but
   add a real title when publishing something you'll want to find again.
+- **Writing an `--analysis` card's causal explanation without verifying it
+  via bess-analyst.** A number pulled straight off a row (a price, a
+  deficit) is real; a mechanism you infer around it ("too small to bother
+  discharging for", "reserved for a future spike") is not, unless it's
+  grounded in the actual DP code. This exact mistake happened once already:
+  a card claimed IDLE won because a 0.043 kWh deficit was "too small" —
+  there is no such threshold in `_compute_reward`, and the arithmetic
+  behind the claim (converting kWh to minutes) was also wrong. bess-analyst
+  caught both by reading `dp_battery_algorithm.py` directly.

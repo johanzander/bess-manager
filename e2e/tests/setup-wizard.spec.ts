@@ -308,6 +308,29 @@ test.describe('Setup Wizard', () => {
     // page.route() mocking pattern used in inverter-schedule-control-model.spec.ts,
     // since no mock-HA fixture scenario currently reproduces a partial
     // phase-sensor discovery.
+    //
+    // Also stubs GET /api/settings to a clean baseline: this test runs after
+    // other tests in this file that complete the wizard for real against the
+    // shared backend, which can leave power_monitoring_enabled=true (and
+    // current_l1/2/3 sensors) already persisted. Without this stub, the
+    // wizard's "load existing settings" step (SetupWizardPage.tsx) would
+    // pick up that leftover state and mask the very regression this test
+    // exists to catch.
+    await page.route('**/api/settings', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          battery: {},
+          home: {},
+          electricityPrice: {},
+          energyProvider: {},
+          growatt: {},
+          sensors: {},
+        }),
+      });
+    });
+
     const growattRequiredSensors = {
       battery_soc: 'sensor.battery_soc',
       battery_charge_power: 'sensor.battery_charge_power',

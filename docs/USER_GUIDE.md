@@ -275,7 +275,7 @@ For UK users on the Octopus Energy Agile tariff.
 
 #### Provider: ENTSO-e / Belpex (Transparency Platform)
 
-For European users on a day-ahead dynamic tariff that follows the ENTSO-e Transparency Platform — including Belgian **Belpex** prices (Luminus dynamic and others). *Experimental: not yet real-world validated — see [issue #126](https://github.com/johanzander/bess-manager/issues/126).*
+For European users on a day-ahead dynamic tariff that follows the ENTSO-e Transparency Platform — including Belgian **Belpex** prices (Luminus dynamic and others).
 
 - **Prerequisites**: The [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HACS integration installed and configured with your area (e.g. Belgium). It creates an "Average electricity price" sensor, e.g. `sensor.belpex_h_average_electricity_price`.
 - **How it works**: BESS reads the `prices_today` and `prices_tomorrow` attributes from that single sensor. Each is a list of `{"time", "price"}` entries. Hourly data (PT60M, 24/day) is expanded to the internal 15-minute resolution; native quarterly data (PT15M, 96/day) is used as-is.

@@ -33,3 +33,17 @@ TOU via solax_modbus — all in production use prior to this file's creation.)
   [#475](https://github.com/johanzander/bess-manager/issues/475)), fixed and
   locked into the `ci-wizard-solis` regression scenario (backend discovery
   test + Playwright wizard E2E).
+- **ENTSO-e / Belpex price provider** (`entsoe_source.py`, added for issue
+  [#126](https://github.com/johanzander/bess-manager/issues/126)) — confirmed
+  working against a real Belgian Belpex/Luminus Dynamic contract by
+  `Frank-Leysen` over an extended live-test period spanning many beta
+  builds. Several real bugs surfaced and were fixed along the way: wizard
+  defaulting to SEK instead of EUR, `ems_discharging_rate` writes
+  overriding Load First mode, and the terminal-value arbitrage cap using
+  an unrelated slot's price as its ceiling
+  ([#422](https://github.com/johanzander/bess-manager/issues/422)/[#425](https://github.com/johanzander/bess-manager/pull/425)).
+  Frank's real (anonymized) config is locked into the regression suite as
+  `ci-wizard-entsoe-frank-126` (backend discovery test + Playwright wizard
+  E2E). Unrelated live-test findings from the same thread were split out
+  into their own issues (#337, #269, #352, #330, #345, #362, #363, #428,
+  #429) rather than tracked here.

@@ -829,12 +829,17 @@ const InverterStatusDashboard: React.FC = () => {
                             {group.dominantIntent.replace(/_/g, ' ')}
                           </span>
                         </td>
-                        {/* Solar column: SOLAR_STORAGE and passive IDLE gains */}
+                        {/* Solar column: SOLAR_STORAGE and passive IDLE gains.
+                            Threshold/precision must match the backend's own
+                            classification epsilon (decision_intelligence.py's
+                            0.01 kWh) -- otherwise a period correctly labeled
+                            SOLAR_STORAGE by the backend can display no value
+                            at all, which reads as a label/data contradiction. */}
                         <td className={`${cell} text-center`}>
                           {!isPast && (group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
-                           group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                           group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
                             <span className="text-amber-500 dark:text-amber-400 font-medium">
-                              +{group.socDeltaKwh.toFixed(1)} kWh
+                              +{group.socDeltaKwh.toFixed(2)} kWh
                             </span>
                           ) : (
                             <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -843,13 +848,13 @@ const InverterStatusDashboard: React.FC = () => {
                         {/* Grid / Discharge column */}
                         <td className={`${cell} text-center`}>
                           {!isPast && group.dominantIntent === 'GRID_CHARGING' &&
-                           group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                           group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
                             <span className="text-green-600 dark:text-green-400 font-medium">
-                              +{group.socDeltaKwh.toFixed(1)} kWh
+                              +{group.socDeltaKwh.toFixed(2)} kWh
                             </span>
-                          ) : !isPast && group.totalActionKwh !== undefined && group.totalActionKwh < -0.05 ? (
+                          ) : !isPast && group.totalActionKwh !== undefined && group.totalActionKwh < -0.01 ? (
                             <span className="text-orange-500 dark:text-orange-400 font-medium">
-                              {group.totalActionKwh.toFixed(1)} kWh
+                              {group.totalActionKwh.toFixed(2)} kWh
                             </span>
                           ) : (
                             <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -936,12 +941,14 @@ const InverterStatusDashboard: React.FC = () => {
                                   {group.dominantIntent.replace(/_/g, ' ')}
                                 </span>
                               </td>
-                              {/* Solar column */}
+                              {/* Solar column -- threshold/precision must match
+                                  the backend's own classification epsilon,
+                                  same reasoning as the today block above */}
                               <td className={`${cell} text-center`}>
                                 {(group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
-                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
                                   <span className="text-amber-500 dark:text-amber-400 font-medium">
-                                    +{group.socDeltaKwh.toFixed(1)} kWh
+                                    +{group.socDeltaKwh.toFixed(2)} kWh
                                   </span>
                                 ) : (
                                   <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -950,13 +957,13 @@ const InverterStatusDashboard: React.FC = () => {
                               {/* Grid / Discharge column */}
                               <td className={`${cell} text-center`}>
                                 {group.dominantIntent === 'GRID_CHARGING' &&
-                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.1 ? (
+                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
                                   <span className="text-green-600 dark:text-green-400 font-medium">
-                                    +{group.socDeltaKwh.toFixed(1)} kWh
+                                    +{group.socDeltaKwh.toFixed(2)} kWh
                                   </span>
-                                ) : group.totalActionKwh !== undefined && group.totalActionKwh < -0.05 ? (
+                                ) : group.totalActionKwh !== undefined && group.totalActionKwh < -0.01 ? (
                                   <span className="text-orange-500 dark:text-orange-400 font-medium">
-                                    {group.totalActionKwh.toFixed(1)} kWh
+                                    {group.totalActionKwh.toFixed(2)} kWh
                                   </span>
                                 ) : (
                                   <span className="text-gray-300 dark:text-gray-600">—</span>

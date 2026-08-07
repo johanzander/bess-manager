@@ -514,6 +514,27 @@ class TestSystemHealthRecheck:
 
 
 # ===========================================================================
+# POST /api/growatt/disable_vpp
+# ===========================================================================
+
+
+class TestDisableGrowattVpp:
+    def test_returns_200_and_calls_disable_vpp_override(self):
+        ctrl = _make_started_controller()
+        sys.modules["app"].bess_controller = ctrl
+
+        resp = _client.post("/api/growatt/disable_vpp")
+
+        assert resp.status_code == 200
+        ctrl.system.disable_vpp_override.assert_called_once()
+
+    def test_unconfigured_returns_503(self):
+        sys.modules["app"].bess_controller = _unconfigured_controller()
+        resp = _client.post("/api/growatt/disable_vpp")
+        assert resp.status_code == 503
+
+
+# ===========================================================================
 # GET /api/dashboard-health-summary
 # ===========================================================================
 

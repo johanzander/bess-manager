@@ -903,6 +903,26 @@ class InverterController(ABC):
         override it.
         """
 
+    def leave_control_mode(self, controller) -> None:  # noqa: B027
+        """Clean up hardware state before this controller instance is replaced
+        by a control_mode switch (e.g. vpp -> tou).
+
+        Called on the outgoing controller by BatterySystemManager.switch_control_mode()
+        before the new mode's controller is created. The default is a no-op;
+        override for hardware whose mode leaves a persistent override active
+        that the next mode won't otherwise clear (see #479).
+        """
+
+    def disable_vpp_override(self, controller) -> None:  # noqa: B027
+        """Force-disable any persistent hardware override this controller may
+        have left active, independent of tracked control_mode state.
+
+        Manual escape hatch (BatterySystemManager.disable_vpp_override) for
+        installs where the override was left active from before this fix
+        existed, or from a stale control_mode -- see #479. Default is a
+        no-op.
+        """
+
     def _write_period_to_hardware(
         self,
         controller,

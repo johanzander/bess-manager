@@ -363,6 +363,8 @@ class BatterySystemManager:
             platform,
         )
 
+        if self._inverter_controller is not None:
+            self._inverter_controller.leave_control_mode(self._controller)
         self.inverter_platform = platform
         self.control_mode = self._resolve_control_mode({}, platform)
         self._inverter_controller = self._create_inverter_controller()
@@ -415,12 +417,33 @@ class BatterySystemManager:
             self.control_mode,
             control_mode,
         )
+        self._inverter_controller.leave_control_mode(self._controller)
         self.control_mode = control_mode
         self._inverter_controller = self._create_inverter_controller()
         logger.info(
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+
+    def disable_vpp_override(self) -> None:
+        """Force-disable a Growatt VPP hardware override, independent of the
+        tracked inverter_platform/control_mode.
+
+        Manual escape hatch for #479: users could get permanently stuck with
+        VPP Remote Control overriding the inverter -- even after switching
+        BESS's own control_mode to "tou", or after switching to a different
+        inverter platform entirely, on installs from before those transitions
+        called leave_control_mode(), or before uninstalling BESS entirely.
+        Uses a throwaway SolaxModbusGrowattController rather than
+        self._inverter_controller/self.inverter_platform, which is exactly
+        the state that may be stale for the install this exists to recover
+        -- gating on it would make the escape hatch unreachable in the case
+        it exists for. A no-op if the entity isn't configured or already
+        disabled (see SolaxModbusGrowattController.disable_vpp_override()).
+        """
+        SolaxModbusGrowattController(
+            battery_settings=self.battery_settings, control_mode="tou"
+        ).disable_vpp_override(self._controller)
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.

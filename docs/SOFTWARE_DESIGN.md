@@ -767,7 +767,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - **Storage**: Indexes by period_index (0-95)
 - **InfluxDB**: Queries at 15-minute boundaries
 - **API**: Returns quarterly, aggregates only for display
-- **Frontend**: Displays both resolutions as user preference
+- **Frontend**: Displays both resolutions as user preference, except the Dashboard's intent color timeline (`BatteryModeTimeline`), which always renders at quarter-hourly granularity regardless of that preference — hourly aggregation can average away a genuine intent disagreement between quarters (#486)
 
 
 ## Development and Testing

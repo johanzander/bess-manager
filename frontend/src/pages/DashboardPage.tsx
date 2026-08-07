@@ -397,10 +397,7 @@ export default function DashboardPage({
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Schedule</h2>
               <BatteryModeTimeline
-                hourlyData={dashboardData.hourlyData as any}
-                tomorrowData={dashboardData.tomorrowData as any}
                 currentHour={currentHour}
-                resolution={dataResolution}
               />
             </div>
 

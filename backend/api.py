@@ -446,6 +446,15 @@ def _aggregate_quarterly_to_hourly(
         "IDLE": 1,
     }
 
+    def dominant_intent(intents: list[str]) -> str:
+        """Most common intent among the 4 quarters; ties broken by priority."""
+        intent_counts: dict[str, int] = {}
+        for intent_item in intents:
+            intent_counts[intent_item] = intent_counts.get(intent_item, 0) + 1
+        max_count = max(intent_counts.values())
+        candidates = [i for i, c in intent_counts.items() if c == max_count]
+        return max(candidates, key=lambda x: intent_priority.get(x, 0))
+
     hourly_periods = []
     num_hours = (len(quarterly_periods) + 3) // 4  # Round up to handle DST
 
@@ -463,20 +472,34 @@ def _aggregate_quarterly_to_hourly(
 
         # Determine dominant strategic intent (most common in the 4 periods)
         # If there's a tie, prioritize action over inaction
-        period_intents = [p.strategicIntent for p in quarter_periods]
-        intent_counts = {}
-        for intent_item in period_intents:
-            intent_counts[intent_item] = intent_counts.get(intent_item, 0) + 1
+        dominant_strategic_intent = dominant_intent(
+            [p.strategicIntent for p in quarter_periods]
+        )
 
-        # Find max count, then use priority as tie-breaker
-        max_count = max(intent_counts.values())
-        candidates = [i for i, c in intent_counts.items() if c == max_count]
-        dominant_intent = max(candidates, key=lambda x: intent_priority.get(x, 0))
+        # Observed intent must aggregate across all 4 quarters too, not just
+        # the last one — a re-plan only updates strategicIntent going
+        # forward, so a stale strategicIntent can persist for an elapsed hour
+        # even though most/all of its quarters were genuinely observed
+        # executing something else (#486). dataSource itself stays tied to
+        # the last quarter (unchanged) — actualSavingsSoFar/predictedRemaining
+        # Savings (api_dataclasses.py) bucket a whole hour's summed
+        # hourlySavings by this field, so flipping it to "actual" as soon as
+        # any one quarter is actual would count still-predicted quarters'
+        # costs as realized.
+        actual_quarters = [p for p in quarter_periods if p.dataSource == "actual"]
+        observed_intents = [
+            p.observedIntent for p in actual_quarters if p.observedIntent
+        ]
+        hour_observed_intent = (
+            dominant_intent(observed_intents)
+            if observed_intents
+            else last_period.observedIntent
+        )
 
         # Sum energy values across the 4 quarters
         hourly_period = APIDashboardHourlyData(
             period=hour,
-            dataSource=last_period.dataSource,  # Use last period's data source
+            dataSource=last_period.dataSource,
             timestamp=last_period.timestamp,
             # Sum energy flows
             solarProduction=create_formatted_value(
@@ -627,8 +650,8 @@ def _aggregate_quarterly_to_hourly(
                 sum(p.netSavings.value for p in quarter_periods), "currency", currency
             ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
-            strategicIntent=dominant_intent,
-            observedIntent=last_period.observedIntent,
+            strategicIntent=dominant_strategic_intent,
+            observedIntent=hour_observed_intent,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 

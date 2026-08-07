@@ -24,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Solis installs now auto-configure grid export power, derived from the same signed sensor as import power. Previously export power was always unconfigured. ([#475](https://github.com/johanzander/bess-manager/issues/475))
 - Huawei LUNA2000 installs now auto-discover all sensors (SOC, battery control, power monitoring) instead of requiring manual entity entry for every field, and gain real-time solar/grid power monitoring. ([#438](https://github.com/johanzander/bess-manager/issues/438))
 - **Growatt VPP Remote Control no longer keeps overriding the inverter after switching away from VPP mode** — switching control mode to TOU, or switching to a different inverter platform entirely, now disables the VPP override automatically. ([#479](https://github.com/johanzander/bess-manager/issues/479))
+- **Dashboard timeline no longer shows a stale intent (e.g. "Selling to Grid") for an elapsed hour that actually executed differently** — the color bar now always reflects true per-quarter data. ([#486](https://github.com/johanzander/bess-manager/issues/486))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

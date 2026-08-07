@@ -1,7 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { HourlyData } from '../types';
-import { DataResolution } from '../hooks/useUserPreferences';
+import { useDashboardData } from '../hooks/useDashboardData';
+import { DashboardHourlyData } from '../api/scheduleApi';
 import { getIntent, StrategicIntent } from '../utils/intent';
+
+// Refresh cadence matches other components that self-fetch quarter-hourly
+// dashboard data (EnergyFlowCards, SystemStatusCard).
+const REFRESH_INTERVAL_MS = 60000;
 
 // Must match the YAxis width and ComposedChart margin used in EnergyFlowChart and BatteryLevelChart
 // so the timeline bar aligns horizontally with the chart plot areas.
@@ -22,10 +26,7 @@ const INTENT_CONFIG: Record<StrategicIntent, { label: string; color: string; dar
 const INTENT_ORDER: StrategicIntent[] = ['GRID_CHARGING', 'SOLAR_STORAGE', 'LOAD_SUPPORT', 'BATTERY_EXPORT', 'SOLAR_EXPORT', 'IDLE'];
 
 interface BatteryModeTimelineProps {
-  hourlyData: HourlyData[];
-  tomorrowData?: HourlyData[] | null;
   currentHour: number;
-  resolution: DataResolution;
 }
 
 interface Segment {
@@ -35,19 +36,22 @@ interface Segment {
   isTomorrow: boolean;
 }
 
+// Always builds segments at true quarter-hour granularity — the color bar
+// must never go through hourly "dominant intent" aggregation, which can
+// let a stale planned intent outvote what was actually observed (#486).
+const STEP_HOURS = 0.25;
+
 function buildSegments(
-  hourlyData: HourlyData[],
-  tomorrowData: HourlyData[] | null | undefined,
-  resolution: DataResolution
+  hourlyData: DashboardHourlyData[],
+  tomorrowData: DashboardHourlyData[] | null | undefined
 ): Segment[] {
-  const step = resolution === 'quarter-hourly' ? 0.25 : 1;
   const segments: Segment[] = [];
 
   for (let i = 0; i < hourlyData.length; i++) {
     const h = hourlyData[i];
     const intent = getIntent(h);
-    const startHour = resolution === 'quarter-hourly' ? i * 0.25 : i;
-    const endHour = startHour + step;
+    const startHour = i * STEP_HOURS;
+    const endHour = startHour + STEP_HOURS;
 
     const last = segments[segments.length - 1];
     if (last && last.intent === intent && !last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
@@ -60,8 +64,8 @@ function buildSegments(
   if (tomorrowData && tomorrowData.length > 0) {
     for (let i = 0; i < tomorrowData.length; i++) {
       const intent = getIntent(tomorrowData[i]);
-      const startHour = 24 + (resolution === 'quarter-hourly' ? i * 0.25 : i);
-      const endHour = startHour + step;
+      const startHour = 24 + i * STEP_HOURS;
+      const endHour = startHour + STEP_HOURS;
 
       const last = segments[segments.length - 1];
       if (last && last.intent === intent && last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
@@ -82,10 +86,7 @@ function formatHour(hour: number): string {
 }
 
 export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
-  hourlyData,
-  tomorrowData,
   currentHour,
-  resolution,
 }) => {
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -99,7 +100,31 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  const segments = buildSegments(hourlyData, tomorrowData, resolution);
+  const { data, loading, error } = useDashboardData(undefined, 'quarter-hourly', REFRESH_INTERVAL_MS);
+
+  // useDashboardData sets loading=true on every periodic refetch too, not
+  // just the first one — gate the skeleton on "no data yet" so a background
+  // 60s refresh doesn't blank out an already-rendered timeline (#486).
+  if (loading && !data) {
+    return (
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow animate-pulse">
+        <div className="h-9 bg-gray-200 dark:bg-gray-700 rounded" />
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow text-red-600 text-center">
+        {error || 'Failed to load schedule'}
+      </div>
+    );
+  }
+
+  const hourlyData = data.hourlyData;
+  const tomorrowData = data.tomorrowData;
+
+  const segments = buildSegments(hourlyData, tomorrowData);
   const hasTomorrow = tomorrowData && tomorrowData.length > 0;
   const maxHour = hasTomorrow ? 48 : 24;
 

@@ -175,6 +175,40 @@ def test_replay_swaps_exact_tie_to_load_cover():
     assert -action == pytest.approx(1.0, abs=0.05)
 
 
+def test_replay_tie_margin_is_non_negative_when_swap_fires():
+    # #466 review: tie_margin must be measured at the PRE-swap value-argmax,
+    # not the post-swap executed action -- otherwise a fired swap (this is
+    # the exact-tie case from test_replay_swaps_exact_tie_to_load_cover)
+    # reports a negative margin, which would wrongly flag this period as a
+    # #450 tie window purely because #466 swapped the executed action.
+    settings = _lossless_battery()
+    soe_levels = np.arange(
+        settings.min_soe_kwh, settings.max_soe_kwh + SOE_STEP_KWH, SOE_STEP_KWH
+    )
+    V_next = 1.0 * (soe_levels - settings.min_soe_kwh)  # slope == buy -> exact tie
+    _, power_levels = _discretize_state_action_space(settings)
+    action, _next_soe, _cost_basis, _reward, tie_margin, _value_slope = (
+        _best_action_at_continuous_state(
+            soe=6.0,
+            t=0,
+            V_next=V_next,
+            power_levels=power_levels,
+            home_consumption=[0.25],
+            battery_settings=settings,
+            dt=0.25,
+            solar_production=[0.0],
+            buy_price=[1.0],
+            sell_price=[0.4],
+            cost_basis=0.0,
+            max_charge_power_per_period=[0.0],
+        )
+    )
+    assert action < 0, f"expected the swap to fire, got action={action}"
+    assert (
+        tie_margin >= 0.0
+    ), f"tie_margin must be non-negative even when #466 swaps, got {tie_margin}"
+
+
 def test_replay_keeps_decisive_arbitrage_hold():
     # Stored energy worth far more later than covering load now.
     action = _replay_choice(value_slope=2.0)

@@ -1607,13 +1607,14 @@ def _best_action_at_continuous_state(
     # injects at this state, prefer the load-covering discharge over an
     # idle-like winner. Epsilon uses the slope at the argmax winner's
     # next_soe -- the same state the margin itself is measured at.
+    argmax_index = best_index
+    argmax_value_slope = _local_value_slope(
+        V_next, candidates[argmax_index][2], battery_settings
+    )
     best_index = _prefer_load_covering_discharge(
         candidates,
-        best_index,
-        epsilon=epsilon_for_period(
-            _local_value_slope(V_next, candidates[best_index][2], battery_settings),
-            SOE_STEP_KWH,
-        ),
+        argmax_index,
+        epsilon=epsilon_for_period(argmax_value_slope, SOE_STEP_KWH),
         home_consumption=home,
         solar_production=solar,
         dt=dt,
@@ -1624,12 +1625,12 @@ def _best_action_at_continuous_state(
         ),
     )
 
-    # #466 note: best_index is POST-swap here -- the risk-aware tie-break
-    # above may already have replaced the value-argmax winner with the
-    # load-covering discharge. tie_margin (and the caller's value_slopes,
-    # which uses the next_soe returned below) therefore describe the action
-    # actually chosen, not the raw argmax; this is deliberate, but it means
-    # the #466 swap perturbs which windows the #450 tie detector flags.
+    # #466 note: best_index is POST-swap here, but tie_margin and
+    # value_slope below are measured at argmax_index (PRE-swap). Tie
+    # detection (#450) measures the DP's own ambiguity at its value-argmax;
+    # a #466 swap replaces which action is executed but must not itself
+    # register as a #450 tie window, so the margin and slope describe the
+    # argmax's own runner-up gap, not the executed action's.
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index
     ]
@@ -1638,7 +1639,8 @@ def _best_action_at_continuous_state(
         best_next_soe,
         best_new_cost_basis,
         best_reward,
-        _tie_margin(candidates, best_index),
+        _tie_margin(candidates, argmax_index),
+        argmax_value_slope,
     )
 
 
@@ -2031,7 +2033,7 @@ def optimize_battery_schedule(
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, action_reward, tie_margin = (
+        action, next_soe, new_cost_basis, action_reward, tie_margin, value_slope = (
             _best_action_at_continuous_state(
                 soe=current_soe,
                 t=t,
@@ -2051,7 +2053,7 @@ def optimize_battery_schedule(
             )
         )
         tie_margins.append(tie_margin)
-        value_slopes.append(_local_value_slope(V[t + 1], next_soe, battery_settings))
+        value_slopes.append(value_slope)
         cost_basis_trajectory.append(current_cost_basis)
         actions.append(action)
         soe_trajectory.append(next_soe)

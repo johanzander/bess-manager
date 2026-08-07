@@ -657,3 +657,11 @@ further.
 **`.github/workflows/ci.yml`'s E2E job runs all ~15 phases (normal-day, growatt-vpp, 13 wizard scenarios) sequentially in one job.** Each phase is independent (its own docker-compose stack, no shared state), so this is a good candidate for a `strategy: matrix` job split — one parallel job per scenario instead of one long sequential job. Would cut wall-clock from "sum of all phases" to roughly "the slowest single phase." Since the repo is public, GitHub Actions minutes are free/unlimited on standard runners, so this is purely a turnaround-time win, not a cost tradeoff. Worth its own PR — restructuring `ci.yml`'s step list into matrix `include:` entries (scenario, settings file, options file, step label) isn't a small tweak.
 
 ---
+
+## From #466 IDLE tie-break code review (non-blocking)
+
+- Idle-schedule guardrail (`core/bess/dp_battery_algorithm.py` ~2317) is silent and tolerance-free; #466 swaps forfeit up to epsilon/period so the DP-vs-idle margin can theoretically shrink below the aggregate forfeiture (no fixture triggers it; smallest observed margin 0.119 SEK vs worst forfeiture 0.032 SEK). Harden: log when the guardrail fires + add an interaction test. (#466 review)
+- `rate_step` fallback ternary duplicated at 3 sites (`core/bess/dp_battery_algorithm.py` tie-break call site, `core/bess/pwl_window_dp.py` call site, `_discharge_candidates`) — extract a shared `_discharge_rate_step_kw` helper. (#466 review)
+- PWL replay's inline finite-difference slope stencil should become a named `_pwl_local_value_slope` helper next to `_pwl_eval_array`, mirroring `_local_value_slope`. (#466 review)
+
+---

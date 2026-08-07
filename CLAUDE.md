@@ -11,6 +11,14 @@ non-negotiable and apply to all agents.
 - NEVER speculate about file contents or behavior - read the file or run the code first
 - Before proposing any fix, show the exact code path and evidence (logs, source) that proves the root cause — do not guess at entity names, prefixes, or discovery logic
 
+## Issue Work
+
+- Any request to fix, resolve, or implement a GitHub issue (e.g. "fix #123",
+  "resolve this issue") MUST go through the `implement-issue` skill from the
+  start — not ad-hoc brainstorming, writing-plans, or direct edits. It already
+  encodes PR hygiene rules (e.g. don't commit plan files) that get skipped
+  otherwise.
+
 ## Agent Documentation Index
 
 | File | When to Read |

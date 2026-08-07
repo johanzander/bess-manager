@@ -5,20 +5,16 @@ analysis. Leverages DailyView for consistent data representation.
 Persists to disk so snapshots survive restarts within the same day.
 """
 
-import dataclasses
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 
 from core.bess import time_utils
-from core.bess.daily_view_builder import DailyView
-from core.bess.models import (
-    DecisionData,
-    EconomicData,
-    EnergyData,
-    PeriodData,
+from core.bess.daily_view_builder import (
+    DailyView,
+    _daily_view_from_dict,
 )
 
 logger = logging.getLogger(__name__)
@@ -40,49 +36,6 @@ class PredictionSnapshot:
     daily_view: DailyView  # Combined view of actuals + predictions
     growatt_schedule: list[dict]  # TOU intervals applied at snapshot time
     predicted_daily_savings: float  # From EconomicSummary
-
-
-def _period_data_from_dict(d: dict) -> PeriodData:
-    """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
-    energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
-    energy = EnergyData(
-        **{k: v for k, v in d["energy"].items() if k in energy_init_fields}
-    )
-
-    economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
-    economic = EconomicData(
-        **{k: v for k, v in d["economic"].items() if k in economic_fields}
-    )
-
-    decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
-    decision = DecisionData(
-        **{k: v for k, v in d["decision"].items() if k in decision_fields}
-    )
-
-    ts_raw = d["timestamp"]
-    ts = datetime.fromisoformat(ts_raw) if ts_raw else None
-
-    return PeriodData(
-        period=d["period"],
-        energy=energy,
-        timestamp=ts,
-        data_source=d["data_source"],
-        economic=economic,
-        decision=decision,
-    )
-
-
-def _daily_view_from_dict(d: dict) -> DailyView:
-    """Deserialize a DailyView from a dict produced by dataclasses.asdict()."""
-    periods = [_period_data_from_dict(p) for p in d["periods"]]
-    return DailyView(
-        date=date.fromisoformat(d["date"]),
-        periods=periods,
-        total_savings=d["total_savings"],
-        actual_count=d["actual_count"],
-        predicted_count=d["predicted_count"],
-        missing_count=d.get("missing_count", 0),
-    )
 
 
 def _snapshot_from_dict(d: dict) -> PredictionSnapshot:

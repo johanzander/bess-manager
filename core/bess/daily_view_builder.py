@@ -3,6 +3,7 @@
 SIMPLIFIED: Always operates on quarterly periods.
 """
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime
@@ -27,6 +28,49 @@ class DailyView:
     actual_count: int
     predicted_count: int
     missing_count: int = 0  # Periods with no sensor data (e.g., HA restart gap)
+
+
+def _period_data_from_dict(d: dict) -> PeriodData:
+    """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
+    energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
+    energy = EnergyData(
+        **{k: v for k, v in d["energy"].items() if k in energy_init_fields}
+    )
+
+    economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
+    economic = EconomicData(
+        **{k: v for k, v in d["economic"].items() if k in economic_fields}
+    )
+
+    decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
+    decision = DecisionData(
+        **{k: v for k, v in d["decision"].items() if k in decision_fields}
+    )
+
+    ts_raw = d["timestamp"]
+    ts = datetime.fromisoformat(ts_raw) if ts_raw else None
+
+    return PeriodData(
+        period=d["period"],
+        energy=energy,
+        timestamp=ts,
+        data_source=d["data_source"],
+        economic=economic,
+        decision=decision,
+    )
+
+
+def _daily_view_from_dict(d: dict) -> DailyView:
+    """Deserialize a DailyView from a dict produced by dataclasses.asdict()."""
+    periods = [_period_data_from_dict(p) for p in d["periods"]]
+    return DailyView(
+        date=date.fromisoformat(d["date"]),
+        periods=periods,
+        total_savings=d["total_savings"],
+        actual_count=d["actual_count"],
+        predicted_count=d["predicted_count"],
+        missing_count=d.get("missing_count", 0),
+    )
 
 
 class DailyViewBuilder:

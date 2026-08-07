@@ -189,3 +189,40 @@ class TestTodayExcludedFromHistoryWideOperations:
 
         assert store.load_day(date(2026, 7, 26)) is None
         assert store.load_day(date(2026, 7, 27)) is not None
+
+
+class TestSharedContainerShape:
+    def test_save_day_writes_view_key_wrapper(self, tmp_path):
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(_make_view(date(2026, 7, 8)))
+
+        raw = json.loads((tmp_path / "2026-07-08.json").read_text())
+        assert "view" in raw
+        assert raw["view"]["total_savings"] == 3.5
+
+    def test_save_day_preserves_existing_snapshots_key(self, tmp_path):
+        path = tmp_path / "2026-07-08.json"
+        path.write_text(json.dumps({"snapshots": [{"foo": "bar"}]}))
+
+        store = DailyViewStore(persist_dir=tmp_path)
+        store.save_day(_make_view(date(2026, 7, 8)))
+
+        raw = json.loads(path.read_text())
+        assert raw["snapshots"] == [{"foo": "bar"}]
+        assert raw["view"]["total_savings"] == 3.5
+
+
+class TestLegacyFlatFormatFallback:
+    def test_load_day_parses_pre_consolidation_flat_file(self, tmp_path):
+        """Files written before this change have no "view"/"snapshots"
+        wrapper - the whole file IS the DailyView dict."""
+        from dataclasses import asdict
+
+        path = tmp_path / "2026-07-08.json"
+        path.write_text(json.dumps(asdict(_make_view(date(2026, 7, 8))), default=str))
+
+        store = DailyViewStore(persist_dir=tmp_path)
+        loaded = store.load_day(date(2026, 7, 8))
+
+        assert loaded is not None
+        assert loaded.total_savings == 3.5

@@ -78,6 +78,7 @@ from core.bess.strategic_intent import (
     classify_strategic_intent,
     create_decision_data,
 )
+from core.bess.tie_detection import epsilon_for_period
 
 # Configure logging
 logging.basicConfig(
@@ -1587,6 +1588,27 @@ def _best_action_at_continuous_state(
         if candidate[0] > best_value:
             best_value = candidate[0]
             best_index = index
+
+    # Risk-aware tie-break (#466): within the value noise grid-snapping
+    # injects at this state, prefer the load-covering discharge over an
+    # idle-like winner. Epsilon uses the slope at the argmax winner's
+    # next_soe -- the same state the margin itself is measured at.
+    best_index = _prefer_load_covering_discharge(
+        candidates,
+        best_index,
+        epsilon=epsilon_for_period(
+            _local_value_slope(V_next, candidates[best_index][2], battery_settings),
+            SOE_STEP_KWH,
+        ),
+        home_consumption=home,
+        solar_production=solar,
+        dt=dt,
+        rate_step=(
+            discharge_resolution_kw
+            if discharge_resolution_kw is not None
+            else battery_settings.max_discharge_power_kw / 100
+        ),
+    )
 
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index

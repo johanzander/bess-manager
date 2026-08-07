@@ -2,7 +2,16 @@
 are within the DP's own value noise, prefer the discharge -- it fails safe
 (tracks actual load) where IDLE fails unsafe (discharge hard-disabled)."""
 
-from core.bess.dp_battery_algorithm import _prefer_load_covering_discharge
+import numpy as np
+import pytest
+
+from core.bess.dp_battery_algorithm import (
+    SOE_STEP_KWH,
+    _best_action_at_continuous_state,
+    _discretize_state_action_space,
+    _prefer_load_covering_discharge,
+)
+from core.bess.settings import BatterySettings
 
 # Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
 IDLE = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
@@ -64,3 +73,70 @@ def test_picks_largest_eligible_coverage_among_ties():
     candidates = [IDLE, partial, COVER]
     # Both discharges are inside epsilon; the fuller cover (1.0 kW) wins.
     assert _pick(candidates, best_index=0) == 2
+
+
+def _lossless_battery() -> BatterySettings:
+    return BatterySettings(
+        total_capacity=10.0,
+        min_soc=10.0,
+        max_soc=100.0,
+        max_charge_power_kw=5.0,
+        max_discharge_power_kw=5.0,
+        efficiency_charge=1.0,
+        efficiency_discharge=1.0,
+        cycle_cost_per_kwh=0.0,
+        inverter_max_ac_power_kw=0.0,
+    )
+
+
+def _replay_choice(value_slope: float) -> float:
+    """Run the one-step replay at soe=6.0 with 1 kW net load, no solar,
+    buy=1.0, and a linear V[t+1] of the given slope; return chosen power.
+
+    Discharging d kWh saves d*buy now but forfeits d*slope of continuation
+    value (lossless battery), so idle-vs-cover margin = d*(slope - buy):
+    slope == buy -> exact tie; slope >> buy -> decisive hold.
+
+    max_charge_power_per_period is pinned to 0.0: at soe=6.0 the battery
+    has 4 kWh of headroom, so an unconstrained charge candidate is itself
+    profitable arbitrage whenever slope > buy (independent of the
+    IDLE-vs-discharge comparison this test isolates) and would win the
+    argmax outright at slope=2.0, masking the case under test. Disabling
+    charge removes that confound without touching the IDLE/discharge
+    candidates the tie-break in this test module targets.
+    """
+    settings = _lossless_battery()
+    soe_levels = np.arange(
+        settings.min_soe_kwh, settings.max_soe_kwh + SOE_STEP_KWH, SOE_STEP_KWH
+    )
+    V_next = value_slope * (soe_levels - settings.min_soe_kwh)
+    _, power_levels = _discretize_state_action_space(settings)
+    action, *_rest = _best_action_at_continuous_state(
+        soe=6.0,
+        t=0,
+        V_next=V_next,
+        power_levels=power_levels,
+        home_consumption=[0.25],
+        battery_settings=settings,
+        dt=0.25,
+        solar_production=[0.0],
+        buy_price=[1.0],
+        sell_price=[0.4],
+        cost_basis=0.0,
+        max_charge_power_per_period=[0.0],
+    )
+    return action
+
+
+def test_replay_swaps_exact_tie_to_load_cover():
+    # slope == buy: idle and cover are exactly tied -> fail-safe side wins.
+    action = _replay_choice(value_slope=1.0)
+    assert action < 0, f"expected load-covering discharge, got {action}"
+    # Covers the 1 kW net load (within one percent-step of 5 kW / 100).
+    assert -action == pytest.approx(1.0, abs=0.05)
+
+
+def test_replay_keeps_decisive_arbitrage_hold():
+    # Stored energy worth far more later than covering load now.
+    action = _replay_choice(value_slope=2.0)
+    assert action == 0.0

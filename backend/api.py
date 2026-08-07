@@ -38,7 +38,7 @@ from loguru import logger
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
-from core.bess.settings_store import VALID_PLATFORMS
+from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -330,7 +330,7 @@ async def patch_settings(updates: dict):
                 # straight through would raise AttributeError.
                 effective_sensors = {
                     **bess_controller.settings_store.get_active_sensors(),
-                    **(updates.get("sensors") or {}),
+                    **flatten_sensors(updates.get("sensors") or {}),
                 }
                 _validate_power_monitoring_sensors(section, effective_sensors)
                 in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
@@ -2960,7 +2960,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                     home[key] = getattr(payload, field)
             effective_sensors = {
                 **bess_controller.settings_store.get_active_sensors(),
-                **(sections.get("sensors") or {}),
+                **flatten_sensors(sections.get("sensors") or {}),
             }
             _validate_power_monitoring_sensors(home, effective_sensors)
             sections["home"] = home

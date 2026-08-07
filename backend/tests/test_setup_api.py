@@ -72,17 +72,7 @@ _PRE_EXISTING_STORE: dict = {
     },
     "growatt": {"device_id": "old-dev"},
     "inverter": {"platform": "growatt_server_min"},
-    # current_l1/l2/l3 are pre-mapped here because _full_wizard_payload()
-    # (below) enables power monitoring with phaseCount=3 by default — the
-    # server-side validation added for the power-monitoring sensor-gating
-    # fix (2026-08-07) would otherwise reject every setup_complete call that
-    # uses the default wizard payload with a 422.
-    "sensors": {
-        "battery_soc": "sensor.old_soc",
-        "current_l1": "sensor.old_l1",
-        "current_l2": "sensor.old_l2",
-        "current_l3": "sensor.old_l3",
-    },
+    "sensors": {"battery_soc": "sensor.old_soc"},
 }
 
 
@@ -404,6 +394,11 @@ class TestSetupComplete:
             "safetyMarginFactor": 1.0,
             "phaseCount": 3,
             "powerMonitoringEnabled": True,
+            "sensors": {
+                "current_l1": "sensor.current_l1",
+                "current_l2": "sensor.current_l2",
+                "current_l3": "sensor.current_l3",
+            },
         }
         resp = _client.post("/api/setup/complete", json=payload)
         assert resp.status_code == 200
@@ -610,6 +605,44 @@ class TestSetupComplete:
             json={"powerMonitoringEnabled": True, "phaseCount": 3},
         )
         assert resp.status_code == 422
+
+    def test_setup_complete_accepts_power_monitoring_with_nested_shared_sensors(
+        self, complete_controller
+    ):
+        """A fresh install (empty settings store) submitting a realistic wizard
+        payload with current_l1/l2/l3 correctly mapped under sensors.shared —
+        the actual nested per-platform shape the real wizard always sends,
+        see APISetupCompletePayload.sensors — must succeed. This is the
+        golden path this whole plan exists to fix (Task 3's wizard
+        auto-enables power monitoring exactly like this). The validation must
+        flatten this nested shape via flatten_sensors(), not just check the
+        already-persisted store, otherwise a brand-new install would 422 on
+        its own first-ever setup_complete call."""
+        complete_controller.settings_store.data["sensors"] = {}
+        payload = _full_wizard_payload(
+            sensors={
+                "platform": "growatt_server_min",
+                "growatt_server_min": {
+                    "battery_soc": "sensor.growatt_battery_soc",
+                    "pv_power": "sensor.growatt_pv_power",
+                },
+                "growatt_server_sph": {},
+                "solax_modbus_growatt_min": {},
+                "solax_modbus_growatt_sph": {},
+                "solax_modbus_native": {},
+                "shared": {
+                    "current_l1": "sensor.current_l1",
+                    "current_l2": "sensor.current_l2",
+                    "current_l3": "sensor.current_l3",
+                },
+            },
+            powerMonitoringEnabled=True,
+            phaseCount=3,
+        )
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        call_args = complete_controller.settings_store.save_all.call_args[0][0]
+        assert call_args["home"]["power_monitoring_enabled"] is True
 
     def test_rejects_invalid_sensor_entity_ids(self, complete_controller):
         payload = _full_wizard_payload(

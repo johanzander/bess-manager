@@ -8,7 +8,7 @@ detector's known coverage blind spot -- not a theoretical worst-case bound.
 
 import pytest
 
-from core.bess.pwl_window_dp import PWLEndSoeOutOfRangeError
+from core.bess.exceptions import PWLEndSoeOutOfRangeError
 from core.bess.tests.synthetic.measure_tie_coverage import measure_scenario
 from core.bess.tests.synthetic.perturb_scenario import (
     PerturbationParams,

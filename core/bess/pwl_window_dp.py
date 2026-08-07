@@ -28,6 +28,7 @@ from core.bess.dp_battery_algorithm import (
     _state_transition_grid,
 )
 from core.bess.dp_constants import POWER_STEP_KW
+from core.bess.exceptions import PWLEndSoeOutOfRangeError, PWLWindowUnderRefinedError
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -47,37 +48,6 @@ PWL_EPS_PRUNE = 1e-6
 # merge could again keep the "wrong" side of a feasibility onset and
 # reintroduce this bug class -- see the fixed #450 bug this constant closed.
 DISCHARGE_LATTICE_PCT_EPS = 1e-9
-
-
-class PWLWindowUnderRefinedError(RuntimeError):
-    """The windowed PWL solve hit one of its own accuracy budgets, so the
-    value table it would return is an approximation of unknown quality.
-
-    Distinct from the *infeasible* case (`pwl_window_is_feasible`), which is
-    an ordinary physical outcome the solver reports honestly. This one means
-    the solver cannot certify its own answer at all: the only reason the
-    hybrid path (#450) re-solves a window is that the grid DP's result on it
-    is not trustworthy to within tie-margin accuracy, so handing back a
-    result of *unknown* accuracy and letting it be spliced in as if exact
-    would replace one silent inaccuracy with another -- precisely the
-    fallback `docs/agents/rules.md` forbids. Raising instead makes the
-    condition impossible to miss; the budgets themselves (see
-    `PWL_MAX_BREAKPOINTS`, `PWL_MAX_REFINE_ITERS`,
-    `PWL_MAX_PREIMAGE_SEED_POINTS`) are the knobs to revisit if it ever
-    fires in practice -- it fires on none of the fixture suite's scenarios.
-    """
-
-
-class PWLEndSoeOutOfRangeError(ValueError):
-    """The pinned `end_soe_target` lies outside `[min_soe_kwh, max_soe_kwh]`,
-    so no terminal row can be built for it.
-
-    A `ValueError` subclass so existing callers and tests that catch
-    `ValueError` are unaffected; the distinct type exists so a caller that
-    legitimately expects this specific condition (the #450 coverage suite hits
-    it on below-min-SOE recovery trajectories) can select for it by type
-    instead of matching a substring of this module's prose error message.
-    """
 
 
 def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):

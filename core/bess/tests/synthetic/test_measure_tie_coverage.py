@@ -7,7 +7,7 @@ from core.bess.dp_battery_algorithm import (
     SOE_STEP_KWH,
     optimize_battery_schedule,
 )
-from core.bess.pwl_window_dp import PWLWindowUnderRefinedError
+from core.bess.exceptions import PWLWindowUnderRefinedError
 from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import _scenario_inputs
 from core.bess.tests.synthetic import measure_tie_coverage

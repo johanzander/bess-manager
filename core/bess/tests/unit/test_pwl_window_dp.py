@@ -7,8 +7,8 @@ from core.bess.dp_battery_algorithm import (
     _discharge_candidates,
 )
 from core.bess.dp_constants import POWER_STEP_KW
+from core.bess.exceptions import PWLWindowUnderRefinedError
 from core.bess.pwl_window_dp import (
-    PWLWindowUnderRefinedError,
     _backward_discharge_levels,
     _end_soe_pin_tolerance,
     _pinned_terminal_row,

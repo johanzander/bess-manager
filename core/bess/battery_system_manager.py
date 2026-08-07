@@ -1467,8 +1467,10 @@ class BatterySystemManager:
             # Today's file is already current — _persist_today_view() (called
             # from _update_energy_data on every tick, including this one) has
             # been keeping it up to date all day. Nothing to save here.
+            # prediction_snapshot_store's file similarly rolls over
+            # automatically at midnight (a new date is a new file) - no
+            # explicit clear() needed here (#409).
             logger.info("Preparing for next day - refreshing predictions")
-            self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 
     def _get_price_data(

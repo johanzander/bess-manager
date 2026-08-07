@@ -1370,6 +1370,60 @@ def _tie_margin(
     return best_value - runner_up
 
 
+def _prefer_load_covering_discharge(
+    candidates: list[tuple[float, float, float, float, float, float]],
+    best_index: int,
+    epsilon: float,
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+    rate_step: float,
+) -> int:
+    """Risk-aware tie-break (#466): if the argmax landed on an idle-like
+    action (|power| <= POWER_TOLERANCE_KW) while the house has forecast net
+    grid import this period, and a discharge candidate that covers no more
+    than that net load sits within `epsilon` of the best value, return that
+    candidate's index instead.
+
+    Rationale (spec 2026-08-07-idle-tie-break-design.md): within `epsilon`
+    -- the value noise the DP's own SOE grid-snapping injects
+    (tie_detection.epsilon_for_period) -- the DP cannot rank the two
+    options, but they are not symmetric in risk. Load-covering discharge
+    fails safe: the inverter tracks *actual* load, absorbing a consumption
+    forecast miss for free. IDLE fails unsafe: discharge is hard-disabled,
+    so the entire miss is imported at the buy price. Deliberate arbitrage
+    holds are untouched by construction -- their margin over discharging
+    exceeds `epsilon`.
+
+    `rate_step` is the discharge percent-grid step (see
+    _discharge_candidates); the load-cover breakpoint snaps to it, so the
+    eligibility cap allows half a step of round-up before a candidate
+    counts as exporting. Among eligible candidates the largest coverage
+    wins -- fuller coverage means less residual import exposed to a miss.
+    """
+    if epsilon <= 0.0:
+        return best_index
+    best_value, best_power = candidates[best_index][0], candidates[best_index][1]
+    if abs(best_power) > POWER_TOLERANCE_KW:
+        return best_index
+    balance_zero_p = (home_consumption - solar_production) / dt
+    if balance_zero_p <= POWER_TOLERANCE_KW:
+        return best_index
+    max_cover_p = balance_zero_p + 0.5 * rate_step + 1e-9
+    swap_index = best_index
+    swap_power = 0.0
+    for index, candidate in enumerate(candidates):
+        discharge_p = -candidate[1]
+        if discharge_p <= POWER_TOLERANCE_KW or discharge_p > max_cover_p:
+            continue
+        if best_value - candidate[0] >= epsilon:
+            continue
+        if discharge_p > swap_power:
+            swap_index = index
+            swap_power = discharge_p
+    return swap_index
+
+
 def _best_action_at_continuous_state(
     soe: float,
     t: int,

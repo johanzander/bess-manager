@@ -669,3 +669,9 @@ further.
 **`.github/workflows/ci.yml`'s E2E job runs all ~15 phases (normal-day, growatt-vpp, 13 wizard scenarios) sequentially in one job.** Each phase is independent (its own docker-compose stack, no shared state), so this is a good candidate for a `strategy: matrix` job split — one parallel job per scenario instead of one long sequential job. Would cut wall-clock from "sum of all phases" to roughly "the slowest single phase." Since the repo is public, GitHub Actions minutes are free/unlimited on standard runners, so this is purely a turnaround-time win, not a cost tradeoff. Worth its own PR — restructuring `ci.yml`'s step list into matrix `include:` entries (scenario, settings file, options file, step label) isn't a small tweak.
 
 ---
+
+## From the power-monitoring sensor-gating fix (non-blocking)
+
+**`core/bess/settings_store.py` has duplicate top-level `VALID_PLATFORMS` and `SHARED_SENSOR_KEYS` definitions.** Both constants are defined twice — once around lines 36-58, again around lines 67-89 — byte-identical in each pair. The second definition silently shadows the first; nothing currently breaks because they're kept in sync by coincidence, but the duplication is dead code and a drift risk if one copy is ever edited without the other. Pre-existing on `main`, unrelated to and not introduced by `docs/superpowers/plans/2026-08-07-power-monitoring-sensor-gating.md`. Fix: delete one copy of each.
+
+---

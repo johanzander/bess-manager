@@ -143,7 +143,7 @@ def test_replay_keeps_decisive_arbitrage_hold():
     assert action == 0.0
 
 
-def _pwl_replay_choice(value_slope: float) -> float:
+def _pwl_replay_choice(value_slope: float, soe: float = 6.0) -> float:
     """Same construction as _replay_choice, against the PWL replay: linear
     continuation row as a two-breakpoint PWL, slope == buy -> exact tie.
 
@@ -157,7 +157,7 @@ def _pwl_replay_choice(value_slope: float) -> float:
     vs = value_slope * (xs - settings.min_soe_kwh)
     _, power_levels = _discretize_state_action_space(settings)
     action, *_rest = _pwl_best_action_at_continuous_state(
-        soe=6.0,
+        soe=soe,
         t=0,
         V_next=(xs, vs),
         power_levels=power_levels,
@@ -181,3 +181,19 @@ def test_pwl_replay_swaps_exact_tie_to_load_cover():
 
 def test_pwl_replay_keeps_decisive_arbitrage_hold():
     assert _pwl_replay_choice(value_slope=2.0) == 0.0
+
+
+def test_pwl_replay_full_swap_at_soe_ceiling():
+    # Winner (IDLE) lands at next_soe == max_soe_kwh -- the domain's upper
+    # breakpoint. _pwl_eval_array extrapolates the true slope below xs[0]
+    # but np.interp clamps flat above xs[-1], so a naive central difference
+    # straddling the ceiling averages in that flat segment and reports half
+    # the true one-sided slope, understating epsilon exactly here (#466
+    # review finding). At slope=1.02 (just above buy=1.0) that halving is
+    # enough to shrink epsilon below the tie margin and only swap a partial
+    # discharge; the correctly one-sided slope keeps epsilon large enough to
+    # swap the full load-covering discharge.
+    settings = _lossless_battery()
+    action = _pwl_replay_choice(value_slope=1.02, soe=settings.max_soe_kwh)
+    assert action < 0, f"expected load-covering discharge, got {action}"
+    assert -action == pytest.approx(1.0, abs=0.05)

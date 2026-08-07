@@ -420,12 +420,27 @@ def _pwl_best_action_at_continuous_state(
     # Risk-aware tie-break (#466), mirroring the grid replay so a re-solved
     # tie window cannot silently reinstate the fail-unsafe IDLE pick. The
     # PWL row has no grid snap; the slope for the shared epsilon definition
-    # is a central finite difference across the winner's next_soe.
+    # is a finite difference across the winner's next_soe. `_pwl_eval_array`
+    # extrapolates the true slope below xs[0] but clamps flat above xs[-1],
+    # so the hi stencil point is clamped into the domain and the divisor
+    # uses the actual (possibly shrunk) span -- this degrades to a genuine
+    # one-sided difference at a full-charge state instead of averaging in a
+    # flat extrapolated segment and understating epsilon there, matching how
+    # the grid counterpart (_local_value_slope) clamps its index rather than
+    # the value.
+    xs_next, _ = V_next
     best_next_soe_candidate = candidates[best_index][2]
-    slope = float(
-        _pwl_eval_array(V_next, np.asarray(best_next_soe_candidate + SOE_STEP_KWH))
-        - _pwl_eval_array(V_next, np.asarray(best_next_soe_candidate - SOE_STEP_KWH))
-    ) / (2 * SOE_STEP_KWH)
+    hi = min(best_next_soe_candidate + SOE_STEP_KWH, float(xs_next[-1]))
+    lo = best_next_soe_candidate - SOE_STEP_KWH
+    if hi == lo:
+        # Degenerate single-breakpoint row (or hi clamped down to lo): no
+        # finite span to estimate a slope from.
+        slope = 0.0
+    else:
+        slope = float(
+            _pwl_eval_array(V_next, np.asarray(hi))
+            - _pwl_eval_array(V_next, np.asarray(lo))
+        ) / (hi - lo)
     best_index = _prefer_load_covering_discharge(
         candidates,
         best_index,

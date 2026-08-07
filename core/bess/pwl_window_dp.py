@@ -22,6 +22,7 @@ from core.bess.dp_battery_algorithm import (
     _compute_reward,
     _compute_reward_grid,
     _discharge_candidates,
+    _discharge_rate_step_kw,
     _effective_ac_cap_kwh,
     _prefer_load_covering_discharge,
     _soe_floor,
@@ -270,6 +271,25 @@ def _pwl_eval_array(
     return result
 
 
+def _pwl_local_value_slope(V_row: tuple[np.ndarray, np.ndarray], soe: float) -> float:
+    """dV/dSoE of a PWL value-function row at a continuous SoE, taken as a
+    central finite difference across `soe` -- the PWL replay's counterpart to
+    the shared epsilon definition's slope input (#466). `_pwl_eval_array`
+    extrapolates the true slope below xs[0] but clamps flat above xs[-1], so
+    the upper stencil point is clamped into the domain and the divisor uses
+    the actual (possibly shrunk) span -- this degrades to a genuine one-sided
+    difference at a full-charge state instead of averaging in a flat
+    extrapolated segment and understating epsilon there, matching how the
+    grid counterpart (`_local_value_slope`) clamps its index rather than the
+    value."""
+    xs, _ = V_row
+    hi = min(soe + SOE_STEP_KWH, float(xs[-1]))
+    lo = soe - SOE_STEP_KWH
+    return float(
+        _pwl_eval_array(V_row, np.asarray(hi)) - _pwl_eval_array(V_row, np.asarray(lo))
+    ) / (hi - lo)
+
+
 def _pwl_best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -418,24 +438,10 @@ def _pwl_best_action_at_continuous_state(
             best_index = index
 
     # Risk-aware tie-break (#466), mirroring the grid replay so a re-solved
-    # tie window cannot silently reinstate the fail-unsafe IDLE pick. The
-    # PWL row has no grid snap; the slope for the shared epsilon definition
-    # is a finite difference across the winner's next_soe. `_pwl_eval_array`
-    # extrapolates the true slope below xs[0] but clamps flat above xs[-1],
-    # so the hi stencil point is clamped into the domain and the divisor
-    # uses the actual (possibly shrunk) span -- this degrades to a genuine
-    # one-sided difference at a full-charge state instead of averaging in a
-    # flat extrapolated segment and understating epsilon there, matching how
-    # the grid counterpart (_local_value_slope) clamps its index rather than
-    # the value.
-    xs_next, _ = V_next
-    best_next_soe_candidate = candidates[best_index][2]
-    hi = min(best_next_soe_candidate + SOE_STEP_KWH, float(xs_next[-1]))
-    lo = best_next_soe_candidate - SOE_STEP_KWH
-    slope = float(
-        _pwl_eval_array(V_next, np.asarray(hi))
-        - _pwl_eval_array(V_next, np.asarray(lo))
-    ) / (hi - lo)
+    # tie window cannot silently reinstate the fail-unsafe IDLE pick. The PWL
+    # row has no grid snap; the slope for the shared epsilon definition comes
+    # from `_pwl_local_value_slope` at the winner's next_soe.
+    slope = _pwl_local_value_slope(V_next, candidates[best_index][2])
     best_index = _prefer_load_covering_discharge(
         candidates,
         best_index,
@@ -443,11 +449,7 @@ def _pwl_best_action_at_continuous_state(
         home_consumption=home,
         solar_production=solar,
         dt=dt,
-        rate_step=(
-            discharge_resolution_kw
-            if discharge_resolution_kw is not None
-            else battery_settings.max_discharge_power_kw / 100
-        ),
+        rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
 
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[

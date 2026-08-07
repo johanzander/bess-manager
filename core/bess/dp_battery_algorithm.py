@@ -1175,6 +1175,20 @@ def _local_value_slope(
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
 
 
+def _discharge_rate_step_kw(
+    discharge_resolution_kw: float | None, battery_settings: BatterySettings
+) -> float:
+    """Discharge percent-grid step (kW): the hardware executes discharge as an
+    integer percent of max_discharge_power_kw unless a finer resolution is
+    configured -- single source for _discharge_candidates and both #466
+    tie-break call sites, which must stay on the same lattice."""
+    return (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+
+
 def _discharge_candidates(
     soe: float,
     battery_settings: BatterySettings,
@@ -1227,11 +1241,7 @@ def _discharge_candidates(
     if p_max <= POWER_TOLERANCE_KW:
         return []
 
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     if min_pct > max_pct:
@@ -1618,11 +1628,7 @@ def _best_action_at_continuous_state(
         home_consumption=home,
         solar_production=solar,
         dt=dt,
-        rate_step=(
-            discharge_resolution_kw
-            if discharge_resolution_kw is not None
-            else battery_settings.max_discharge_power_kw / 100
-        ),
+        rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
 
     # #466 note: best_index is POST-swap here, but tie_margin and
@@ -2317,6 +2323,15 @@ def optimize_battery_schedule(
         ).economic_summary.battery_solar_cost
 
     if guardrail_idle_cost < guardrail_optimized_cost:
+        logger.info(
+            "Idle-schedule guardrail fired: idle cost %.6f < optimized cost %.6f "
+            "(delta %.6f %s) -- returning the all-IDLE schedule instead of the "
+            "DP's plan.",
+            guardrail_idle_cost,
+            guardrail_optimized_cost,
+            guardrail_optimized_cost - guardrail_idle_cost,
+            currency,
+        )
         return idle_schedule
 
     return OptimizationResult(

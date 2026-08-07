@@ -10,9 +10,14 @@ from core.bess.dp_battery_algorithm import (
     _best_action_at_continuous_state,
     _discretize_state_action_space,
     _prefer_load_covering_discharge,
+    optimize_battery_schedule,
 )
-from core.bess.pwl_window_dp import _pwl_best_action_at_continuous_state
+from core.bess.pwl_window_dp import (
+    _pwl_best_action_at_continuous_state,
+    _pwl_local_value_slope,
+)
 from core.bess.settings import BatterySettings
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
 # Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
 IDLE = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
@@ -269,3 +274,52 @@ def test_pwl_replay_full_swap_at_soe_ceiling():
     action = _pwl_replay_choice(value_slope=1.02, soe=settings.max_soe_kwh)
     assert action < 0, f"expected load-covering discharge, got {action}"
     assert -action == pytest.approx(1.0, abs=0.05)
+
+
+def test_pwl_local_value_slope_matches_line_slope_at_interior_point():
+    xs = np.array([0.0, 10.0])
+    vs = np.array([0.0, 20.0])  # slope 2.0
+    assert _pwl_local_value_slope((xs, vs), soe=5.0) == pytest.approx(2.0)
+
+
+def test_pwl_local_value_slope_is_one_sided_at_last_breakpoint():
+    # soe == xs[-1]: a naive central difference straddling the ceiling would
+    # average in the flat extrapolation above xs[-1] and report half the
+    # true slope (the #466 review finding pinned by
+    # test_pwl_replay_full_swap_at_soe_ceiling above). The clamped-span
+    # divisor keeps this exact instead.
+    xs = np.array([0.0, 10.0])
+    vs = np.array([0.0, 20.0])  # slope 2.0
+    assert _pwl_local_value_slope((xs, vs), soe=10.0) == pytest.approx(2.0)
+
+
+def test_466_tie_break_does_not_trip_idle_guardrail():
+    """The idle-schedule guardrail (dp_battery_algorithm.py, ~2320) silently
+    returns the all-IDLE schedule if it ever costs strictly less than the
+    DP's own plan -- a fail-safe against SoE-grid discretization residual.
+    #466's tie-break trades up to epsilon/period to prefer a load-covering
+    discharge over IDLE, which narrows (in theory) the margin the guardrail
+    compares against. No known fixture trips it (#466 review: smallest
+    observed margin 0.119 SEK vs worst forfeiture 0.032 SEK), but the
+    fixture that exercises the tie-break most directly is #466's own
+    regression scenario -- pin that it still doesn't trip here."""
+    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
+        build_scenario_inputs("regression_2026_08_06_466")
+    )
+    result = optimize_battery_schedule(
+        buy_price=buy_prices,
+        sell_price=sell_prices,
+        home_consumption=scenario["home_consumption"],
+        solar_production=scenario["solar_production"],
+        initial_soe=scenario["battery"]["initial_soe"],
+        initial_cost_basis=scenario["battery"]["initial_cost_basis"],
+        battery_settings=battery_settings,
+        period_duration_hours=period_duration_hours,
+    )
+
+    actions = [pd.decision.battery_action for pd in result.period_data]
+    assert any(
+        abs(a) > 1e-9 for a in actions
+    ), "guardrail appears to have fired -- schedule is all-IDLE"
+    assert result.period_data[32].decision.strategic_intent == "LOAD_SUPPORT"
+    assert result.period_data[45].decision.strategic_intent == "LOAD_SUPPORT"

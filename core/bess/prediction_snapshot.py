@@ -2,12 +2,15 @@
 
 Stores snapshots of predictions and actuals throughout the day for deviation
 analysis. Leverages DailyView for consistent data representation.
-Persists to disk so snapshots survive restarts within the same day.
+Persists to disk in the shared per-day file owned by DailyViewStore, so
+snapshots survive restarts and are kept per calendar day forever (same
+retention as DailyViewStore) until a user clears the history. Only the
+in-memory snapshot list is per-day: it rolls over on date change.
 """
 
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from core.bess import time_utils
@@ -15,7 +18,7 @@ from core.bess.daily_view_builder import (
     DailyView,
     _daily_view_from_dict,
 )
-from core.bess.daily_view_store import _load_container, _write_container
+from core.bess.daily_view_store import container_transaction, read_container
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +57,44 @@ class PredictionSnapshotStore:
 
     Stores snapshots captured during each optimization to enable comparison
     of predicted vs actual outcomes. Persisted to disk so snapshots survive
-    add-on restarts. Cleared at midnight like HistoricalDataStore.
+    add-on restarts. The in-memory list holds a single calendar day and rolls
+    over automatically on date change — the store is long-lived (constructed
+    once per process), so it re-checks the current date on every public access
+    rather than relying on an external clear() at midnight.
     """
 
     def __init__(self, persist_dir: Path = PERSIST_DIR):
         """Initialize the prediction snapshot store and load any persisted data."""
         self._snapshots: list[PredictionSnapshot] = []
         self._persist_dir = persist_dir
+        self._current_date: date = time_utils.today()
         self._load_from_disk()
         logger.debug("Initialized PredictionSnapshotStore")
 
     def _today_path(self) -> Path:
-        return self._persist_dir / f"{time_utils.today().isoformat()}.json"
+        return self._persist_dir / f"{self._current_date.isoformat()}.json"
+
+    def _ensure_current_day(self) -> None:
+        """Roll the in-memory snapshot list over when the calendar day changes.
+
+        This store outlives any single day (it is created once at process
+        start), so every public read/write re-anchors it to today before
+        touching self._snapshots.
+        """
+        today = time_utils.today()
+        if today == self._current_date:
+            return
+
+        logger.info(
+            "Prediction snapshot day rollover: %s -> %s (discarding %d in-memory snapshots)",
+            self._current_date,
+            today,
+            len(self._snapshots),
+        )
+        self._current_date = today
+        # A new day's file normally has no snapshots yet; reloading also
+        # recovers any written earlier today by a previous process.
+        self._load_from_disk()
 
     def store_snapshot(
         self,
@@ -87,6 +116,8 @@ class PredictionSnapshotStore:
         Returns:
             PredictionSnapshot: The stored snapshot object
         """
+        self._ensure_current_day()
+
         snapshot = PredictionSnapshot(
             snapshot_timestamp=snapshot_timestamp,
             optimization_period=optimization_period,
@@ -114,6 +145,7 @@ class PredictionSnapshotStore:
         Returns:
             list[PredictionSnapshot]: All snapshots, chronologically ordered
         """
+        self._ensure_current_day()
         return sorted(self._snapshots, key=lambda s: s.snapshot_timestamp)
 
     def get_snapshot_at_period(self, period: int) -> PredictionSnapshot | None:
@@ -125,6 +157,7 @@ class PredictionSnapshotStore:
         Returns:
             PredictionSnapshot | None: Closest snapshot, or None if no snapshots
         """
+        self._ensure_current_day()
         if not self._snapshots:
             return None
 
@@ -137,10 +170,13 @@ class PredictionSnapshotStore:
         return closest_snapshot
 
     def clear(self) -> None:
-        """Clear all stored snapshots.
+        """Clear all stored snapshots, in memory and in today's file.
 
-        Called at midnight transition to prepare for next day.
+        Optional manual reset (e.g. a user-triggered history wipe). Day
+        rollover no longer depends on this: the store discards the previous
+        day's in-memory snapshots automatically when the date changes.
         """
+        self._ensure_current_day()
         self._snapshots.clear()
         self._save_to_disk()
         logger.info("Cleared all prediction snapshots")
@@ -151,15 +187,15 @@ class PredictionSnapshotStore:
         Returns:
             int: Number of snapshots stored
         """
+        self._ensure_current_day()
         return len(self._snapshots)
 
     def _save_to_disk(self) -> None:
         """Persist snapshots to today's shared per-day file."""
         path = self._today_path()
         try:
-            container = _load_container(path)
-            container["snapshots"] = [asdict(s) for s in self._snapshots]
-            _write_container(path, container)
+            with container_transaction(path) as container:
+                container["snapshots"] = [asdict(s) for s in self._snapshots]
             logger.debug(
                 "Persisted %d prediction snapshots to %s",
                 len(self._snapshots),
@@ -171,7 +207,7 @@ class PredictionSnapshotStore:
     def _load_from_disk(self) -> None:
         """Load today's persisted snapshots from the shared per-day file."""
         path = self._today_path()
-        container = _load_container(path)
+        container = read_container(path)
         raw_snapshots = container.get("snapshots", [])
         try:
             self._snapshots = [_snapshot_from_dict(s) for s in raw_snapshots]

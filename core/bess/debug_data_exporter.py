@@ -283,6 +283,16 @@ def _scrub_entity_registry_entry(
 # Patterns that identify actionable log lines worth including in compact exports.
 # These cover: errors/warnings, hardware commands, key decisions, feature-specific
 # events (discharge inhibit, charge power), and intent transitions.
+#
+# All six strategic intents (not just the three battery-active ones) must be
+# listed here: each per-period box-table row in dp_battery_algorithm.py's
+# schedule log embeds its own Intent column, so a row only survives
+# compaction if its intent string matches this pattern. Dropping
+# SOLAR_EXPORT/SOLAR_STORAGE/IDLE silently discarded every earlier-run
+# schedule row for periods where the DP wasn't actively charging/discharging
+# -- typically all of a day's solar hours -- which broke bess-analyst's
+# documented cross-run reconciliation (extract_decision_evidence.py,
+# bess-analyst.md) for exactly those periods. Found investigating #466.
 _LOG_KEY_PATTERNS = re.compile(
     r"WARNING|ERROR|CRITICAL"
     r"|HARDWARE:"
@@ -290,7 +300,7 @@ _LOG_KEY_PATTERNS = re.compile(
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"
-    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING"
+    r"|LOAD_SUPPORT|BATTERY_EXPORT|GRID_CHARGING|SOLAR_EXPORT|SOLAR_STORAGE|IDLE"
     r"|TOU hardware|TOU conversion|schedule created"
     r"|Setting.*power rate|power rate.*set",
     re.IGNORECASE,
@@ -304,6 +314,24 @@ _COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent con
 # no way to show what happened yesterday evening unless it also reads from
 # DailyViewStore, which is never cleared.
 _PREVIOUS_DAYS_TO_INCLUDE = 2
+
+
+def _periods_signature(predicted_periods: list) -> dict[int, tuple]:
+    """Map period -> (intent, rounded battery_action) for change detection.
+
+    Two snapshots covering the same period "agree" if the DP's decision for
+    it -- what it planned to do, not the exact float noise of the
+    surrounding forecast -- is the same. Rounding to 3dp (gram-scale on a
+    kWh quantity) avoids treating floating-point summation jitter as a real
+    schedule change.
+    """
+    return {
+        p.period: (
+            p.decision.strategic_intent,
+            round(p.decision.battery_action or 0.0, 3),
+        )
+        for p in predicted_periods
+    }
 
 
 @dataclass
@@ -925,12 +953,42 @@ class DebugDataAggregator:
         """Serialize prediction snapshots from today.
 
         Args:
-            compact: If True, return ALL snapshots as 5-field summary rows
-                (timestamp, period, predicted_savings, actual_count, predicted_count).
-                This enables the full-day prediction evolution table for use case 3
-                (morning prediction vs evening actual analysis) at ~6 KB instead
-                of 166 KB for the complete JSON.
-                If False, return full snapshot data for all snapshots.
+            compact: If True, return one entry per snapshot with the 5
+                summary fields (timestamp, period, predicted_savings,
+                actual_count, predicted_count) for the full-day evolution
+                table, PLUS that run's own forward-looking forecast
+                (`predicted_periods`: every period with data_source ==
+                "predicted", i.e. every period NOT already realized at that
+                run's own decision time -- exact buy/sell/solar/consumption/
+                SOE/shadow_price/intent, not the rounded box-table version).
+                Already-realized periods are deliberately excluded: they're
+                the same data every earlier snapshot that day would also
+                carry, and are already exported in full once, at exact
+                precision, in Historical Sensor Data -- repeating them per
+                snapshot would be pure duplication for no analytical value,
+                since a past period's *actual* outcome doesn't change
+                between snapshots (only the forecast for what's still ahead
+                does). This is what makes two runs' schedules actually
+                diffable: `optimize_battery_schedule()`'s own forward
+                horizon input, not a log line.
+
+                `predicted_periods` is further omitted (empty list) whenever
+                it's unchanged from the immediately preceding snapshot for
+                every period they both cover (same intent + battery_action,
+                see `_periods_signature`) -- most 15-min optimization cycles
+                genuinely change nothing (the real log shows this directly:
+                "DECISION: Keep current schedule" dominates; "Apply schedule"
+                is the rare event). Naively including every snapshot's full
+                remaining-day forecast measured ~6 MB/day; deduping against
+                only-if-changed bounds it to roughly the number of times the
+                plan actually moved, while still capturing every real change
+                -- including the flip investigated in #466 -- at full
+                fidelity, unlike a fixed lookback/lookahead window (which
+                would have silently excluded that exact flip). The evolution
+                table's summary fields are never deduped -- every run still
+                gets its own row there regardless.
+                If False, return full snapshot data (all periods, actual and
+                predicted) for all snapshots, no deduplication.
 
         Returns:
             List of snapshot dictionaries
@@ -941,16 +999,39 @@ class DebugDataAggregator:
                 return []
             if not compact:
                 return [asdict(snapshot) for snapshot in snapshots]
-            # Compact: all snapshots as summary rows for the evolution table.
+            # Compact: summary fields (evolution table) + that run's own
+            # forward-looking forecast periods (cross-run diffing), deduped
+            # against the previous snapshot -- see docstring.
             # Use grid_only_cost - hourly_cost to match the dashboard total
             # savings definition (includes both solar and battery benefit).
             result = []
+            prev_signature: dict[int, tuple] = {}
             for snapshot in snapshots:
                 total_savings = sum(
                     p.economic.grid_only_cost - p.economic.hourly_cost
                     for p in snapshot.daily_view.periods
                     if p.economic is not None
                 )
+                predicted = [
+                    p
+                    for p in snapshot.daily_view.periods
+                    if p.data_source == "predicted"
+                ]
+                signature = _periods_signature(predicted)
+                # Compare only the periods both snapshots cover -- the window
+                # rolls forward each cycle, so a brand-new period at the far
+                # end (never seen by prev_signature) is not a "change" to an
+                # existing decision, it's just newly visible. Excluding it
+                # from the comparison (rather than treating its absence from
+                # prev_signature as a mismatch) is what makes dedup actually
+                # fire on the common case of "nothing changed, window just
+                # advanced by one period."
+                overlap = signature.keys() & prev_signature.keys()
+                unchanged = bool(overlap) and all(
+                    prev_signature[p] == signature[p] for p in overlap
+                )
+                predicted_periods = [] if unchanged else [asdict(p) for p in predicted]
+                prev_signature = signature
                 result.append(
                     {
                         "snapshot_timestamp": snapshot.snapshot_timestamp.isoformat(),
@@ -958,6 +1039,8 @@ class DebugDataAggregator:
                         "total_savings": total_savings,
                         "actual_count": snapshot.daily_view.actual_count,
                         "predicted_count": snapshot.daily_view.predicted_count,
+                        "predicted_periods": predicted_periods,
+                        "predicted_periods_unchanged": bool(unchanged),
                     }
                 )
             return result

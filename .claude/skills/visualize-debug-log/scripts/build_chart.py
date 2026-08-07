@@ -166,6 +166,81 @@ def compute_decision_view(r: dict, cycle_cost: float) -> dict:
     }
 
 
+def _row_dict(
+    period: int,
+    buy: float,
+    sell: float,
+    intent: str,
+    soe_start: float,
+    soe_end: float,
+    solar: float,
+    load: float,
+    grid_import: float,
+    grid_export: float,
+    batt_charged: float,
+    batt_discharged: float,
+    solar_to_batt: float,
+    grid_to_batt: float,
+    batt_to_home: float,
+    batt_to_grid: float,
+    solar_to_home: float,
+    solar_to_grid: float,
+    grid_to_home: float,
+    source: str,
+    dec: dict,
+    econ: dict,
+) -> dict:
+    """Shared row shape for both actual and forecast periods.
+
+    Historical and forecast periods get their flow/intent values from
+    different places (recomputed EnergyData vs. the DP's own forecast dict —
+    see build_rows), but the resulting row dict, and the decision/economic
+    fields pulled off `dec`/`econ`, are identical either way.
+    """
+    return {
+        "period": period,
+        "time": _fmt_time(period),
+        "buy": buy,
+        "sell": sell,
+        "intent": intent,
+        "soe_start": soe_start,
+        "soe_end": soe_end,
+        "solar": solar,
+        "load": load,
+        "grid_import": grid_import,
+        "grid_export": grid_export,
+        "batt_charged": batt_charged,
+        "batt_discharged": batt_discharged,
+        "solar_to_batt": solar_to_batt,
+        "grid_to_batt": grid_to_batt,
+        "batt_to_home": batt_to_home,
+        "batt_to_grid": batt_to_grid,
+        "solar_to_home": solar_to_home,
+        "solar_to_grid": solar_to_grid,
+        "grid_to_home": grid_to_home,
+        "source": source,
+        "shadow_price": dec.get("shadow_price", 0.0),
+        "cost_basis": dec.get("cost_basis", 0.0),
+        "future_value": dec.get("future_value", 0.0),
+        "hourly_cost": econ.get("hourly_cost", 0.0),
+        "grid_only_cost": econ.get("grid_only_cost", 0.0),
+        "hourly_savings": econ.get("hourly_savings", 0.0),
+        # Same formula backing the live dashboard's "Net Grid Cost" tile
+        # (EconomicData.grid_cost, core/bess/models.py:232) -- wear-free,
+        # import_cost - export_revenue. Net savings (grid_only_cost -
+        # grid_cost) matches the dashboard's "Net Savings" exactly
+        # (backend/api_dataclasses.py's netSavings).
+        "grid_cost": econ.get("grid_cost", 0.0),
+        # The DP's own two reward terms (core/bess/dp_battery_algorithm.py
+        # _compute_reward: import_cost, export_revenue, battery_wear_cost),
+        # so the chart can show reward = export_revenue - import_cost -
+        # battery_wear_cost as its own breakdown, not just the result.
+        "import_cost": econ.get("import_cost", 0.0),
+        "export_revenue": econ.get("export_revenue", 0.0),
+        "battery_wear_cost": econ.get("battery_cycle_cost", 0.0),
+    }
+
+
 def build_rows(parsed: dict) -> list[dict]:
     rows_by_period: dict[int, dict] = {}
 
@@ -187,48 +262,30 @@ def build_rows(parsed: dict) -> list[dict]:
         )
         power = energy.battery_charged - energy.battery_discharged
         intent = infer_intent_from_flows(power, energy)
-        rows_by_period[h["period"]] = {
-            "period": h["period"],
-            "time": _fmt_time(h["period"]),
-            "buy": econ.get("buy_price", 0.0),
-            "sell": econ.get("sell_price", 0.0),
-            "intent": intent,
-            "soe_start": energy.battery_soe_start,
-            "soe_end": energy.battery_soe_end,
-            "solar": energy.solar_production,
-            "load": energy.home_consumption,
-            "grid_import": energy.grid_imported,
-            "grid_export": energy.grid_exported,
-            "batt_charged": energy.battery_charged,
-            "batt_discharged": energy.battery_discharged,
-            "solar_to_batt": _clean_flow(energy.solar_to_battery),
-            "grid_to_batt": _clean_flow(energy.grid_to_battery),
-            "batt_to_home": _clean_flow(energy.battery_to_home),
-            "batt_to_grid": _clean_flow(energy.battery_to_grid),
-            "solar_to_home": _clean_flow(energy.solar_to_home),
-            "solar_to_grid": _clean_flow(energy.solar_to_grid),
-            "grid_to_home": _clean_flow(energy.grid_to_home),
-            "source": "actual",
-            "shadow_price": dec.get("shadow_price", 0.0),
-            "cost_basis": dec.get("cost_basis", 0.0),
-            "future_value": dec.get("future_value", 0.0),
-            "hourly_cost": econ.get("hourly_cost", 0.0),
-            "grid_only_cost": econ.get("grid_only_cost", 0.0),
-            "hourly_savings": econ.get("hourly_savings", 0.0),
-            # Same formula backing the live dashboard's "Net Grid Cost" tile
-            # (EconomicData.grid_cost, core/bess/models.py:232) -- wear-free,
-            # import_cost - export_revenue. Net savings (grid_only_cost -
-            # grid_cost) matches the dashboard's "Net Savings" exactly
-            # (backend/api_dataclasses.py's netSavings).
-            "grid_cost": econ.get("grid_cost", 0.0),
-            # The DP's own two reward terms (core/bess/dp_battery_algorithm.py
-            # _compute_reward: import_cost, export_revenue, battery_wear_cost),
-            # so the chart can show reward = export_revenue - import_cost -
-            # battery_wear_cost as its own breakdown, not just the result.
-            "import_cost": econ.get("import_cost", 0.0),
-            "export_revenue": econ.get("export_revenue", 0.0),
-            "battery_wear_cost": econ.get("battery_cycle_cost", 0.0),
-        }
+        rows_by_period[h["period"]] = _row_dict(
+            period=h["period"],
+            buy=econ.get("buy_price", 0.0),
+            sell=econ.get("sell_price", 0.0),
+            intent=intent,
+            soe_start=energy.battery_soe_start,
+            soe_end=energy.battery_soe_end,
+            solar=energy.solar_production,
+            load=energy.home_consumption,
+            grid_import=energy.grid_imported,
+            grid_export=energy.grid_exported,
+            batt_charged=energy.battery_charged,
+            batt_discharged=energy.battery_discharged,
+            solar_to_batt=_clean_flow(energy.solar_to_battery),
+            grid_to_batt=_clean_flow(energy.grid_to_battery),
+            batt_to_home=_clean_flow(energy.battery_to_home),
+            batt_to_grid=_clean_flow(energy.battery_to_grid),
+            solar_to_home=_clean_flow(energy.solar_to_home),
+            solar_to_grid=_clean_flow(energy.solar_to_grid),
+            grid_to_home=_clean_flow(energy.grid_to_home),
+            source="actual",
+            dec=dec,
+            econ=econ,
+        )
 
     for pd_ in parsed["forecast"]:
         p = pd_["period"]
@@ -237,48 +294,30 @@ def build_rows(parsed: dict) -> list[dict]:
         e = pd_["energy"]
         econ = pd_["economic"]
         dec = pd_["decision"]
-        rows_by_period[p] = {
-            "period": p,
-            "time": _fmt_time(p),
-            "buy": econ.get("buy_price", 0.0),
-            "sell": econ.get("sell_price", 0.0),
-            "intent": dec.get("strategic_intent", "IDLE"),
-            "soe_start": e["battery_soe_start"],
-            "soe_end": e["battery_soe_end"],
-            "solar": e["solar_production"],
-            "load": e["home_consumption"],
-            "grid_import": e["grid_imported"],
-            "grid_export": e["grid_exported"],
-            "batt_charged": e["battery_charged"],
-            "batt_discharged": e["battery_discharged"],
-            "solar_to_batt": _clean_flow(e["solar_to_battery"]),
-            "grid_to_batt": _clean_flow(e["grid_to_battery"]),
-            "batt_to_home": _clean_flow(e["battery_to_home"]),
-            "batt_to_grid": _clean_flow(e["battery_to_grid"]),
-            "solar_to_home": _clean_flow(e["solar_to_home"]),
-            "solar_to_grid": _clean_flow(e["solar_to_grid"]),
-            "grid_to_home": _clean_flow(e["grid_to_home"]),
-            "source": "forecast",
-            "shadow_price": dec.get("shadow_price", 0.0),
-            "cost_basis": dec.get("cost_basis", 0.0),
-            "future_value": dec.get("future_value", 0.0),
-            "hourly_cost": econ.get("hourly_cost", 0.0),
-            "grid_only_cost": econ.get("grid_only_cost", 0.0),
-            "hourly_savings": econ.get("hourly_savings", 0.0),
-            # Same formula backing the live dashboard's "Net Grid Cost" tile
-            # (EconomicData.grid_cost, core/bess/models.py:232) -- wear-free,
-            # import_cost - export_revenue. Net savings (grid_only_cost -
-            # grid_cost) matches the dashboard's "Net Savings" exactly
-            # (backend/api_dataclasses.py's netSavings).
-            "grid_cost": econ.get("grid_cost", 0.0),
-            # The DP's own two reward terms (core/bess/dp_battery_algorithm.py
-            # _compute_reward: import_cost, export_revenue, battery_wear_cost),
-            # so the chart can show reward = export_revenue - import_cost -
-            # battery_wear_cost as its own breakdown, not just the result.
-            "import_cost": econ.get("import_cost", 0.0),
-            "export_revenue": econ.get("export_revenue", 0.0),
-            "battery_wear_cost": econ.get("battery_cycle_cost", 0.0),
-        }
+        rows_by_period[p] = _row_dict(
+            period=p,
+            buy=econ.get("buy_price", 0.0),
+            sell=econ.get("sell_price", 0.0),
+            intent=dec.get("strategic_intent", "IDLE"),
+            soe_start=e["battery_soe_start"],
+            soe_end=e["battery_soe_end"],
+            solar=e["solar_production"],
+            load=e["home_consumption"],
+            grid_import=e["grid_imported"],
+            grid_export=e["grid_exported"],
+            batt_charged=e["battery_charged"],
+            batt_discharged=e["battery_discharged"],
+            solar_to_batt=_clean_flow(e["solar_to_battery"]),
+            grid_to_batt=_clean_flow(e["grid_to_battery"]),
+            batt_to_home=_clean_flow(e["battery_to_home"]),
+            batt_to_grid=_clean_flow(e["battery_to_grid"]),
+            solar_to_home=_clean_flow(e["solar_to_home"]),
+            solar_to_grid=_clean_flow(e["solar_to_grid"]),
+            grid_to_home=_clean_flow(e["grid_to_home"]),
+            source="forecast",
+            dec=dec,
+            econ=econ,
+        )
 
     rows = [rows_by_period[p] for p in sorted(rows_by_period)]
     cycle_cost = parsed["battery_settings"].get("cycle_cost_per_kwh", 0.0)
@@ -291,6 +330,14 @@ def build_summary(rows: list[dict], battery_settings: dict) -> dict:
     return {
         "cycle_cost": battery_settings.get("cycle_cost_per_kwh", 0.0),
         "capacity": battery_settings.get("total_capacity", 0.0),
+        # Reserve floor / usable ceiling the DP actually plans within (BatterySettings.
+        # min_soe_kwh/max_soe_kwh, core/bess/settings.py) -- lets the SOE panel show
+        # why a period went IDLE (battery pinned at a limit) instead of leaving it a
+        # mystery.
+        "soe_min": battery_settings.get("min_soe_kwh", 0.0),
+        "soe_max": battery_settings.get(
+            "max_soe_kwh", battery_settings.get("total_capacity", 0.0)
+        ),
         # actual_cost/savings use grid_cost (wear-free import_cost -
         # export_revenue), the same basis as the dashboard's "Net Grid Cost"
         # tile and APISavingsBucket.netSavings (backend/api_dataclasses.py:
@@ -307,11 +354,46 @@ def build_summary(rows: list[dict], battery_settings: dict) -> dict:
     }
 
 
-def render(rows: list[dict], summary: dict, title: str, subtitle: str) -> str:
+def render_analysis(cards: list[dict]) -> str:
+    """Render optional issue-specific analysis cards below the chart.
+
+    Each card is {"heading": str, "pill": str|None, "paragraphs": [str, ...]}.
+    Paragraph strings are trusted HTML (may contain <b>/<code>/etc.) written
+    by whoever is analyzing the bundle -- same trust level as every other
+    value this script already interpolates into the template, not user
+    input from an untrusted source. This section answers a *specific*
+    question about *this* bundle; it is never inferred from the data here,
+    only supplied by the caller (see SKILL.md: verify any decision-mechanism
+    claim via the bess-analyst sub-agent against the real DP code before
+    passing it in -- a plausible-sounding but unverified explanation is
+    worse than no explanation).
+    """
+    if not cards:
+        return ""
+    out = []
+    for card in cards:
+        paragraphs = list(card.get("paragraphs", []))
+        if card.get("pill") and paragraphs:
+            paragraphs[-1] += f' <span class="status-pill">{card["pill"]}</span>'
+        paras = "\n".join(f"<p>{p}</p>" for p in paragraphs)
+        out.append(
+            f'<h2 class="section">{card["heading"]}</h2>\n<div class="finding-card">\n{paras}\n</div>'
+        )
+    return "\n\n".join(out)
+
+
+def render(
+    rows: list[dict],
+    summary: dict,
+    title: str,
+    subtitle: str,
+    analysis_cards: list[dict] | None = None,
+) -> str:
     head = (SCRIPT_DIR / "template_head.html").read_text()
     tail = (SCRIPT_DIR / "template_tail.js").read_text()
 
     head = head.replace("{{TITLE}}", title).replace("{{SUBTITLE}}", subtitle)
+    head = head.replace("{{ANALYSIS}}", render_analysis(analysis_cards or []))
     rows_json = json.dumps(rows, separators=(",", ":"))
     summary_json = json.dumps(summary, separators=(",", ":"))
 
@@ -329,6 +411,19 @@ def main() -> None:
     ap.add_argument("-o", "--output", required=True, help="Output HTML path")
     ap.add_argument(
         "--title", default=None, help="Chart title (default: derived from bundle)"
+    )
+    ap.add_argument(
+        "--analysis",
+        default=None,
+        help=(
+            "Path to a JSON file of issue-specific analysis cards to render below the "
+            'chart: a list of {"heading": str, "pill": str|None, "paragraphs": [str, ...]}. '
+            "Optional -- omit for a plain chart. Each paragraph is trusted HTML. Verify any "
+            "claim about *why* the DP made a decision via the bess-analyst sub-agent against "
+            "the real dp_battery_algorithm.py logic before writing it here -- a plausible but "
+            "unverified mechanism (e.g. an invented minimum-deficit threshold) is worse than no "
+            "explanation."
+        ),
     )
     args = ap.parse_args()
 
@@ -350,7 +445,11 @@ def main() -> None:
         f"stored values); the remainder is the latest optimization run's own forecast."
     )
 
-    html = render(rows, summary, title, subtitle)
+    analysis_cards = (
+        json.loads(Path(args.analysis).read_text()) if args.analysis else None
+    )
+
+    html = render(rows, summary, title, subtitle, analysis_cards)
     Path(args.output).write_text(html)
     print(
         f"Wrote {args.output} ({len(rows)} periods, {summary['n_actual']} actual / {summary['n_forecast']} forecast)"

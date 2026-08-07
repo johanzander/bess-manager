@@ -47,6 +47,27 @@
     "unit_of_measurement": "W"
    }
   },
+  "sensor.main_breaker_current_l1": {
+   "state": "8.5",
+   "attributes": {
+    "unit_of_measurement": "A",
+    "device_class": "current"
+   }
+  },
+  "sensor.main_breaker_current_l2": {
+   "state": "4.2",
+   "attributes": {
+    "unit_of_measurement": "A",
+    "device_class": "current"
+   }
+  },
+  "sensor.main_breaker_current_l3": {
+   "state": "6.1",
+   "attributes": {
+    "unit_of_measurement": "A",
+    "device_class": "current"
+   }
+  },
   "number.abc1234567_battery_charge_power_limit": {
    "state": "100",
    "attributes": {

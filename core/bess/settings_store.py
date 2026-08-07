@@ -121,6 +121,39 @@ PLATFORM_GRID_POWER_POLARITY = {
 }
 
 
+def flatten_sensors(sensors: dict) -> dict:
+    """Flatten a per-platform sensors dict into a flat sensor_key -> entity_id dict.
+
+    Handles both storage shapes:
+    - Legacy flat format (no "platform" key): returned as-is (string values only).
+    - Per-platform format: {"platform": <id>, "shared": {...}, "<platform>": {...}}
+      -> shared sensors merged with the active platform's sensors (platform wins
+      on key collision).
+
+    Shared module-level logic so both ``SettingsStore.get_active_sensors`` and
+    any caller validating a not-yet-persisted payload (e.g. the setup wizard's
+    ``sensors`` field, which is always in the per-platform shape) can flatten
+    consistently instead of assuming the flat shape.
+    """
+    if not isinstance(sensors, dict):
+        return {}
+
+    # Legacy flat format (no "platform" key) — return as-is
+    if "platform" not in sensors:
+        return {k: v for k, v in sensors.items() if isinstance(v, str)}
+
+    platform = sensors.get("platform", "")
+    platform_sensors = sensors.get(platform, {})
+    shared_sensors = sensors.get("shared", {})
+
+    result = {}
+    if isinstance(shared_sensors, dict):
+        result.update(shared_sensors)
+    if isinstance(platform_sensors, dict):
+        result.update(platform_sensors)
+    return result
+
+
 class SettingsStore:
     """Read/write /data/bess_settings.json with atomic writes.
 
@@ -236,24 +269,7 @@ class SettingsStore:
         dict of sensor_key → entity_id without needing to know about the
         per-platform storage structure.
         """
-        sensors = self.data.get("sensors", {})
-        if not isinstance(sensors, dict):
-            return {}
-
-        # Legacy flat format (no "platform" key) — return as-is
-        if "platform" not in sensors:
-            return {k: v for k, v in sensors.items() if isinstance(v, str)}
-
-        platform = sensors.get("platform", "")
-        platform_sensors = sensors.get(platform, {})
-        shared_sensors = sensors.get("shared", {})
-
-        result = {}
-        if isinstance(shared_sensors, dict):
-            result.update(shared_sensors)
-        if isinstance(platform_sensors, dict):
-            result.update(platform_sensors)
-        return result
+        return flatten_sensors(self.data.get("sensors", {}))
 
     def apply_discovered(
         self,

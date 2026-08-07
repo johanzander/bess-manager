@@ -652,6 +652,62 @@ class TestPatchSettingsSensorValidation:
 
 
 # ===========================================================================
+# PATCH /api/settings — power monitoring sensor gating
+# ===========================================================================
+
+
+class TestPatchSettingsPowerMonitoringValidation:
+    """Enabling power monitoring via PATCH must be rejected server-side when
+    the phase-current sensors its phase_count requires aren't mapped — the
+    same gap that let power_monitoring_enabled=True crash-loop in production
+    (2026-08-07 debug bundle) because nothing validated it server-side."""
+
+    def test_rejects_power_monitoring_without_phase_sensors(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 3}},
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert "current_l1" in detail or "phase" in detail.lower()
+        # The invalid combination must never be persisted, even though the
+        # request was rejected — a prior bug wrote power_monitoring_enabled
+        # to disk BEFORE running this validation, so the 422 error message
+        # was returned but the crash-loop-inducing config was still saved.
+        assert not mock_controller.settings_store.data["home"].get(
+            "power_monitoring_enabled"
+        )
+
+    def test_rejects_single_phase_without_l1_sensor(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 1}},
+        )
+        assert response.status_code == 422
+
+    def test_allows_power_monitoring_when_phase_sensors_mapped(self, mock_controller):
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "current_l1": "sensor.current_l1",
+            "current_l2": "sensor.current_l2",
+            "current_l3": "sensor.current_l3",
+            "battery_charging_power_rate": "sensor.charge_rate",
+        }
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 3}},
+        )
+        assert response.status_code == 200
+
+    def test_allows_disabling_power_monitoring_without_sensors(self, mock_controller):
+        """Turning power monitoring off must never be blocked by this check."""
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": False}},
+        )
+        assert response.status_code == 200
+
+
+# ===========================================================================
 # PATCH /api/settings — response shape
 # ===========================================================================
 

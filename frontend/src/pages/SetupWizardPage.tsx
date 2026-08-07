@@ -108,8 +108,13 @@ const SetupWizardPage: React.FC = () => {
       const d: DiscoveryResult = res.data;
       setDiscovery(d);
 
-      // Seed form defaults from auto-detected hints
-      if (d.detectedPhaseCount) {
+      // Seed form defaults from auto-detected hints. detectedPhaseCount is a
+      // raw count (0-3) of which current_l1/l2/l3 sensors were found — only
+      // 3 (all phases) or 1 (single phase, current_l1 only) map to a valid
+      // HomeSettings.phase_count (must be 1 or 3; see settings.py __post_init__).
+      // A partial 2-of-3 discovery is left at the existing/default phaseCount
+      // rather than seeding an invalid value.
+      if (d.detectedPhaseCount === 3 || d.detectedPhaseCount === 1) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount! }));
       }
       // Auto-select pricing provider based on discovered integrations.
@@ -214,7 +219,12 @@ const SetupWizardPage: React.FC = () => {
       // for an already-configured system, where this could silently
       // override a choice the user already made.
       const chargeRateSensorFound = !!getActiveSensorsFlat(newSensors).battery_charging_power_rate;
-      if (wizardNeededRef.current && chargeRateSensorFound && d.detectedPhaseCount) {
+      // Only auto-enable when EVERY phase sensor for the resolved phase count
+      // was found -- current_l1 alone (detectedPhaseCount >= 1) is not enough
+      // for a 3-phase install (see get_current_phase_loads_w, which crashes
+      // on a None current_l2/l3 read otherwise).
+      const allPhaseSensorsFound = d.detectedPhaseCount === 3 || d.detectedPhaseCount === 1;
+      if (wizardNeededRef.current && chargeRateSensorFound && allPhaseSensorsFound) {
         setHomeForm(f => ({ ...f, powerMonitoringEnabled: true }));
       }
 

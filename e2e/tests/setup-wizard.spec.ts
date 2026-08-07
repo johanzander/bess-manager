@@ -297,4 +297,115 @@ test.describe('Setup Wizard', () => {
       await expect(fuseToggle).toBeEnabled();
     }
   });
+
+  test('partial phase-current discovery does not auto-enable fuse protection or seed an invalid phase count', async ({ page }) => {
+    // Regression test: discovery finding only 2 of the 3 current_l1/l2/l3
+    // sensors (detectedPhaseCount === 2) must not auto-enable fuse
+    // protection (current_l3 is missing, so real-time monitoring would
+    // crash on a None read) and must not seed HomeSettings.phase_count with
+    // the raw count 2, which core/bess/settings.py rejects (only 1 or 3 are
+    // valid). Stubs POST /api/setup/discover directly, following the
+    // page.route() mocking pattern used in inverter-schedule-control-model.spec.ts,
+    // since no mock-HA fixture scenario currently reproduces a partial
+    // phase-sensor discovery.
+    //
+    // Also stubs GET /api/settings to a clean baseline: this test runs after
+    // other tests in this file that complete the wizard for real against the
+    // shared backend, which can leave power_monitoring_enabled=true (and
+    // current_l1/2/3 sensors) already persisted. Without this stub, the
+    // wizard's "load existing settings" step (SetupWizardPage.tsx) would
+    // pick up that leftover state and mask the very regression this test
+    // exists to catch.
+    await page.route('**/api/settings', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          battery: {},
+          home: {},
+          electricityPrice: {},
+          energyProvider: {},
+          growatt: {},
+          sensors: {},
+        }),
+      });
+    });
+
+    const growattRequiredSensors = {
+      battery_soc: 'sensor.battery_soc',
+      battery_charge_power: 'sensor.battery_charge_power',
+      battery_discharge_power: 'sensor.battery_discharge_power',
+      battery_charge_stop_soc: 'number.battery_charge_stop_soc',
+      battery_discharge_stop_soc: 'number.battery_discharge_stop_soc',
+      battery_charging_power_rate: 'number.battery_charging_power_rate',
+      battery_discharging_power_rate: 'number.battery_discharging_power_rate',
+      grid_charge: 'switch.grid_charge',
+      lifetime_battery_charged: 'sensor.lifetime_battery_charged',
+      lifetime_battery_discharged: 'sensor.lifetime_battery_discharged',
+      lifetime_solar_energy: 'sensor.lifetime_solar_energy',
+      lifetime_export_to_grid: 'sensor.lifetime_export_to_grid',
+      lifetime_import_from_grid: 'sensor.lifetime_import_from_grid',
+      lifetime_load_consumption: 'sensor.lifetime_load_consumption',
+    };
+
+    await page.route('**/api/setup/discover', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          growattFound: true,
+          growattDeviceId: 'device1',
+          solaxFound: false,
+          solaxHasGrowattTou: false,
+          solaxHasGrowattGen3: false,
+          solisFound: false,
+          huaweiFound: false,
+          huaweiDeviceId: null,
+          nordpoolFound: true,
+          nordpoolArea: 'SE3',
+          nordpoolCustomArea: null,
+          nordpoolCustomEntity: null,
+          nordpoolConfigEntryId: 'entry1',
+          octopusFound: false,
+          entsoeFound: false,
+          entsoeEntity: null,
+          // Only current_l1 and current_l2 discovered -- current_l3 is
+          // missing, so this is a partial (2-of-3) phase discovery.
+          sensors: { current_l1: 'sensor.current_l1', current_l2: 'sensor.current_l2' },
+          platformSensors: { growatt_server_min: growattRequiredSensors },
+          missingSensors: [],
+          detectedInverterPlatforms: ['growatt_server_min'],
+          detectedPhaseCount: 2,
+          currency: 'SEK',
+          vatMultiplier: 1.25,
+        }),
+      });
+    });
+
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    // Navigate to the Home step (step 4)
+    await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
+    await expectActiveStep(page, 2);
+    await page.getByRole('button', { name: /Next: Battery/i }).click();
+    await expectActiveStep(page, 3);
+    await page.getByRole('button', { name: /Next: Home/i }).click();
+    await expectActiveStep(page, 4);
+
+    // Must NOT have been auto-enabled -- current_l3 is missing, so the
+    // required-sensor set for the default (3-phase) HomeSettings config
+    // isn't fully mapped.
+    const fuseToggle = page.getByRole('switch', { name: /Enable fuse protection/i });
+    await expect(fuseToggle).not.toBeChecked();
+    await expect(fuseToggle).toBeDisabled();
+
+    // The Phase Count radio group is always rendered (it's used by the
+    // day-ahead scheduler regardless of fuse protection), so confirm the
+    // real invariant directly: phaseCount was never seeded with the invalid
+    // raw discovery count of 2 -- it stayed at the default of 3-phase, and
+    // the 1-phase option was not selected either.
+    await expect(page.getByRole('radio', { name: '3-phase' })).toBeChecked();
+    await expect(page.getByRole('radio', { name: '1-phase' })).not.toBeChecked();
+  });
 });

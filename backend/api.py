@@ -38,7 +38,7 @@ from loguru import logger
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
-from core.bess.settings_store import VALID_PLATFORMS
+from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -111,6 +111,41 @@ def _strip_empty_sensor_values(sensors: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def _validate_power_monitoring_sensors(
+    home_section: dict, active_sensors: dict
+) -> None:
+    """Raise HTTPException(422) if power monitoring is being enabled without
+    the phase-current sensors its phase_count requires.
+
+    Mirrors the frontend gating in HomeFormSection.tsx/SetupWizardPage.tsx —
+    this is the server-side backstop so the API itself refuses the invalid
+    combination regardless of which client called it.
+    """
+    if not home_section.get("power_monitoring_enabled"):
+        return
+    phase_count = home_section.get("phase_count", 3)
+    required_keys = (
+        ["current_l1"]
+        if phase_count == 1
+        else [
+            "current_l1",
+            "current_l2",
+            "current_l3",
+        ]
+    )
+    required_keys = [*required_keys, "battery_charging_power_rate"]
+    missing = [k for k in required_keys if not active_sensors.get(k)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cannot enable power monitoring: missing required sensor(s) "
+                f"for {phase_count}-phase: {', '.join(missing)}. "
+                "Configure them in Settings → Sensors first."
+            ),
+        )
 
 
 def _require_configured_system(bess_controller) -> None:
@@ -273,6 +308,26 @@ async def patch_settings(updates: dict):
             if store_key == "sensors":
                 section = _strip_empty_sensor_values(section)
 
+            # Validate power-monitoring sensor requirements BEFORE persisting —
+            # must run ahead of save_section so an invalid combination is never
+            # written to disk, even though the client still gets a 422.
+            if store_key == "home":
+                effective_sensors = {
+                    **bess_controller.settings_store.get_active_sensors(),
+                    **flatten_sensors(updates.get("sensors") or {}),
+                }
+                _validate_power_monitoring_sensors(section, effective_sensors)
+
+            if store_key == "sensors":
+                # A sensor removal (e.g. unmapping a phase-current sensor) can
+                # break an already-enabled power-monitoring config just as
+                # much as an explicit disable-without-sensors on the home
+                # section can — validate against the persisted home config.
+                persisted_home = bess_controller.settings_store.get_section("home")
+                _validate_power_monitoring_sensors(
+                    persisted_home, flatten_sensors(section)
+                )
+
             bess_controller.settings_store.save_section(store_key, section)
 
             # Apply in-memory updates for sections that drive live behaviour
@@ -294,6 +349,8 @@ async def patch_settings(updates: dict):
                 # successor if a migration was ever interrupted (see
                 # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
                 # straight through would raise AttributeError.
+                # (Power-monitoring sensor validation already ran above, before
+                # save_section, so the invalid combination is never persisted.)
                 in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
                 bess_controller.system.update_settings({"home": in_mem})
 
@@ -2942,6 +2999,11 @@ async def setup_complete(payload: APISetupCompletePayload):
             for field, key in _HOME_MAP.items():
                 if getattr(payload, field) is not None:
                     home[key] = getattr(payload, field)
+            effective_sensors = {
+                **bess_controller.settings_store.get_active_sensors(),
+                **flatten_sensors(sections.get("sensors") or {}),
+            }
+            _validate_power_monitoring_sensors(home, effective_sensors)
             sections["home"] = home
 
         # --- electricity price ---
@@ -3147,6 +3209,10 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         logger.info(f"Setup complete: saved sections {list(sections.keys())}")
         return {"success": True, "saved_sections": list(sections.keys())}
+    except HTTPException:
+        # Preserve the original status code (e.g. 422 from sensor/platform
+        # validation) instead of masking it as a generic 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error completing setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

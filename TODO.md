@@ -202,6 +202,18 @@
 
 ---
 
+### Health check silently skips genuinely-required-but-unmapped sensors
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/health_check.py`
+
+**Description**: `perform_health_check()`'s `not_configured` branch (`health_check.py:183-193`) always converts an unmapped sensor to `"SKIPPED"` and `determine_health_status()` (`health_check.py:99-102`) excludes SKIPPED checks from both `required_total` and `required_working` — regardless of whether the caller passed `is_required=True`. This means components that call `perform_health_check(is_required=True, ...)` with a sensor that is *entirely unmapped* (not just unavailable) currently report OK/pass instead of ERROR, the same underlying shortcoming just fixed for Power Monitoring (see `docs/superpowers/plans/2026-08-07-power-monitoring-sensor-gating.md`). Affected call sites: `growatt_min_controller.py:1387` (Battery Control), `solax_modbus_growatt_controller.py:757` (Battery Control), `sensor_collector.py:813,827` (Battery Monitoring, Energy Monitoring) — all pass `is_required=True` for sensors assumed always-present via platform suffix maps, but if a user manually deletes/unmaps one, the health check would not catch it.
+
+**Fix direction**: Make `not_configured` → `SKIPPED` conditional on `method_name not in required_methods`; when it *is* required, report `ERROR` instead. Needs care: verify none of the four call sites above have individually-optional sensors within their `all_methods` list that would wrongly start erroring.
+
+**Files**: `core/bess/health_check.py` (`perform_health_check`, `determine_health_status`)
+
+---
+
 ### **Improve InfluxDB Health Check to Verify Sensor Coverage**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `influxdb_helper.py`
@@ -655,5 +667,11 @@ further.
 **`e2e/package-lock.json` has `@playwright/test` locked at 1.59.1 while 1.62.1 is current.** `package.json`'s `^1.59.1` range already permits the newer version — the lockfile just hasn't been refreshed since it was last committed. Bumping it (`npm update @playwright/test` + commit the lockfile) also changes the pinned Chromium revision that CI/local runs download, so it's worth doing deliberately in its own PR rather than as a drive-by here.
 
 **`.github/workflows/ci.yml`'s E2E job runs all ~15 phases (normal-day, growatt-vpp, 13 wizard scenarios) sequentially in one job.** Each phase is independent (its own docker-compose stack, no shared state), so this is a good candidate for a `strategy: matrix` job split — one parallel job per scenario instead of one long sequential job. Would cut wall-clock from "sum of all phases" to roughly "the slowest single phase." Since the repo is public, GitHub Actions minutes are free/unlimited on standard runners, so this is purely a turnaround-time win, not a cost tradeoff. Worth its own PR — restructuring `ci.yml`'s step list into matrix `include:` entries (scenario, settings file, options file, step label) isn't a small tweak.
+
+---
+
+## From the power-monitoring sensor-gating fix (non-blocking)
+
+**`core/bess/settings_store.py` has duplicate top-level `VALID_PLATFORMS` and `SHARED_SENSOR_KEYS` definitions.** Both constants are defined twice — once around lines 36-58, again around lines 67-89 — byte-identical in each pair. The second definition silently shadows the first; nothing currently breaks because they're kept in sync by coincidence, but the duplication is dead code and a drift risk if one copy is ever edited without the other. Pre-existing on `main`, unrelated to and not introduced by `docs/superpowers/plans/2026-08-07-power-monitoring-sensor-gating.md`. Fix: delete one copy of each.
 
 ---

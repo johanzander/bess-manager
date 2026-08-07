@@ -374,6 +374,19 @@ class TestHandleSpecialCases:
         mock_get_view.assert_not_called()
         mock_save.assert_not_called()
 
+    def test_prepare_next_day_does_not_clear_prediction_snapshot_store(self, system):
+        """Day rollover now happens via a new per-day file (folded into the
+        DailyView format, #409) instead of an explicit clear() call - a new
+        calendar day naturally starts a new, empty file."""
+        with (
+            patch.object(system, "_fetch_predictions"),
+            patch.object(system.prediction_snapshot_store, "clear") as mock_clear,
+        ):
+            system._handle_special_cases(
+                period=95, prepare_next_day=True, is_first_run=False
+            )
+            mock_clear.assert_not_called()
+
 
 class TestPersistTodayView:
     def test_no_op_when_no_schedule_exists_yet(self, system):

@@ -2,28 +2,28 @@
 
 Stores snapshots of predictions and actuals throughout the day for deviation
 analysis. Leverages DailyView for consistent data representation.
-Persists to disk so snapshots survive restarts within the same day.
+Persists to disk in the shared per-day file owned by DailyViewStore, so
+snapshots survive restarts and are kept per calendar day forever (same
+retention as DailyViewStore) until a user clears the history. Only the
+in-memory snapshot list is per-day: it rolls over on date change.
 """
 
-import dataclasses
-import json
 import logging
+import threading
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
 
 from core.bess import time_utils
-from core.bess.daily_view_builder import DailyView
-from core.bess.models import (
-    DecisionData,
-    EconomicData,
-    EnergyData,
-    PeriodData,
+from core.bess.daily_view_builder import (
+    DailyView,
+    _daily_view_from_dict,
 )
+from core.bess.daily_view_store import container_transaction, read_container
 
 logger = logging.getLogger(__name__)
 
-PERSIST_PATH = Path("/data/bess_prediction_snapshots.json")
+PERSIST_DIR = Path("/data/daily_views")
 
 
 @dataclass
@@ -42,49 +42,6 @@ class PredictionSnapshot:
     predicted_daily_savings: float  # From EconomicSummary
 
 
-def _period_data_from_dict(d: dict) -> PeriodData:
-    """Deserialize a PeriodData from a dict produced by dataclasses.asdict()."""
-    energy_init_fields = {f.name for f in dataclasses.fields(EnergyData) if f.init}
-    energy = EnergyData(
-        **{k: v for k, v in d["energy"].items() if k in energy_init_fields}
-    )
-
-    economic_fields = {f.name for f in dataclasses.fields(EconomicData) if f.init}
-    economic = EconomicData(
-        **{k: v for k, v in d["economic"].items() if k in economic_fields}
-    )
-
-    decision_fields = {f.name for f in dataclasses.fields(DecisionData) if f.init}
-    decision = DecisionData(
-        **{k: v for k, v in d["decision"].items() if k in decision_fields}
-    )
-
-    ts_raw = d["timestamp"]
-    ts = datetime.fromisoformat(ts_raw) if ts_raw else None
-
-    return PeriodData(
-        period=d["period"],
-        energy=energy,
-        timestamp=ts,
-        data_source=d["data_source"],
-        economic=economic,
-        decision=decision,
-    )
-
-
-def _daily_view_from_dict(d: dict) -> DailyView:
-    """Deserialize a DailyView from a dict produced by dataclasses.asdict()."""
-    periods = [_period_data_from_dict(p) for p in d["periods"]]
-    return DailyView(
-        date=date.fromisoformat(d["date"]),
-        periods=periods,
-        total_savings=d["total_savings"],
-        actual_count=d["actual_count"],
-        predicted_count=d["predicted_count"],
-        missing_count=d.get("missing_count", 0),
-    )
-
-
 def _snapshot_from_dict(d: dict) -> PredictionSnapshot:
     """Deserialize a PredictionSnapshot from a dict produced by asdict()."""
     return PredictionSnapshot(
@@ -101,15 +58,50 @@ class PredictionSnapshotStore:
 
     Stores snapshots captured during each optimization to enable comparison
     of predicted vs actual outcomes. Persisted to disk so snapshots survive
-    add-on restarts. Cleared at midnight like HistoricalDataStore.
+    add-on restarts. The in-memory list holds a single calendar day and rolls
+    over automatically on date change — the store is long-lived (constructed
+    once per process), so it re-checks the current date on every public access
+    rather than relying on an external clear() at midnight.
     """
 
-    def __init__(self, persist_path: Path = PERSIST_PATH):
+    def __init__(self, persist_dir: Path = PERSIST_DIR):
         """Initialize the prediction snapshot store and load any persisted data."""
         self._snapshots: list[PredictionSnapshot] = []
-        self._persist_path = persist_path
+        self._persist_dir = persist_dir
+        self._current_date: date = time_utils.today()
+        # Guards self._current_date/self._snapshots across the day-rollover
+        # check and the read/mutate/save that follows it in each public
+        # method — container_lock (daily_view_store.py) only protects the
+        # file, not this in-memory state, so scheduler-thread and
+        # request-thread calls must not interleave here either.
+        self._instance_lock = threading.Lock()
         self._load_from_disk()
         logger.debug("Initialized PredictionSnapshotStore")
+
+    def _today_path(self) -> Path:
+        return self._persist_dir / f"{self._current_date.isoformat()}.json"
+
+    def _ensure_current_day(self) -> None:
+        """Roll the in-memory snapshot list over when the calendar day changes.
+
+        This store outlives any single day (it is created once at process
+        start), so every public read/write re-anchors it to today before
+        touching self._snapshots.
+        """
+        today = time_utils.today()
+        if today == self._current_date:
+            return
+
+        logger.info(
+            "Prediction snapshot day rollover: %s -> %s (discarding %d in-memory snapshots)",
+            self._current_date,
+            today,
+            len(self._snapshots),
+        )
+        self._current_date = today
+        # A new day's file normally has no snapshots yet; reloading also
+        # recovers any written earlier today by a previous process.
+        self._load_from_disk()
 
     def store_snapshot(
         self,
@@ -139,8 +131,10 @@ class PredictionSnapshotStore:
             predicted_daily_savings=predicted_daily_savings,
         )
 
-        self._snapshots.append(snapshot)
-        self._save_to_disk()
+        with self._instance_lock:
+            self._ensure_current_day()
+            self._snapshots.append(snapshot)
+            self._save_to_disk()
 
         logger.debug(
             "Stored snapshot at period %d: predicted savings %.2f, %d periods, %d TOU intervals",
@@ -158,7 +152,9 @@ class PredictionSnapshotStore:
         Returns:
             list[PredictionSnapshot]: All snapshots, chronologically ordered
         """
-        return sorted(self._snapshots, key=lambda s: s.snapshot_timestamp)
+        with self._instance_lock:
+            self._ensure_current_day()
+            return sorted(self._snapshots, key=lambda s: s.snapshot_timestamp)
 
     def get_snapshot_at_period(self, period: int) -> PredictionSnapshot | None:
         """Get snapshot closest to specified period.
@@ -169,24 +165,30 @@ class PredictionSnapshotStore:
         Returns:
             PredictionSnapshot | None: Closest snapshot, or None if no snapshots
         """
-        if not self._snapshots:
-            return None
+        with self._instance_lock:
+            self._ensure_current_day()
+            if not self._snapshots:
+                return None
 
-        # Find snapshot with optimization_period closest to target period
-        closest_snapshot = min(
-            self._snapshots,
-            key=lambda s: abs(s.optimization_period - period),
-        )
+            # Find snapshot with optimization_period closest to target period
+            closest_snapshot = min(
+                self._snapshots,
+                key=lambda s: abs(s.optimization_period - period),
+            )
 
-        return closest_snapshot
+            return closest_snapshot
 
     def clear(self) -> None:
-        """Clear all stored snapshots.
+        """Clear all stored snapshots, in memory and in today's file.
 
-        Called at midnight transition to prepare for next day.
+        Optional manual reset (e.g. a user-triggered history wipe). Day
+        rollover no longer depends on this: the store discards the previous
+        day's in-memory snapshots automatically when the date changes.
         """
-        self._snapshots.clear()
-        self._save_to_disk()
+        with self._instance_lock:
+            self._ensure_current_day()
+            self._snapshots.clear()
+            self._save_to_disk()
         logger.info("Cleared all prediction snapshots")
 
     def get_snapshot_count(self) -> int:
@@ -195,59 +197,36 @@ class PredictionSnapshotStore:
         Returns:
             int: Number of snapshots stored
         """
-        return len(self._snapshots)
+        with self._instance_lock:
+            self._ensure_current_day()
+            return len(self._snapshots)
 
     def _save_to_disk(self) -> None:
-        """Persist snapshots to disk to survive restarts."""
-        data = {
-            "date": time_utils.today().isoformat(),
-            "snapshots": [asdict(s) for s in self._snapshots],
-        }
-
+        """Persist snapshots to today's shared per-day file."""
+        path = self._today_path()
         try:
-            self._persist_path.parent.mkdir(parents=True, exist_ok=True)
-
-            # Serialize with default=str to handle datetime and date objects
-            with open(self._persist_path, "w") as f:
-                json.dump(data, f, default=str)
-
+            with container_transaction(path) as container:
+                container["snapshots"] = [asdict(s) for s in self._snapshots]
             logger.debug(
                 "Persisted %d prediction snapshots to %s",
                 len(self._snapshots),
-                self._persist_path,
+                path,
             )
-        except Exception as e:
+        except OSError as e:
             logger.warning("Failed to persist prediction snapshots: %s", e)
 
     def _load_from_disk(self) -> None:
-        """Load persisted snapshots on startup.
-
-        Only loads if the persisted file is from today.
-        """
-        if not self._persist_path.exists():
-            logger.debug("No persisted snapshots file found")
-            return
-
+        """Load today's persisted snapshots from the shared per-day file."""
+        path = self._today_path()
+        container = read_container(path)
+        raw_snapshots = container.get("snapshots", [])
         try:
-            with open(self._persist_path) as f:
-                data = json.load(f)
-
-            # Validate date — only use if from today
-            stored_date = data.get("date")
-            today = time_utils.today().isoformat()
-            if stored_date != today:
-                logger.info(
-                    "Persisted snapshots from %s (not today %s), discarding",
-                    stored_date,
-                    today,
-                )
-                return
-
-            raw_snapshots = data.get("snapshots", [])
             self._snapshots = [_snapshot_from_dict(s) for s in raw_snapshots]
-            logger.info(
-                "Loaded %d persisted prediction snapshots from disk",
-                len(self._snapshots),
-            )
-        except Exception as e:
+            if self._snapshots:
+                logger.info(
+                    "Loaded %d persisted prediction snapshots from disk",
+                    len(self._snapshots),
+                )
+        except (KeyError, ValueError) as e:
             logger.warning("Failed to load persisted prediction snapshots: %s", e)
+            self._snapshots = []

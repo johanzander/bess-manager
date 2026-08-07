@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 
 from . import time_utils
-from .daily_view_builder import DailyView, DailyViewBuilder
+from .daily_view_builder import DailyView, DailyViewBuilder, _period_data_from_dict
 from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
     OptimizationResult,
@@ -45,7 +45,7 @@ from .models import (
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
 from .power_monitor import HomePowerMonitor
-from .prediction_snapshot import PredictionSnapshotStore, _period_data_from_dict
+from .prediction_snapshot import PredictionSnapshotStore
 from .price_manager import HomeAssistantSource, PriceManager, PriceSource
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
@@ -1470,8 +1470,10 @@ class BatterySystemManager:
             # Today's file is already current — _persist_today_view() (called
             # from _update_energy_data on every tick, including this one) has
             # been keeping it up to date all day. Nothing to save here.
+            # prediction_snapshot_store's file similarly rolls over
+            # automatically at midnight (a new date is a new file) - no
+            # explicit clear() needed here (#409).
             logger.info("Preparing for next day - refreshing predictions")
-            self.prediction_snapshot_store.clear()
             self._fetch_predictions()
 
     def _get_price_data(

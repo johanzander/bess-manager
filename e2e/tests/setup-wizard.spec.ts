@@ -268,7 +268,13 @@ test.describe('Setup Wizard', () => {
     const platformsWithoutLocalLoad = ['growatt_server_sph'];
     const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus'];
     const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
-    const expectFuseDisabled = platformsWithoutChargeRate.includes(expected.inverterPlatform);
+    // Fuse protection also needs phase-current sensors (current_l1/l2/l3) discovered,
+    // independent of the platform's charge-rate-control capability — a platform that
+    // supports charge rate control can still lack phase sensors on an install with no
+    // CT clamps configured. Most fixtures provide both; noPhaseSensors opts a scenario
+    // out explicitly instead of overloading the (separately-purposed) phaseCount field.
+    const expectFuseDisabled =
+      platformsWithoutChargeRate.includes(expected.inverterPlatform) || expected.noPhaseSensors === true;
 
     await page.goto('/setup');
     await expectActiveStep(page, 1);

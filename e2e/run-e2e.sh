@@ -88,6 +88,7 @@ if [ "$RUN_WIZARD" = true ]; then
     "ci-wizard-growatt-modbus"
     "ci-wizard-solis"
     "ci-wizard-growatt-vpp"
+    "ci-wizard-growatt-vpp-ridax-118"
   )
 
   for scenario in "${WIZARD_SCENARIOS[@]}"; do

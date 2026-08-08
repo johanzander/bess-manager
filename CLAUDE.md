@@ -11,6 +11,14 @@ non-negotiable and apply to all agents.
 - NEVER speculate about file contents or behavior - read the file or run the code first
 - Before proposing any fix, show the exact code path and evidence (logs, source) that proves the root cause — do not guess at entity names, prefixes, or discovery logic
 
+## Issue Work
+
+- Any request to fix, resolve, or implement a GitHub issue (e.g. "fix #123",
+  "resolve this issue") MUST go through the `implement-issue` skill from the
+  start — not ad-hoc brainstorming, writing-plans, or direct edits. It already
+  encodes PR hygiene rules (e.g. don't commit plan files) that get skipped
+  otherwise.
+
 ## Agent Documentation Index
 
 | File | When to Read |
@@ -147,11 +155,12 @@ of `analyzed`.
 The user pays per token. A long Opus session that re-reads a large context after
 every multi-minute wait is what runs up the bill — not the work itself.
 
-- **Default to Sonnet** (set in `.claude/settings.json`). Use Opus only for a
-  genuinely hard reasoning step, say so, and drop back. Don't run routine
-  coordination, iteration, CI-watching, or file edits on Opus.
-- **Never spawn Opus subagents**, and avoid agents for long-running watches
-  entirely; if delegation is truly needed, use a cheap model.
+- **Pick the best-fit model per task.** No model is pinned in
+  `.claude/settings.json`, so sessions start on the Claude Code default.
+  Reach for a stronger model on genuinely hard reasoning, and prefer a
+  cheaper one for routine coordination, iteration, CI-watching, or file edits.
+- **Don't put subagents on an expensive model**, and avoid agents for
+  long-running watches entirely; if delegation is truly needed, use a cheap model.
 - **Don't hold one big session across many long CI/test waits.** The prompt
   cache expires after ~5 min, so each long wait forces a full uncached re-read
   of the entire context. Prefer `/clear` between unrelated chunks, or let the

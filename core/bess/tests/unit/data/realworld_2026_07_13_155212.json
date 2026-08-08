@@ -416,10 +416,10 @@
     "export_spot_multiplier": 1.018
   },
   "expected_results": {
-    "base_cost": 10.80806,
-    "battery_solar_cost": -2.08388,
-    "base_to_battery_solar_savings": 12.89194,
-    "base_to_battery_solar_savings_pct": 119.28083,
+    "base_cost": 10.8081,
+    "battery_solar_cost": -2.0242,
+    "base_to_battery_solar_savings": 12.8322,
+    "base_to_battery_solar_savings_pct": 118.7282,
     "total_charged": 8.05751,
     "total_discharged": 14.975
   },

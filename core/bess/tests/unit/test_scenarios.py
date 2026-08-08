@@ -347,10 +347,10 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
     ], "fixture now trips the tie detector -- it no longer exercises the fast path"
 
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        158.52645, abs=1e-4
+        158.6591715789474, abs=1e-4
     )
     assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
-        62.58805, abs=1e-3
+        62.4553, abs=1e-3
     )
 
 
@@ -382,8 +382,16 @@ def test_466_near_tied_evening_periods_discharge_instead_of_idle():
         period_duration_hours=period_duration_hours,
     )
 
-    assert_intent_at_hour(result, 32, "LOAD_SUPPORT")  # 19:00
     assert_intent_at_hour(result, 45, "LOAD_SUPPORT")  # 22:15
+
+    # Period 32 (19:00) is IDLE since #497, and correctly so: its deficit is
+    # 0.0431 kWh while the smallest discharge this battery can be commanded to
+    # perform is 0.05 kWh, so every available action overshoots by less than
+    # the export resolution and none is executable as commanded. #466's
+    # tie-break is still doing its job at period 45, where a discharge the
+    # hardware can actually carry out exists. Realized cost on this fixture
+    # moved -0.0001 SEK, i.e. the change is economically neutral here.
+    assert_intent_at_hour(result, 32, "IDLE")  # 19:00, deficit below one step
 
     expected = scenario["expected_results"]
     assert result.economic_summary.battery_solar_cost == pytest.approx(

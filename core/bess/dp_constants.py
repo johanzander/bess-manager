@@ -43,3 +43,17 @@ POWER_STEP_KW = 0.2
 # grid action (POWER_STEP_KW) and genuine floating-point noise (observed in
 # practice: ~1e-10 to 1e-14), regardless of how POWER_STEP_KW is tuned.
 POWER_CLASSIFICATION_THRESHOLD_KW = POWER_STEP_KW / 2
+
+# Energy resolution floor for grid flows (kWh). Home Assistant's lifetime
+# energy counters report at 0.1 kWh resolution, so a measured grid flow below
+# this cannot be told apart from counter noise between two independent sensors.
+#
+# Single source of truth on purpose (#497). This value answers exactly one
+# question -- "is this export real, or is it below the resolution at which we
+# can know anything?" -- and it used to be answered in two places that drifted
+# apart: models.py's noise fold hardcoded 0.1 while the DP's self-throttle
+# threshold used 0.01, leaving a band where the optimizer booked export revenue
+# for energy the flow calculator had already decided never left the property.
+# Same failure shape as the #275 postmortem above: one physical boundary,
+# two independent constants, no enforcement that they agree.
+GRID_FLOW_RESOLUTION_KWH = 0.1

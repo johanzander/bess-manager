@@ -236,10 +236,10 @@
     "initial_cost_basis": 0.4
   },
   "expected_results": {
-    "base_cost": 5.7648935625,
-    "battery_solar_cost": -2.1141989611875003,
-    "base_to_battery_solar_savings": 7.8790925236875005,
-    "base_to_battery_solar_savings_pct": 136.67368596256716,
+    "base_cost": 5.7649,
+    "battery_solar_cost": -2.111,
+    "base_to_battery_solar_savings": 7.8759,
+    "base_to_battery_solar_savings_pct": 136.6181,
     "_note": "Post-fix (#466) pin. Pre-fix (commit c1013fe9) this same input replays the bundle's own reported economics exactly -- grid_only_cost 5.764893562499999, battery_solar_cost -2.094315584625 -- confirming the extraction is faithful to the debug log. The fix improves battery_solar_cost by discharging at periods 32 (19:00) and 45 (22:15) instead of sitting IDLE."
   }
 }

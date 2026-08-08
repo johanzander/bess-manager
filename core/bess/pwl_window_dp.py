@@ -14,7 +14,6 @@ horizon.
 import numpy as np
 
 from core.bess.dp_battery_algorithm import (
-    BATTERY_EXPORT_THRESHOLD_KWH,
     POWER_CLASSIFICATION_THRESHOLD_KW,
     POWER_TOLERANCE_KW,
     BatterySettings,
@@ -22,6 +21,7 @@ from core.bess.dp_battery_algorithm import (
     _compute_reward,
     _compute_reward_grid,
     _discharge_candidates,
+    _discharge_is_unexecutable,
     _discharge_rate_step_kw,
     _effective_ac_cap_kwh,
     _prefer_load_covering_discharge,
@@ -105,7 +105,6 @@ def _pwl_candidate_values_at(
     battery_settings: BatterySettings,
     dt: float,
     period_max_charge: float | None,
-    self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None = None,
     discharge_resolution_kw: float | None = None,
 ) -> np.ndarray:
@@ -148,7 +147,6 @@ def _pwl_candidate_values_at(
         current_buy_price=buy_price[t],
         current_sell_price=sell_price[t],
         solar_production=solar_production[t],
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
 
@@ -202,6 +200,18 @@ def _pwl_candidate_values_at(
         * rate_step
     )
     feasible &= ~is_discharge | (np.abs(power_row) <= affordable_discharge_power)
+
+    # Same executability rule the replay pass applies when building its
+    # candidate set (#497). `power_row` is built once for the whole window, so
+    # it cannot be filtered up front the way `_discharge_candidates` filters
+    # per period -- the deficit is a per-period quantity. Masking here is
+    # where the window's other per-period feasibility rules already live, and
+    # routing both passes through `_discharge_is_unexecutable` is what keeps
+    # them on the identical action set (see `_backward_discharge_levels`).
+    feasible &= ~is_discharge | ~_discharge_is_unexecutable(
+        np.abs(power_row), home_consumption[t], solar_production[t], dt
+    )
+
     feasible &= (next_soe >= min_soe) & (next_soe <= max_soe)
 
     effective_import_cap = None
@@ -238,7 +248,6 @@ def _pwl_candidate_values_at(
         current_buy_price=buy_price[t],
         current_sell_price=sell_price[t],
         solar_production=solar_production[t],
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
     value_bypass = reward_bypass + _pwl_eval_array(V_next, soe_col)
@@ -304,7 +313,6 @@ def _pwl_best_action_at_continuous_state(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
@@ -380,7 +388,6 @@ def _pwl_best_action_at_continuous_state(
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         value = reward + float(_pwl_eval_array(V_next, np.asarray(next_soe)))
@@ -408,7 +415,6 @@ def _pwl_best_action_at_continuous_state(
         home,
         solar,
         discharge_resolution_kw=discharge_resolution_kw,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         ac_cap_kwh=ac_cap_kwh,
     ):
         consider(-p)
@@ -681,7 +687,6 @@ def run_pwl_window_backward_induction(
     end_soe_target: float,
     end_soe_tolerance: float = 1e-6,
     max_charge_power_per_period: list[float] | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -771,7 +776,6 @@ def run_pwl_window_backward_induction(
                 battery_settings,
                 dt,
                 _pmc,
-                self_throttle_export_threshold_kwh,
                 import_cap_kwh,
                 discharge_resolution_kw,
             )
@@ -888,7 +892,6 @@ def resolve_pwl_window(
     dt: float,
     cost_basis: float,
     max_charge_power_per_period: list[float] | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
 ) -> list[tuple[float, float]]:
@@ -939,7 +942,6 @@ def resolve_pwl_window(
             cost_basis=basis,
             max_charge_power_per_period=max_charge_power_per_period,
             discharge_resolution_kw=discharge_resolution_kw,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         actions.append((action, next_soe))

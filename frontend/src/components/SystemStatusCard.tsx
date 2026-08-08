@@ -3,7 +3,7 @@ import api from '../lib/api';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { FormattedValue, ControlModel } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
-import { getIntent } from '../utils/intent';
+import { getIntent, isCurtailed } from '../utils/intent';
 import { 
   DollarSign, 
   Battery, 
@@ -286,7 +286,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       IDLE: 'Standby',
     };
     const rawIntent = getIntent(currentHourData).toUpperCase().replace(/ /g, '_');
-    const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
+    const strategicIntent = isCurtailed(currentHourData)
+      ? 'Curtailed (No Export)'
+      : (intentDisplayNames[rawIntent] ?? rawIntent);
 
     return {
       strategicIntent,

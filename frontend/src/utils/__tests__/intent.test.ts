@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getIntent } from '../intent'
+import { getIntent, isCurtailed } from '../intent'
 
 describe('getIntent', () => {
   it('prefers observedIntent over strategicIntent for actual periods', () => {
@@ -28,5 +28,36 @@ describe('getIntent', () => {
 
   it('defaults to IDLE when no intent is present', () => {
     expect(getIntent({})).toBe('IDLE')
+  })
+})
+
+describe('isCurtailed', () => {
+  it('is true for a SOLAR_EXPORT period the backend flagged as curtailed', () => {
+    expect(
+      isCurtailed({ dataSource: 'predicted', strategicIntent: 'SOLAR_EXPORT', curtailed: true })
+    ).toBe(true)
+  })
+
+  it('is false for a SOLAR_EXPORT period the backend did not flag as curtailed', () => {
+    expect(
+      isCurtailed({ dataSource: 'predicted', strategicIntent: 'SOLAR_EXPORT', curtailed: false })
+    ).toBe(false)
+  })
+
+  it('is true for a curtailed period even when the intent is SOLAR_STORAGE', () => {
+    // Regression: a period still charging at its rate limit while the
+    // surplus above that rate is curtailed classifies as SOLAR_STORAGE, not
+    // SOLAR_EXPORT (battery_system_manager.py's should_curtail condition
+    // applies "regardless of strategic_intent") -- isCurtailed must not
+    // silently drop this case by gating on intent.
+    expect(
+      isCurtailed({ dataSource: 'predicted', strategicIntent: 'SOLAR_STORAGE', curtailed: true })
+    ).toBe(true)
+  })
+
+  it('is false when curtailed is not set', () => {
+    expect(
+      isCurtailed({ dataSource: 'predicted', strategicIntent: 'IDLE' })
+    ).toBe(false)
   })
 })

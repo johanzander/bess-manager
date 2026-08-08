@@ -92,6 +92,7 @@ interface PeriodGroup {
   totalActionKwh?: number;
   socEndPct?: number;
   socDeltaKwh?: number | null;
+  curtailed?: boolean; // planned PV curtailment (#501), distinct from a profitable SOLAR_EXPORT
 }
 
 interface InverterSchedule {
@@ -487,7 +488,15 @@ const InverterStatusDashboard: React.FC = () => {
     );
   };
 
-  const getIntentColor = (intent: string) => {
+  const getIntentColor = (intent: string, curtailed?: boolean) => {
+    // Matches isCurtailed()'s own ground truth (frontend/src/utils/intent.ts)
+    // -- curtailment isn't gated on intent, since a period still charging at
+    // its rate limit while curtailing the surplus above it classifies as
+    // SOLAR_STORAGE, not SOLAR_EXPORT (battery_system_manager.py's
+    // should_curtail comment).
+    if (curtailed) {
+      return 'bg-stone-200 text-stone-800 dark:bg-stone-700 dark:text-stone-300';
+    }
     const colors: Record<string, string> = {
       'SOLAR_STORAGE': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-300',
       'LOAD_SUPPORT': 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300',
@@ -498,6 +507,11 @@ const InverterStatusDashboard: React.FC = () => {
     };
     return colors[intent] || colors['IDLE'];
   };
+
+  // Planned PV curtailment (#501): a group the plan expects to curtail
+  // (export limit applied, cost 0) rather than sell at a profit.
+  const getIntentLabel = (intent: string, curtailed?: boolean) =>
+    curtailed ? 'CURTAILED (NO EXPORT)' : intent.replace(/_/g, ' ');
 
   useEffect(() => {
     loadData(false);
@@ -825,8 +839,8 @@ const InverterStatusDashboard: React.FC = () => {
                         </td>
                         <td className={`${cell} text-center text-gray-600 dark:text-gray-400`}>{formatDuration(group.durationMinutes)}</td>
                         <td className={`${cell} text-center`}>
-                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
-                            {group.dominantIntent.replace(/_/g, ' ')}
+                          <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent, group.curtailed)}`}>
+                            {getIntentLabel(group.dominantIntent, group.curtailed)}
                           </span>
                         </td>
                         {/* Solar column: SOLAR_STORAGE and passive IDLE gains.
@@ -937,8 +951,8 @@ const InverterStatusDashboard: React.FC = () => {
                               </td>
                               <td className={`${cell} text-center text-gray-600 dark:text-gray-400`}>{formatDuration(group.durationMinutes)}</td>
                               <td className={`${cell} text-center`}>
-                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent)}`}>
-                                  {group.dominantIntent.replace(/_/g, ' ')}
+                                <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent, group.curtailed)}`}>
+                                  {getIntentLabel(group.dominantIntent, group.curtailed)}
                                 </span>
                               </td>
                               {/* Solar column -- threshold/precision must match

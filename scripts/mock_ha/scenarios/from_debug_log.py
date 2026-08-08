@@ -93,6 +93,17 @@ def _write_regression_fixture(
             "cycle_cost_per_kwh": bs["cycle_cost_per_kwh"],
             "inverter_max_ac_power_kw": bs.get("inverter_max_ac_power_kw", 0.0),
             "inverter_ac_power_margin": bs.get("inverter_ac_power_margin", 0.0),
+            "export_curtailment_enabled": bs.get("export_curtailment_enabled", False),
+            "export_curtailment_price_floor": bs.get(
+                "export_curtailment_price_floor", 0.0
+            ),
+            # Whether curtailment was actually ACTIVE at planning time
+            # (enabled AND the platform supports export-limit control --
+            # battery_system_manager.py). Debug logs don't record the
+            # capability bit, so this defaults to the enabled flag; set it
+            # false by hand for a fixture from a platform that can't
+            # curtail, so replays don't take a DP path that never ran live.
+            "export_curtailment_active": bs.get("export_curtailment_enabled", False),
             "initial_soe": d["initial_soe"],
             "initial_cost_basis": d.get("initial_cost_basis"),
         },

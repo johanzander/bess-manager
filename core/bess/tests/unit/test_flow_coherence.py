@@ -46,9 +46,14 @@ pytestmark = pytest.mark.slow
 
 TOLERANCE = 1e-6
 
-# Measured on 2026-08-08 at 18bccae4 across 33 fixtures / 1875 periods.
-# Every one of the 182 is the #497 fold; there is no second cause mixed in.
-KNOWN_INCOHERENT_PERIODS = 182
+# Measured on 2026-08-08 at 18bccae4 across 33 fixtures / 1875 periods (182),
+# re-measured on 2026-08-08 after regression_2026_08_08_143843 joined the
+# corpus (34 fixtures): the 29 additional periods are all that fixture's
+# night LOAD_SUPPORT discharges exhibiting the same #497 fold (unsourced
+# export == home oversupply, sub-0.1 kWh), verified by
+# test_every_incoherent_period_is_the_known_497_fold -- more corpus, not a
+# new cause. Every one of the 211 is the #497 fold.
+KNOWN_INCOHERENT_PERIODS = 211
 
 
 def _optimize(scenario_name):

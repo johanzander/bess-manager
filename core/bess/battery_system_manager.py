@@ -40,6 +40,7 @@ from .models import (
     EconomicData,
     EconomicSummary,
     PeriodData,
+    apply_export_curtailment_to_period_data,
     infer_intent_from_flows,
 )
 from .octopus_energy_source import OctopusEnergySource
@@ -234,6 +235,20 @@ class BatterySystemManager:
     def is_configured(self) -> bool:
         """True when the system has a valid inverter platform and can operate."""
         return self._inverter_controller is not None
+
+    @property
+    def export_curtailment_active(self) -> bool:
+        """Capability-aware export-curtailment flag, not just the raw user
+        setting (#459 review): planning/reporting as if curtailment will
+        happen on a platform that can't actually do it makes outcomes worse
+        than leaving the feature off. Entity misconfiguration on a supported
+        platform is a separate, self-correcting case surfaced by the runtime
+        failure banner in _apply_period_schedule, not checked here."""
+        return (
+            self.battery_settings.export_curtailment_enabled
+            and self._inverter_controller is not None
+            and self._inverter_controller.supports_export_limit_control
+        )
 
     @property
     def controller(self) -> HomeAssistantAPIController:
@@ -771,7 +786,9 @@ class BatterySystemManager:
         """
         try:
             # Build daily view (merges actuals + predictions)
-            daily_view = self.daily_view_builder.build_daily_view(optimization_period)
+            daily_view = self.daily_view_builder.build_daily_view(
+                optimization_period, self.export_curtailment_active
+            )
 
             # Get current Growatt schedule
             growatt_schedule = self._inverter_controller.tou_intervals.copy()
@@ -2144,18 +2161,7 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
-            # Capability-aware, not just the raw user setting (#459 review):
-            # planning for curtailment on a platform that can't actually do
-            # it makes outcomes worse than leaving the feature off (see
-            # optimize_battery_schedule's export_curtailment_active
-            # docstring). Entity misconfiguration on a supported platform is
-            # a separate, self-correcting case surfaced by the runtime
-            # failure banner in _apply_period_schedule, not checked here.
-            export_curtailment_active = (
-                self.battery_settings.export_curtailment_enabled
-                and self._inverter_controller is not None
-                and self._inverter_controller.supports_export_limit_control
-            )
+            export_curtailment_active = self.export_curtailment_active
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2398,11 +2404,30 @@ class BatterySystemManager:
                 today_base_cost = sum(
                     pd.economic.grid_only_cost for pd in today_result_periods
                 )
+                # Reported cost must reflect what will actually happen at
+                # runtime, not the honest physics-only price PeriodData
+                # itself keeps (#502) -- see the matching comment in
+                # dp_battery_algorithm.py's own battery_solar_cost
+                # aggregation for why the raw period_data_list stays
+                # untouched. today_solar_only_cost must come from the SAME
+                # curtailment-adjusted copies as today_optimized_cost, not
+                # the honest periods, or the battery-vs-solar-only savings
+                # subtraction below mixes a curtailed total against an
+                # uncurtailed baseline (code review finding).
+                today_curtailment_adjusted_periods = [
+                    apply_export_curtailment_to_period_data(
+                        pd,
+                        self.export_curtailment_active,
+                        self.battery_settings.export_curtailment_price_floor,
+                    )
+                    for pd in today_result_periods
+                ]
                 today_solar_only_cost = sum(
-                    pd.economic.solar_only_cost for pd in today_result_periods
+                    pd.economic.solar_only_cost
+                    for pd in today_curtailment_adjusted_periods
                 )
                 today_optimized_cost = sum(
-                    pd.economic.hourly_cost for pd in today_result_periods
+                    pd.economic.hourly_cost for pd in today_curtailment_adjusted_periods
                 )
                 today_charged = sum(
                     pd.energy.battery_charged for pd in today_result_periods
@@ -3294,7 +3319,9 @@ class BatterySystemManager:
                 )
 
         # Build daily view with current period
-        return self.daily_view_builder.build_daily_view(current_period)
+        return self.daily_view_builder.build_daily_view(
+            current_period, self.export_curtailment_active
+        )
 
     def _persist_today_view(self) -> None:
         """Best-effort snapshot of today's merged view to disk.

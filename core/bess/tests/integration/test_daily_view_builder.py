@@ -346,3 +346,33 @@ def test_prepare_next_day_schedule_does_not_corrupt_todays_tail(
 
     assert view.periods[94].economic.hourly_savings == 10.0
     assert view.periods[95].economic.hourly_savings == 10.0
+
+
+def test_predicted_period_curtailed_when_export_curtailment_active(
+    view_builder, schedule_store
+):
+    """Issue #502: a future/predicted period exporting below the
+    curtailment floor must be reported at zero export/cost when
+    export_curtailment_active is passed, since it will be curtailed to zero
+    at runtime -- the phantom negative-price charge must not reach
+    total_savings."""
+    curtailed = create_period_data(10, "predicted", savings=0.0)
+    curtailed.economic.buy_price = 1.0
+    curtailed.economic.sell_price = -0.02
+    curtailed.economic.export_revenue = curtailed.energy.grid_exported * -0.02
+    curtailed.economic.hourly_cost = -curtailed.economic.export_revenue
+    curtailed.economic.hourly_savings = -curtailed.economic.hourly_cost
+
+    periods = [create_period_data(i, "predicted", savings=0.0) for i in range(96)]
+    periods[10] = curtailed
+    opt_result = OptimizationResult(input_data={}, period_data=periods)
+    schedule_store.store_schedule(opt_result, optimization_period=0)
+
+    view = view_builder.build_daily_view(
+        current_period=0, export_curtailment_active=True
+    )
+
+    curtailed_view_period = view.periods[10]
+    assert curtailed_view_period.energy.grid_exported == 0.0
+    assert curtailed_view_period.economic.export_revenue == 0.0
+    assert view.total_savings == 0.0

@@ -9,11 +9,25 @@ file) is the stability flag for this codebase — see `feature-lifecycle` skill.
 - **Growatt VPP control mode** (`inverter.control_mode="vpp"`, on top of the
   `solax_modbus_growatt_min` (GEN4) and `solax_modbus_growatt_sph` (GEN3)
   platforms) — shipped per issue
-  [#118](https://github.com/johanzander/bess-manager/issues/118). Not yet
-  confirmed against real hardware; GEN4's existing `"tou"` control mode is
-  unaffected and remains the default there. Move to the validated list below
-  once a beta tester confirms (`feature-lifecycle` Stage 5), naming their
-  scenario.
+  [#118](https://github.com/johanzander/bess-manager/issues/118). Confirmed
+  writing real VPP commands to hardware by multiple testers (`nholmgaard`,
+  `ridax67`, `jdungen`), and several real bugs found in the field have been
+  fixed: LOAD_SUPPORT forcing a fixed rate instead of releasing control
+  ([#413](https://github.com/johanzander/bess-manager/issues/413)), a
+  spurious `power=0%` write on every schedule reload
+  ([#421](https://github.com/johanzander/bess-manager/issues/421)/[#423](https://github.com/johanzander/bess-manager/pull/423)),
+  IDLE periods draining the battery overnight
+  ([#466](https://github.com/johanzander/bess-manager/issues/466)), and VPP
+  Remote Control continuing to override the inverter after switching away
+  from VPP mode
+  ([#479](https://github.com/johanzander/bess-manager/issues/479)). A
+  real-world regression scenario built from `ridax67`'s live config is
+  locked in as `ci-wizard-growatt-vpp-ridax-118` (backend discovery test +
+  Playwright wizard E2E). Still marked experimental: the most recent fix
+  (#479) has only shipped in the beta channel (`v10.1.0b4`) so far, not yet
+  in a stable/prod release, and no tester has given a clean "this now works
+  end-to-end" confirmation since it landed. Move to the validated list below
+  once both happen (`feature-lifecycle` Stage 5/6).
 - `solax_modbus_growatt_sph` (GEN3) — monitoring-only, schedule control not implemented.
 - `solax_modbus_native` (SolaX VPP).
 

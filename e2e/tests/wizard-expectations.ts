@@ -26,6 +26,8 @@ export interface WizardExpectation {
   consumptionForecastFound: boolean;
   dischargeInhibitFound: boolean;
   weatherFound: boolean;
+  /** No current_l1/l2/l3 sensors were discovered (no CT clamps configured) — disables fuse protection regardless of platform capability. Optional, defaults to false. */
+  noPhaseSensors?: boolean;
 }
 
 export const EXPECTATIONS: Record<string, WizardExpectation> = {
@@ -214,5 +216,20 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     consumptionForecastFound: false,
     dischargeInhibitFound: false,
     weatherFound: false,
+  },
+  /** Real-world regression from issue #118: ridax67's live Growatt GEN4 VPP installation. */
+  'ci-wizard-growatt-vpp-ridax-118': {
+    growattFound: false,
+    solaxFound: true,
+    inverterPlatform: 'solax_modbus_growatt_min',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
+    solcastFound: true,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+    noPhaseSensors: true,
   },
 };

@@ -766,10 +766,17 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | `pv_power` | sensor | `input_power` | Real-time solar PV power (W) |
 | `import_power` / `export_power` | sensor | `power_meter_active_power` (separate power-meter device, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`, `"export_positive"` — issue #438) |
 
-**Lifetime energy (optional):** see `HUAWEI_SUFFIX_MAP` in `ha_api_controller.py`
-for the five lifetime-energy suffixes added in #471/#473 (not reproduced here
-to avoid duplicating a list that will drift — the suffix map is the source of
-truth).
+**Lifetime energy:** see `HUAWEI_SUFFIX_MAP` in `ha_api_controller.py` for the
+five lifetime-energy suffixes added in #471/#473 (not reproduced here to
+avoid duplicating a list that will drift — the suffix map is the source of
+truth). These map to the same five core energy sensors `EnergyFlowCalculator`
+requires on every platform (`energy_flow_calculator.py`), so they're required
+for BESS to compute energy flows on Huawei too, same as elsewhere — not
+optional. `grid_exported_energy`/`grid_accumulated_energy` specifically come
+from the separate power-meter device (see the real-time grid-power row
+above); an install with no power meter genuinely cannot report them, and the
+health check correctly reports that as an error rather than silently
+reporting OK.
 
 **Auto-detection:** `HUAWEI_SUFFIX_MAP` is wired into `discover_sensors_from_registry`
 (the same production entity-registry scan every other platform uses — fixed

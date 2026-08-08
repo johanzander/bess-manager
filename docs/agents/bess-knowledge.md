@@ -345,6 +345,17 @@ battery has room.  With the cap set:
   (reported per period on `EnergyData` and as `clippedSolar` in the API).
   A full battery during above-cap solar is therefore genuinely costly, which
   is what pushes the optimizer to reserve headroom for the midday peak.
+  `clipped_solar` also absorbs export-limit-curtailed PV (#269/#502) — same
+  field, second cause: when `export_curtailment_enabled` and a period would
+  export below `export_curtailment_price_floor`, the solar-sourced share of
+  that export (never the battery-sourced share, since the hardware
+  export-limit only throttles PV) is reported as unharvested here rather
+  than at its honest negative-price cost, since it will be curtailed to
+  zero at runtime. Applied only at reporting seams
+  (`apply_export_curtailment_to_period_data` in `models.py`) — the
+  `PeriodData` BSM actually stores stays at the honest price, since the
+  execution-time curtailment trigger and the DP's own guardrail comparison
+  both require it.
 - **Deferring absorption uses the SOLAR_EXPORT-below-max bypass (#313)**:
   normally IDLE passively absorbs surplus, so a reward change alone cannot
   defer charging.  The existing bypass candidate (SoE held exactly unchanged,

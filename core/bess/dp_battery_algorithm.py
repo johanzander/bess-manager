@@ -72,6 +72,7 @@ from core.bess.models import (
     EnergyData,
     OptimizationResult,
     PeriodData,
+    apply_export_curtailment_to_period_data,
 )
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
@@ -2238,7 +2239,20 @@ def optimize_battery_schedule(
     # re-deriving the formula (see EconomicData.from_energy_data).
     solar_only_cost = sum(h.economic.solar_only_cost for h in hourly_results)
 
-    total_optimized_cost = sum(h.economic.hourly_cost for h in hourly_results)
+    # Reported cost must reflect what will actually happen at runtime, not
+    # the honest physics-only price PeriodData itself keeps (#502): a period
+    # that will be curtailed to zero export contributes zero cost here, via
+    # a reporting-only copy -- hourly_results/PeriodData stay untouched
+    # since BSM's execution-time curtailment trigger and the guardrail
+    # comparison above both require the real, un-adjusted values.
+    total_optimized_cost = sum(
+        apply_export_curtailment_to_period_data(
+            h,
+            export_curtailment_active,
+            battery_settings.export_curtailment_price_floor,
+        ).economic.hourly_cost
+        for h in hourly_results
+    )
     total_charged = sum(h.energy.battery_charged for h in hourly_results)
     total_discharged = sum(h.energy.battery_discharged for h in hourly_results)
 

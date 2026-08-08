@@ -9,7 +9,13 @@ from datetime import date, datetime
 
 from . import time_utils
 from .historical_data_store import HistoricalDataStore
-from .models import DecisionData, EconomicData, EnergyData, PeriodData
+from .models import (
+    DecisionData,
+    EconomicData,
+    EnergyData,
+    PeriodData,
+    apply_export_curtailment_to_period_data,
+)
 from .schedule_store import ScheduleStore
 from .settings import BatterySettings
 from .time_utils import format_period, get_period_count
@@ -86,7 +92,9 @@ class DailyViewBuilder:
             decision=DecisionData(strategic_intent=intent),
         )
 
-    def build_daily_view(self, current_period: int) -> DailyView:
+    def build_daily_view(
+        self, current_period: int, export_curtailment_active: bool = False
+    ) -> DailyView:
         """Build view for today.
 
         Merges:
@@ -95,6 +103,12 @@ class DailyViewBuilder:
 
         Args:
             current_period: Current period index (0-95 for normal day)
+            export_curtailment_active: Caller-computed, capability-aware
+                flag (BatterySystemManager.export_curtailment_active) --
+                when True, a future period that will be curtailed to zero
+                export at runtime is reported here at zero export/cost
+                (#502), never the raw settings field (see
+                apply_export_curtailment_to_period_data).
 
         Returns:
             DailyView with quarterly periods (92-100 depending on DST)
@@ -128,7 +142,13 @@ class DailyViewBuilder:
                 target_timestamp = time_utils.period_index_to_timestamp(i)
                 period_data = self.schedule_store.get_period_data_at(target_timestamp)
                 if period_data is not None:
-                    periods.append(period_data)
+                    periods.append(
+                        apply_export_curtailment_to_period_data(
+                            period_data,
+                            export_curtailment_active,
+                            self.battery_settings.export_curtailment_price_floor,
+                        )
+                    )
                 else:
                     # No historical data AND no predicted data for this period
                     # This can happen when HA restarts and sensor data is unavailable

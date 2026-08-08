@@ -26,6 +26,8 @@ export interface WizardExpectation {
   consumptionForecastFound: boolean;
   dischargeInhibitFound: boolean;
   weatherFound: boolean;
+  /** No current_l1/l2/l3 sensors were discovered (no CT clamps configured) — disables fuse protection regardless of platform capability. Optional, defaults to false. */
+  noPhaseSensors?: boolean;
 }
 
 export const EXPECTATIONS: Record<string, WizardExpectation> = {
@@ -228,5 +230,6 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     consumptionForecastFound: false,
     dischargeInhibitFound: false,
     weatherFound: false,
+    noPhaseSensors: true,
   },
 };

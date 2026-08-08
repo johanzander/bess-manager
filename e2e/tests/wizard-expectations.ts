@@ -215,4 +215,18 @@ export const EXPECTATIONS: Record<string, WizardExpectation> = {
     dischargeInhibitFound: false,
     weatherFound: false,
   },
+  /** Real-world regression from issue #118: ridax67's live Growatt GEN4 VPP installation. */
+  'ci-wizard-growatt-vpp-ridax-118': {
+    growattFound: false,
+    solaxFound: true,
+    inverterPlatform: 'solax_modbus_growatt_min',
+    nordpoolFound: true,
+    octopusFound: false,
+    autoSelectedProvider: 'nordpool_official',
+    phaseCount: null,
+    solcastFound: true,
+    consumptionForecastFound: false,
+    dischargeInhibitFound: false,
+    weatherFound: false,
+  },
 };

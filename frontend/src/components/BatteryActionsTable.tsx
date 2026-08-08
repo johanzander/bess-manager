@@ -5,23 +5,12 @@ import { useDashboardData } from '../hooks/useDashboardData';
 import { DataResolution } from '../hooks/useUserPreferences';
 import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
 import { getIntent, isCurtailed } from '../utils/intent';
+import { formatFixed } from '../utils/format';
 
 interface BatteryActionsTableProps {
   resolution: DataResolution;
   date?: string; // ISO date (YYYY-MM-DD); omit for today
 }
-
-// A locally-summed total (e.g. a day's export revenue across several
-// near-zero curtailed periods) can land on a tiny negative float that
-// rounds to zero -- JS's Number.prototype.toFixed keeps the sign in that
-// case ((-0.0004).toFixed(2) === "-0.00"), unlike toFixed on an already-
-// negative-zero value. Round first, then add 0 to normalize -0 to 0 (IEEE
-// 754: -0 + 0 === 0) before the final toFixed, so it never happens.
-export const formatFixed = (value: number, prec: number): string => {
-  const factor = 10 ** prec;
-  const rounded = Math.round(value * factor) / factor + 0;
-  return rounded.toFixed(prec);
-};
 
 // Column group styling — shared between today's and tomorrow's tables.
 // Conditions = what the optimizer observed, Battery = what it decided, Cost & Savings = the result.

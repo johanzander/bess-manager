@@ -2695,10 +2695,9 @@ class BatterySystemManager:
             if period_data is not None and (
                 period_data.energy.grid_exported > 0 or self._export_limit_curtailed
             ):
-                should_curtail = (
-                    period_data.energy.grid_exported > 0
-                    and period_data.economic.sell_price
-                    < self.battery_settings.export_curtailment_price_floor
+                should_curtail = self.battery_settings.should_curtail_export(
+                    period_data.energy.grid_exported,
+                    period_data.economic.sell_price,
                 )
                 try:
                     self._inverter_controller.apply_export_limit(

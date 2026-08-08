@@ -476,15 +476,13 @@ def _aggregate_quarterly_to_hourly(
             [p.strategicIntent for p in quarter_periods]
         )
 
-        # Curtailment (#501) only ever coincides with SOLAR_EXPORT quarters,
-        # so tie it to whichever quarters actually produced the winning
-        # intent above -- if any of those were curtailed, the hour as
-        # displayed is a curtailed export, not a profitable one.
-        hour_curtailed = any(
-            p.curtailed
-            for p in quarter_periods
-            if p.strategicIntent == dominant_strategic_intent
-        )
+        # Curtailment (#501) is independent of intent -- a curtailed quarter
+        # can classify as SOLAR_STORAGE (battery still charging at its rate
+        # limit while the surplus above it curtails), so never filter by the
+        # dominant intent. If any quarter was curtailed, the hour as
+        # displayed is (at least partly) a curtailed export, not a purely
+        # profitable one.
+        hour_curtailed = any(p.curtailed for p in quarter_periods)
 
         # Observed intent must aggregate across all 4 quarters too, not just
         # the last one — a re-plan only updates strategicIntent going

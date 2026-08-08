@@ -725,9 +725,10 @@ def _build_period_data(
 
     export_curtailment_active: caller-computed, capability-aware curtailment
     flag (see optimize_battery_schedule's docstring). Used only to derive
-    decision.curtailed (#501) via the same condition BSM's execution-time
-    gate applies (_apply_period_schedule's should_curtail) -- never affects
-    the reported energy/economic fields.
+    decision.curtailed (#501) via BatterySettings.should_curtail_export, the
+    same shared predicate BSM's execution-time gate applies
+    (_apply_period_schedule) -- never affects the reported energy/economic
+    fields.
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -797,10 +798,8 @@ def _build_period_data(
     energy_stored = max(0.0, next_soe - soe)
     battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
-    curtailed = (
-        export_curtailment_active
-        and grid_exported > 0
-        and current_sell_price < battery_settings.export_curtailment_price_floor
+    curtailed = export_curtailment_active and battery_settings.should_curtail_export(
+        grid_exported, current_sell_price
     )
 
     decision_data = create_decision_data(

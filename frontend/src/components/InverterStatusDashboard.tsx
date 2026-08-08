@@ -510,8 +510,12 @@ const InverterStatusDashboard: React.FC = () => {
 
   // Planned PV curtailment (#501): a group the plan expects to curtail
   // (export limit applied, cost 0) rather than sell at a profit.
+  // Curtailment doesn't replace the intent (a curtailed period can still be
+  // charging, e.g. SOLAR_STORAGE) -- keep the intent and mark it curtailed.
   const getIntentLabel = (intent: string, curtailed?: boolean) =>
-    curtailed ? 'CURTAILED (NO EXPORT)' : intent.replace(/_/g, ' ');
+    curtailed
+      ? `${intent.replace(/_/g, ' ')} (CURTAILED)`
+      : intent.replace(/_/g, ' ');
 
   useEffect(() => {
     loadData(false);

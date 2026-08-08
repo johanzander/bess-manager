@@ -64,7 +64,7 @@ function buildSegments(
     const endHour = startHour + STEP_HOURS;
 
     const last = segments[segments.length - 1];
-    if (last && last.legendKey === legendKey && !last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
+    if (last && last.legendKey === legendKey && last.intent === intent && !last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
       last.endHour = endHour;
     } else {
       segments.push({ startHour, endHour, intent, legendKey, isTomorrow: false });
@@ -80,7 +80,7 @@ function buildSegments(
       const endHour = startHour + STEP_HOURS;
 
       const last = segments[segments.length - 1];
-      if (last && last.legendKey === legendKey && last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
+      if (last && last.legendKey === legendKey && last.intent === intent && last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
         last.endHour = endHour;
       } else {
         segments.push({ startHour, endHour, intent, legendKey, isTomorrow: true });
@@ -250,7 +250,11 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
             }}
           >
             <p className="font-semibold text-gray-900 dark:text-white text-sm">
-              {INTENT_CONFIG[tooltipData.segment.legendKey].label}
+              {/* Curtailment doesn't replace the intent (a curtailed period
+                  can still be charging, e.g. SOLAR_STORAGE) -- show both. */}
+              {tooltipData.segment.legendKey === 'CURTAILED'
+                ? `${INTENT_CONFIG[tooltipData.segment.intent].label} — Curtailed (No Export)`
+                : INTENT_CONFIG[tooltipData.segment.legendKey].label}
             </p>
             <p className="text-xs text-gray-600 dark:text-gray-400">
               {formatHour(tooltipData.segment.startHour)} – {formatHour(tooltipData.segment.endHour)}

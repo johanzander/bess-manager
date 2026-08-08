@@ -2,7 +2,7 @@
   "name": "regression_2026_08_08_143843",
   "description": "Issue #269 follow-up (charge-early tie-break): live report 8 Aug 2026 14:30 CEST -- SOE 12.0/15 with ~4.7 kWh of below-floor solar surplus remaining; the pre-fix DP held SOE flat (curtail) for two periods and deferred the 3 kWh fill, actuating as charge-rate 0% + Meter 1.",
   "issue": 269,
-  "pr": null,
+  "pr": 510,
   "source": "debug_log/bess-debug-2026-08-08-143843.md",
   "resolution": "quarterly",
   "period_duration_hours": 0.25,

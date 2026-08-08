@@ -667,3 +667,60 @@ further.
 ## From the #497 flow-invariant suite (non-blocking)
 
 **`test_scenarios.py::test_all_scenarios` and `test_plan_faithfulness.py::test_realized_matches_planned_across_all_fixtures` use two different definitions of "realized" (R).** The inline block at the end of `test_all_scenarios` builds commands via `derive_control_command(...)` without `shadow_price`/`buy_price`; `helpers.run_scenario_realized` — which the new corpus-wide gap pin uses — passes both. So the two corpus-wide R-vs-P checks are not measuring the same R. Nothing is wrong today, but whoever fixes #497 and re-pins `PLAN_EXECUTION_GAP_SEK` will be re-pinning against one definition while the looser per-scenario check enforces the other. Fix: replace the inline block in `test_all_scenarios` with a `run_scenario_realized` call. Left out of the invariant-suite PR because it changes what an existing test asserts, which deserves its own diff rather than riding along with test-infrastructure additions.
+
+---
+
+## The bigger question: why does the DP need a dozen epsilons at all?
+
+Raised while diagnosing #497. Worth its own investigation, not a drive-by fix.
+
+The DP currently carries something like a dozen independently-chosen small
+constants, each added to patch one symptom:
+
+| Constant | Where | Purpose |
+|---|---|---|
+| `BATTERY_EXPORT_THRESHOLD_KWH` (0.01) | `dp_battery_algorithm.py:97` | self-throttle export credit (#240) |
+| hardcoded `0.1` fold floor | `models.py:167` | lifetime-counter noise (#350) |
+| `0.01` battery_to_grid / grid_to_battery | `strategic_intent.py` | intent classification |
+| `_POWER_THRESHOLD_KW` (0.1) | `strategic_intent.py` | intent noise filter |
+| `POWER_TOLERANCE_KW` | `dp_battery_algorithm.py` | charge/discharge/idle branch selection |
+| `POWER_CLASSIFICATION_THRESHOLD_KW` | `dp_battery_algorithm.py` | minimum discharge candidate |
+| `SOE_STEP_KWH` (0.1) | `dp_constants.py` | DP state grid resolution |
+| `rate_step` = max_discharge/100 | `dp_battery_algorithm.py` | hardware percent resolution |
+| `epsilon` (tie detection) | `tie_detection.py` | value-function noise band |
+| `max_cover_p` half-step band | `dp_battery_algorithm.py:1436` | #466 load-cover tie-break |
+| `validate_energy_balance` tolerance (0.2) | `models.py` | cross-sensor balance warning |
+| `GRID_RESOLUTION_TOLERANCE` (0.10 SEK) | `test_plan_faithfulness.py` | plan-faithfulness slack |
+
+Each is defensible in isolation. The failure mode is that they interact: any
+two of them that describe *the same physical boundary* in different units, or
+at different stages of the pipeline, can silently drift apart. #240 vs #350 is
+one instance (#497); the design doc referenced at `strategic_intent.py:44`
+records an earlier one. Both were found by a human reading a schedule by hand,
+years apart, and both needed DP expertise to adjudicate — which does not scale
+and is not something the maintainer can review.
+
+The question is not "are these values right" but "why are there so many
+independent ones". Candidate framings, none investigated:
+
+1. **How many of these are really the same boundary expressed twice?** The
+   self-throttle threshold, the fold floor and the intent classifier's
+   `battery_to_grid` cut all try to answer one question: "is this export real?"
+   Three constants, three call sites, three chances to disagree. If that is one
+   concept, it should be one named thing with one owner.
+2. **How many exist only because the DP models *commanded* energy rather than
+   *executed* energy?** #497's fix removes one by making the plan describe what
+   the hardware will actually do. `max_cover_p` (#466) may be the same shape.
+   The inverter simulator already encodes the true execution semantics; the DP
+   approximating them with epsilons is arguably the root pattern.
+3. **How many are discretization artifacts that a continuous formulation would
+   not need?** `SOE_STEP_KWH`, `rate_step`, the tie-detection `epsilon` and the
+   half-step cover band all exist because the DP searches a grid. `pwl_window_dp`
+   already explores a piecewise-linear alternative.
+
+Concrete first step, cheap and non-destructive: enumerate every small constant
+in `core/bess/`, and for each record the physical question it answers. Any
+physical question answered by more than one constant is a latent #497. That
+inventory is a day's work and would tell us whether this is a real structural
+problem or a dozen unrelated coincidences — worth knowing before anyone
+proposes a redesign.

@@ -1476,6 +1476,15 @@ def _prefer_curtailed_charge_absorb(
     below-floor window) is never preferred over one that only absorbs
     surplus. Discharge winners -- including a #466 load-covering swap --
     are left untouched: this tie-break only reorders hold-vs-store picks.
+
+    `epsilon <= 0.0` disables the tie-break entirely -- deliberately
+    mirroring #466 and tie_detection's documented blind spot: a flat value
+    function (dV/dSoE == 0) gives epsilon no scale, so there is no
+    principled band in which candidates count as "tied" rather than
+    genuinely ranked, and swapping on an arbitrary absolute threshold
+    would trade real value. In practice below-floor periods with a live
+    evening export block have dV/dSoE ~= cycle_cost > 0, so the disabled
+    case is the degenerate no-future-value horizon, not the reported bug.
     """
     if epsilon <= 0.0:
         return best_index

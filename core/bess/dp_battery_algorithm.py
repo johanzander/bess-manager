@@ -1449,6 +1449,57 @@ def _prefer_load_covering_discharge(
     return swap_index
 
 
+def _prefer_curtailed_charge_absorb(
+    candidates: list[tuple[float, float, float, float, float, float]],
+    best_index: int,
+    epsilon: float,
+) -> int:
+    """Charge-early tie-break under the #269 curtailment sell-price floor:
+    if this period's sell price was floored to 0 for the reward calculation,
+    prefer the candidate that stores the most energy among those within
+    `epsilon` of the best value, provided it imports no more grid energy
+    than the argmax winner.
+
+    Rationale: flooring the sell price makes every below-floor export worth
+    exactly 0, so whenever the remaining below-floor surplus exceeds the
+    battery's headroom, "charge now, curtail later" and "curtail now,
+    charge later" earn identical reward and the argmax picks between them
+    on float noise. The options are not symmetric in reality: deferring
+    actuates as charge-rate 0% + export-limit 0 (PV physically clipped to
+    house load, above-forecast production wasted) and spends the plan's
+    slack against a later solar shortfall before the next positive-price
+    block. Charging earliest is stochastically dominant -- equal model
+    reward, strictly better under forecast error in either direction.
+
+    The import guard keeps the swap free: a candidate that stores more by
+    importing from the grid (the full-rate charge candidate during a
+    below-floor window) is never preferred over one that only absorbs
+    surplus. Discharge winners -- including a #466 load-covering swap --
+    are left untouched: this tie-break only reorders hold-vs-store picks.
+    """
+    if epsilon <= 0.0:
+        return best_index
+    best_value, best_power, best_next_soe, _, _, best_grid_imported = candidates[
+        best_index
+    ]
+    if best_power < -POWER_TOLERANCE_KW:
+        return best_index
+    swap_index = best_index
+    swap_next_soe = best_next_soe
+    for index, candidate in enumerate(candidates):
+        value, power, next_soe, _, _, grid_imported = candidate
+        if power < -POWER_TOLERANCE_KW:
+            continue
+        if best_value - value >= epsilon:
+            continue
+        if grid_imported > best_grid_imported + 1e-9:
+            continue
+        if next_soe > swap_next_soe + 1e-9:
+            swap_index = index
+            swap_next_soe = next_soe
+    return swap_index
+
+
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -1465,6 +1516,7 @@ def _best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
+    sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -1621,15 +1673,26 @@ def _best_action_at_continuous_state(
     argmax_value_slope = _local_value_slope(
         V_next, candidates[argmax_index][2], battery_settings
     )
+    epsilon = epsilon_for_period(argmax_value_slope, SOE_STEP_KWH)
     best_index = _prefer_load_covering_discharge(
         candidates,
         argmax_index,
-        epsilon=epsilon_for_period(argmax_value_slope, SOE_STEP_KWH),
+        epsilon=epsilon,
         home_consumption=home,
         solar_production=solar,
         dt=dt,
         rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
+
+    # Charge-early tie-break under the #269 curtailment floor -- see
+    # _prefer_curtailed_charge_absorb. Runs after the #466 swap and never
+    # overrides a discharge winner, so the two preferences cannot fight.
+    if sell_price_floored is not None and sell_price_floored[t]:
+        best_index = _prefer_curtailed_charge_absorb(
+            candidates,
+            best_index,
+            epsilon=epsilon,
+        )
 
     # #466 note: best_index is POST-swap here, but tie_margin and
     # value_slope below are measured at argmax_index (PRE-swap). Tie
@@ -1982,8 +2045,13 @@ def optimize_battery_schedule(
     if export_curtailment_active:
         floor = battery_settings.export_curtailment_price_floor
         reward_sell_price = [0.0 if p < floor else p for p in sell_price]
+        # Which periods the floor actually rewrote -- the replay's
+        # charge-early tie-break (_prefer_curtailed_charge_absorb) only
+        # fires in these.
+        sell_price_floored = [p < floor for p in sell_price]
     else:
         reward_sell_price = sell_price
+        sell_price_floored = None
 
     # Step 1: Run DP to compute the value-to-go array V. Step 2 recomputes
     # each replay action directly from V (interpolated at the true
@@ -2056,6 +2124,7 @@ def optimize_battery_schedule(
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 import_cap_kwh=import_cap_kwh,
+                sell_price_floored=sell_price_floored,
             )
         )
         tie_margins.append(tie_margin)
@@ -2188,6 +2257,9 @@ def optimize_battery_schedule(
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
             )
+            window_floored = (
+                sell_price_floored[sl] if sell_price_floored is not None else None
+            )
             window_resolutions[window.start] = resolve_pwl_window(
                 V_window,
                 start_soe=soe_trajectory[window.start],
@@ -2203,6 +2275,7 @@ def optimize_battery_schedule(
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
+                sell_price_floored=window_floored,
             )
 
         actions, soe_trajectory = splice_schedule(

@@ -44,6 +44,10 @@ def _scenario_inputs(scenario: dict):
         cycle_cost_per_kwh=battery["cycle_cost_per_kwh"],
         inverter_max_ac_power_kw=battery.get("inverter_max_ac_power_kw", 0.0),
         inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
+        export_curtailment_enabled=battery.get("export_curtailment_enabled", False),
+        export_curtailment_price_floor=battery.get(
+            "export_curtailment_price_floor", 0.0
+        ),
     )
 
     if "buy_price" in scenario and "sell_price" in scenario:
@@ -96,6 +100,14 @@ def _scenario_inputs(scenario: dict):
     }
     if "terminal_value_per_kwh" in scenario:
         inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+    # export_curtailment_active is capability-aware in production (enabled
+    # AND the platform supports export-limit control, resolved in
+    # battery_system_manager.py) -- fixtures record the resolved flag
+    # explicitly rather than this helper inferring it from the enabled
+    # setting, so a fixture from a non-curtailing platform replays the
+    # same DP path it ran live.
+    if battery.get("export_curtailment_active", False):
+        inputs["export_curtailment_active"] = True
     if "home" in scenario:
         inputs["home_settings"] = HomeSettings(**scenario["home"])
     return inputs

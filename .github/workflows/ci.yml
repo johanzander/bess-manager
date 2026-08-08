@@ -112,7 +112,20 @@ jobs:
 
       - name: Run fast tests
         if: needs.changes.outputs.backend == 'true'
-        run: pytest -m "not slow" --tb=short -q
+        run: |
+          pytest -m "not slow" --tb=short -q \
+            --cov=backend --cov=core/bess --cov-report=term-missing \
+            --cov-report=xml
+
+      - name: Coverage summary
+        if: needs.changes.outputs.backend == 'true'
+        run: |
+          {
+            echo "### Coverage (fast tests)"
+            echo '```'
+            python -c "import xml.etree.ElementTree as ET; print(f'Total: {float(ET.parse(\"coverage.xml\").getroot().get(\"line-rate\")) * 100:.1f}%')"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: No backend changes
         if: needs.changes.outputs.backend != 'true'

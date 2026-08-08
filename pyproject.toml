@@ -73,6 +73,11 @@ module = [
 ]
 ignore_missing_imports = true
 
+[tool.coverage.run]
+omit = [
+    "*/tests/*",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["core/bess/tests", "backend/tests"]
 python_files = "test_*.py"

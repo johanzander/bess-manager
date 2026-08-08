@@ -75,9 +75,13 @@ class EnergyData:
     battery_soe_start: float  # kWh (changed from battery_soc_start)
     battery_soe_end: float  # kWh (changed from battery_soc_end)
 
-    # Solar lost to the inverter AC output cap (kWh) — DC production the
-    # inverter could neither convert to AC nor store in a full/rate-limited
-    # battery. Zero unless the inverter_max_ac_power_kw feature is enabled.
+    # Solar production never delivered as AC-side export/consumption (kWh).
+    # Two causes: the inverter AC output cap (DC production the inverter
+    # could neither convert to AC nor store in a full/rate-limited battery,
+    # zero unless inverter_max_ac_power_kw is enabled), or the solar-sourced
+    # share of a period's export curtailed to zero at runtime by PV
+    # export-limit curtailment (#502, zero unless export_curtailment_enabled
+    # -- see apply_export_curtailment_to_period_data).
     clipped_solar: float = 0.0
 
     # Detailed flows (calculated automatically in __post_init__)

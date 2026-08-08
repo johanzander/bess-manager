@@ -456,3 +456,22 @@ class TestCurtailedPeriodsNotChargedInReportedCost:
         result = _curtailment_scenario(export_curtailment_active=False)
 
         assert result.economic_summary.battery_solar_cost == pytest.approx(0.1)
+
+    def test_solar_only_baseline_stays_consistent_with_curtailed_total(self):
+        """Regression (found in code review on this PR): solar_only_cost --
+        the "solar but no battery" baseline used to derive
+        solar_to_battery_solar_savings -- must be curtailment-adjusted by
+        the SAME transform as battery_solar_cost, or the savings subtraction
+        mixes a curtailed total against an honest baseline and misattributes
+        curtailment's own savings to the battery. Here the curtailed export
+        would happen identically with or without a battery (nothing else in
+        the scenario depends on the battery), so once both sides are
+        consistently curtailment-adjusted, the battery adds zero measurable
+        solar-only savings -- not the inflated ~3.0 SEK an unadjusted
+        baseline would report."""
+        result = _curtailment_scenario(export_curtailment_active=True)
+
+        assert result.economic_summary.solar_only_cost == pytest.approx(0.0)
+        assert result.economic_summary.solar_to_battery_solar_savings == pytest.approx(
+            0.0
+        )

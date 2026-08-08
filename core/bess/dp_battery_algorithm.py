@@ -2233,25 +2233,32 @@ def optimize_battery_schedule(
         home_consumption[i] * buy_price[i] for i in range(len(buy_price))
     )
 
-    # Cost with solar but no battery — the correct baseline for judging whether
-    # the battery adds value beyond what solar alone already provides. Reuses
-    # each period's already-computed EconomicData.solar_only_cost rather than
-    # re-deriving the formula (see EconomicData.from_energy_data).
-    solar_only_cost = sum(h.economic.solar_only_cost for h in hourly_results)
-
     # Reported cost must reflect what will actually happen at runtime, not
     # the honest physics-only price PeriodData itself keeps (#502): a period
     # that will be curtailed to zero export contributes zero cost here, via
     # a reporting-only copy -- hourly_results/PeriodData stay untouched
     # since BSM's execution-time curtailment trigger and the guardrail
     # comparison above both require the real, un-adjusted values.
-    total_optimized_cost = sum(
+    #
+    # solar_only_cost (the "solar but no battery" baseline) must be derived
+    # from the SAME curtailment-adjusted copy as total_optimized_cost, not
+    # the honest hourly_results -- otherwise the battery-vs-solar-only
+    # savings subtraction below mixes a curtailed total against an
+    # uncurtailed baseline, misattributing curtailment's own savings to the
+    # battery (code review finding).
+    curtailment_adjusted_periods = [
         apply_export_curtailment_to_period_data(
             h,
             export_curtailment_active,
             battery_settings.export_curtailment_price_floor,
-        ).economic.hourly_cost
+        )
         for h in hourly_results
+    ]
+    solar_only_cost = sum(
+        h.economic.solar_only_cost for h in curtailment_adjusted_periods
+    )
+    total_optimized_cost = sum(
+        h.economic.hourly_cost for h in curtailment_adjusted_periods
     )
     total_charged = sum(h.energy.battery_charged for h in hourly_results)
     total_discharged = sum(h.energy.battery_discharged for h in hourly_results)

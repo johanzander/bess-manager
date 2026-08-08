@@ -36,6 +36,8 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import MagicMock
 
+import pytest
+
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import (
@@ -53,6 +55,7 @@ from core.bess.price_manager import MockSource
 from core.bess.settings import BatterySettings
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 from core.bess.tests.conftest import MockHomeAssistantController
+from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
 PERIOD = 20
 
@@ -474,3 +477,46 @@ class TestBellmanGuardrailNotFooledByFloor:
             export_curtailment_active=False,
         )
         assert any(p.energy.battery_discharged > 0 for p in result.period_data)
+
+
+class TestDPCurtailmentDisplayFlagOnRealFieldReport:
+    """Reproduces @Frank-Leysen's live #501 report (8 Aug 2026, 09:11 CEST,
+    10.1.0b5, gist 626de4276692d2f2c76cf4ef025478ea) from the real debug
+    bundle -- not a hand-built scenario. The plan showed SOLAR_EXPORT at
+    13:45 and 14:15-14:59 (sell price ~-EUR0.021) with SOC 73-78%, and the
+    reporter reasonably read that as "paying to export with room to spare."
+    Actual behaviour: curtailment is active, so those periods (and several
+    SOLAR_STORAGE ones alongside them) cost EUR0 -- the plan was right, the
+    display was wrong."""
+
+    def test_flags_the_reported_periods_as_curtailed(self):
+        scenario, battery_settings, buy_price, sell_price, dt = build_scenario_inputs(
+            "regression_frank_debug_2026_08_08"
+        )
+        battery = scenario["battery"]
+        result = optimize_battery_schedule(
+            buy_price=buy_price,
+            sell_price=sell_price,
+            home_consumption=scenario["home_consumption"],
+            solar_production=scenario["solar_production"],
+            initial_soe=battery["initial_soe"],
+            battery_settings=battery_settings,
+            period_duration_hours=dt,
+            terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
+            export_curtailment_active=True,
+        )
+
+        # Fixture horizon starts at absolute period 36 (09:00); Frank's
+        # reported 13:45 and 14:15 slots are absolute periods 55 and 57.
+        by_period = {36 + i: pd for i, pd in enumerate(result.period_data)}
+
+        period_1345 = by_period[13 * 4 + 3]
+        assert period_1345.decision.strategic_intent == "SOLAR_EXPORT"
+        assert period_1345.decision.curtailed is True
+
+        period_1415 = by_period[14 * 4 + 1]
+        assert period_1415.decision.strategic_intent == "SOLAR_EXPORT"
+        assert period_1415.decision.curtailed is True
+
+        # Sell price matches the reporter's observation (~-EUR0.021).
+        assert period_1345.economic.sell_price == pytest.approx(-0.021, abs=0.001)

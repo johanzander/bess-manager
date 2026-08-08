@@ -24,6 +24,16 @@ class FormattedValue:
     text: str
 
 
+def _fixed(value: float, prec: int, thousands: bool = False) -> str:
+    """Format `value` to `prec` decimals, never as "-0.00" for a value that
+    rounds to zero (e.g. a curtailed period's tiny FP-noise export revenue,
+    round(-0.0004, 2) == -0.0). round() preserves the sign of a negative
+    value that rounds to zero; adding 0.0 to that result normalizes -0.0 to
+    0.0 per IEEE 754, before the string ever gets built."""
+    rounded = round(value, prec) + 0.0
+    return f"{rounded:,.{prec}f}" if thousands else f"{rounded:.{prec}f}"
+
+
 def create_formatted_value(
     value: float, unit_type: str, currency: str, precision: int | None = None
 ) -> FormattedValue:
@@ -37,44 +47,47 @@ def create_formatted_value(
     """
     if unit_type == "currency":
         prec = precision if precision is not None else 2
+        display = _fixed(value, prec, thousands=True)
         return FormattedValue(
             value=value,
-            display=f"{value:,.{prec}f}",
+            display=display,
             unit=currency,
-            text=f"{value:,.{prec}f} {currency}",
+            text=f"{display} {currency}",
         )
     elif unit_type == "energy_kwh_only":
         # Always use kWh units to ensure consistency in savings view
         # Small values like 0.2 kWh should remain as "0.2 kWh", not "200 Wh"
         prec = precision if precision is not None else 1
+        display = _fixed(value, prec)
         return FormattedValue(
             value=value,
-            display=f"{value:.{prec}f}",
+            display=display,
             unit="kWh",
-            text=f"{value:.{prec}f} kWh",
+            text=f"{display} kWh",
         )
     elif unit_type == "percentage":
         prec = precision if precision is not None else 0
+        display = _fixed(value, prec)
         return FormattedValue(
             value=value,
-            display=f"{value:.{prec}f}",
+            display=display,
             unit="%",
-            text=f"{value:.{prec}f} %",
+            text=f"{display} %",
         )
     elif unit_type == "price":
         prec = precision if precision is not None else 2
         price_unit = f"{currency}/kWh"
+        display = _fixed(value, prec)
         return FormattedValue(
             value=value,
-            display=f"{value:.{prec}f}",
+            display=display,
             unit=price_unit,
-            text=f"{value:.{prec}f} {price_unit}",
+            text=f"{display} {price_unit}",
         )
     else:
         # Default fallback
-        return FormattedValue(
-            value=value, display=f"{value:.2f}", unit="", text=f"{value:.2f}"
-        )
+        display = _fixed(value, 2)
+        return FormattedValue(value=value, display=display, unit="", text=display)
 
 
 @dataclass

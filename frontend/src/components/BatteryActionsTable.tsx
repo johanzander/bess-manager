@@ -11,6 +11,18 @@ interface BatteryActionsTableProps {
   date?: string; // ISO date (YYYY-MM-DD); omit for today
 }
 
+// A locally-summed total (e.g. a day's export revenue across several
+// near-zero curtailed periods) can land on a tiny negative float that
+// rounds to zero -- JS's Number.prototype.toFixed keeps the sign in that
+// case ((-0.0004).toFixed(2) === "-0.00"), unlike toFixed on an already-
+// negative-zero value. Round first, then add 0 to normalize -0 to 0 (IEEE
+// 754: -0 + 0 === 0) before the final toFixed, so it never happens.
+export const formatFixed = (value: number, prec: number): string => {
+  const factor = 10 ** prec;
+  const rounded = Math.round(value * factor) / factor + 0;
+  return rounded.toFixed(prec);
+};
+
 // Column group styling — shared between today's and tomorrow's tables.
 // Conditions = what the optimizer observed, Battery = what it decided, Cost & Savings = the result.
 const GROUP_STYLES = {
@@ -74,7 +86,7 @@ const CostValueCell: React.FC<{ value: any; tone: 'cost' | 'revenue' | 'neutral'
 
   return (
     <>
-      <div className={`font-medium ${toneClass}`}>{value?.display ?? amount.toFixed(2)}</div>
+      <div className={`font-medium ${toneClass}`}>{value?.display ?? formatFixed(amount, 2)}</div>
       <div className="text-xs text-gray-500 dark:text-gray-400">{value?.unit}</div>
     </>
   );
@@ -99,7 +111,7 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
     }
     // Fallback for legacy or raw numeric values
     if (typeof field === 'number') {
-      return field.toFixed(2);
+      return formatFixed(field, 2);
     }
     return field || 'N/A';
   };
@@ -516,17 +528,17 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
-              <div className="font-medium text-red-600 dark:text-red-400">{totalImportCost.toFixed(2)}</div>
+              <div className="font-medium text-red-600 dark:text-red-400">{formatFixed(totalImportCost, 2)}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
-              <div className="font-medium text-green-600 dark:text-green-400">{totalExportRevenue.toFixed(2)}</div>
+              <div className="font-medium text-green-600 dark:text-green-400">{formatFixed(totalExportRevenue, 2)}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
             </td>
 
             <td className="px-3 py-2 whitespace-nowrap text-sm border border-gray-300 dark:border-gray-600 text-center">
-              <div className="font-medium text-gray-600 dark:text-gray-300">{totalWear.toFixed(2)}</div>
+              <div className="font-medium text-gray-600 dark:text-gray-300">{formatFixed(totalWear, 2)}</div>
               <div className="text-xs text-gray-500 dark:text-gray-400">{costUnit}</div>
             </td>
 
@@ -597,7 +609,7 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 opacity-75">
                   <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded-lg text-center border border-blue-200 dark:border-blue-800">
                     <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {tomorrowGridOnlyCost.toFixed(2)}
+                      {formatFixed(tomorrowGridOnlyCost, 2)}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-300">Grid-Only Cost</div>
@@ -606,7 +618,7 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
 
                   <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded-lg text-center border border-green-200 dark:border-green-800">
                     <div className="text-2xl font-bold text-gray-900 dark:text-white">
-                      {tomorrowOptimizedCost.toFixed(2)}
+                      {formatFixed(tomorrowOptimizedCost, 2)}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-300">Optimized Cost</div>
@@ -615,12 +627,12 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
 
                   <div className="bg-purple-50 dark:bg-purple-900/20 p-4 rounded-lg text-center border border-purple-200 dark:border-purple-800">
                     <div className={`text-2xl font-bold ${tomorrowSavings >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
-                      {tomorrowSavings.toFixed(2)}
+                      {formatFixed(tomorrowSavings, 2)}
                     </div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">{currencyUnit}</div>
                     <div className="text-sm text-gray-600 dark:text-gray-300">Projected Savings</div>
                     <div className="text-xs text-gray-500 dark:text-gray-400">
-                      {tomorrowGridOnlyCost > 0 ? `${((tomorrowSavings / tomorrowGridOnlyCost) * 100).toFixed(1)}%` : '0%'}
+                      {tomorrowGridOnlyCost > 0 ? `${formatFixed((tomorrowSavings / tomorrowGridOnlyCost) * 100, 1)}%` : '0%'}
                     </div>
                   </div>
                 </div>

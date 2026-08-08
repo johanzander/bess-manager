@@ -112,6 +112,17 @@ was "worth" `sell_price`, check this threshold first: below it, the relevant
 alternative-value comparison is against the buy price avoided, not the sell
 price (`core/bess/dp_battery_algorithm.py:511-522`).
 
+Note the throttle rewrites the *reward* only — `battery_discharged` and
+`next_soe` still carry the full commanded setpoint. For an overshoot between
+0.01 and 0.1 kWh the DP therefore books export revenue that load-following
+hardware never earns, and `EnergyData._calculate_detailed_flows` folds the
+orphaned export back into `battery_to_home` (#350), leaving a period whose
+flows do not add up. This is issue #497, open and measured: 182 of 1875
+fixture periods, pinned by
+`core/bess/tests/unit/test_flow_coherence.py`. Do not treat a
+`battery_to_home` that exceeds `home_consumption` in a planned period as
+evidence of a new bug until that pin reaches zero.
+
 **Cost basis tracking (weighted average)**: When the battery charges at
 different prices over time, the system tracks the cost of stored energy as a
 **weighted average**, not FIFO. On charge: `new_cost_basis = (soe *

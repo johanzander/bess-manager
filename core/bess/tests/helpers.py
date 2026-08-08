@@ -195,6 +195,8 @@ def assert_physical_constraints(result, battery: dict) -> None:
     Checks:
     - SOE stays within [min_soe_kwh, max_soe_kwh]
     - Charge/discharge power respects limits
+    - Every period's detailed flows are internally coherent (see
+      assert_flow_coherence)
     """
     tolerance = 1e-6
 
@@ -242,6 +244,75 @@ def assert_physical_constraints(result, battery: dict) -> None:
                 assert (
                     abs(action) <= battery["max_discharge_power_kw"] + power_tolerance
                 ), f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
+
+        assert_flow_coherence(pd)
+
+
+# Detailed-flow invariants for DP-PLANNED periods.
+#
+# They exist because the DP has accumulated a number of independently-tuned
+# constants (export thresholds, noise folds, power tolerances, SOE grid steps)
+# that each behave correctly in isolation but have twice now drifted into
+# disagreeing on a narrow band of inputs, producing periods whose reported flows
+# do not add up (#350 vs #240, diagnosed in #497). Nothing in the suite
+# previously checked that a period's numbers were self-consistent, so those only
+# ever surfaced when a human read a schedule by hand.
+#
+# IMPORTANT -- planned periods only. `_calculate_detailed_flows` deliberately
+# refuses to invent a flow to reconcile independent lifetime counters, so on
+# MEASURED data these balances legitimately fail: leftover `grid_imported`
+# beyond what the home and battery took is dropped rather than attributed
+# (models.py:142), and `battery_to_grid` is capped by `grid_exported` rather
+# than forced to absorb the discharge remainder (models.py:149). Both are
+# cross-sensor noise, not defects. A DP plan has no sensors and no noise, so it
+# has no such excuse. Do not point this helper at historical/measured
+# EnergyData -- it will fail by design.
+#
+# Deliberately NOT included here: "every exported kWh has a source" and "the
+# home is never oversupplied". Both are violated today by the #497 fold, in 182
+# of 1875 fixture periods. They are pinned instead by
+# test_flow_coherence.py::test_orphan_export_debt_is_not_growing, and move here
+# once that debt is paid.
+def assert_flow_coherence(pd) -> None:
+    """Assert one DP-planned period's detailed flows add up to its totals."""
+    tolerance = 1e-6
+    e = pd.energy
+
+    assert (
+        abs(e.battery_to_home + e.battery_to_grid - e.battery_discharged) < tolerance
+    ), (
+        f"Period {pd.period}: battery discharge does not split into its "
+        f"destinations -- battery_to_home {e.battery_to_home:.4f} + "
+        f"battery_to_grid {e.battery_to_grid:.4f} != battery_discharged "
+        f"{e.battery_discharged:.4f}"
+    )
+    assert (
+        abs(e.solar_to_battery + e.grid_to_battery - e.battery_charged) < tolerance
+    ), (
+        f"Period {pd.period}: battery charge does not split into its sources -- "
+        f"solar_to_battery {e.solar_to_battery:.4f} + grid_to_battery "
+        f"{e.grid_to_battery:.4f} != battery_charged {e.battery_charged:.4f}"
+    )
+    assert abs(e.grid_to_home + e.grid_to_battery - e.grid_imported) < tolerance, (
+        f"Period {pd.period}: imported energy has no destination -- grid_to_home "
+        f"{e.grid_to_home:.4f} + grid_to_battery {e.grid_to_battery:.4f} != "
+        f"grid_imported {e.grid_imported:.4f}"
+    )
+
+    for flow_name in (
+        "solar_to_home",
+        "solar_to_battery",
+        "solar_to_grid",
+        "grid_to_home",
+        "grid_to_battery",
+        "battery_to_home",
+        "battery_to_grid",
+    ):
+        value = getattr(e, flow_name)
+        assert value >= -tolerance, (
+            f"Period {pd.period}: {flow_name} is negative ({value:.4f}) -- a flow "
+            f"between two entities cannot run backwards"
+        )
 
 
 def make_battery_settings(**overrides):

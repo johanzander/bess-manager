@@ -3,7 +3,6 @@ import pytest
 
 from core.bess import pwl_window_dp
 from core.bess.dp_battery_algorithm import (
-    BATTERY_EXPORT_THRESHOLD_KWH,
     _discharge_candidates,
 )
 from core.bess.dp_constants import POWER_STEP_KW
@@ -645,7 +644,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         dt,
         home[0],
         solar[0],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         ac_cap_kwh=None,
     )
     assert np.isclose(replay_levels, level).any(), (
@@ -667,7 +665,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         sell_price=sell_price,
         cost_basis=0.0,
         max_charge_power_per_period=None,
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
     replay_value = reward + float(_pwl_eval_array(continuation, np.asarray(next_soe)))
@@ -688,7 +685,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         battery,
         dt,
         None,
-        BATTERY_EXPORT_THRESHOLD_KWH,
         None,
     )[0]
 

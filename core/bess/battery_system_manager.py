@@ -2139,11 +2139,6 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
-            self_throttle_export_threshold_kwh = (
-                self._inverter_controller.self_throttle_export_threshold_kwh
-                if self._inverter_controller is not None
-                else None
-            )
             # Capability-aware, not just the raw user setting (#459 review):
             # planning for curtailment on a platform that can't actually do
             # it makes outcomes worse than leaving the feature off (see
@@ -2169,7 +2164,6 @@ class BatterySystemManager:
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 export_curtailment_active=export_curtailment_active,
                 home_settings=self.home_settings,
             )

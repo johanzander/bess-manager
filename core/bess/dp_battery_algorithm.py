@@ -61,6 +61,7 @@ from enum import Enum
 import numpy as np
 
 from core.bess.dp_constants import (
+    GRID_FLOW_RESOLUTION_KWH,
     POWER_CLASSIFICATION_THRESHOLD_KW,
     POWER_STEP_KW,
     SOE_STEP_KWH,
@@ -435,7 +436,6 @@ def _compute_reward_grid(
     current_buy_price: float,
     current_sell_price: float,
     solar_production: float,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Vectorized form of `_compute_reward`'s reward calculation.
@@ -504,11 +504,12 @@ def _compute_reward_grid(
     )
     reward_store = -total_cost_store
 
-    # Discharging reward -- self-throttling fix (#240): overshoot below
-    # BATTERY_EXPORT_THRESHOLD_KWH gets no export credit.
-    grid_imported_d, grid_exported_d = ac_flows_grid(0.0, battery_discharged_active)
-    grid_exported_discharge = np.where(
-        grid_exported_d <= self_throttle_export_threshold_kwh, 0.0, grid_exported_d
+    # Discharging reward. No self-throttle correction (#240) is needed or
+    # possible: _discharge_candidates never proposes a discharge whose
+    # overshoot is below the export resolution, so grid_exported here is
+    # either zero or a genuine, measurable export.
+    grid_imported_d, grid_exported_discharge = ac_flows_grid(
+        0.0, battery_discharged_active
     )
     total_cost_discharge = (
         grid_imported_d * current_buy_price
@@ -550,7 +551,6 @@ def _compute_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[float, float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
@@ -648,16 +648,6 @@ def _compute_reward(
         grid_imported, grid_exported, _ = _ac_flows(
             solar_production, home_consumption, 0.0, battery_discharged, ac_cap_kwh
         )
-
-        # Self-throttling fix (#240): load-first hardware never actually
-        # exports a small discharge overshoot beyond home_consumption -- it
-        # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
-        # (the same battery_to_grid boundary strategic_intent.
-        # classify_strategic_intent uses to call something BATTERY_EXPORT vs
-        # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
-        # credit. At or above it, it's a genuine deliberate export.
-        if grid_exported <= self_throttle_export_threshold_kwh:
-            grid_exported = 0.0
 
     else:  # IDLE — passive solar charging
         battery_charged, _ = _idle_battery_flows(soe, next_soe, battery_settings)
@@ -959,7 +949,6 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> np.ndarray:
     """
@@ -1066,7 +1055,6 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
 
@@ -1119,7 +1107,6 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
@@ -1189,6 +1176,47 @@ def _discharge_rate_step_kw(
     )
 
 
+def _discharge_is_unexecutable(
+    discharge_power_kw,
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+):
+    """Is this discharge one no inverter can actually carry out as commanded?
+
+    True when the commanded discharge overshoots the home deficit by less than
+    `GRID_FLOW_RESOLUTION_KWH`. Such an action is unexecutable on every
+    platform, for two different reasons that happen to coincide:
+
+    - Load-following firmware simply throttles it back to the deficit
+      (`inverter_simulator.mode_to_power`: `min(deficit, rate_kw * dt, ...)`),
+      so the overshoot never leaves the property.
+    - Hardware that would deliver it produces an export below the resolution
+      of the energy counters that measure exports, so `EnergyData`'s noise
+      fold (#350) attributes it back to the home regardless.
+
+    Excluding these is the whole of the #497 fix. Proposing one anyway meant
+    the DP priced an export that never happened and drew energy from the
+    battery that never left it, emitting a period whose reported flows did not
+    add up. Every earlier attempt patched a consequence instead -- #240 zeroed
+    the export *credit* in the reward and left the *energy* overstated, which
+    is precisely the band this predicate removes. Nothing downstream needs a
+    threshold now, so none of them have to be kept in sync with each other.
+
+    Accepts a scalar or an array; returns the matching shape. Both the replay
+    candidate set (`_discharge_candidates`) and the PWL window's feasibility
+    mask (`pwl_window_dp._pwl_candidate_values_at`) route through here, so the
+    two passes cannot drift onto different action sets -- the failure mode
+    `_backward_discharge_levels`' docstring warns about.
+    """
+    deficit_kw = (home_consumption - solar_production) / dt
+    if deficit_kw <= POWER_TOLERANCE_KW:
+        return np.zeros_like(discharge_power_kw, dtype=bool)
+    return (discharge_power_kw > deficit_kw) & (
+        discharge_power_kw <= deficit_kw + GRID_FLOW_RESOLUTION_KWH / dt
+    )
+
+
 def _discharge_candidates(
     soe: float,
     battery_settings: BatterySettings,
@@ -1196,7 +1224,6 @@ def _discharge_candidates(
     home_consumption: float,
     solar_production: float,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     ac_cap_kwh: float | None = None,
 ) -> list[float]:
     """Candidate discharge magnitudes (kW, positive) to evaluate for the
@@ -1248,19 +1275,25 @@ def _discharge_candidates(
         return []
     candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
 
-    # Finding 5: reward(p) has two immediate-reward breakpoints -- where
-    # energy_balance crosses 0 (import stops) and where it crosses
-    # self_throttle_export_threshold_kwh (self-throttle ends, real export
-    # starts). Snap each to its nearest achievable step so the reward
-    # plateau's edge is represented too.
-    balance_zero_p = (home_consumption - solar_production) / dt
-    export_starts_p = balance_zero_p + self_throttle_export_threshold_kwh / dt
-    for p in (balance_zero_p, export_starts_p):
-        if 0.0 < p < p_max:
-            pct = min(max_pct, max(min_pct, round(p / rate_step)))
-            candidates.add(pct * rate_step)
-
-    return sorted(candidates)
+    # The largest step at or below the deficit is already in the enumeration
+    # above, so dropping the unexecutable steps needs nothing added back: it
+    # leaves as-exact-as-possible load cover the best available discharge, and
+    # any surviving larger candidate exports enough to be real.
+    #
+    # Unconditional, with no "but keep one anyway if this empties the set"
+    # carve-out. When the deficit is smaller than the smallest commandable
+    # discharge, every discharge overshoots it and the honest answer is that
+    # this hardware cannot serve that deficit from the battery -- so the DP
+    # proposes none and the home imports it. An earlier draft kept the
+    # smallest step in that case; it cost exact plan-faithfulness (one fixture
+    # period, 0.0034 kWh) to save a fraction of an öre, and reintroduced the
+    # asymmetry between this pass and the PWL window that the whole predicate
+    # exists to prevent.
+    return sorted(
+        p
+        for p in candidates
+        if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
+    )
 
 
 def _charge_candidate(
@@ -1463,7 +1496,6 @@ def _best_action_at_continuous_state(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[float, float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
@@ -1552,7 +1584,6 @@ def _best_action_at_continuous_state(
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
@@ -1580,7 +1611,6 @@ def _best_action_at_continuous_state(
         home,
         solar,
         discharge_resolution_kw=discharge_resolution_kw,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         ac_cap_kwh=ac_cap_kwh,
     ):
         consider(-p)
@@ -1793,7 +1823,6 @@ def _replay_accounting_pass(
     battery_settings: BatterySettings,
     dt: float,
     currency: str,
-    self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None = None,
 ) -> tuple[list[PeriodData], float]:
     """Rebuild PeriodData (and the reward-objective cost) for a given
@@ -1834,7 +1863,6 @@ def _replay_accounting_pass(
             sell_price=reward_sell_price,
             solar_production=solar_production[t],
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
 
@@ -1882,7 +1910,6 @@ def optimize_battery_schedule(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float | None = None,
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
@@ -1946,8 +1973,6 @@ def optimize_battery_schedule(
         initial_soe = battery_settings.min_soe_kwh
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
-    if self_throttle_export_threshold_kwh is None:
-        self_throttle_export_threshold_kwh = BATTERY_EXPORT_THRESHOLD_KWH
 
     # Validate inputs to prevent impossible scenarios
     if initial_soe > battery_settings.max_soe_kwh:
@@ -2001,7 +2026,6 @@ def optimize_battery_schedule(
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
 
@@ -2054,7 +2078,6 @@ def optimize_battery_schedule(
                 cost_basis=current_cost_basis,
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 import_cap_kwh=import_cap_kwh,
             )
         )
@@ -2184,7 +2207,6 @@ def optimize_battery_schedule(
                 dt=dt,
                 end_soe_target=soe_trajectory[window.end],
                 max_charge_power_per_period=window_max_charge,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
             )
@@ -2200,7 +2222,6 @@ def optimize_battery_schedule(
                 dt=dt,
                 cost_basis=cost_basis_trajectory[window.start],
                 max_charge_power_per_period=window_max_charge,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
             )
@@ -2223,7 +2244,6 @@ def optimize_battery_schedule(
             battery_settings=battery_settings,
             dt=dt,
             currency=currency,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
 

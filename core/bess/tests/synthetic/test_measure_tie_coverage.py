@@ -3,7 +3,6 @@ import inspect
 import pytest
 
 from core.bess.dp_battery_algorithm import (
-    BATTERY_EXPORT_THRESHOLD_KWH,
     SOE_STEP_KWH,
     optimize_battery_schedule,
 )
@@ -154,7 +153,6 @@ def _replay(inputs, result):
         dt=inputs["period_duration_hours"],
         initial_soe=inputs["initial_soe"],
         initial_cost_basis=inputs["initial_cost_basis"],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
 
@@ -170,7 +168,6 @@ def _reference(inputs, result, segment, cost_bases):
         dt=inputs["period_duration_hours"],
         soe_trajectory=post_splice_soe_trajectory(result, inputs["initial_soe"]),
         cost_basis=cost_bases[segment.start],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
 
@@ -272,8 +269,8 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     Re-pinned for #466 (risk-aware IDLE tie-break): the grid replay now
     breaks a near-tied IDLE inside this window toward load-covering
     discharge, which changes the SOE trajectory `segment_reference_cost`
-    inherits at both ends -- both figures move together (43.099611 /
-    43.098050) without indicating a regression. This segment's own cost is
+    inherits at both ends -- both figures move together without indicating
+    a regression. This segment's own cost is
     NOT the right place to judge that: pinning both ends forbids either pass
     from banking energy differently outside the window, so a windowed delta
     conflates the tie-break's real effect with wherever it happened to move
@@ -281,6 +278,15 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     on this scenario is the right measure and moved 230.710092 -> 230.741975,
     +0.031883 SEK, inside the #450/#467 0.05 SEK regression budget -- an
     accounting shift, not an economic regression.
+
+    Re-pinned again for #497 (the DP no longer proposes discharges the
+    inverter cannot execute): 42.965278 / 42.945155, with the delta still
+    positive at +0.020123 SEK, and the full-horizon objective moving
+    230.741975 -> 230.753873, a further +0.011898 SEK and still inside the
+    same budget. Every absolute cost on this fixture shifted because the
+    plan no longer books export revenue it cannot collect; the property
+    this test exists to check -- the reference not undershooting the
+    hybrid -- is unaffected.
     """
     scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
     inputs = _scenario_inputs(scenario)
@@ -291,8 +297,8 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     reference_cost = _reference(inputs, result, Window(start=7, end=12), cost_bases)
 
     hybrid_cost = sum(period_costs[7:12])
-    assert hybrid_cost == pytest.approx(43.099611, abs=1e-5)
-    assert reference_cost == pytest.approx(43.098050, abs=1e-5)
+    assert hybrid_cost == pytest.approx(42.965278, abs=1e-5)
+    assert reference_cost == pytest.approx(42.945155, abs=1e-5)
     assert hybrid_cost - reference_cost > 0.0
 
 
@@ -423,7 +429,7 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     # independently of whether the PWL solver itself found the true optimum
     # (it does not always; see the undershoot test above).
     delta = sum(period_costs[segment.start : segment.end]) - reference_cost
-    assert delta == pytest.approx(0.078224, abs=1e-5)
+    assert delta == pytest.approx(0.033190, abs=1e-5)
 
 
 @pytest.mark.slow
@@ -473,7 +479,6 @@ def test_refuses_to_measure_a_scenario_with_export_curtailment_enabled():
             dt=0.25,
             soe_trajectory=[2.0, 2.0, 2.0],
             cost_basis=0.4,
-            self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
             import_cap_kwh=None,
         )
 
@@ -489,7 +494,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
 
     Same fixture and segment as
     `test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all` above,
-    which independently pins the delta at 0.078224 SEK by calling
+    which independently pins the delta at 0.033190 SEK by calling
     `replay_schedule`/`segment_reference_cost` directly. This test exercises
     the same numbers through the public `measure_scenario` entry point, so a
     wiring mistake in `measure_scenario` itself (wrong segment, wrong slice,
@@ -504,7 +509,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
     assert sum(measurement.margin_ratio_counts.values()) == len(
         scenario["home_consumption"]
     )
-    assert measurement.financial_impact_sek == pytest.approx(0.078224, abs=1e-5)
+    assert measurement.financial_impact_sek == pytest.approx(0.033190, abs=1e-5)
 
 
 @pytest.mark.slow

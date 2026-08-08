@@ -33,7 +33,10 @@ from core.bess.dp_battery_algorithm import (
     _run_dynamic_programming,
     _tie_margin,
 )
-from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
+from core.bess.dp_constants import (
+    GRID_FLOW_RESOLUTION_KWH,
+    POWER_CLASSIFICATION_THRESHOLD_KW,
+)
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
@@ -272,46 +275,41 @@ def test_charge_candidate_present_when_above_classification_threshold():
     assert candidate > 0.0
 
 
-def test_compute_reward_self_throttle_threshold_is_parameterized():
-    """#320: a platform with no self-throttle (self_throttle_export_threshold_kwh=0)
-    must credit export revenue for the smallest overshoot; the default (0.01)
-    must not."""
-    from core.bess.dp_battery_algorithm import _compute_reward
+def test_discharge_candidates_exclude_unexecutable_overshoots():
+    """#497: no candidate overshoots the home deficit by less than
+    GRID_FLOW_RESOLUTION_KWH.
 
+    This replaced #320's parameterized self-throttle threshold. That approach
+    let the DP propose such a discharge and then zeroed the export *credit* in
+    `_compute_reward`, which left `battery_discharged` and `next_soe` carrying
+    energy the hardware never moved -- the flows did not add up and the plan
+    was not executable. Excluding the action outright is strictly stronger:
+    there is no longer a threshold anywhere downstream to keep in sync, and no
+    platform needs to configure one.
+    """
     settings = make_battery_settings(max_discharge_power_kw=5.0)
-    # power chosen so grid_exported lands strictly between 0 and 0.01 kWh
-    # at dt=1.0h: home_consumption=1.0, discharge=1.005 kW -> export=0.005 kWh
-    reward_default, _, _ = _compute_reward(
-        power=-1.005,
+    deficit_kw = 1.0  # dt=1.0h, so also the deficit in kWh
+    candidates = _discharge_candidates(
         soe=15.0,
-        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
-        period=0,
-        home_consumption=1.0,
         battery_settings=settings,
         dt=1.0,
-        buy_price=[0.30],
-        sell_price=[0.10],
+        home_consumption=deficit_kw,
         solar_production=0.0,
-        cost_basis=0.0,
     )
-    reward_no_throttle, _, _ = _compute_reward(
-        power=-1.005,
-        soe=15.0,
-        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
-        period=0,
-        home_consumption=1.0,
-        battery_settings=settings,
-        dt=1.0,
-        buy_price=[0.30],
-        sell_price=[0.10],
-        solar_production=0.0,
-        cost_basis=0.0,
-        self_throttle_export_threshold_kwh=0.0,
+
+    unexecutable = [
+        p for p in candidates if 0 < p - deficit_kw < GRID_FLOW_RESOLUTION_KWH
+    ]
+    assert not unexecutable, (
+        f"candidates overshoot the deficit by less than the export resolution "
+        f"and cannot be executed as commanded: {unexecutable}"
     )
-    # no_throttle credits the 0.005 kWh export at sell_price=0.10; default
-    # zeroes it out (self-throttled), so no_throttle's reward is higher.
-    assert reward_no_throttle > reward_default
-    assert reward_no_throttle == pytest.approx(reward_default + 0.005 * 0.10, abs=1e-9)
+
+    # Exact load cover survives (it is on the 1%-of-max grid here), so the
+    # exclusion never costs the DP the ability to serve the home...
+    assert deficit_kw in candidates
+    # ...and a genuine, measurable export is still reachable.
+    assert any(p - deficit_kw >= GRID_FLOW_RESOLUTION_KWH for p in candidates)
 
 
 def test_discharge_candidates_use_injected_resolution():

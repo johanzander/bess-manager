@@ -101,27 +101,40 @@ impossible to store surplus solar for post-horizon use (issue #359). On any
 market with genuine price variation (Nordic, Belpex, UK variable-export),
 this carve-out is inert and the cap applies exactly as described above.
 
-**Self-throttling near self-consumption (issue #240)**: In `_compute_reward`,
-a discharge whose overshoot above `home_consumption` is
-`<= BATTERY_EXPORT_THRESHOLD_KWH` (0.01 kWh,
-`core/bess/dp_battery_algorithm.py:96`) has its `grid_exported` forced to
-zero for reward purposes — the DP treats it as pure self-consumption, not an
-export sale, because load-first hardware doesn't reliably deliver a trivial
-overshoot to the grid in practice. When evaluating whether a small discharge
-was "worth" `sell_price`, check this threshold first: below it, the relevant
-alternative-value comparison is against the buy price avoided, not the sell
-price (`core/bess/dp_battery_algorithm.py:511-522`).
+**The DP only proposes executable discharges (issues #240, #497)**:
+`_discharge_candidates` excludes any discharge that would overshoot the home
+deficit by less than `GRID_FLOW_RESOLUTION_KWH` (0.1 kWh,
+`core/bess/dp_constants.py`). Such a discharge is not executable on any
+platform: load-following firmware throttles it back to the deficit, and on
+hardware that would deliver it the resulting export is below the resolution of
+the counters that measure exports. So no planned period can contain a
+sub-resolution battery export, and every planned flow set balances exactly.
 
-Note the throttle rewrites the *reward* only — `battery_discharged` and
-`next_soe` still carry the full commanded setpoint. For an overshoot between
-0.01 and 0.1 kWh the DP therefore books export revenue that load-following
-hardware never earns, and `EnergyData._calculate_detailed_flows` folds the
-orphaned export back into `battery_to_home` (#350), leaving a period whose
-flows do not add up. This is issue #497, open and measured: 182 of 1875
-fixture periods, pinned by
-`core/bess/tests/unit/test_flow_coherence.py`. Do not treat a
-`battery_to_home` that exceeds `home_consumption` in a planned period as
-evidence of a new bug until that pin reaches zero.
+When judging whether a small discharge was "worth" `sell_price`, the answer is
+that the DP was never offered that action -- the relevant comparison is between
+covering load exactly and a genuinely larger, measurable export.
+
+This replaced #240's approach, which let the DP propose the action and then
+zeroed the export *credit* in `_compute_reward` while leaving
+`battery_discharged` and `next_soe` carrying the full commanded setpoint. That
+booked export revenue load-following hardware never earns, and
+`EnergyData._calculate_detailed_flows` folded the orphaned export back into
+`battery_to_home` (#350), producing periods whose flows did not add up (#497:
+182 of 1875 fixture periods). Consequences of removing it, all measured:
+
+- Planned flows always balance -- `assert_flow_coherence` checks this on every
+  period of every fixture.
+- Plan and execution agree exactly: realized cost equals planned cost on all 33
+  fixtures, where 20 of them previously disagreed by up to 0.73 SEK.
+- The DP's own objective and the reported `battery_solar_cost` now agree
+  exactly, removing a long-documented reporting drift.
+- Realized cost improved by a net 1.04 SEK across the corpus, because the DP had
+  been optimising against revenue it could not collect.
+
+The trade-off: when a deficit is smaller than the smallest discharge the
+hardware can be commanded to perform, the DP proposes no discharge and the home
+imports it. There is no platform-specific self-throttle threshold any more --
+`self_throttle_export_threshold_kwh` was deleted along with its plumbing.
 
 **Cost basis tracking (weighted average)**: When the battery charges at
 different prices over time, the system tracks the cost of stored energy as a

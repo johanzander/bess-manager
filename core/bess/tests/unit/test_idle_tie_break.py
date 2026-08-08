@@ -321,5 +321,19 @@ def test_466_tie_break_does_not_trip_idle_guardrail():
     assert any(
         abs(a) > 1e-9 for a in actions
     ), "guardrail appears to have fired -- schedule is all-IDLE"
-    assert result.period_data[32].decision.strategic_intent == "LOAD_SUPPORT"
     assert result.period_data[45].decision.strategic_intent == "LOAD_SUPPORT"
+
+    # Period 32 was LOAD_SUPPORT until #497 and is now IDLE, correctly: its
+    # deficit is 0.0431 kWh while the smallest discharge this battery can be
+    # commanded to perform is 0.05 kWh (0.2 kW * 0.25 h, the first step above
+    # POWER_CLASSIFICATION_THRESHOLD_KW). Every available action overshoots by
+    # less than the export resolution, so none is executable as commanded and
+    # the DP proposes no discharge -- the home imports 0.0431 kWh instead.
+    #
+    # This is the deliberate cost of #497's rule, and it is measured, not
+    # assumed: realized cost on this fixture moved by -0.0001 SEK (i.e. very
+    # slightly cheaper), and across the whole fixture corpus the rule is a net
+    # 1.04 SEK improvement in realized cost. The DP no longer plans discharges
+    # the inverter cannot carry out, and declining a deficit smaller than one
+    # commandable step is what that means in practice.
+    assert result.period_data[32].decision.strategic_intent == "IDLE"

@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
+from core.bess.dp_constants import GRID_FLOW_RESOLUTION_KWH
+
 logger = logging.getLogger(__name__)
 
 __all__ = [
@@ -151,12 +153,16 @@ class EnergyData:
             self.battery_discharged - battery_to_home,
         )
 
-        # A battery_to_grid below the lifetime counter's own 0.1 kWh resolution
-        # can't be told apart from counter noise between battery_discharged and
-        # home_consumption - and unlike a real export, it doesn't require the
-        # inverter to have been in an export-capable mode. Fold it back into
-        # battery_to_home rather than let it flip the observed intent to
-        # BATTERY_EXPORT (see issue #350).
+        # A battery_to_grid below the lifetime counter's own resolution
+        # (GRID_FLOW_RESOLUTION_KWH) can't be told apart from counter noise
+        # between battery_discharged and home_consumption - and unlike a real
+        # export, it doesn't require the inverter to have been in an
+        # export-capable mode. Fold it back into battery_to_home rather than
+        # let it flip the observed intent to BATTERY_EXPORT (see issue #350).
+        #
+        # The DP's self-throttle threshold is derived from this same constant
+        # (#497), so a planned discharge can no longer land in a band where the
+        # optimizer credits an export that this fold then erases.
         #
         # Only when battery_to_home > 0: the battery was already covering a
         # genuine home deficit, so a sub-resolution overshoot plausibly means
@@ -164,7 +170,7 @@ class EnergyData:
         # battery_to_home == 0 (home's need was already fully met by solar),
         # there's no deficit to fold into - any nonzero export, however small,
         # has nowhere else to have gone and must stay a real export.
-        if battery_to_home > 0 and 0 < battery_to_grid < 0.1:
+        if battery_to_home > 0 and 0 < battery_to_grid < GRID_FLOW_RESOLUTION_KWH:
             battery_to_home += battery_to_grid
             battery_to_grid = 0.0
 

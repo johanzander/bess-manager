@@ -416,6 +416,11 @@ class APIDashboardHourlyData:
     # Raw values for logic only
     strategicIntent: str
     observedIntent: str | None
+    # Planned PV curtailment (#501): true when this period's SOLAR_EXPORT
+    # is curtailment (grid_exported > 0, sell_price below the export
+    # curtailment floor while curtailment is active), not a genuine
+    # profitable export. See core/bess/models.py DecisionData.curtailed.
+    curtailed: bool
     directSolar: float
 
     @classmethod
@@ -558,6 +563,7 @@ class APIDashboardHourlyData:
             # Raw values for logic
             strategicIntent=hourly.decision.strategic_intent,
             observedIntent=hourly.decision.observed_intent,
+            curtailed=hourly.decision.curtailed,
             directSolar=direct_solar,
         )
 

@@ -335,6 +335,60 @@ class TestDPCurtailmentAwareReward:
         assert period1.economic.sell_price == -3.0
 
 
+def _forced_export_scenario(export_curtailment_active: bool) -> OptimizationResult:
+    """Solar surplus large enough (5 kWh into a 1 kWh battery) that period 1
+    exports regardless of whatever the DP did in period 0 -- isolates the
+    display-flag question from the preemptive-discharge behavior covered by
+    TestDPCurtailmentAwareReward above."""
+    bs = BatterySettings(
+        total_capacity=1.0,
+        min_soc=0.0,
+        max_soc=100.0,
+        max_charge_power_kw=1.0,
+        max_discharge_power_kw=1.0,
+        efficiency_charge=1.0,
+        efficiency_discharge=1.0,
+        cycle_cost_per_kwh=0.0,
+    )
+    bs.export_curtailment_enabled = export_curtailment_active
+    bs.export_curtailment_price_floor = 0.0
+    return optimize_battery_schedule(
+        buy_price=[1.0, 1.0],
+        sell_price=[0.1, -3.0],
+        home_consumption=[0.0, 0.0],
+        battery_settings=bs,
+        solar_production=[0.0, 5.0],
+        initial_soe=1.0,
+        initial_cost_basis=0.0,
+        period_duration_hours=1.0,
+        terminal_value_per_kwh=0.0,
+        export_curtailment_active=export_curtailment_active,
+    )
+
+
+class TestDPCurtailmentDisplayFlag:
+    """The plan itself must be able to report which periods it curtails
+    (#501) -- BSM's execution-time gate (TestExportLimitCurtailment above)
+    decides this per period as it dispatches, but never writes the verdict
+    back onto PeriodData, so the UI has no way to distinguish a curtailed
+    period from a genuinely profitable export."""
+
+    def test_flags_period_as_curtailed_when_active_and_below_floor(self):
+        result = _forced_export_scenario(export_curtailment_active=True)
+        period1 = result.period_data[1]
+        assert period1.energy.grid_exported > 0
+        assert period1.economic.sell_price < 0.0  # below the 0.0 floor
+        assert period1.decision.curtailed is True
+
+    def test_does_not_flag_when_curtailment_inactive(self):
+        """Same negative-price export, but curtailment isn't active on this
+        platform/config -- must not be flagged as curtailed."""
+        result = _forced_export_scenario(export_curtailment_active=False)
+        period1 = result.period_data[1]
+        assert period1.energy.grid_exported > 0
+        assert period1.decision.curtailed is False
+
+
 class TestBellmanGuardrailNotFooledByFloor:
     """Regression (#459 review, verified by bess-analyst against the real
     optimizer with a randomized sweep, ~1-4% of realistic volatile-price

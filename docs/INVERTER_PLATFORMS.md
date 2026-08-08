@@ -204,6 +204,12 @@ gated by the `supports_export_limit_control` capability flag — currently
 only `SolaxModbusGrowattController` implements it. `growatt_server` (cloud)
 has no equivalent HA service to hook into and stays a safe no-op.
 
+This same condition is also computed at planning time (mirrored, not
+re-derived at dispatch) and exposed as `PeriodData.decision.curtailed`
+(#501), so the UI can show a period the plan expects to curtail as
+distinct from a genuinely profitable export — see
+`core/bess/dp_battery_algorithm.py`'s `_build_period_data`.
+
 ### Growatt MIX/SPH (Local) — `growatt_solax_modbus_gen3` (GEN3)
 
 GEN3 models (MIX/SPA/SPH) connected via the solax_modbus Growatt plugin.

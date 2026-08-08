@@ -4,7 +4,7 @@ import { FormattedValue } from '../types';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { DataResolution } from '../hooks/useUserPreferences';
 import { periodToTimeString, periodToEndTime } from '../utils/timeUtils';
-import { getIntent } from '../utils/intent';
+import { getIntent, isCurtailed } from '../utils/intent';
 
 interface BatteryActionsTableProps {
   resolution: DataResolution;
@@ -388,12 +388,17 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
                   <div className="flex items-center">
                     <div className="flex-1" />
                     <div className="flex-none text-center">
-                      <div className={`font-medium ${getNumericValue(hour.gridExported) >= 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                      <div className={`font-medium ${isCurtailed(hour) ? 'text-stone-500 dark:text-stone-400' : getNumericValue(hour.gridExported) >= 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
                         {getDisplayValue(hour.gridExported)}
                       </div>
                       <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                     </div>
                     <div className="flex-1 flex flex-col items-start gap-0.5 pl-1">
+                      {isCurtailed(hour) && (
+                        <span className="text-xs font-medium bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-300 px-1 py-0 rounded flex items-center gap-0.5">
+                          Curtailed
+                        </span>
+                      )}
                       {(hour.solarToGrid?.value ?? 0) > 0.05 && (
                         <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                           <Sun className="h-2.5 w-2.5" />
@@ -794,12 +799,17 @@ export const BatteryActionsTable: React.FC<BatteryActionsTableProps> = ({ resolu
                           <div className="flex items-center">
                             <div className="flex-1" />
                             <div className="flex-none text-center">
-                              <div className={`font-medium ${getNumericValue(hour.gridExported) >= 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
+                              <div className={`font-medium ${isCurtailed(hour) ? 'text-stone-500 dark:text-stone-400' : getNumericValue(hour.gridExported) >= 0.05 ? 'text-green-600 dark:text-green-400' : 'text-gray-400 dark:text-gray-500'}`}>
                                 {getDisplayValue(hour.gridExported)}
                               </div>
                               <div className="text-xs text-gray-500 dark:text-gray-400">{getUnit(hour.gridExported)}</div>
                             </div>
                             <div className="flex-1 flex flex-col items-start gap-0.5 pl-1">
+                              {isCurtailed(hour) && (
+                                <span className="text-xs font-medium bg-stone-200 dark:bg-stone-700 text-stone-800 dark:text-stone-300 px-1 py-0 rounded flex items-center gap-0.5">
+                                  Curtailed
+                                </span>
+                              )}
                               {(hour.solarToGrid?.value ?? 0) > 0.05 && (
                                 <span className="text-xs font-medium bg-slate-100 dark:bg-slate-900/30 text-slate-700 dark:text-slate-300 px-1 py-0 rounded flex items-center gap-0.5">
                                   <Sun className="h-2.5 w-2.5" />

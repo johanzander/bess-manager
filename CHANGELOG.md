@@ -31,6 +31,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - The schedule table showed SOLAR_STORAGE/GRID_CHARGING/LOAD_SUPPORT labels with the kWh amount hidden as "--" for small-but-real periods (0.01–0.1 kWh) — the frontend's display threshold is now aligned with the backend's classification threshold. ([#484](https://github.com/johanzander/bess-manager/issues/484))
 - **Power monitoring could be enabled without the phase-current sensors it needs, crash-looping the schedule updater while the health check reported "OK"** — enabling it now requires those sensors to be mapped, at the settings UI, setup wizard, and API layers, and the health check flags the gap if it occurs anyway. ([#492](https://github.com/johanzander/bess-manager/issues/492))
 - Dashboard could crash with "Minified React error #310" during a background data refresh — the timeline's tooltip state hook was declared after two conditional early returns, changing the number of hooks called between renders.
+- **Planned PV curtailment now shows as "Curtailed" instead of a plain "Solar Export"** in the schedule table, inverter schedule view, battery mode timeline, and current-status card, so a period the plan expects to throw away for free no longer looks like a profitable export. ([#501](https://github.com/johanzander/bess-manager/issues/501))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

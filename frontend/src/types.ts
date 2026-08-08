@@ -41,6 +41,7 @@ export interface HourlyData {
   // Control and decision fields
   strategicIntent?: string;    // strategy name
   observedIntent?: string;     // what actually happened (set for past periods only)
+  curtailed?: boolean;         // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
 
   // All user-facing data via FormattedValue - canonical naming
   buyPrice?: FormattedValue;

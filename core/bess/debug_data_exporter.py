@@ -593,6 +593,9 @@ class DebugDataAggregator:
         InfluxDB username and password are stripped — URL is retained for
         diagnosing connection issues.
 
+        Remaining values go through the same _redact_secrets() pass used for
+        the other sections of the export.
+
         Returns:
             Settings dict with credentials redacted.
         """
@@ -603,7 +606,7 @@ class DebugDataAggregator:
                 influxdb.pop("username", None)
                 influxdb.pop("password", None)
                 options["influxdb"] = influxdb
-            return options
+            return _redact_secrets(options)
         except Exception as e:
             logger.warning("Failed to serialize addon options: %s", e)
             return {}

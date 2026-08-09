@@ -510,8 +510,13 @@ class TestDPCurtailmentDisplayFlagOnRealFieldReport:
         # reported 13:45 and 14:15 slots are absolute periods 55 and 57.
         by_period = {36 + i: pd for i, pd in enumerate(result.period_data)}
 
+        # 13:45 planned as SOLAR_EXPORT at the time of Frank's report; the
+        # charge-early tie-break under the curtailment price floor
+        # (c26dfad4) now resolves it to charging instead, with the sub-rate
+        # surplus still exporting below the floor -- the SOLAR_STORAGE-
+        # while-curtailed case, which must be flagged all the same.
         period_1345 = by_period[13 * 4 + 3]
-        assert period_1345.decision.strategic_intent == "SOLAR_EXPORT"
+        assert period_1345.decision.strategic_intent == "SOLAR_STORAGE"
         assert period_1345.decision.curtailed is True
 
         period_1415 = by_period[14 * 4 + 1]

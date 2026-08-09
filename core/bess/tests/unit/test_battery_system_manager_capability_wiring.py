@@ -20,8 +20,4 @@ def test_optimize_battery_schedule_receives_controller_capabilities():
         discharge_resolution_kw = controller.discharge_resolution_kw(
             settings.max_discharge_power_kw
         )
-        self_throttle_export_threshold_kwh = (
-            controller.self_throttle_export_threshold_kwh
-        )
         assert discharge_resolution_kw == 0.05
-        assert self_throttle_export_threshold_kwh == 0.01

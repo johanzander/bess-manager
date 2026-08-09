@@ -13,6 +13,23 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
+# Energy resolution floor for grid flows (kWh). Home Assistant's lifetime
+# energy counters report at 0.1 kWh resolution, so a measured grid flow below
+# this cannot be told apart from counter noise between two independent sensors.
+#
+# Single source of truth on purpose (#497). This value answers exactly one
+# question -- "is this export real, or is it below the resolution at which we
+# can know anything?" -- and it used to be answered in two places that drifted
+# apart: this module's noise fold hardcoded 0.1 while the DP's self-throttle
+# threshold used 0.01, leaving a band where the optimizer booked export revenue
+# for energy the flow calculator had already decided never left the property.
+# Same failure shape as the #275 postmortem (see dp_constants.py): one physical
+# boundary, two independent constants, no enforcement that they agree.
+#
+# Homed here, in the measurement/model layer, because it describes the sensors,
+# not the optimizer -- the DP's `_discharge_is_unexecutable` imports it.
+GRID_FLOW_RESOLUTION_KWH = 0.1
+
 __all__ = [
     "DecisionData",
     "EconomicData",
@@ -156,12 +173,16 @@ class EnergyData:
             self.battery_discharged - battery_to_home,
         )
 
-        # A battery_to_grid below the lifetime counter's own 0.1 kWh resolution
-        # can't be told apart from counter noise between battery_discharged and
-        # home_consumption - and unlike a real export, it doesn't require the
-        # inverter to have been in an export-capable mode. Fold it back into
-        # battery_to_home rather than let it flip the observed intent to
-        # BATTERY_EXPORT (see issue #350).
+        # A battery_to_grid below the lifetime counter's own resolution
+        # (GRID_FLOW_RESOLUTION_KWH) can't be told apart from counter noise
+        # between battery_discharged and home_consumption - and unlike a real
+        # export, it doesn't require the inverter to have been in an
+        # export-capable mode. Fold it back into battery_to_home rather than
+        # let it flip the observed intent to BATTERY_EXPORT (see issue #350).
+        #
+        # The DP's self-throttle threshold is derived from this same constant
+        # (#497), so a planned discharge can no longer land in a band where the
+        # optimizer credits an export that this fold then erases.
         #
         # Only when battery_to_home > 0: the battery was already covering a
         # genuine home deficit, so a sub-resolution overshoot plausibly means
@@ -169,7 +190,7 @@ class EnergyData:
         # battery_to_home == 0 (home's need was already fully met by solar),
         # there's no deficit to fold into - any nonzero export, however small,
         # has nowhere else to have gone and must stay a real export.
-        if battery_to_home > 0 and 0 < battery_to_grid < 0.1:
+        if battery_to_home > 0 and 0 < battery_to_grid < GRID_FLOW_RESOLUTION_KWH:
             battery_to_home += battery_to_grid
             battery_to_grid = 0.0
 

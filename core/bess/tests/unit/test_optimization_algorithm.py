@@ -493,7 +493,7 @@ def test_grid_charges_during_solar_surplus_when_price_is_cheaper():
 
 def test_optimize_battery_schedule_accepts_capability_parameters():
     """#320: optimize_battery_schedule must accept discharge_resolution_kw
-    and self_throttle_export_threshold_kwh without erroring, and produce the
+    without erroring, and produce the
     exact same result as today when they're left at their defaults (None)."""
     settings = make_battery_settings(max_discharge_power_kw=5.0)
     horizon = 8
@@ -510,7 +510,6 @@ def test_optimize_battery_schedule_accepts_capability_parameters():
     with_explicit_defaults = optimize_battery_schedule(
         **kwargs,
         discharge_resolution_kw=settings.max_discharge_power_kw / 100,
-        self_throttle_export_threshold_kwh=0.01,
     )
     assert [p.decision.strategic_intent for p in baseline.period_data] == [
         p.decision.strategic_intent for p in with_explicit_defaults.period_data

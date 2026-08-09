@@ -167,77 +167,40 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
         )
 
 
-# Per-fixture gap between what executing the plan actually costs (R, via the
-# inverter simulator) and what the optimizer predicted it would cost (P), in
-# SEK. Measured on 2026-08-08 at 18bccae4.
+# Executing an optimizer plan must cost exactly what the optimizer said it
+# would. Not "within a tolerance" -- exactly.
 #
-# A nonzero entry means the optimizer's predicted savings for that day are
-# wrong by that amount -- it is a defect budget, not a target. Almost all of
-# the positive mass is #497 (the plan books export revenue that load-following
-# hardware never earns, so R comes out more expensive than P). The one negative
-# entry runs the other way and has a different, still-undiagnosed cause.
-# `regression_2026_08_08_143843`'s entry has a second, distinct cause (#502,
-# see TODO.md's "From #502" entry): the simulator has no model of PV
-# export-limit curtailment, so it still pays the honest price for a period
-# BSM will actually curtail to zero -- not the plan being newly dishonest.
-#
-# Regenerate deliberately, never reflexively: a shrinking number is a fix, a
-# growing one is a regression, and either way the diff that moved it should say
-# why in its description.
-PLAN_EXECUTION_GAP_SEK = {
-    "historical_2024_08_16_high_spread_no_solar": -0.0330,
-    "historical_2025_01_05_no_spread_no_solar": +0.0000,
-    "historical_2025_01_12_evening_peak_no_solar": +0.0658,
-    "historical_2025_01_13_night_low_no_solar": +0.0236,
-    "historical_2025_06_02_high_solar_export": +0.1495,
-    "realworld_2026_03_24_225535": +0.0000,
-    "realworld_2026_04_11_004719": +0.0055,
-    "realworld_2026_04_19_084608": +0.0000,
-    "realworld_2026_04_22_202249": +0.0401,
-    "realworld_2026_04_24_090423": +0.0270,
-    "realworld_2026_04_27_184643": +0.0000,
-    "realworld_2026_04_27_211212": +0.7313,
-    "realworld_2026_04_29_195900": +0.0443,
-    "realworld_2026_04_29_220919": +0.5591,
-    "realworld_2026_07_13_155212": +0.0326,
-    "regression_2026_07_25_090230": +0.0139,
-    "regression_2026_07_26_203726": +0.0255,
-    "regression_2026_08_02_043728": +0.0894,
-    "regression_2026_08_06_466": +0.0033,
-    "regression_2026_08_08_143843": +0.0693,
-    "regression_frank_debug_2026_08_08": +0.0054,
-    "regression_frank_debug_before": +0.0453,
-    "synthetic_2024_08_16_high_spread_with_solar": +0.0000,
-    "synthetic_2025_01_12_evening_peak_with_solar": +0.2408,
-    "synthetic_clear_sky_ac_clipping": +0.1945,
-    "synthetic_consumption_efficient": +0.1499,
-    "synthetic_consumption_ev_charging": +0.4498,
-    "synthetic_consumption_high_no_solar": +0.0000,
-    "synthetic_extreme_negative_prices": +0.0000,
-    "synthetic_extreme_volatility": +0.0000,
-    "synthetic_historical_2024_08_16_high_spread_with_solar": +0.0000,
-    "synthetic_historical_2025_01_12_evening_peak_with_solar": +0.0000,
-    "synthetic_seasonal_spring": +0.0000,
-    "synthetic_seasonal_summer": +0.1939,
-    "synthetic_seasonal_winter": +0.4498,
-}
+# This was a 33-entry table of per-fixture gaps when it was written, totalling
+# 3.57 SEK of predicted savings the hardware could not deliver. #497 removed
+# the cause: the DP no longer proposes discharges the inverter cannot execute
+# as commanded, so there is nothing left for execution to diverge from and the
+# table collapsed to a single equality. Any future gap is a real finding, and
+# there is no band for one to hide in.
+PLAN_EXECUTION_TOLERANCE_SEK = 0.001  # float-accumulation slack only
 
-# Enough slack to absorb float jitter, far below the smallest gap that means
-# anything (0.0033 SEK) -- so a real movement in any fixture still fails.
-GAP_PIN_TOLERANCE_SEK = 0.001
+# The one surviving pinned gap, with a cause distinct from #497 (see TODO.md's
+# "From #502" entry): #507 stopped the *plan* charging the honest price for
+# periods BSM will curtail to zero at runtime, but the inverter simulator has
+# no model of PV export-limit curtailment, so *execution* still pays it. On
+# main this fixture pinned +0.0693 (that #502 share plus #497's +0.0490
+# phantom-export share); #497's fix removed its share, leaving exactly the
+# simulator's curtailment blindness. Goes to zero when the simulator learns
+# curtailment -- delete the entry then.
+KNOWN_PLAN_EXECUTION_GAP_SEK = {
+    "regression_2026_08_08_143843": +0.0203,  # #502: simulator can't curtail
+}
 
 
 @pytest.mark.slow
 def test_realized_matches_planned_across_all_fixtures():
-    """Pin R-vs-P per fixture across the whole corpus.
+    """R == P exactly, on every fixture in the corpus.
 
-    ``test_scenarios_are_plan_faithful_realized_equals_planned`` above checks
-    two hand-built 6-period scenarios under a 0.10 SEK band, which is loose
-    enough that a systematic per-period mismodel passes unnoticed -- #497 lived
-    there for months. This runs the same R-vs-P comparison over every fixture
-    in ``core/bess/tests/unit/data`` and pins each result, so any change to the
-    optimizer's economics has to account for its effect on plan faithfulness
-    explicitly.
+    `test_scenarios_are_plan_faithful_realized_equals_planned` above checks two
+    hand-built 6-period scenarios under a 0.10 SEK band -- loose enough that a
+    systematic per-period mismodel passes unnoticed, which is how #497 survived
+    for months. This runs the same comparison over every fixture in
+    `core/bess/tests/unit/data`, with no per-fixture exemptions: a new fixture
+    is covered the moment it is added, and cannot be quietly excluded.
     """
     from core.bess.tests.helpers import run_scenario_realized
     from core.bess.tests.unit.test_scenarios import (
@@ -245,34 +208,21 @@ def test_realized_matches_planned_across_all_fixtures():
         load_test_scenario,
     )
 
-    discovered = set(get_all_scenario_files())
-    pinned = set(PLAN_EXECUTION_GAP_SEK)
-    assert discovered == pinned, (
-        "Fixture corpus and the pinned gap table have drifted apart. Added "
-        f"fixtures with no pin: {sorted(discovered - pinned)}. Pinned entries "
-        f"with no fixture: {sorted(pinned - discovered)}. A new fixture must "
-        "record its own plan-execution gap -- silently exempting it is how a "
-        "mismodel gets in unmeasured."
-    )
-
-    drifted = []
-    for name in sorted(discovered):
+    gaps = []
+    for name in sorted(get_all_scenario_files()):
         result, realized = run_scenario_realized(load_test_scenario(name))
         planned = result.economic_summary.battery_solar_cost
-        gap = realized - planned
-        expected = PLAN_EXECUTION_GAP_SEK[name]
-        if abs(gap - expected) > GAP_PIN_TOLERANCE_SEK:
-            drifted.append(
-                f"  {name}: gap {gap:+.4f} SEK, pinned {expected:+.4f} "
-                f"(moved {gap - expected:+.4f})"
+        expected = KNOWN_PLAN_EXECUTION_GAP_SEK.get(name, 0.0)
+        if abs((realized - planned) - expected) > PLAN_EXECUTION_TOLERANCE_SEK:
+            gaps.append(
+                f"  {name}: R={realized:.4f} P={planned:.4f} "
+                f"(gap {realized - planned:+.4f} SEK, expected {expected:+.4f})"
             )
 
-    assert not drifted, (
-        "Plan-execution gap moved on "
-        f"{len(drifted)} fixture(s).\n"
-        "Toward zero means plan faithfulness improved -- update the pin and say "
-        "so in the PR. Away from zero means the optimizer now predicts savings "
-        "it cannot deliver.\n" + "\n".join(drifted)
+    assert not gaps, (
+        f"{len(gaps)} fixture(s) plan a cost their own execution does not "
+        f"reproduce. The optimizer is predicting savings the hardware cannot "
+        f"deliver:\n" + "\n".join(gaps)
     )
 
 
@@ -642,9 +592,11 @@ def test_load_support_self_throttles_discretization_overshoot():
     """#240 regression: load-first hardware never exports a discharge that
     overshoots home_consumption -- it self-throttles to the actual deficit,
     regardless of what a coarser discretized plan might have assumed. This
-    locks in the physical behavior the #240 reward-model fix
-    (core/bess/dp_battery_algorithm.py's _compute_reward) now assumes:
-    before that fix, the plan credited export revenue for energy that was
+    locks in the physical behavior the DP now accounts for by excluding
+    such discharges from its action set outright (#497,
+    core/bess/dp_battery_algorithm.py's _discharge_is_unexecutable; the
+    earlier #240 fix instead zeroed the export credit in _compute_reward):
+    before that, the plan credited export revenue for energy that was
     never actually exported, breaking R == P for these periods -- a case
     the existing hand-crafted plan-faithfulness scenarios were deliberately
     designed to avoid (see their own docstrings), so nothing else covers it.

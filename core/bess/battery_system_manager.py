@@ -2160,11 +2160,6 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
-            self_throttle_export_threshold_kwh = (
-                self._inverter_controller.self_throttle_export_threshold_kwh
-                if self._inverter_controller is not None
-                else None
-            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2178,7 +2173,6 @@ class BatterySystemManager:
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 export_curtailment_active=self.export_curtailment_active,
                 home_settings=self.home_settings,
             )

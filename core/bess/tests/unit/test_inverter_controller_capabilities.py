@@ -16,14 +16,7 @@ def test_discharge_resolution_kw_defaults_to_one_percent_of_max():
     assert controller.discharge_resolution_kw(5.0) == 0.05
 
 
-def test_self_throttle_export_threshold_kwh_defaults_to_one_hundredth():
-    settings = make_battery_settings()
-    controller = GrowattMinController(settings)
-    assert controller.self_throttle_export_threshold_kwh == 0.01
-
-
 def test_sph_inherits_the_same_defaults():
     settings = make_battery_settings(max_discharge_power_kw=10.0)
     controller = GrowattSphController(settings)
     assert controller.discharge_resolution_kw(10.0) == 0.1
-    assert controller.self_throttle_export_threshold_kwh == 0.01

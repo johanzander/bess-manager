@@ -271,6 +271,7 @@
     "base_cost": 3.9,
     "battery_solar_cost": -1.5,
     "base_to_battery_solar_savings": 5.4,
-    "base_to_battery_solar_savings_pct": 139.4
+    "base_to_battery_solar_savings_pct": 138.9,
+    "_note": " Re-pinned after merging #497 (PR #511): removing the DP's phantom sub-resolution export revenue moved planned cost to the honest figure and closed this fixture's +0.0054 plan-execution gap to exactly zero."
   }
 }

@@ -43,3 +43,7 @@ POWER_STEP_KW = 0.2
 # grid action (POWER_STEP_KW) and genuine floating-point noise (observed in
 # practice: ~1e-10 to 1e-14), regardless of how POWER_STEP_KW is tuned.
 POWER_CLASSIFICATION_THRESHOLD_KW = POWER_STEP_KW / 2
+
+# GRID_FLOW_RESOLUTION_KWH lives in models.py: it describes a property of the
+# measurement layer (Home Assistant's lifetime counters), not of the DP -- the
+# optimizer imports it from there (#497 review follow-up).

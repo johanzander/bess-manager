@@ -66,6 +66,7 @@ from core.bess.dp_constants import (
     SOE_STEP_KWH,
 )
 from core.bess.models import (
+    GRID_FLOW_RESOLUTION_KWH,
     DecisionData,
     EconomicData,
     EconomicSummary,
@@ -90,12 +91,6 @@ logger = logging.getLogger(__name__)
 # Algorithm parameters. SOE_STEP_KWH/POWER_STEP_KW live in dp_constants.py
 # (shared with strategic_intent.py -- see that module's docstring for why).
 POWER_TOLERANCE_KW = 0.001  # Threshold to distinguish IDLE from charge/discharge
-# Matches strategic_intent.classify_strategic_intent's own
-# battery_to_grid threshold for BATTERY_EXPORT classification -- keep these
-# in sync: the DP's own reward search must value a discharge's export
-# credit consistently with whether that discharge will actually be
-# classified (and executed via grid_first) as a real export.
-BATTERY_EXPORT_THRESHOLD_KWH = 0.01
 
 
 class StrategicIntent(Enum):
@@ -436,7 +431,6 @@ def _compute_reward_grid(
     current_buy_price: float,
     current_sell_price: float,
     solar_production: float,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Vectorized form of `_compute_reward`'s reward calculation.
@@ -505,11 +499,15 @@ def _compute_reward_grid(
     )
     reward_store = -total_cost_store
 
-    # Discharging reward -- self-throttling fix (#240): overshoot below
-    # BATTERY_EXPORT_THRESHOLD_KWH gets no export credit.
-    grid_imported_d, grid_exported_d = ac_flows_grid(0.0, battery_discharged_active)
-    grid_exported_discharge = np.where(
-        grid_exported_d <= self_throttle_export_threshold_kwh, 0.0, grid_exported_d
+    # Discharging reward. No self-throttle correction (#240): where actions
+    # are actually chosen, sub-resolution overshoots never reach this code
+    # (_discharge_candidates and the PWL mask exclude them), so any action
+    # taken has grid_exported that is zero or a genuine, measurable export.
+    # The coarse backward pass does still price in-band grid points here --
+    # intentionally, as a value-approximation proxy; see the comment at its
+    # feasibility mask in _run_dynamic_programming.
+    grid_imported_d, grid_exported_discharge = ac_flows_grid(
+        0.0, battery_discharged_active
     )
     total_cost_discharge = (
         grid_imported_d * current_buy_price
@@ -551,7 +549,6 @@ def _compute_reward(
     sell_price: list[float],
     solar_production: float,
     cost_basis: float,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> tuple[float, float, float]:
     """Hot-path reward computation — returns scalars only, no dataclass allocation.
@@ -568,9 +565,10 @@ def _compute_reward(
       already makes the hold-vs-discharge call correctly via the
       forward-looking value function -- a separate floor on top of that is
       redundant at best (see docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
-    - Self-throttling (#240): a discharge overshooting home_consumption by
-      less than BATTERY_EXPORT_THRESHOLD_KWH is not credited as export
-      revenue -- load-first hardware never actually delivers it to the grid.
+    - No self-throttle threshold (#240, superseded by #497): this function
+      credits whatever flows `_ac_flows` reports, threshold-free. Discharges
+      whose overshoot is below the export resolution are excluded from the
+      action set outright (`_discharge_is_unexecutable`), never priced here.
 
     Returns:
         (reward, new_cost_basis, grid_imported). `grid_imported` is exposed
@@ -649,16 +647,6 @@ def _compute_reward(
         grid_imported, grid_exported, _ = _ac_flows(
             solar_production, home_consumption, 0.0, battery_discharged, ac_cap_kwh
         )
-
-        # Self-throttling fix (#240): load-first hardware never actually
-        # exports a small discharge overshoot beyond home_consumption -- it
-        # delivers only what the home needs. Below BATTERY_EXPORT_THRESHOLD_KWH
-        # (the same battery_to_grid boundary strategic_intent.
-        # classify_strategic_intent uses to call something BATTERY_EXPORT vs
-        # LOAD_SUPPORT), treat the overshoot as self-throttled: no export
-        # credit. At or above it, it's a genuine deliberate export.
-        if grid_exported <= self_throttle_export_threshold_kwh:
-            grid_exported = 0.0
 
     else:  # IDLE — passive solar charging
         battery_charged, _ = _idle_battery_flows(soe, next_soe, battery_settings)
@@ -973,7 +961,6 @@ def _run_dynamic_programming(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
 ) -> np.ndarray:
     """
@@ -1058,6 +1045,16 @@ def _run_dynamic_programming(
             )
             feasible &= ~is_discharge | (np.abs(power_row) * dt <= ac_headroom_kwh)
 
+        # Deliberately NOT masked by _discharge_is_unexecutable (#497): this
+        # pass only estimates V on a coarse POWER_STEP_KW lattice; actions are
+        # chosen (and executability enforced) in the replay and PWL passes.
+        # The coarse lattice often has no executable point near the deficit
+        # breakpoint, so an in-band action here -- phantom overshoot credit
+        # and all, bounded by GRID_FLOW_RESOLUTION_KWH * sell_price per
+        # period -- is a closer proxy for the exact-cover action the replay's
+        # finer percent lattice really has than excluding it. Measured on all
+        # 33 fixtures (2026-08-09): masking here helps 7 and hurts 10, net
+        # -0.004 SEK -- approximation noise, not a real bug either way.
         next_soe = _state_transition_grid(
             soe_col,
             power_row,
@@ -1080,7 +1077,6 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
 
@@ -1133,7 +1129,6 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
@@ -1194,12 +1189,74 @@ def _discharge_rate_step_kw(
 ) -> float:
     """Discharge percent-grid step (kW): the hardware executes discharge as an
     integer percent of max_discharge_power_kw unless a finer resolution is
-    configured -- single source for _discharge_candidates and both #466
-    tie-break call sites, which must stay on the same lattice."""
+    configured -- the lattice _discharge_candidates enumerates."""
     return (
         discharge_resolution_kw
         if discharge_resolution_kw is not None
         else battery_settings.max_discharge_power_kw / 100
+    )
+
+
+def _discharge_is_unexecutable(
+    discharge_power_kw,
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+):
+    """Is this discharge one no inverter can actually carry out as commanded?
+
+    True when the commanded discharge overshoots the home deficit by less than
+    `GRID_FLOW_RESOLUTION_KWH`. Such an action is unexecutable on every
+    platform, for two different reasons that happen to coincide:
+
+    - Load-following firmware simply throttles it back to the deficit
+      (`inverter_simulator.mode_to_power`: `min(deficit, rate_kw * dt, ...)`),
+      so the overshoot never leaves the property.
+    - Hardware that would deliver it produces an export below the resolution
+      of the energy counters that measure exports, so `EnergyData`'s noise
+      fold (#350) attributes it back to the home regardless.
+
+    Excluding these is the whole of the #497 fix. Proposing one anyway meant
+    the DP priced an export that never happened and drew energy from the
+    battery that never left it, emitting a period whose reported flows did not
+    add up. Every earlier attempt patched a consequence instead -- #240 zeroed
+    the export *credit* in the reward and left the *energy* overstated, which
+    is precisely the band this predicate removes. Nothing downstream needs a
+    threshold now, so none of them have to be kept in sync with each other.
+
+    The lower boundary deliberately mirrors `EnergyData`'s fold condition
+    (`battery_to_home > 0`, models.py): the band starts at any positive
+    deficit at all, not at `POWER_TOLERANCE_KW` -- the fold has no such
+    stand-down, so neither can this.
+
+    The upper boundary is inclusive (`<=`) even though the fold's own bound
+    is strict (`< GRID_FLOW_RESOLUTION_KWH`) -- deliberately, as float
+    safety margin, not drift. At an overshoot of exactly the resolution the
+    two sites compute the same physical quantity through different float
+    paths (this predicate subtracts powers, the fold subtracts energies),
+    and they can land on opposite sides of the boundary: measured on
+    synthetic_seasonal_summer period 16, the DP saw overshoot 0.1 + 1e-16
+    ("real export") while the fold saw battery_to_grid 0.1 - 2e-17 (folded
+    to zero), yielding a period whose planned 0.16 SEK export revenue
+    load-first execution never delivers. Excluding the exact boundary costs
+    at most one marginal export candidate; admitting it re-opens the #497
+    incoherence at float precision.
+
+    Accepts a scalar or an array; returns the matching shape. Both the replay
+    candidate set (`_discharge_candidates`) and the PWL window's feasibility
+    mask (`pwl_window_dp._pwl_candidate_values_at`) route through here, so the
+    two action-choosing passes cannot drift onto different action sets -- the
+    failure mode `_backward_discharge_levels`' docstring warns about. The
+    coarse-grid backward pass is the one deliberate exception: it only
+    estimates V, never emits an action, and keeping in-band grid points there
+    approximates the exact-cover breakpoint its lattice lacks -- see the
+    comment at its feasibility mask in `_run_dynamic_programming`.
+    """
+    deficit_kw = (home_consumption - solar_production) / dt
+    if deficit_kw <= 0.0:
+        return np.zeros_like(discharge_power_kw, dtype=bool)
+    return (discharge_power_kw > deficit_kw) & (
+        discharge_power_kw <= deficit_kw + GRID_FLOW_RESOLUTION_KWH / dt
     )
 
 
@@ -1210,7 +1267,6 @@ def _discharge_candidates(
     home_consumption: float,
     solar_production: float,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     ac_cap_kwh: float | None = None,
 ) -> list[float]:
     """Candidate discharge magnitudes (kW, positive) to evaluate for the
@@ -1262,19 +1318,25 @@ def _discharge_candidates(
         return []
     candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
 
-    # Finding 5: reward(p) has two immediate-reward breakpoints -- where
-    # energy_balance crosses 0 (import stops) and where it crosses
-    # self_throttle_export_threshold_kwh (self-throttle ends, real export
-    # starts). Snap each to its nearest achievable step so the reward
-    # plateau's edge is represented too.
-    balance_zero_p = (home_consumption - solar_production) / dt
-    export_starts_p = balance_zero_p + self_throttle_export_threshold_kwh / dt
-    for p in (balance_zero_p, export_starts_p):
-        if 0.0 < p < p_max:
-            pct = min(max_pct, max(min_pct, round(p / rate_step)))
-            candidates.add(pct * rate_step)
-
-    return sorted(candidates)
+    # The largest step at or below the deficit is already in the enumeration
+    # above, so dropping the unexecutable steps needs nothing added back: it
+    # leaves as-exact-as-possible load cover the best available discharge, and
+    # any surviving larger candidate exports enough to be real.
+    #
+    # Unconditional, with no "but keep one anyway if this empties the set"
+    # carve-out. When the deficit is smaller than the smallest commandable
+    # discharge, every discharge overshoots it and the honest answer is that
+    # this hardware cannot serve that deficit from the battery -- so the DP
+    # proposes none and the home imports it. An earlier draft kept the
+    # smallest step in that case; it cost exact plan-faithfulness (one fixture
+    # period, 0.0034 kWh) to save a fraction of an öre, and reintroduced the
+    # asymmetry between this pass and the PWL window that the whole predicate
+    # exists to prevent.
+    return sorted(
+        p
+        for p in candidates
+        if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
+    )
 
 
 def _charge_candidate(
@@ -1402,7 +1464,6 @@ def _prefer_load_covering_discharge(
     home_consumption: float,
     solar_production: float,
     dt: float,
-    rate_step: float,
 ) -> int:
     """Risk-aware tie-break (#466): if the argmax landed on an idle-like
     action (|power| <= POWER_TOLERANCE_KW) while the house has forecast net
@@ -1420,11 +1481,11 @@ def _prefer_load_covering_discharge(
     holds are untouched by construction -- their margin over discharging
     exceeds `epsilon`.
 
-    `rate_step` is the discharge percent-grid step (see
-    _discharge_candidates); the load-cover breakpoint snaps to it, so the
-    eligibility cap allows half a step of round-up before a candidate
-    counts as exporting, further capped so the round-up itself can never
-    exceed BATTERY_EXPORT_THRESHOLD_KWH of real export. Among eligible
+    Eligibility is exact cover or under-cover only. No round-up allowance
+    is needed (#497): every candidate overshooting the deficit by less than
+    the export resolution was already excluded as unexecutable
+    (`_discharge_is_unexecutable`), and anything overshooting by more is a
+    genuine export, never a load-cover swap target. Among eligible
     candidates the largest coverage wins -- fuller coverage means less
     residual import exposed to a miss.
 
@@ -1446,9 +1507,7 @@ def _prefer_load_covering_discharge(
     balance_zero_p = (home_consumption - solar_production) / dt
     if balance_zero_p <= POWER_TOLERANCE_KW:
         return best_index
-    max_cover_p = (
-        balance_zero_p + min(0.5 * rate_step, BATTERY_EXPORT_THRESHOLD_KWH / dt) + 1e-9
-    )
+    max_cover_p = balance_zero_p + 1e-9
     swap_index = best_index
     swap_power = 0.0
     for index, candidate in enumerate(candidates):
@@ -1537,7 +1596,6 @@ def _best_action_at_continuous_state(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float, float]:
@@ -1627,7 +1685,6 @@ def _best_action_at_continuous_state(
             buy_price=buy_price,
             sell_price=sell_price,
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         value = reward + _interpolate_value(V_next, next_soe, battery_settings)
@@ -1655,7 +1712,6 @@ def _best_action_at_continuous_state(
         home,
         solar,
         discharge_resolution_kw=discharge_resolution_kw,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         ac_cap_kwh=ac_cap_kwh,
     ):
         consider(-p)
@@ -1704,7 +1760,6 @@ def _best_action_at_continuous_state(
         home_consumption=home,
         solar_production=solar,
         dt=dt,
-        rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
 
     # Charge-early tie-break under the #269 curtailment floor -- see
@@ -1879,7 +1934,6 @@ def _replay_accounting_pass(
     battery_settings: BatterySettings,
     dt: float,
     currency: str,
-    self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None = None,
     export_curtailment_active: bool = False,
 ) -> tuple[list[PeriodData], float]:
@@ -1921,7 +1975,6 @@ def _replay_accounting_pass(
             sell_price=reward_sell_price,
             solar_production=solar_production[t],
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
 
@@ -1970,7 +2023,6 @@ def optimize_battery_schedule(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     discharge_resolution_kw: float | None = None,
-    self_throttle_export_threshold_kwh: float | None = None,
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
@@ -2034,8 +2086,6 @@ def optimize_battery_schedule(
         initial_soe = battery_settings.min_soe_kwh
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
-    if self_throttle_export_threshold_kwh is None:
-        self_throttle_export_threshold_kwh = BATTERY_EXPORT_THRESHOLD_KWH
 
     # Validate inputs to prevent impossible scenarios
     if initial_soe > battery_settings.max_soe_kwh:
@@ -2094,7 +2144,6 @@ def optimize_battery_schedule(
         terminal_value_per_kwh=terminal_value_per_kwh,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
 
@@ -2147,7 +2196,6 @@ def optimize_battery_schedule(
                 cost_basis=current_cost_basis,
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 import_cap_kwh=import_cap_kwh,
                 sell_price_floored=sell_price_floored,
             )
@@ -2279,7 +2327,6 @@ def optimize_battery_schedule(
                 dt=dt,
                 end_soe_target=soe_trajectory[window.end],
                 max_charge_power_per_period=window_max_charge,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
             )
@@ -2298,7 +2345,6 @@ def optimize_battery_schedule(
                 dt=dt,
                 cost_basis=cost_basis_trajectory[window.start],
                 max_charge_power_per_period=window_max_charge,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
                 discharge_resolution_kw=discharge_resolution_kw,
                 import_cap_kwh=import_cap_kwh,
                 sell_price_floored=window_floored,
@@ -2322,7 +2368,6 @@ def optimize_battery_schedule(
             battery_settings=battery_settings,
             dt=dt,
             currency=currency,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
             export_curtailment_active=export_curtailment_active,
         )

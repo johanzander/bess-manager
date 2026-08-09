@@ -34,6 +34,7 @@ from core.bess.dp_battery_algorithm import (
     _tie_margin,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
+from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
@@ -272,46 +273,41 @@ def test_charge_candidate_present_when_above_classification_threshold():
     assert candidate > 0.0
 
 
-def test_compute_reward_self_throttle_threshold_is_parameterized():
-    """#320: a platform with no self-throttle (self_throttle_export_threshold_kwh=0)
-    must credit export revenue for the smallest overshoot; the default (0.01)
-    must not."""
-    from core.bess.dp_battery_algorithm import _compute_reward
+def test_discharge_candidates_exclude_unexecutable_overshoots():
+    """#497: no candidate overshoots the home deficit by less than
+    GRID_FLOW_RESOLUTION_KWH.
 
+    This replaced #320's parameterized self-throttle threshold. That approach
+    let the DP propose such a discharge and then zeroed the export *credit* in
+    `_compute_reward`, which left `battery_discharged` and `next_soe` carrying
+    energy the hardware never moved -- the flows did not add up and the plan
+    was not executable. Excluding the action outright is strictly stronger:
+    there is no longer a threshold anywhere downstream to keep in sync, and no
+    platform needs to configure one.
+    """
     settings = make_battery_settings(max_discharge_power_kw=5.0)
-    # power chosen so grid_exported lands strictly between 0 and 0.01 kWh
-    # at dt=1.0h: home_consumption=1.0, discharge=1.005 kW -> export=0.005 kWh
-    reward_default, _, _ = _compute_reward(
-        power=-1.005,
+    deficit_kw = 1.0  # dt=1.0h, so also the deficit in kWh
+    candidates = _discharge_candidates(
         soe=15.0,
-        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
-        period=0,
-        home_consumption=1.0,
         battery_settings=settings,
         dt=1.0,
-        buy_price=[0.30],
-        sell_price=[0.10],
+        home_consumption=deficit_kw,
         solar_production=0.0,
-        cost_basis=0.0,
     )
-    reward_no_throttle, _, _ = _compute_reward(
-        power=-1.005,
-        soe=15.0,
-        next_soe=15.0 - 1.005 * 1.0 / settings.efficiency_discharge,
-        period=0,
-        home_consumption=1.0,
-        battery_settings=settings,
-        dt=1.0,
-        buy_price=[0.30],
-        sell_price=[0.10],
-        solar_production=0.0,
-        cost_basis=0.0,
-        self_throttle_export_threshold_kwh=0.0,
+
+    unexecutable = [
+        p for p in candidates if 0 < p - deficit_kw < GRID_FLOW_RESOLUTION_KWH
+    ]
+    assert not unexecutable, (
+        f"candidates overshoot the deficit by less than the export resolution "
+        f"and cannot be executed as commanded: {unexecutable}"
     )
-    # no_throttle credits the 0.005 kWh export at sell_price=0.10; default
-    # zeroes it out (self-throttled), so no_throttle's reward is higher.
-    assert reward_no_throttle > reward_default
-    assert reward_no_throttle == pytest.approx(reward_default + 0.005 * 0.10, abs=1e-9)
+
+    # Exact load cover survives (it is on the 1%-of-max grid here), so the
+    # exclusion never costs the DP the ability to serve the home...
+    assert deficit_kw in candidates
+    # ...and a genuine, measurable export is still reachable.
+    assert any(p - deficit_kw >= GRID_FLOW_RESOLUTION_KWH for p in candidates)
 
 
 def test_discharge_candidates_use_injected_resolution():
@@ -441,3 +437,61 @@ def test_interpolate_value_extrapolates_below_min_soe():
     # floor should yield ~1.95, not the clamped-flat 2.0.
     assert value == pytest.approx(1.95, abs=1e-9)
     assert value != pytest.approx(V_row[0], abs=1e-9)
+
+
+# --- #497 review follow-ups: the unexecutable-discharge exclusion must agree
+# --- with models.py's noise fold at both boundaries.
+
+
+def test_unexecutable_band_applies_down_to_zero_deficit():
+    """models.py's noise fold applies whenever battery_to_home > 0 -- any
+    positive deficit at all. The exclusion must use the same boundary: a
+    deficit inside (0, POWER_TOLERANCE_KW] must not stand the predicate
+    down, or the DP can still plan the exact #497 incoherent period there
+    (0.2 kW against a 0.0008 kW deficit -> 0.0498 kWh phantom export)."""
+    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+
+    assert _discharge_is_unexecutable(
+        0.2, home_consumption=0.0002, solar_production=0.0, dt=0.25
+    )
+
+
+def test_exact_resolution_overshoot_stays_excluded():
+    """An overshoot of exactly GRID_FLOW_RESOLUTION_KWH is excluded even
+    though models.py's fold bound is strict (`< GRID_FLOW_RESOLUTION_KWH`)
+    -- the inclusive upper bound is float safety margin, not drift. At the
+    exact boundary the DP (subtracting powers) and the fold (subtracting
+    energies) can land on opposite sides of the resolution, re-opening the
+    #497 incoherence: verified on synthetic_seasonal_summer period 16,
+    where admitting the boundary produced a planned 0.1 kWh export the
+    fold erased and a 0.16 SEK plan-vs-execution gap. See the predicate's
+    docstring."""
+    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+
+    assert _discharge_is_unexecutable(
+        1.1, home_consumption=1.0, solar_production=0.0, dt=1.0
+    )
+
+
+def test_tiny_deficit_plan_has_coherent_flows():
+    """End-to-end regression for the residual (0, POWER_TOLERANCE_KW]
+    deficit band: every discharge this small battery can command overshoots
+    the 0.0008 kW deficit by less than GRID_FLOW_RESOLUTION_KWH, so the DP
+    must propose none of them -- proposing one yields a period whose
+    planned export the models.py fold erases (flows that do not add up)."""
+    from core.bess.dp_battery_algorithm import optimize_battery_schedule
+    from core.bess.tests.helpers import assert_flow_coherence
+
+    settings = make_battery_settings(max_discharge_power_kw=0.2)
+    horizon = 4
+    result = optimize_battery_schedule(
+        buy_price=[1.0] * horizon,
+        sell_price=[0.5] * horizon,
+        home_consumption=[0.0002] * horizon,
+        solar_production=[0.0] * horizon,
+        initial_soe=10.0,
+        battery_settings=settings,
+        period_duration_hours=0.25,
+    )
+    for pd in result.period_data:
+        assert_flow_coherence(pd)

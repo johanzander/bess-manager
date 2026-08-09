@@ -262,13 +262,18 @@ def assert_physical_constraints(result, battery: dict) -> None:
 
 # Detailed-flow invariants for DP-PLANNED periods.
 #
-# They exist because the DP has accumulated a number of independently-tuned
+# They exist because the DP had accumulated a number of independently-tuned
 # constants (export thresholds, noise folds, power tolerances, SOE grid steps)
-# that each behave correctly in isolation but have twice now drifted into
-# disagreeing on a narrow band of inputs, producing periods whose reported flows
-# do not add up (#350 vs #240, diagnosed in #497). Nothing in the suite
-# previously checked that a period's numbers were self-consistent, so those only
-# ever surfaced when a human read a schedule by hand.
+# that each behaved correctly in isolation but twice drifted into disagreeing on
+# a narrow band of inputs, producing periods whose reported flows did not add up
+# (#350 vs #240, diagnosed and fixed in #497). Nothing in the suite checked that
+# a period's numbers were self-consistent, so those only ever surfaced when a
+# human read a schedule by hand.
+#
+# All six hold for every period of every fixture. Two of them -- exports having
+# a source, and the home being supplied exactly what it consumed -- were
+# violated in 182 of 1875 periods before #497 and were pinned separately while
+# that debt stood; they are ordinary assertions now.
 #
 # IMPORTANT -- planned periods only. `_calculate_detailed_flows` deliberately
 # refuses to invent a flow to reconcile independent lifetime counters, so on
@@ -280,16 +285,25 @@ def assert_physical_constraints(result, battery: dict) -> None:
 # has no such excuse. Do not point this helper at historical/measured
 # EnergyData -- it will fail by design.
 #
-# Deliberately NOT included here: "every exported kWh has a source" and "the
-# home is never oversupplied". Both are violated today by the #497 fold, in 182
-# of 1875 fixture periods. They are pinned instead by
-# test_flow_coherence.py::test_orphan_export_debt_is_not_growing, and move here
-# once that debt is paid.
 def assert_flow_coherence(pd) -> None:
     """Assert one DP-planned period's detailed flows add up to its totals."""
     tolerance = 1e-6
     e = pd.energy
 
+    assert abs(e.grid_exported - e.solar_to_grid - e.battery_to_grid) < tolerance, (
+        f"Period {pd.period}: exported energy has no source -- solar_to_grid "
+        f"{e.solar_to_grid:.4f} + battery_to_grid {e.battery_to_grid:.4f} != "
+        f"grid_exported {e.grid_exported:.4f}"
+    )
+    assert (
+        abs(e.solar_to_home + e.battery_to_home + e.grid_to_home - e.home_consumption)
+        < tolerance
+    ), (
+        f"Period {pd.period}: what reached the home does not match what it "
+        f"consumed -- solar_to_home {e.solar_to_home:.4f} + battery_to_home "
+        f"{e.battery_to_home:.4f} + grid_to_home {e.grid_to_home:.4f} != "
+        f"home_consumption {e.home_consumption:.4f}"
+    )
     assert (
         abs(e.battery_to_home + e.battery_to_grid - e.battery_discharged) < tolerance
     ), (

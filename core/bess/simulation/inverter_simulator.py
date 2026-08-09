@@ -41,11 +41,11 @@ def derive_control_command(
 
     ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE
     intra-period discharge gate (mirrors
-    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT does NOT
-    use this gate (#393 -- reverted #384/#385's extension, see
-    test_load_support_discharge_gate.py). Omit both to leave the gate closed
-    -- callers that don't care about it (most existing tests) see unchanged,
-    pre-gate behavior."""
+    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT is
+    deliberately NOT mirrored here even though production gates it since #520
+    -- see ``_map_rates``. Omit both to leave the gate closed -- callers that
+    don't care about it (most existing tests) see unchanged, pre-gate
+    behavior."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
         strategic_intent, battery_action_kw, settings, shadow_price, buy_price
@@ -112,9 +112,22 @@ def _map_rates(
         rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
         return False, rate, 0
     if intent == "LOAD_SUPPORT":
-        # No shadow-price gate (#393): reverted #384/#385's extension -- see
-        # test_load_support_discharge_gate.py for why. Plan-scaled cap only,
-        # same as BATTERY_EXPORT.
+        # Production gates LOAD_SUPPORT since #520; this simulator deliberately
+        # does not, and that is not an oversight to "fix" by mirroring it.
+        #
+        # The gate is a sub-period ceiling: it lets the battery cover load that
+        # exceeds the period's forecast average. This simulator runs point
+        # forecasts at 15-min resolution, where no such excess exists by
+        # construction -- so it can only ever model the gate's cost (covering
+        # more of a *planned* partial cover from battery than the DP chose),
+        # never its benefit. For SOLAR_EXPORT/SOLAR_STORAGE that cost is zero
+        # (planned deficit is zero, so an open gate is a no-op here), which is
+        # why mirroring them is safe. For LOAD_SUPPORT it is not: mirroring the
+        # gate moves 27 of 36 corpus fixtures, +25.67 SEK of realized cost in
+        # total, purely from the unmodellable half of the trade-off. Modelling
+        # it would pin a number the simulator cannot interpret.
+        #
+        # Plan-scaled cap only, same as BATTERY_EXPORT.
         if action_kw < -0.01:
             rate = min(
                 100,

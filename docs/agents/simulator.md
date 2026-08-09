@@ -62,9 +62,11 @@ scenarios.
   (#187/#319) — an `R == P` test for gate-related changes was structurally
   unsatisfiable until this was fixed. Pass both (from `pd.decision.shadow_price`
   and the period's `buy_price`) to exercise the gate; omit both to leave it
-  closed (pre-gate behavior, the default). #384 briefly extended this gate to
-  LOAD_SUPPORT too; #393 reverted that extension after real captured data
-  showed it firing far more broadly than intended — see
+  closed (pre-gate behavior, the default). Production also applies this gate to
+  LOAD_SUPPORT on TOU/register platforms (#384, reverted by #393, re-landed by
+  #520) — the simulator deliberately does **not** mirror that, because a
+  15-min point-forecast simulator has no sub-period excess load to cover and so
+  can only model the gate's cost, never its benefit. See
   `docs/agents/bess-knowledge.md`'s SOLAR_EXPORT discharge gate section.
 
 ## Known gaps and `xfail`

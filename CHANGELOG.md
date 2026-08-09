@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **House load spikes during a battery-supported period are now covered from the battery instead of the grid**, on TOU/register platforms, whenever the stored energy is worth less than importing at that moment (`buy_price × discharge_efficiency ≥ shadow_price`). When the battery is genuinely being reserved for a pricier later period the reserve is still protected and the spike is imported. ([#520](https://github.com/johanzander/bess-manager/issues/520))
 - Near-tied battery decisions now prefer the fullest load-covering discharge even when the tie surfaces at a partial cover, closing a gap where residual import stayed exposed to consumption spikes. ([#512](https://github.com/johanzander/bess-manager/issues/512))
 - Health checks for Battery Control, Battery Monitoring, and Energy Monitoring now report ERROR instead of OK when a required sensor is entirely unmapped, not just when it's unavailable.
 - Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))

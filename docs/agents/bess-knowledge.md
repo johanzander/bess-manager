@@ -335,37 +335,75 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
-**LOAD_SUPPORT does NOT use this gate (#393 — reverted #384/#385).** #384
-briefly extended this gate to LOAD_SUPPORT (`discharge_rate =
-max(planned_rate, gate_result)`, raising but never lowering the plan-scaled
-ceiling), reasoning that `load_first`'s physical self-limiting to the real
-house deficit made an open ceiling safe. Two problems surfaced:
+**LOAD_SUPPORT uses this gate too, on TOU/register platforms (#520).** House
+load exceeding the period forecast is the normal condition, not an edge case,
+and there is nothing platform-specific in `buy × eff_d ≥ shadow` — so the same
+economic test applies:
 
-- #385's own validation against the reporting user's real captured data found
-  the gate does **not** open during the sustained overnight near-tie regime it
-  was built to fix — `shadow_price` sits within a cent or two of `buy_price`
-  for the whole stretch there (that near-tie is close to the defining
-  condition for choosing LOAD_SUPPORT at all), so the strict inequality rarely
-  trips in exactly the case that motivated the change.
-- Replaying a full day of real captured data from a second, independent
-  report showed the same gate condition evaluating **true for the large
-  majority of LOAD_SUPPORT periods (51/67, ~76%)** — not the rare "reserve
-  genuinely not needed elsewhere" case the gate was designed for. In
-  practice this meant a broad, mostly-untested override of the #147
-  reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
-  later, pricier period rather than dumping at full rate).
+```
+discharge_rate = max(plan_scaled, intra_period_discharge_gate(buy, shadow, eff_d))
+```
 
-LOAD_SUPPORT is back to its plan-scaled cap unconditionally, matching
-pre-#384/v9.9.0b23 behavior — no shadow-price gate at all. The original
-overnight-leak problem #381/#384 described (small real grid imports, 0.1–0.2
-kWh/night, while SOE has ample headroom above the floor) remains open and
-tracked in #393, to be revisited with a mechanism actually validated against
-real captured data across representative regimes (not just the motivating
-case) before it ships again. See
-`core/bess/tests/unit/test_load_support_gate_regression_393.py`, which
-replays real captured data (`regression_2026_07_26_203726.json`) reproducing
-the 76% figure and asserting LOAD_SUPPORT's discharge_rate never exceeds the
-plan-scaled baseline regardless of shadow_price.
+Raising, never lowering, the plan-scaled ceiling: gate closed → plan-scaled cap
+and the deficit is imported; gate open → ceiling raised and the deficit is
+covered from the battery.
+
+This settles a change that flipped twice (#384/#385 shipped it, #393 reverted
+it, #520 re-landed it). **Do not re-revert on #393's reasoning**, which was:
+"a broad override of the #147 reservation pacing." That double-counts the
+reservation. `shadow_price` **is** dV/dSoE, the DP's own marginal value of
+stored energy — the future value the pacing protects is already inside the
+gate's own comparison:
+
+- Energy genuinely needed for a later peak → high `shadow_price` → gate
+  **closed** → import. Reservation protected, by construction.
+- Gate **open** → the energy is worth more used now than saved. There is
+  nothing being reserved.
+
+The gate does not override reservation pacing; it *evaluates* it. #393's
+headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT periods"
+measured **gate-openness**, not pacing-override: it means that in 76% of those
+periods battery-now genuinely beat grid-now.
+
+The breadth is real and corpus-wide — measured over the 34-fixture corpus
+(603 LOAD_SUPPORT periods) the gate is open in **431 (71.5%)** and raises the
+ceiling above the DP's plan-scaled rate in **427** of them. That is expected
+under the argument above, and it is what makes the gate's correctness an
+argument about `shadow_price`'s meaning rather than a claim that it rarely
+fires. (#520 also quotes an overlap of "9 periods — 1.5%" between gate-open
+and "a genuine reservation the plan is holding"; that figure could not be
+reproduced from the corpus under any definition tried when the TOU half
+landed — treat the 71.5%/427 numbers above as the measured ones.)
+
+Two limits to keep in mind when analysing this:
+
+- `shadow_price` is the marginal value *at the planned SoE*. It is accurate for
+  a modest overshoot; for a large one the true value of stored energy rises as
+  SoE falls, so the test flatters battery use. That bounds *how much* extra to
+  cover, not the direction of the rule — and it is why the gate is evaluated
+  fresh each period.
+- **The corpus cannot measure this gate's benefit.** Fixtures are 15-minute
+  averages from point forecasts, where a sub-period spike is arithmetically
+  invisible; only the *cost* (covering more of a planned partial cover from
+  battery) is representable. The simulator therefore deliberately does **not**
+  mirror the gate for LOAD_SUPPORT (`inverter_simulator._map_rates`) — doing so
+  moves 27 of 36 fixtures by +25.67 SEK of realized cost in total, which is the
+  unmeasurable trade-off's cost half alone, not a real result. For
+  SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
+  is why the simulator does mirror the gate for those.
+
+**VPP platforms are still excluded** (`discharge_rate_is_load_following` is
+False there): their `discharge_rate` is an immediate forced power command, not
+a load-following ceiling (#324), so opening the gate would command a full-power
+discharge rather than permit a gentle cover. The VPP half of #520 maps the
+gate's *decision* (release control / hold) rather than its rate, and is
+deferred to candidate-scoring work.
+
+See `core/bess/tests/unit/test_load_support_discharge_gate.py` and
+`test_load_support_gate_regression_393.py` (real captured data,
+`regression_2026_07_26_203726.json`, still reproducing the 76% figure) — both
+assert the ceiling follows the gate. Their assertions were deliberately
+inverted by #520.
 
 ### The inverter AC output cap (solar clipping avoidance)
 

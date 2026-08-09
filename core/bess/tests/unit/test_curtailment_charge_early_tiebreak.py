@@ -17,15 +17,30 @@ export block if later solar underdelivers). These tests pin that the DP
 absorbs below-floor surplus at the earliest physical opportunity.
 """
 
-from core.bess.dp_battery_algorithm import _prefer_curtailed_charge_absorb
+from core.bess.action_selector import Candidate, _prefer_curtailed_charge_absorb
 from core.bess.tests.helpers import run_scenario_realized
 from core.bess.tests.unit.test_scenarios import load_test_scenario
 
-# Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
-HOLD = (10.0, 0.0, 12.0, 0.035, 0.0, 0.0)  # SOLAR_EXPORT bypass: SOE flat
-ABSORB = (10.0, 0.0, 12.6, 0.035, 0.0, 0.0)  # IDLE: passively absorbs surplus
-CHARGE_IMPORT = (9.999, 5.0, 13.25, 0.05, -0.1, 0.65)  # full rate, pulls grid
-DISCHARGE = (9.99, -1.0, 11.7, 0.035, 0.2, 0.0)
+
+def _candidate(value, power, next_soe, new_cost_basis, reward, grid_imported):
+    """Build a `Candidate` from the positional layout these fixtures were
+    written against, so the cases below stay literally what they were when
+    the tie-breaks lived on 6-tuples (P1 gave them a dataclass)."""
+    return Candidate(
+        power=power,
+        next_soe=next_soe,
+        reward=reward,
+        new_cost_basis=new_cost_basis,
+        grid_imported=grid_imported,
+        value=value,
+    )
+
+
+# Candidate fields: (value, power, next_soe, new_cost_basis, reward, grid_imported)
+HOLD = _candidate(10.0, 0.0, 12.0, 0.035, 0.0, 0.0)  # SOLAR_EXPORT bypass: SOE flat
+ABSORB = _candidate(10.0, 0.0, 12.6, 0.035, 0.0, 0.0)  # IDLE: absorbs surplus
+CHARGE_IMPORT = _candidate(9.999, 5.0, 13.25, 0.05, -0.1, 0.65)  # pulls grid
+DISCHARGE = _candidate(9.99, -1.0, 11.7, 0.035, 0.2, 0.0)
 
 
 def test_exact_tie_swaps_hold_to_highest_soe_absorb():
@@ -43,7 +58,7 @@ def test_never_swaps_into_grid_importing_charge():
 
 
 def test_decisive_hold_margin_is_never_swapped():
-    low_absorb = (9.98, 0.0, 12.6, 0.035, 0.0, 0.0)
+    low_absorb = _candidate(9.98, 0.0, 12.6, 0.035, 0.0, 0.0)
     candidates = [HOLD, low_absorb]
     # 0.02 behind with epsilon 0.01: the hold is deliberate arbitrage.
     assert _prefer_curtailed_charge_absorb(candidates, 0, epsilon=0.01) == 0

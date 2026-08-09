@@ -1466,8 +1466,11 @@ def _prefer_load_covering_discharge(
     dt: float,
 ) -> int:
     """Risk-aware tie-break (#466): if the argmax landed on an idle-like
-    action (|power| <= POWER_TOLERANCE_KW) while the house has forecast net
-    grid import this period, and a discharge candidate that covers no more
+    action (|power| <= POWER_TOLERANCE_KW) or a partial load-cover (#512 --
+    which tied candidate argmax returns is an enumeration-order accident, so
+    ties can surface at a partial cover just as well as at IDLE) while the
+    house has forecast net grid import this period, and a discharge
+    candidate that covers no more
     than that net load sits within `epsilon` of the best value, return that
     candidate's index instead.
 

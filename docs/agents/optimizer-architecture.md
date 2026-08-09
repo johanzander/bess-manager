@@ -38,17 +38,28 @@ design principle for intent semantics:
 
 ### P1. One selector
 
-There is exactly **one** implementation of candidate enumeration +
-evaluation + selection, parameterized by a continuation-value evaluator
-`eval_V(next_soe) -> float`. The grid backward induction, the grid forward
-replay, the PWL backward induction, and the PWL forward replay all call it.
+There is exactly **one** implementation of candidate **enumeration** and
+**tie policy**, parameterized by a continuation-value evaluator
+`eval_V(next_soe) -> float`. The grid forward replay, the PWL backward
+induction, and the PWL forward replay call it directly. The grid backward
+induction's numpy-vectorized hot loop may keep its own evaluator for
+speed, provided it (a) consumes the same enumeration functions and
+(b) is pinned bit-parity against the selector by a standing test — a
+vectorized evaluator that drifts from the selector is the #236 bug
+reproduced.
 
 Forbidden: adding a candidate type, guard, cap, or preference to one call
-site and mirroring it by hand into the others. The four ~170-line
-hand-mirrored near-clones (grid replay `_best_action_at_continuous_state`
-vs `_pwl_best_action_at_continuous_state`) are the #236-class /
-`DISCHARGE_LATTICE_PCT_EPS`-class bug factory; the mirror comments
-("branch for branch") are the symptom.
+site and mirroring it by hand into the others. The concrete targets are
+the two hand-cloned enumerate/select functions —
+`_best_action_at_continuous_state` (~213 lines) vs
+`_pwl_best_action_at_continuous_state` (~221 lines), whose parity is
+maintained only by "mirror" comments (`pwl_window_dp.py:164,442,458,912`).
+The shared helpers (`_discharge_candidates`, `_charge_candidate`,
+`_prefer_*`, `_tie_margin`) are already imported by PWL rather than
+cloned; the clone problem is precisely the enumerate/select pair. (The
+`_compute_reward`/`_compute_reward_grid` "branch for branch" pair at
+`dp_battery_algorithm.py:447` is the physics core — protected below, not
+a P1 target.)
 
 ### P2. Ties resolve through one lexicographic preference table
 
@@ -119,9 +130,17 @@ No caller re-derives or hand-picks a SEK margin.
 A solver output spliced over another solver's output (the #450 PWL path)
 must either carry a certification the machinery actually earns, or an
 explicit error bound. #513 (PWL mis-ranks a plan by 0.584 SEK while
-"exact") is the standing counterexample: until fixed, PWL splices are
-treated as *heuristic* improvements, and any new reliance on their
-exactness is forbidden.
+"exact") is the standing counterexample.
+
+**Current state (aspirational until the Phase 2 rider lands):**
+`splice_schedule` today splices unconditionally — the only guard is the
+certification raise (`PWLWindowUnderRefinedError`), and #513 proves
+certification does not imply correct ranking. "Treated as heuristic"
+becomes a code property via the splice cost-gate (migration plan, Phase 2
+rider): a re-solved window is accepted only if its replayed cost is no
+worse than the grid segment it replaces. Until that gate exists, any NEW
+reliance on PWL exactness is forbidden; the existing splice path is
+grandfathered, gate pending.
 
 ### P7. Point forecasts stay; risk handling is structural, not stochastic
 

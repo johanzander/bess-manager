@@ -61,8 +61,15 @@ No new architecture work starts while overlapping WIP is open — parallel
 sessions rediscovering each other's findings is how this program got
 confusing.
 
-- [ ] Merge PR #510 (approved 2026-08-08; two optional test nits may ride
-      along or follow up).
+- [x] Merge PR #510 (merged 2026-08-08, `742d5906`; two optional test nits
+      may follow up).
+- [ ] Land the flow-coherence pin test (`test_flow_coherence.py`, 182/1875
+      incoherent-period pin) — currently only in an unmerged WIP worktree,
+      **not on main**, yet it is Phase 3's acceptance anchor. Merge it (or
+      its successor from the fold-scoping PR) before Phase 3 starts.
+- [ ] Land `scripts/bench_pwl_everywhere.py` from branch
+      `bench/pwl-everywhere` (pushed, uncommitted to main) — it is the
+      #512 sweep gate referenced in the deferred track.
 - [ ] Land or explicitly park PR #511 (#497 executable-discharge fix). If
       Phase 4 will supersede it within weeks, landing it anyway is correct:
       it stops live bleeding and its tests become Phase 4 acceptance tests.
@@ -153,6 +160,11 @@ class PeriodInputs:                   # per-period bundle, built once per t
       battery_solar_cost, stored as a generated JSON under
       `tests/unit/data/golden/` in the first commit) and assert the
       refactored path reproduces them bit-identically.
+      **Golden lifecycle:** these goldens pin *refactor* parity, and every
+      later behavior-changing phase (Phase 2 onward) regenerates them as
+      part of its measured-delta step, stating the regeneration in the PR
+      body. The parity test itself is never deleted or skipped — a phase
+      that can't regenerate goldens hasn't measured its delta.
 - [ ] Run it against unrefactored code to prove the golden capture is
       self-consistent (trivially passes).
 - [ ] Extract `Candidate`/`select_action`; port the grid replay call site;
@@ -214,10 +226,18 @@ Baseline table (each row = one guard/preference, applied in order, all
 measured against `candidates[argmax_index].value` — never chained):
 
 1. **Guard:** candidates importing more grid than the argmax winner are
-   ineligible (+1e-9 tolerance).
-2. **Guard:** if the argmax winner is a discharge, return it (decisive or
-   not — no preference reorders a discharge winner; #466/#510 ordering
-   made structural).
+   ineligible (+1e-9 tolerance). (Subsumes the identical guard inside
+   `_prefer_curtailed_charge_absorb` — dp:1504. Recorded foreclosure: in
+   negative-buy-price windows a within-epsilon grid top-up is arguably the
+   safer pick against a solar shortfall, and this row permanently bans it.
+   That codifies today's behavior; a future amendment relaxing it must
+   cite this note and bring field evidence.)
+2. **Guard:** if the argmax winner is any non-idle action
+   (`abs(power) > POWER_TOLERANCE_KW` — charge OR discharge), return it.
+   This is exact parity with today: both `_prefer_*` functions bail on any
+   non-idle winner (dp:1430, dp:1494). Narrowing this to discharge-only
+   would let row 3 flip a within-epsilon charge winner to a discharge —
+   an undeclared semantic change this plan does not make.
 3. **Prefer** the largest load-tracking discharge ≤ net load (+half a
    rate step, capped at `BATTERY_EXPORT_THRESHOLD_KWH/dt`) within epsilon
    — the #466 rule, now firing on **all** within-epsilon ties, including
@@ -231,11 +251,21 @@ measured against `candidates[argmax_index].value` — never chained):
 
 - Row 3 drops the `epsilon <= 0.0` early-return (flagged in the #510
   review: today the tie-break is disabled exactly where the value function
-  is flat, the most degenerate tie). Acceptance: on ridax67's
-  2026-08-07-232503 bundle fixture, the 06:00–06:59 crossover period must
-  resolve to a tracking mode, not IDLE, whenever a lattice-feasible
-  discharge ≤ net load exists; where none exists (86 W load vs 200 W
-  minimum gear) IDLE legitimately stands and the test pins that too.
+  is flat, the most degenerate tie). At `epsilon == 0`, "within epsilon"
+  catches only bit-exact ties — economically sound, since cycle cost is
+  already inside `_compute_reward`, so on an exact tie tracking is weakly
+  dominant under forecast error. **Before writing the RED test, replay the
+  ridax67 2026-08-07-232503 bundle and measure the 06:00–06:59 period's
+  actual margin.** If it is bit-exact-tied, the acceptance below applies
+  as written. If the gap is tiny but nonzero, passing requires an epsilon
+  *floor* — which trades real model value and may only be introduced with
+  an explicit per-period forfeiture bound stated in the row docstring
+  (and counted against the 0.05 SEK/fixture budget).
+  Acceptance: on the bundle fixture, the crossover period must resolve to
+  a tracking mode, not IDLE, whenever a lattice-feasible discharge ≤ net
+  load exists within the (possibly zero-width) band; where none exists
+  (86 W load vs 200 W minimum gear) IDLE legitimately stands and the test
+  pins that too.
 - Rows apply uniformly in grid and PWL paths via Phase 1's single call
   site — the `#466-vs-#510 can't fight` argument becomes row ordering, not
   a guard-clause coincidence.
@@ -245,6 +275,14 @@ measured against `candidates[argmax_index].value` — never chained):
 - [ ] Port the existing unit tests for both `_prefer_*` functions onto
       `apply_tie_policy` (same cases, same expected indices) — run RED
       against an empty table, GREEN against the ported rows.
+- [ ] **P6 splice cost-gate rider:** accept a re-solved tie window only if
+      its replayed cost (via `_replay_accounting_pass` over the spliced
+      segment) is ≤ the grid segment it replaces; a worse window is
+      discarded with a WARNING log naming the window and both costs (an
+      explicit, visible decision — not a silent fallback: the grid plan is
+      the incumbent, the splice is the challenger). RED test: a synthetic
+      window reproducing the #513 mis-ranking shape must NOT be spliced.
+      This makes `optimizer-architecture.md` P6 true in code.
 - [ ] Add the two new acceptance tests above (RED first: today's code
       picks IDLE at the crossover with epsilon 0).
 - [ ] Implement; measure the corpus deltas
@@ -276,8 +314,9 @@ Depends on Phase 0's fold-scoping outcome (it may already have moved the
       site: `sensor_collector`, `influxdb_helper`, `debug_data_exporter`,
       `simulation/inverter_simulator`, backend API paths — each gets an
       explicit exact-vs-ingested decision in the plan).
-- [ ] Acceptance (already written, this is the point): the #497 pin in
-      `test_flow_coherence.py` — 182/1875 incoherent periods — goes to
+- [ ] Acceptance (already written — landed on main via Phase 0's drain
+      item): the #497 pin in `test_flow_coherence.py` — 182/1875
+      incoherent periods — goes to
       **0**, and the plan-execution gap pins that the fold caused
       (+0.73/+0.56/+0.45 family) collapse, each re-pinned at its measured
       value.
@@ -342,7 +381,8 @@ floor; #320/#352 reproductions pass.
 - [ ] **#513 (before any new reliance on PWL exactness):** fix the PWL
       mis-ranking; until then P6 stands (PWL splices are heuristic).
 - [ ] **#512 (gated on premise test):** SOE-step sweep through
-      `scripts/bench_pwl_everywhere.py` + realized-cost harness first; only
+      `scripts/bench_pwl_everywhere.py` (on main via Phase 0's drain item)
+      + realized-cost harness first; only
       if the finer grid captures the gap AND survives realized cost does a
       constants PR follow (2026-08-09 sweep found the #350 fold interaction
       — Phase 0/3 must land first).

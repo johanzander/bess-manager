@@ -17,11 +17,11 @@ from pathlib import Path
 
 import pytest
 
+from core.bess.action_selector import _discharge_candidates
 from core.bess.dp_battery_algorithm import (
     _ac_flows,
     _build_period_data,
     _compute_reward,
-    _discharge_candidates,
     _effective_ac_cap_kwh,
     _state_transition,
 )

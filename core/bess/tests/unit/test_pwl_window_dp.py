@@ -2,9 +2,7 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
-from core.bess.dp_battery_algorithm import (
-    _discharge_candidates,
-)
+from core.bess.action_selector import _discharge_candidates
 from core.bess.dp_constants import POWER_STEP_KW
 from core.bess.exceptions import PWLWindowUnderRefinedError
 from core.bess.pwl_window_dp import (

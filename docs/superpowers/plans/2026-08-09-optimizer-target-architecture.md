@@ -136,25 +136,50 @@ class Candidate:
 def select_action(
     soe: float,
     t: int,
+    cost_basis: float,
     eval_V: Callable[[float], float],
+    eval_value_slope: Callable[[float], float],
     period_inputs: PeriodInputs,
     battery_settings: BatterySettings,
 ) -> SelectionResult:                 # chosen Candidate + full candidate
                                       # list + argmax index + tie margin
 
 @dataclass(frozen=True)
-class PeriodInputs:                   # per-period bundle, built once per t
-    buy_price: float
-    sell_price: float                 # reward-facing (floored) price
-    sell_price_floored: bool          # 269 flag
-    home_consumption: float           # kWh this period
-    solar_production: float           # kWh this period
+class PeriodInputs:                   # HORIZON-level bundle, indexed by t
+    buy_price: list[float]
+    sell_price: list[float]           # reward-facing (floored) prices
+    home_consumption: list[float]
+    solar_production: list[float]
     dt: float                         # hours
-    max_charge_power_kw: float | None # 233 per-period derating, None = no cap
+    max_charge_power_per_period: list[float] | None   # 233 derating
     import_cap_kwh: float | None      # 429 fuse cap
-    self_throttle_export_threshold_kwh: float
     discharge_resolution_kw: float | None
+    sell_price_floored: list[bool] | None             # 269 flag
 ```
+
+**As-built (Phase 1, PR #521) — this block is the real signature, not a
+sketch.** Three things the original sketch got wrong, corrected here so
+Phase 2 does not re-derive them:
+
+1. **`PeriodInputs` holds horizon-level lists indexed by `t`, not
+   per-period scalars.** `_compute_reward` takes the price *lists* plus a
+   period index, so scalar fields would mean rebuilding throwaway lists
+   per candidate or changing the physics core's signature at ~15 call
+   sites. Converting `_compute_reward` to the scalar convention its twin
+   `_compute_reward_grid` already uses belongs to a phase allowed to touch
+   that signature — it is not free.
+2. **`select_action` also takes `cost_basis` and a separate
+   `eval_value_slope`.** The grid and PWL paths compute dV/dSoE
+   differently (`_local_value_slope` clamps a grid index;
+   `_pwl_local_value_slope` takes a clamped central difference); unifying
+   them would be a behavior change. `self_throttle_export_threshold_kwh`
+   is gone from the sketch entirely — #497 removed that threshold.
+3. **One deferred import is structural.** `action_selector` imports the
+   physics from `dp_battery_algorithm`, so `dp_battery_algorithm`'s two
+   consumers import back from it inside the function body — the same
+   arrangement `optimize_battery_schedule` already has with
+   `pwl_window_dp`. The alternative was moving the physics core out of
+   `dp_battery_algorithm.py`, which the architecture doc protects.
 
 - Candidate enumeration (idle, discharge lattice via
   `_discharge_candidates`, charge via `_charge_candidate`, SOLAR_EXPORT

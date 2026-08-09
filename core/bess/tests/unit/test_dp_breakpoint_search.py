@@ -23,20 +23,35 @@ executable exactly as planned.
 import numpy as np
 import pytest
 
-from core.bess.dp_battery_algorithm import (
+from core.bess.action_selector import (
     TIE_DEDUP_SOE_KWH,
-    _best_action_at_continuous_state,
+    Candidate,
     _charge_candidate,
     _discharge_candidates,
+    _tie_margin,
+)
+from core.bess.dp_battery_algorithm import (
+    _best_action_at_continuous_state,
     _discretize_state_action_space,
     _interpolate_value,
     _run_dynamic_programming,
-    _tie_margin,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+
+
+def _candidate(value: float, power: float, next_soe: float) -> Candidate:
+    """A `Candidate` carrying only the three fields `_tie_margin` reads."""
+    return Candidate(
+        power=power,
+        next_soe=next_soe,
+        reward=0.0,
+        new_cost_basis=0.0,
+        grid_imported=0.0,
+        value=value,
+    )
 
 
 def _prepare(scenario_name):
@@ -541,10 +556,9 @@ def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
     Candidates within TIE_DEDUP_SOE_KWH of the chosen next_soe are excluded
     from the runner-up search.
     """
-    # (value, power, next_soe, cost_basis, reward, grid_imported)
-    chosen = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)
-    duplicate = (10.0, 0.0, 5.0, 0.0, 0.0, 0.0)  # identical outcome -- not a tie
-    distinct = (9.0, -2.0, 5.0 + TIE_DEDUP_SOE_KWH + 0.1, 0.0, 0.0, 0.0)
+    chosen = _candidate(value=10.0, power=0.0, next_soe=5.0)
+    duplicate = _candidate(value=10.0, power=0.0, next_soe=5.0)  # same outcome
+    distinct = _candidate(value=9.0, power=-2.0, next_soe=5.0 + TIE_DEDUP_SOE_KWH + 0.1)
 
     assert _tie_margin([chosen, duplicate], best_index=0) == float("inf")
     assert _tie_margin([chosen, duplicate, distinct], best_index=0) == pytest.approx(
@@ -555,7 +569,7 @@ def test_tie_margin_ignores_candidates_landing_at_the_same_soe():
 def test_tie_margin_is_infinite_without_a_distinct_alternative():
     """ "No distinct alternative was feasible" must read as "not tied", not
     as a zero margin that the detector would flag (#450)."""
-    only = (3.0, 0.0, 5.0, 0.0, 0.0, 0.0)
+    only = _candidate(value=3.0, power=0.0, next_soe=5.0)
     assert _tie_margin([only], best_index=0) == float("inf")
 
 
@@ -601,7 +615,7 @@ def test_unexecutable_band_applies_down_to_zero_deficit():
     deficit inside (0, POWER_TOLERANCE_KW] must not stand the predicate
     down, or the DP can still plan the exact #497 incoherent period there
     (0.2 kW against a 0.0008 kW deficit -> 0.0498 kWh phantom export)."""
-    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+    from core.bess.action_selector import _discharge_is_unexecutable
 
     assert _discharge_is_unexecutable(
         0.2, home_consumption=0.0002, solar_production=0.0, dt=0.25
@@ -618,7 +632,7 @@ def test_exact_resolution_overshoot_stays_excluded():
     where admitting the boundary produced a planned 0.1 kWh export the
     fold erased and a 0.16 SEK plan-vs-execution gap. See the predicate's
     docstring."""
-    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+    from core.bess.action_selector import _discharge_is_unexecutable
 
     assert _discharge_is_unexecutable(
         1.1, home_consumption=1.0, solar_production=0.0, dt=1.0

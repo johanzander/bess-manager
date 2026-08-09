@@ -101,3 +101,44 @@ def test_grid_import_stays_within_fuse_cap():
         f"under the phase_count-scaled cap {IMPORT_CAP_KWH:.2f} kWh -- the "
         "DP is over-discharging against a too-conservative cap"
     )
+
+
+# Same house and spike, but the battery starts empty, so no discharge action
+# can bring the spike period's import under the fuse cap. This is the
+# "constrain, don't raise" half of #429 -- the half the scenario above never
+# reaches, because there the battery can always meet the cap.
+UNMEETABLE_CAP_SCENARIO = {
+    **IMPORT_CAP_SCENARIO,
+    "battery": {**IMPORT_CAP_SCENARIO["battery"], "initial_soe": 1.0},
+    "buy_price": [5.0, 5.0, 1.0, 1.0],
+}
+
+
+def test_cap_constrains_rather_than_raises_when_no_action_can_meet_it():
+    """When the house load alone exceeds the fuse cap and the battery cannot
+    help, the cap must constrain the choice among the least-bad actions, not
+    eliminate every candidate (#429).
+
+    The optimizer has to keep planning -- the load is served either way, and
+    the fuse's real behavior is not the DP's to simulate. If the import
+    filter ever stops flooring its threshold at the minimum import any
+    candidate actually achieves, this period's candidate list empties and
+    selection dies on an empty list instead of returning the honest plan.
+    The expensive early prices keep the battery empty at the spike, so no
+    discharge is available to duck under the cap.
+    """
+    result, realized_cost = run_scenario_realized(UNMEETABLE_CAP_SCENARIO)
+
+    assert realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=0.01
+    ), "Plan is not faithfully executable (R != P)"
+
+    spike_period = result.period_data[2]
+    assert spike_period.energy.grid_imported > IMPORT_CAP_KWH, (
+        "fixture no longer exercises the unmeetable-cap path: import "
+        f"{spike_period.energy.grid_imported:.2f} kWh is within the cap "
+        f"{IMPORT_CAP_KWH:.2f} kWh"
+    )
+    assert spike_period.energy.battery_soe_start == pytest.approx(
+        UNMEETABLE_CAP_SCENARIO["battery"]["min_soe_kwh"], abs=0.05
+    ), "fixture no longer exercises an empty battery at the spike"

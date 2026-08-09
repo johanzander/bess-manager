@@ -61,12 +61,10 @@ from enum import Enum
 import numpy as np
 
 from core.bess.dp_constants import (
-    POWER_CLASSIFICATION_THRESHOLD_KW,
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
 from core.bess.models import (
-    GRID_FLOW_RESOLUTION_KWH,
     DecisionData,
     EconomicData,
     EconomicSummary,
@@ -77,11 +75,9 @@ from core.bess.models import (
 )
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
-    FLOW_NOISE_FLOOR_KWH,
     classify_strategic_intent,
     create_decision_data,
 )
-from core.bess.tie_detection import epsilon_for_period
 
 # Configure logging
 logging.basicConfig(
@@ -987,6 +983,15 @@ def _run_dynamic_programming(
     docs/superpowers/specs/2026-07-16-issue-313-root-cause-investigation.md.
     """
 
+    # The candidate space this pass estimates V over is defined once, in
+    # action_selector (P1) -- this pass evaluates it with its own vectorized
+    # evaluator but must not restate what the candidates are. Imported here
+    # rather than at module scope because action_selector imports this module
+    # for the reward/transition primitives, so a top-level import would be
+    # circular -- the same arrangement pwl_window_dp already has with this
+    # file.
+    from core.bess.action_selector import _discharge_rate_step_kw, _residual_cover_p
+
     # Set defaults if not provided
     if solar_production is None:
         solar_production = [0.0] * horizon
@@ -1250,503 +1255,6 @@ def _local_value_slope(
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
 
 
-def _discharge_rate_step_kw(
-    discharge_resolution_kw: float | None, battery_settings: BatterySettings
-) -> float:
-    """Discharge percent-grid step (kW): the hardware executes discharge as an
-    integer percent of max_discharge_power_kw unless a finer resolution is
-    configured -- the lattice _discharge_candidates enumerates."""
-    return (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
-
-
-def _discharge_is_unexecutable(
-    discharge_power_kw,
-    home_consumption: float,
-    solar_production: float,
-    dt: float,
-):
-    """Is this discharge one no inverter can actually carry out as commanded?
-
-    True when the commanded discharge overshoots the home deficit by less than
-    `GRID_FLOW_RESOLUTION_KWH`. Such an action is unexecutable on every
-    platform, for two different reasons that happen to coincide:
-
-    - Load-following firmware simply throttles it back to the deficit
-      (`inverter_simulator.mode_to_power`: `min(deficit, rate_kw * dt, ...)`),
-      so the overshoot never leaves the property.
-    - Hardware that would deliver it produces an export below the resolution
-      of the energy counters that measure exports, so `EnergyData`'s noise
-      fold (#350) attributes it back to the home regardless.
-
-    Excluding these is the whole of the #497 fix. Proposing one anyway meant
-    the DP priced an export that never happened and drew energy from the
-    battery that never left it, emitting a period whose reported flows did not
-    add up. Every earlier attempt patched a consequence instead -- #240 zeroed
-    the export *credit* in the reward and left the *energy* overstated, which
-    is precisely the band this predicate removes. Nothing downstream needs a
-    threshold now, so none of them have to be kept in sync with each other.
-
-    The lower boundary deliberately mirrors `EnergyData`'s fold condition
-    (`battery_to_home > 0`, models.py): the band starts at any positive
-    deficit at all, not at `POWER_TOLERANCE_KW` -- the fold has no such
-    stand-down, so neither can this.
-
-    The upper boundary is inclusive (`<=`) even though the fold's own bound
-    is strict (`< GRID_FLOW_RESOLUTION_KWH`) -- deliberately, as float
-    safety margin, not drift. At an overshoot of exactly the resolution the
-    two sites compute the same physical quantity through different float
-    paths (this predicate subtracts powers, the fold subtracts energies),
-    and they can land on opposite sides of the boundary: measured on
-    synthetic_seasonal_summer period 16, the DP saw overshoot 0.1 + 1e-16
-    ("real export") while the fold saw battery_to_grid 0.1 - 2e-17 (folded
-    to zero), yielding a period whose planned 0.16 SEK export revenue
-    load-first execution never delivers. Excluding the exact boundary costs
-    at most one marginal export candidate; admitting it re-opens the #497
-    incoherence at float precision.
-
-    Accepts a scalar or an array; returns the matching shape. Both the replay
-    candidate set (`_discharge_candidates`) and the PWL window's feasibility
-    mask (`pwl_window_dp._pwl_candidate_values_at`) route through here, so the
-    two action-choosing passes cannot drift onto different action sets -- the
-    failure mode `_backward_discharge_levels`' docstring warns about. The
-    coarse-grid backward pass is the one deliberate exception: it only
-    estimates V, never emits an action, and keeping in-band grid points there
-    approximates the exact-cover breakpoint its lattice lacks -- see the
-    comment at its feasibility mask in `_run_dynamic_programming`.
-    """
-    deficit_kw = (home_consumption - solar_production) / dt
-    if deficit_kw <= 0.0:
-        return np.zeros_like(discharge_power_kw, dtype=bool)
-    return (discharge_power_kw > deficit_kw) & (
-        discharge_power_kw <= deficit_kw + GRID_FLOW_RESOLUTION_KWH / dt
-    )
-
-
-def _residual_cover_p(
-    home_consumption: float,
-    solar_production: float,
-    dt: float,
-    rate_step: float,
-) -> float | None:
-    """Exact net-load residual as a discharge power (kW, positive), when the
-    percent lattice cannot represent covering it -- else None (#466
-    follow-up, sunrise crossover).
-
-    When forecast home load exceeds solar by less than the smallest lattice
-    candidate (`min_pct * rate_step`, see `_discharge_candidates`), the DP
-    has no executable action that covers the residual: sub-residual lattice
-    candidates don't exist, and every overshooting one is either excluded
-    by `_discharge_is_unexecutable` (#497) or exports for real -- so IDLE
-    wins by default and the home imports the residual at buy price even
-    when the battery's marginal value says covering it is cheaper. On
-    load-first hardware the exact-cover action is natively executable: the
-    inverter delivers `min(actual load, rate ceiling)`, so a planned
-    residual-cover discharge is delivered exactly at forecast
-    (`inverter_simulator.py::mode_to_power`; VPP LOAD_SUPPORT is rate-less
-    load-following, #413). Planning the *delivery* rather than a rate-step
-    *command* is what keeps exact plan-faithfulness -- the property that
-    ruled out keeping the smallest lattice step for this case in #497's
-    design (see the carve-out note in `_discharge_candidates`).
-
-    Two executability floors gate the candidate (both verified against the
-    execution path, not assumed):
-
-    - `residual * dt > 0.01 kWh`: `classify_strategic_intent`'s
-      sub-threshold fallthrough labels a discharge LOAD_SUPPORT only above
-      its `battery_discharged > 0.01` noise floor
-      (`strategic_intent.py`) -- at or below it the period classifies IDLE
-      and the command mapper would discharge nothing (R != P, the #282
-      failure shape).
-    - `residual <= round(residual / rate_step) * rate_step`: register/TOU
-      platforms write an integer percent (`_scale_to_percent` rounds to
-      nearest), and load-first delivery is `min(actual load, ceiling)` --
-      so the plan is only exact when the rounded rate ceiling covers the
-      residual. This subsumes the round-to-0% case (below half a step the
-      ceiling is 0 and nothing executes) and rejects the round-DOWN bands
-      `(k*rate_step, (k+0.5)*rate_step)` for k >= 1, where the commanded
-      ceiling would under-deliver the plan by up to half a step (caught in
-      review by executed repro: residual 0.12 kW -> 1% of 10 kW = 0.10 kW
-      ceiling -> realized 0.10 for a planned 0.12).
-
-    Residuals at or above the smallest lattice candidate return None: the
-    percent grid already contains candidates at or below the residual
-    there, and this helper must not widen #466's scope beyond the
-    unrepresentable gap.
-    """
-    residual_p = (home_consumption - solar_production) / dt
-    min_lattice_p = (
-        int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
-    ) * rate_step
-    if residual_p >= min_lattice_p:
-        return None
-    if residual_p * dt <= FLOW_NOISE_FLOOR_KWH:
-        return None
-    if residual_p > round(residual_p / rate_step) * rate_step:
-        return None
-    return residual_p
-
-
-def _discharge_candidates(
-    soe: float,
-    battery_settings: BatterySettings,
-    dt: float,
-    home_consumption: float,
-    solar_production: float,
-    discharge_resolution_kw: float | None = None,
-    ac_cap_kwh: float | None = None,
-) -> list[float]:
-    """Candidate discharge magnitudes (kW, positive) to evaluate for the
-    single-period objective (reward + interpolated continuation value) --
-    see docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md,
-    Findings 1/2/3/5.
-
-    Real hardware executes discharge as an integer percent (0-100) of
-    `max_discharge_power_kw`
-    (core/bess/simulation/inverter_simulator.py::_map_rates) -- it cannot
-    apply an arbitrary continuous kW value. So the actually-achievable
-    action space is that discrete percent grid, not the real line
-    (postmortem, #282: an earlier version of this function returned exact
-    analytic breakpoints like -7.505 kW out of a 10 kW max, which
-    percent-rounds to 7.5 kW on real hardware -- a planned action execution
-    silently can't reproduce, breaking plan-faithfulness/R==P). Enumerating
-    that percent grid directly is both exact with respect to the true
-    (discrete) action space and guarantees every candidate is executable
-    exactly as planned.
-
-    Second postmortem (#282): `classify_strategic_intent` treats any
-    discharge magnitude at or below `POWER_CLASSIFICATION_THRESHOLD_KW`
-    (derived from the fixed `POWER_STEP_KW`, not from
-    `max_discharge_power_kw`) as noise, falling through to a different
-    classification branch. That was safe by construction under the old
-    fixed grid (smallest nonzero action, `POWER_STEP_KW`, always exceeded
-    it), but 1% of `max_discharge_power_kw` can land at or below it for any
-    battery with `max_discharge_power_kw <= 10 kW` -- so candidates at or
-    below the threshold are excluded here too, not just candidates at or
-    below zero.
-    """
-    available_energy = soe - battery_settings.min_soe_kwh
-    p_max = min(
-        battery_settings.max_discharge_power_kw,
-        available_energy / dt * battery_settings.efficiency_discharge,
-    )
-    if ac_cap_kwh is not None:
-        # Discharge shares the inverter's AC stage with PV conversion — see
-        # the matching feasibility mask in _run_dynamic_programming.
-        ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar_production, ac_cap_kwh))
-        p_max = min(p_max, ac_headroom_kwh / dt)
-    if p_max <= POWER_TOLERANCE_KW:
-        return []
-
-    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
-    max_pct = int(np.floor(p_max / rate_step + 1e-9))
-    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
-    if min_pct > max_pct:
-        # No lattice candidate fits, but the off-lattice residual-cover
-        # candidate (#466 follow-up, below) may still: it sits under the
-        # smallest lattice power by construction, so a nearly-empty battery
-        # can be able to cover a small net load while unable to sustain any
-        # percent-grid discharge.
-        cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
-        if cover_p is not None and cover_p <= p_max:
-            return [cover_p]
-        return []
-    candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
-
-    # The largest step at or below the deficit is already in the enumeration
-    # above, so dropping the unexecutable steps needs nothing added back: it
-    # leaves as-exact-as-possible load cover the best available discharge, and
-    # any surviving larger candidate exports enough to be real.
-    #
-    # Unconditional, with no "but keep one anyway if this empties the set"
-    # carve-out. When the deficit is smaller than the smallest commandable
-    # discharge, every discharge overshoots it and the honest answer is that
-    # this hardware cannot serve that deficit from the battery -- so the DP
-    # proposes none and the home imports it. An earlier draft kept the
-    # smallest step in that case; it cost exact plan-faithfulness (one fixture
-    # period, 0.0034 kWh) to save a fraction of an öre, and reintroduced the
-    # asymmetry between this pass and the PWL window that the whole predicate
-    # exists to prevent.
-    executable = [
-        p
-        for p in candidates
-        if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
-    ]
-
-    # #466 follow-up: one deliberate off-lattice candidate -- discharge
-    # exactly the forecast net-load residual when it is smaller than the
-    # smallest lattice candidate. This is not the carve-out the paragraph
-    # above rejects: that draft planned the smallest *step* and let the plan
-    # overstate delivery by the overshoot, breaking exact plan-faithfulness.
-    # This candidate plans the *delivery* itself -- load-first executes
-    # `min(actual load, ceiling)`, so commanding one rate step at a sub-step
-    # deficit delivers exactly the deficit -- which is why R == P holds
-    # exactly. See _residual_cover_p for the classify/round-to-percent gates.
-    cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
-    if cover_p is not None and cover_p <= p_max:
-        executable.append(cover_p)
-
-    return sorted(executable)
-
-
-def _charge_candidate(
-    soe: float,
-    battery_settings: BatterySettings,
-    dt: float,
-    period_max_charge: float | None,
-) -> float | None:
-    """The single representative STORE (charge) candidate power, or `None`
-    if no genuine charge is possible -- see Finding 4 in
-    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md:
-    any power above `POWER_TOLERANCE_KW` produces an identical reward
-    (binary store physics; actual throughput is governed by
-    `max_charge_power_kw`/solar/room, not the chosen power value), so a
-    single feasible positive power fully represents the action.
-
-    Same classification-threshold guard as `_discharge_candidates`: a
-    candidate at or below `POWER_CLASSIFICATION_THRESHOLD_KW` would be
-    misclassified as noise by `classify_strategic_intent` rather than as a
-    genuine charge (reachable when very little room remains near a full
-    battery), so treat that case as no charge available rather than
-    returning a candidate the classifier can't recognize.
-    """
-    available_capacity = battery_settings.max_soe_kwh - soe
-    max_charge_power = available_capacity / dt / battery_settings.efficiency_charge
-    if period_max_charge is not None:
-        max_charge_power = min(max_charge_power, period_max_charge)
-    if max_charge_power <= POWER_CLASSIFICATION_THRESHOLD_KW:
-        return None
-    return min(POWER_STEP_KW, max_charge_power)
-
-
-# Minimum SOE separation at which two candidate actions count as different
-# *decisions* rather than two power levels of the same decision, when
-# measuring how ambiguous a period's choice is (#450). See _tie_margin.
-#
-# This is a behavioural-DISTINCTNESS threshold, empirically calibrated --
-# not a duplicate-removal tolerance, despite the duplicate candidates
-# (IDLE vs the SOLAR_EXPORT-below-max bypass, which land on the identical
-# next_soe) being what first exposed the problem. Removing literal
-# duplicates needs only ~SOE_STEP_KWH; 1.0 kWh is 40x that (#512), and
-# per the calibration sweep it is the DOMINANT lever on the trigger rate,
-# not a safety margin around a smaller principled value. Sweeping it over
-# 0.05 -> 1.5 kWh moves suite-wide flagging from 15.6% of periods to 0.4%.
-#
-# It is set where it is because #450's own reproduction fixture has its
-# genuine alternative 1.25-1.5 kWh away from the chosen action's next_soe
-# -- charging in a different window -- while the mass of spurious
-# near-ties across every other fixture sits below 1 kWh, i.e. nudging the
-# same plan's power level. #450's case is still caught the whole way up to
-# 1.25 kWh, so 1.0 kWh keeps margin on both sides.
-#
-# Two consequences worth knowing before touching this:
-#
-# 1. It suppresses the charge side almost entirely. _charge_candidate
-#    returns a single POWER_STEP_KW (0.1 kW) gradient probe, which moves
-#    SOE by only ~0.025 kWh at dt=0.25h (~0.1 kWh at dt=1h) -- always well
-#    under this threshold. So the charge candidate can essentially never
-#    be the runner-up, and "charge now vs charge later" (the case the
-#    _tie_margin docstring names as the target) can only register as a tie
-#    when the CHOSEN action is a large discharge and the alternative is
-#    the far-away no-discharge state, never when the chosen action is
-#    itself a charge.
-# 2. TODO: it is an absolute kWh figure that scales with neither battery
-#    capacity nor dt. Every fixture in the suite uses a similar-sized
-#    battery, so no test can catch this. On a much smaller battery (say
-#    5 kWh usable) a 1.0 kWh separation is a fifth of the whole range and
-#    the detector would likely go silent -- and silently, since a missed
-#    tie reproduces #450's bug rather than raising. Making it relative to
-#    usable capacity needs a fixture with a small battery to calibrate
-#    against.
-TIE_DEDUP_SOE_KWH = 1.0
-
-
-def _tie_margin(
-    candidates: list[tuple[float, float, float, float, float, float]],
-    best_index: int,
-) -> float:
-    """Value gap between the chosen candidate and the best *behaviourally
-    distinct* alternative (#450).
-
-    `candidates` are `(value, power, next_soe, new_cost_basis, reward,
-    grid_imported)` tuples as built by `_best_action_at_continuous_state`,
-    already filtered against the import cap (#429) so every entry here is an
-    action the house's fuse can actually support.
-
-    A raw best-minus-second-best gap over the full candidate list is not a
-    usable ambiguity signal, because several of those candidates are the
-    same decision expressed twice:
-
-    - IDLE and the SOLAR_EXPORT-below-max candidate coincide exactly
-      whenever there is no solar surplus to route differently (both hold
-      soe, both score identically) -- a margin of 0.0 that says nothing
-      about ambiguity;
-    - adjacent discharge breakpoints can sit a fraction of a grid step
-      apart, which the grid DP's SOE_STEP_KWH-resolution value table cannot
-      even distinguish.
-
-    The alternatives that matter for #450 are ones landing at a materially
-    different SOE -- e.g. charging in this window versus a later one. So a
-    candidate only counts as a runner-up if its next_soe differs from the
-    chosen candidate's by more than TIE_DEDUP_SOE_KWH.
-
-    Returns float("inf") when no distinct alternative is feasible ("not
-    tied, no comparison possible").
-    """
-    best_value, _, best_next_soe, _, _, _ = candidates[best_index]
-    runner_up = float("-inf")
-    for index, (value, _power, next_soe, _cb, _reward, _gi) in enumerate(candidates):
-        if index == best_index:
-            continue
-        if abs(next_soe - best_next_soe) <= TIE_DEDUP_SOE_KWH:
-            continue
-        if value > runner_up:
-            runner_up = value
-    if runner_up == float("-inf"):
-        return float("inf")
-    return best_value - runner_up
-
-
-def _prefer_load_covering_discharge(
-    candidates: list[tuple[float, float, float, float, float, float]],
-    best_index: int,
-    epsilon: float,
-    home_consumption: float,
-    solar_production: float,
-    dt: float,
-) -> int:
-    """Risk-aware tie-break (#466): if the argmax landed on an idle-like
-    action (|power| <= POWER_TOLERANCE_KW) or a partial load-cover (#512 --
-    which tied candidate argmax returns is an enumeration-order accident, so
-    ties can surface at a partial cover just as well as at IDLE) while the
-    house has forecast net grid import this period, and a discharge
-    candidate that covers no more
-    than that net load sits within `epsilon` of the best value, return that
-    candidate's index instead.
-
-    Rationale (spec 2026-08-07-idle-tie-break-design.md): within `epsilon`
-    -- the value noise the DP's own SOE grid-snapping injects
-    (tie_detection.epsilon_for_period) -- the DP cannot rank the two
-    options, but they are not symmetric in risk. Load-covering discharge
-    fails safe: the inverter tracks *actual* load, absorbing a consumption
-    forecast miss for free. IDLE fails unsafe: discharge is hard-disabled,
-    so the entire miss is imported at the buy price. Deliberate arbitrage
-    holds are untouched by construction -- their margin over discharging
-    exceeds `epsilon`.
-
-    Eligibility is exact cover or under-cover only. No round-up allowance
-    is needed (#497): every candidate overshooting the deficit by less than
-    the export resolution was already excluded as unexecutable
-    (`_discharge_is_unexecutable`), and anything overshooting by more is a
-    genuine export, never a load-cover swap target. Among eligible
-    candidates the largest coverage wins -- fuller coverage means less
-    residual import exposed to a miss.
-
-    Economic bound: each swap forfeits at most `epsilon` (empirically
-    ~0.003-0.015 SEK per period), but a single horizon can contain many
-    swapped periods, and the aggregate is bounded only empirically, not
-    per-horizon -- fixture evidence puts the worst observed full-horizon
-    cost at +0.032 SEK, inside the #450 budget of 0.05 SEK. Separately, for
-    small net loads the eligibility band above is wide in SEK/kWh terms, so
-    swaps fire more often than #467's tie detector flags near-ties; this is
-    deliberate, since every swapped candidate is within `epsilon` --
-    value noise, not a real gap -- of the argmax winner.
-    """
-    if epsilon <= 0.0:
-        return best_index
-    best_value, best_power = candidates[best_index][0], candidates[best_index][1]
-    balance_zero_p = (home_consumption - solar_production) / dt
-    if balance_zero_p <= POWER_TOLERANCE_KW:
-        return best_index
-    max_cover_p = balance_zero_p + 1e-9
-    # Fire only when the argmax landed on IDLE or a *partial* load-cover.
-    # The original guard assumed exact ties always surface at IDLE (argmax
-    # returns the first maximum), but which tied candidate the argmax lands
-    # on is an enumeration-order accident -- at the #512 grid resolution it
-    # started landing on partial covers, silently bypassing the swap and
-    # leaving residual import exposed. Charges and genuine exports
-    # (discharge beyond the deficit) stay untouched, as before.
-    is_idle = abs(best_power) <= POWER_TOLERANCE_KW
-    is_partial_cover = -best_power > POWER_TOLERANCE_KW and -best_power <= max_cover_p
-    if not (is_idle or is_partial_cover):
-        return best_index
-    swap_index = best_index
-    swap_power = 0.0
-    for index, candidate in enumerate(candidates):
-        discharge_p = -candidate[1]
-        if discharge_p <= POWER_TOLERANCE_KW or discharge_p > max_cover_p:
-            continue
-        if best_value - candidate[0] >= epsilon:
-            continue
-        if discharge_p > swap_power:
-            swap_index = index
-            swap_power = discharge_p
-    return swap_index
-
-
-def _prefer_curtailed_charge_absorb(
-    candidates: list[tuple[float, float, float, float, float, float]],
-    best_index: int,
-    epsilon: float,
-) -> int:
-    """Charge-early tie-break under the #269 curtailment sell-price floor:
-    if this period's sell price was floored to 0 for the reward calculation,
-    prefer the candidate that stores the most energy among those within
-    `epsilon` of the best value, provided it imports no more grid energy
-    than the argmax winner.
-
-    Rationale: flooring the sell price makes every below-floor export worth
-    exactly 0, so whenever the remaining below-floor surplus exceeds the
-    battery's headroom, "charge now, curtail later" and "curtail now,
-    charge later" earn identical reward and the argmax picks between them
-    on float noise. The options are not symmetric in reality: deferring
-    actuates as charge-rate 0% + export-limit 0 (PV physically clipped to
-    house load, above-forecast production wasted) and spends the plan's
-    slack against a later solar shortfall before the next positive-price
-    block. Charging earliest is stochastically dominant -- equal model
-    reward, strictly better under forecast error in either direction.
-
-    The import guard keeps the swap free: a candidate that stores more by
-    importing from the grid (the full-rate charge candidate during a
-    below-floor window) is never preferred over one that only absorbs
-    surplus. Discharge winners -- including a #466 load-covering swap --
-    are left untouched: this tie-break only reorders hold-vs-store picks.
-
-    `epsilon <= 0.0` disables the tie-break entirely -- deliberately
-    mirroring #466 and tie_detection's documented blind spot: a flat value
-    function (dV/dSoE == 0) gives epsilon no scale, so there is no
-    principled band in which candidates count as "tied" rather than
-    genuinely ranked, and swapping on an arbitrary absolute threshold
-    would trade real value. In practice below-floor periods with a live
-    evening export block have dV/dSoE ~= cycle_cost > 0, so the disabled
-    case is the degenerate no-future-value horizon, not the reported bug.
-    """
-    if epsilon <= 0.0:
-        return best_index
-    best_value, best_power, best_next_soe, _, _, best_grid_imported = candidates[
-        best_index
-    ]
-    if best_power < -POWER_TOLERANCE_KW:
-        return best_index
-    swap_index = best_index
-    swap_next_soe = best_next_soe
-    for index, candidate in enumerate(candidates):
-        value, power, next_soe, _, _, grid_imported = candidate
-        if power < -POWER_TOLERANCE_KW:
-            continue
-        if best_value - value >= epsilon:
-            continue
-        if grid_imported > best_grid_imported + 1e-9:
-            continue
-        if next_soe > swap_next_soe + 1e-9:
-            swap_index = index
-            swap_next_soe = next_soe
-    return swap_index
-
-
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -1763,196 +1271,63 @@ def _best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> tuple[float, float, float, float, float]:
-    """One-step Bellman recompute at a true continuous SoE, using the
-    already-known V[t+1, :] (linearly interpolated) as the continuation
-    value -- the same reward+max(V) logic as _run_dynamic_programming's
-    backward pass, applied at the true replay state instead of one snapped
-    to the nearest grid index. Used by optimize_battery_schedule's Step 2 to
+) -> tuple[float, float, float, float, float, float]:
+    """The grid DP's forward replay: `action_selector.select_action` with the
+    continuation value read off the already-known V[t+1, :] row, linearly
+    interpolated at the candidate's true continuous SoE instead of snapped to
+    the nearest grid index. Used by optimize_battery_schedule's Step 2 to
     reconstruct the continuous path without trusting a policy table computed
     for a slightly different state. See
     docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md.
 
-    Candidate actions are the exact breakpoints of the piecewise-linear
-    reward+continuation objective (see
-    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md)
-    rather than a fixed power grid -- `power_levels` is unused for the
-    search itself, kept only for call-site compatibility with
+    Candidate enumeration, evaluation and tie policy all live in
+    `action_selector` (P1) -- this wrapper contributes only the grid-flavoured
+    `eval_V`/slope pair and the tuple shape its callers expect. `power_levels`
+    is unused, kept for call-site compatibility with
     `_discretize_state_action_space`.
 
     Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
-    tie_margin), where tie_margin is the gap between the chosen action's
-    value and the best *behaviourally distinct* runner-up's value --
-    float("inf") if no distinct alternative was feasible, meaning "not
-    tied, no comparison possible". Used by the hybrid PWL tie detector
-    (#450) to find near-tied periods without re-deriving this comparison.
-
-    "Behaviourally distinct" means landing more than TIE_DEDUP_SOE_KWH away
-    in next_soe (see _tie_margin): several candidates evaluated here are
-    duplicates of each other in outcome -- most notably IDLE and the
-    SOLAR_EXPORT-below-max candidate whenever there is no solar surplus to
-    route differently, which land on the identical next_soe with the
-    identical value. Ranking those against each other reports margin 0.0
-    for a period with no ambiguity at all, which is not the situation #450
-    is about (two genuinely different battery actions being close enough
-    that the grid-snapped continuation-value lookup could flip the choice).
+    tie_margin, value_slope). `tie_margin` is the gap between the *argmax*
+    action's value and the best behaviourally distinct runner-up's --
+    float("inf") if no distinct alternative was feasible, meaning "not tied,
+    no comparison possible" -- and is measured pre-tie-break on purpose (see
+    `SelectionResult`). Used by the hybrid PWL tie detector (#450) to find
+    near-tied periods without re-deriving this comparison.
     """
-    period_max_charge = (
-        max_charge_power_per_period[t]
-        if max_charge_power_per_period is not None
-        else None
-    )
-    home = home_consumption[t]
-    solar = solar_production[t]
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    # Imported here rather than at module scope because action_selector
+    # imports this module for the reward/transition primitives it evaluates
+    # candidates with, so a top-level import would be circular -- the same
+    # arrangement pwl_window_dp already has with this file.
+    from core.bess.action_selector import PeriodInputs, select_action
 
-    # Candidates are gathered first, then filtered against the import cap
-    # (#429), so the cap's "constrain, don't raise" floor -- the minimum
-    # grid_imported any candidate in this set actually achieves -- can be
-    # computed before any candidate is discarded. Each entry is
-    # (value, power, next_soe, new_cost_basis, reward, grid_imported),
-    # appended in the original consideration order so that exact value ties
-    # still resolve to the first-considered candidate exactly as before.
-    candidates: list[tuple[float, float, float, float, float, float]] = []
-
-    def consider(power: float, forced_next_soe: float | None = None) -> None:
-        next_soe = (
-            forced_next_soe
-            if forced_next_soe is not None
-            else _state_transition(
-                soe,
-                power,
-                battery_settings,
-                dt,
-                solar_production=solar,
-                home_consumption=home,
-                ac_cap_kwh=ac_cap_kwh,
-                import_cap_kwh=import_cap_kwh,
-            )
-        )
-        # See _soe_floor's docstring (#233): the feasible floor for this
-        # candidate is soe itself until real charging crosses back above
-        # min_soe_kwh.
-        if (
-            next_soe < _soe_floor(soe, battery_settings)
-            or next_soe > battery_settings.max_soe_kwh
-        ):
-            return
-        reward, new_cost_basis, grid_imported = _compute_reward(
-            power=power,
-            soe=soe,
-            next_soe=next_soe,
-            period=t,
-            home_consumption=home,
-            battery_settings=battery_settings,
-            dt=dt,
-            solar_production=solar,
+    result = select_action(
+        soe=soe,
+        t=t,
+        cost_basis=cost_basis,
+        eval_V=lambda next_soe: _interpolate_value(V_next, next_soe, battery_settings),
+        eval_value_slope=lambda next_soe: _local_value_slope(
+            V_next, next_soe, battery_settings
+        ),
+        period_inputs=PeriodInputs(
             buy_price=buy_price,
             sell_price=sell_price,
-            cost_basis=cost_basis,
+            home_consumption=home_consumption,
+            solar_production=solar_production,
+            dt=dt,
+            max_charge_power_per_period=max_charge_power_per_period,
             import_cap_kwh=import_cap_kwh,
-        )
-        value = reward + _interpolate_value(V_next, next_soe, battery_settings)
-        candidates.append(
-            (value, power, next_soe, new_cost_basis, reward, grid_imported)
-        )
-
-    # IDLE -- always a feasible candidate.
-    consider(0.0)
-
-    # SOLAR_EXPORT-below-max (#313): soe held exactly unchanged, this
-    # period's own solar surplus exports directly instead of passively
-    # charging -- see _run_dynamic_programming's matching backward-pass
-    # candidate for the full rationale. Bypasses _state_transition (whose
-    # power=0 branch always charges as much as room/rate permit) to force
-    # next_soe == soe directly, then reuses the same _compute_reward call
-    # every other candidate uses.
-    consider(0.0, forced_next_soe=soe)
-
-    # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
-    for p in _discharge_candidates(
-        soe,
-        battery_settings,
-        dt,
-        home,
-        solar,
-        discharge_resolution_kw=discharge_resolution_kw,
-        ac_cap_kwh=ac_cap_kwh,
-    ):
-        consider(-p)
-
-    # Charge (STORE) -- Finding 4: no grid search needed on this side at
-    # all, a single representative candidate fully covers it.
-    charge_candidate = _charge_candidate(soe, battery_settings, dt, period_max_charge)
-    if charge_candidate is not None:
-        consider(charge_candidate)
-
-    # Import-cap filtering (#429) runs BEFORE the argmax and before the tie
-    # margin is measured: a candidate the fuse cannot actually support is not
-    # a runner-up, so letting it into _tie_margin would report ambiguity
-    # against an action that was never on the table.
-    if import_cap_kwh is not None and candidates:
-        floor_grid_imported = min(c[5] for c in candidates)
-        effective_import_cap = max(import_cap_kwh, floor_grid_imported)
-        candidates = [c for c in candidates if c[5] <= effective_import_cap + 1e-9]
-
-    # The SOLAR_EXPORT-below-max candidate holds soe exactly unchanged, so it
-    # is feasible at every state, and the import-cap filter above cannot empty
-    # a non-empty list (its threshold is floored at the minimum grid_imported
-    # any candidate achieves, so that candidate always survives) --
-    # `candidates` is never empty and an IndexError below would be a real bug,
-    # not a case to defend against.
-    best_index = 0
-    best_value = float("-inf")
-    for index, candidate in enumerate(candidates):
-        if candidate[0] > best_value:
-            best_value = candidate[0]
-            best_index = index
-
-    # Risk-aware tie-break (#466): within the value noise grid-snapping
-    # injects at this state, prefer the load-covering discharge over an
-    # idle-like winner. Epsilon uses the slope at the argmax winner's
-    # next_soe -- the same state the margin itself is measured at.
-    argmax_index = best_index
-    argmax_value_slope = _local_value_slope(
-        V_next, candidates[argmax_index][2], battery_settings
+            discharge_resolution_kw=discharge_resolution_kw,
+            sell_price_floored=sell_price_floored,
+        ),
+        battery_settings=battery_settings,
     )
-    epsilon = epsilon_for_period(argmax_value_slope, SOE_STEP_KWH)
-    best_index = _prefer_load_covering_discharge(
-        candidates,
-        argmax_index,
-        epsilon=epsilon,
-        home_consumption=home,
-        solar_production=solar,
-        dt=dt,
-    )
-
-    # Charge-early tie-break under the #269 curtailment floor -- see
-    # _prefer_curtailed_charge_absorb. Runs after the #466 swap and never
-    # overrides a discharge winner, so the two preferences cannot fight.
-    if sell_price_floored is not None and sell_price_floored[t]:
-        best_index = _prefer_curtailed_charge_absorb(
-            candidates,
-            best_index,
-            epsilon=epsilon,
-        )
-
-    # #466 note: best_index is POST-swap here, but tie_margin and
-    # value_slope below are measured at argmax_index (PRE-swap). Tie
-    # detection (#450) measures the DP's own ambiguity at its value-argmax;
-    # a #466 swap replaces which action is executed but must not itself
-    # register as a #450 tie window, so the margin and slope describe the
-    # argmax's own runner-up gap, not the executed action's.
-    _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
-        best_index
-    ]
     return (
-        best_action,
-        best_next_soe,
-        best_new_cost_basis,
-        best_reward,
-        _tie_margin(candidates, argmax_index),
-        argmax_value_slope,
+        result.chosen.power,
+        result.chosen.next_soe,
+        result.chosen.new_cost_basis,
+        result.chosen.reward,
+        result.tie_margin,
+        result.value_slope,
     )
 
 

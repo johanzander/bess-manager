@@ -70,6 +70,47 @@ class TestRedactSecrets:
         assert _redact_secrets(None) is None
 
 
+class TestSerializeAddonOptions:
+    """Settings go through the same redaction pass as the export's other
+    sections, with InfluxDB's two fields still stripped by name.
+    """
+
+    def _serialize(self, settings: dict) -> dict:
+        aggregator = DebugDataAggregator(MagicMock(), settings_data=settings)
+        return aggregator._serialize_addon_options()
+
+    def test_secret_named_value_is_redacted(self):
+        out = self._serialize(
+            {"some_section": {"api_key": "value-here", "enabled": True}}
+        )
+        assert out["some_section"]["api_key"] == _REDACTED
+        assert out["some_section"]["enabled"] is True
+
+    def test_influxdb_credentials_still_stripped_url_kept(self):
+        out = self._serialize(
+            {
+                "influxdb": {
+                    "url": "http://homeassistant.local:8086",
+                    "username": "u",
+                    "password": "p",
+                }
+            }
+        )
+        assert out["influxdb"] == {"url": "http://homeassistant.local:8086"}
+
+    def test_non_secret_settings_survive_unchanged(self):
+        settings = {
+            "sensors": {"shared": {"current_l1": "sensor.l1"}},
+            "home": {"max_fuse_current": 20},
+        }
+        assert self._serialize(settings) == settings
+
+    def test_caller_settings_not_mutated(self):
+        settings = {"some_section": {"api_key": "value-here"}}
+        self._serialize(settings)
+        assert settings["some_section"]["api_key"] == "value-here"
+
+
 class TestRedactIdentifiers:
     def test_serial_reduced_to_last_four(self):
         out = _redact_identifiers([["growatt_server", "ABCDE12345"]])

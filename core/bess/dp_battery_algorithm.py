@@ -710,6 +710,7 @@ def _build_period_data(
     currency: str,
     continuation_value: float = 0.0,
     import_cap_kwh: float | None = None,
+    export_curtailment_active: bool = False,
 ) -> PeriodData:
     """Build full PeriodData for the winning action of a DP cell.
 
@@ -722,6 +723,13 @@ def _build_period_data(
     action) -- reported as decision.future_value. Defaults to 0.0 for any
     caller that hasn't been updated to pass the real continuation value
     (see issue #353).
+
+    export_curtailment_active: caller-computed, capability-aware curtailment
+    flag (see optimize_battery_schedule's docstring). Used only to derive
+    decision.curtailed (#501) via BatterySettings.should_curtail_export, the
+    same shared predicate BSM's execution-time gate applies
+    (_apply_period_schedule) -- never affects the reported energy/economic
+    fields.
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
@@ -791,11 +799,16 @@ def _build_period_data(
     energy_stored = max(0.0, next_soe - soe)
     battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
+    curtailed = export_curtailment_active and battery_settings.should_curtail_export(
+        grid_exported, current_sell_price
+    )
+
     decision_data = create_decision_data(
         power=power,
         battery_action_kwh=battery_action_kwh,
         energy_data=energy_data,
         cost_basis=new_cost_basis,
+        curtailed=curtailed,
         # future_value is the DP's actual value-to-go from the resulting
         # state -- reported here as continuation_value directly (#353).
         future_value=continuation_value,
@@ -1868,6 +1881,7 @@ def _replay_accounting_pass(
     currency: str,
     self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None = None,
+    export_curtailment_active: bool = False,
 ) -> tuple[list[PeriodData], float]:
     """Rebuild PeriodData (and the reward-objective cost) for a given
     (action, SOE) trajectory.
@@ -1926,6 +1940,7 @@ def _replay_accounting_pass(
             currency=currency,
             import_cap_kwh=import_cap_kwh,
             continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
+            export_curtailment_active=export_curtailment_active,
         )
 
         i = round((soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
@@ -2163,6 +2178,7 @@ def optimize_battery_schedule(
             # _interpolate_value(...)`), reported here as future_value (#353)
             # instead of being discarded.
             continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
+            export_curtailment_active=export_curtailment_active,
         )
 
         # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
@@ -2308,6 +2324,7 @@ def optimize_battery_schedule(
             currency=currency,
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
+            export_curtailment_active=export_curtailment_active,
         )
 
     # Step 3: Calculate economic summary directly from PeriodData

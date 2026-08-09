@@ -52,8 +52,11 @@ TOLERANCE = 1e-6
 # night LOAD_SUPPORT discharges exhibiting the same #497 fold (unsourced
 # export == home oversupply, sub-0.1 kWh), verified by
 # test_every_incoherent_period_is_the_known_497_fold -- more corpus, not a
-# new cause. Every one of the 211 is the #497 fold.
-KNOWN_INCOHERENT_PERIODS = 211
+# new cause. Re-measured on 2026-08-09 after regression_frank_debug_2026_08_08
+# joined the corpus (#501, 35 fixtures): its 1 additional period is the same
+# #497 fold, verified per-fixture the same way. Every one of the 212 is the
+# #497 fold.
+KNOWN_INCOHERENT_PERIODS = 212
 
 
 def _optimize(scenario_name):

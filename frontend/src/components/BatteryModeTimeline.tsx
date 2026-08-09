@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { DashboardHourlyData } from '../api/scheduleApi';
-import { getIntent, StrategicIntent } from '../utils/intent';
+import { getIntent, isCurtailed, StrategicIntent } from '../utils/intent';
 
 // Refresh cadence matches other components that self-fetch quarter-hourly
 // dashboard data (EnergyFlowCards, SystemStatusCard).
@@ -14,16 +14,24 @@ const REFRESH_INTERVAL_MS = 60000;
 const CHART_LEFT_OFFSET = 65;
 const CHART_RIGHT_OFFSET = 65;
 
-const INTENT_CONFIG: Record<StrategicIntent, { label: string; color: string; darkColor: string }> = {
+// 'CURTAILED' is a display-only pseudo-intent (#501): a period the plan
+// expects to curtail (export limit applied, cost 0) rather than sell at a
+// profit -- see isCurtailed() (utils/intent.ts) for why this isn't gated on
+// intent === SOLAR_EXPORT. It is never a value of StrategicIntent itself --
+// only this timeline's own legend/config keys.
+type LegendKey = StrategicIntent | 'CURTAILED';
+
+const INTENT_CONFIG: Record<LegendKey, { label: string; color: string; darkColor: string }> = {
   GRID_CHARGING: { label: 'Charging from Grid', color: '#a855f7', darkColor: '#a855f7' },
   SOLAR_STORAGE: { label: 'Storing Solar', color: '#eab308', darkColor: '#facc15' },
   LOAD_SUPPORT: { label: 'Powering Home', color: '#3b82f6', darkColor: '#60a5fa' },
   BATTERY_EXPORT: { label: 'Selling to Grid', color: '#22c55e', darkColor: '#4ade80' },
   SOLAR_EXPORT: { label: 'Solar Export', color: '#84cc16', darkColor: '#a3e635' },
+  CURTAILED: { label: 'Curtailed (No Export)', color: '#78716c', darkColor: '#a8a29e' },
   IDLE: { label: 'Standby', color: '#9ca3af', darkColor: '#6b7280' },
 };
 
-const INTENT_ORDER: StrategicIntent[] = ['GRID_CHARGING', 'SOLAR_STORAGE', 'LOAD_SUPPORT', 'BATTERY_EXPORT', 'SOLAR_EXPORT', 'IDLE'];
+const INTENT_ORDER: LegendKey[] = ['GRID_CHARGING', 'SOLAR_STORAGE', 'LOAD_SUPPORT', 'BATTERY_EXPORT', 'SOLAR_EXPORT', 'CURTAILED', 'IDLE'];
 
 interface BatteryModeTimelineProps {
   currentHour: number;
@@ -33,6 +41,7 @@ interface Segment {
   startHour: number;
   endHour: number;
   intent: StrategicIntent;
+  legendKey: LegendKey;
   isTomorrow: boolean;
 }
 
@@ -50,28 +59,31 @@ function buildSegments(
   for (let i = 0; i < hourlyData.length; i++) {
     const h = hourlyData[i];
     const intent = getIntent(h);
+    const legendKey: LegendKey = isCurtailed(h) ? 'CURTAILED' : intent;
     const startHour = i * STEP_HOURS;
     const endHour = startHour + STEP_HOURS;
 
     const last = segments[segments.length - 1];
-    if (last && last.intent === intent && !last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
+    if (last && last.legendKey === legendKey && last.intent === intent && !last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
       last.endHour = endHour;
     } else {
-      segments.push({ startHour, endHour, intent, isTomorrow: false });
+      segments.push({ startHour, endHour, intent, legendKey, isTomorrow: false });
     }
   }
 
   if (tomorrowData && tomorrowData.length > 0) {
     for (let i = 0; i < tomorrowData.length; i++) {
-      const intent = getIntent(tomorrowData[i]);
+      const th = tomorrowData[i];
+      const intent = getIntent(th);
+      const legendKey: LegendKey = isCurtailed(th) ? 'CURTAILED' : intent;
       const startHour = 24 + i * STEP_HOURS;
       const endHour = startHour + STEP_HOURS;
 
       const last = segments[segments.length - 1];
-      if (last && last.intent === intent && last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
+      if (last && last.legendKey === legendKey && last.intent === intent && last.isTomorrow && Math.abs(last.endHour - startHour) < 0.01) {
         last.endHour = endHour;
       } else {
-        segments.push({ startHour, endHour, intent, isTomorrow: true });
+        segments.push({ startHour, endHour, intent, legendKey, isTomorrow: true });
       }
     }
   }
@@ -130,7 +142,7 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
   const hasTomorrow = tomorrowData && tomorrowData.length > 0;
   const maxHour = hasTomorrow ? 48 : 24;
 
-  const usedIntents = new Set(segments.map(s => s.intent));
+  const usedIntents = new Set(segments.map(s => s.legendKey));
 
   // Tick marks every hour
   const ticks: number[] = [];
@@ -157,7 +169,7 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
           {segments.map((seg, i) => {
             const x = (seg.startHour / maxHour) * 1000;
             const width = ((seg.endHour - seg.startHour) / maxHour) * 1000;
-            const config = INTENT_CONFIG[seg.intent];
+            const config = INTENT_CONFIG[seg.legendKey];
             const color = isDarkMode ? config.darkColor : config.color;
             const isFirst = i === 0;
             const isLast = i === segments.length - 1;
@@ -238,7 +250,11 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
             }}
           >
             <p className="font-semibold text-gray-900 dark:text-white text-sm">
-              {INTENT_CONFIG[tooltipData.segment.intent].label}
+              {/* Curtailment doesn't replace the intent (a curtailed period
+                  can still be charging, e.g. SOLAR_STORAGE) -- show both. */}
+              {tooltipData.segment.legendKey === 'CURTAILED'
+                ? `${INTENT_CONFIG[tooltipData.segment.intent].label} — Curtailed (No Export)`
+                : INTENT_CONFIG[tooltipData.segment.legendKey].label}
             </p>
             <p className="text-xs text-gray-600 dark:text-gray-400">
               {formatHour(tooltipData.segment.startHour)} – {formatHour(tooltipData.segment.endHour)}
@@ -250,11 +266,11 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
 
       {/* Legend */}
       <div className="flex flex-wrap justify-center gap-4 mt-3 text-sm">
-        {INTENT_ORDER.filter(intent => usedIntents.has(intent)).map((intent) => {
-          const config = INTENT_CONFIG[intent];
+        {INTENT_ORDER.filter(key => usedIntents.has(key)).map((key) => {
+          const config = INTENT_CONFIG[key];
           const color = isDarkMode ? config.darkColor : config.color;
           return (
-            <div key={intent} className="flex items-center">
+            <div key={key} className="flex items-center">
               <div
                 className="w-4 h-3 rounded-sm mr-2"
                 style={{ backgroundColor: color }}

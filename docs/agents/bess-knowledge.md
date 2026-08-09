@@ -46,6 +46,18 @@ horizon.
 
 **Actions**: Charge, discharge, or idle at various power levels — filtered
 by physical constraints (available energy, remaining capacity, power limits).
+Discharge candidates enumerate the inverter's integer-percent rate grid,
+plus one deliberate off-lattice candidate (#466 follow-up): discharging
+exactly the forecast net-load residual when that residual is smaller than
+the smallest percent candidate (typical at solar/load crossovers around
+sunrise/sunset). Load-first hardware delivers `min(actual load, ceiling)`,
+so this action executes exactly as planned; it is gated so it always
+classifies as LOAD_SUPPORT and rounds to a nonzero rate register
+(`_residual_cover_p` in `dp_battery_algorithm.py`). Without it, those
+crossover periods had no executable discharge at all — sub-residual
+lattice candidates don't exist and overshooting ones are excluded as
+unexecutable (#497 below) — so IDLE won by default and the home imported
+the residual: the "morning IDLE" pattern users saw pre-fix.
 
 **Transition**: Each action updates SOE accounting for charge/discharge
 efficiency losses and updates the **cost basis** of stored energy.

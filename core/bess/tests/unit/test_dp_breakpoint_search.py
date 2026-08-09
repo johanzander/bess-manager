@@ -292,7 +292,16 @@ def test_discharge_candidates_exceed_classification_threshold():
     causing real hardware to discharge nothing when the plan assumed export
     revenue: a confirmed R != P divergence on several real-world scenarios
     with 6 kW batteries. Every non-zero candidate must stay strictly above
-    the classification threshold, not just above zero."""
+    the classification threshold, not just above zero.
+
+    One deliberate exception exists since the #466 sunrise-crossover
+    follow-up: the residual load-cover candidate may sit at or below the
+    threshold, because it is gated to classify LOAD_SUPPORT (via the
+    battery_discharged > 0.01 kWh fallthrough) and to round to a nonzero
+    percent -- see _residual_cover_p and
+    test_discharge_candidates_include_sub_lattice_residual_cover. This
+    scenario's residual (1.234 kW) is far above the lattice minimum, so no
+    cover candidate appears here and the blanket assertion still holds."""
     settings = make_battery_settings(max_discharge_power_kw=6.0)
     candidates = _discharge_candidates(
         soe=15.0,
@@ -307,6 +316,74 @@ def test_discharge_candidates_exceed_classification_threshold():
         f"{POWER_CLASSIFICATION_THRESHOLD_KW} kW classification threshold -- "
         f"would be misclassified (not real discharge) at execution time"
     )
+
+
+def test_discharge_candidates_include_sub_lattice_residual_cover():
+    """#466 follow-up (sunrise crossover): when the forecast net load sits
+    below the smallest percent-lattice candidate, the exact residual is a
+    candidate -- discharging it covers the load with zero grid flows, and
+    load-first hardware delivers min(actual load, ceiling) so the plan is
+    executable despite being off the percent grid. Uses the real inputs
+    from #466's second debug bundle: home 0.1675 kWh, solar 0.1461 kWh,
+    dt=0.25h -> residual 85.7 W, vs a 0.2 kW smallest lattice candidate
+    (10 kW battery, 1% steps, POWER_CLASSIFICATION_THRESHOLD_KW guard)."""
+    settings = make_battery_settings(max_discharge_power_kw=10.0)
+    home, solar, dt = 0.1675, 0.1461, 0.25
+    residual_p = (home - solar) / dt
+
+    candidates = _discharge_candidates(
+        soe=4.34,
+        battery_settings=settings,
+        dt=dt,
+        home_consumption=home,
+        solar_production=solar,
+    )
+    assert any(
+        c == pytest.approx(residual_p, abs=1e-9) for c in candidates
+    ), f"expected residual-cover candidate {residual_p:.4f} kW in {candidates}"
+
+    # Floors (see _residual_cover_p): below the classifier's 0.01 kWh
+    # battery_discharged fallthrough the action would classify IDLE and
+    # execute nothing -- no candidate may exist there.
+    tiny = _discharge_candidates(
+        soe=4.34,
+        battery_settings=settings,
+        dt=dt,
+        home_consumption=0.010,  # residual 0.008 kWh = 0.032 kW
+        solar_production=0.002,
+    )
+    assert all(
+        c > POWER_CLASSIFICATION_THRESHOLD_KW for c in tiny
+    ), f"sub-classifier residual must not produce a cover candidate: {tiny}"
+
+    # Below half a percent step the rate register rounds to 0% and executes
+    # nothing (dt=1h so the 0.01 kWh energy floor alone would pass).
+    sub_step = _discharge_candidates(
+        soe=4.34,
+        battery_settings=settings,
+        dt=1.0,
+        home_consumption=0.030,  # residual 0.030 kW < 0.05 = half a step
+        solar_production=0.0,
+    )
+    assert all(
+        c > POWER_CLASSIFICATION_THRESHOLD_KW for c in sub_step
+    ), f"sub-half-step residual must not produce a cover candidate: {sub_step}"
+
+    # Round-DOWN band (review finding): a residual in (k*rate_step,
+    # (k+0.5)*rate_step) for k >= 1 rounds to a percent ceiling BELOW the
+    # residual -- e.g. 0.12 kW -> 1% of 10 kW = 0.10 kW -- so load-first
+    # delivery (min(load, ceiling)) would under-deliver the plan by the
+    # difference and break exact R == P. No cover candidate may exist there.
+    round_down = _discharge_candidates(
+        soe=4.34,
+        battery_settings=settings,
+        dt=dt,
+        home_consumption=0.130,  # residual 0.03 kWh = 0.12 kW, ceiling 0.10
+        solar_production=0.100,
+    )
+    assert all(
+        c > POWER_CLASSIFICATION_THRESHOLD_KW for c in round_down
+    ), f"round-down-band residual must not produce a cover candidate: {round_down}"
 
 
 def test_charge_candidate_none_when_below_classification_threshold():

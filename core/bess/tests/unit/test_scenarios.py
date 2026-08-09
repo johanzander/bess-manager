@@ -398,3 +398,85 @@ def test_466_near_tied_evening_periods_discharge_instead_of_idle():
     assert result.economic_summary.battery_solar_cost == pytest.approx(
         expected["battery_solar_cost"], abs=1e-3
     )
+
+
+def test_466_sunrise_crossover_covers_residual_load_instead_of_idle():
+    """Replays the exact optimizer input recorded in #466's second debug
+    bundle (bess-debug-2026-08-07-232503.md, run at optimization_period 93,
+    horizon 99 starting 23:15). The sunrise-crossover periods 27-30
+    (06:00-06:45) forecast solar 0.1461 kWh against home 0.1675 kWh -- an
+    ~86 W residual, below the smallest discharge the percent lattice can
+    command even at #512's finer grid (0.1 kW). Pre-fix those periods sat
+    IDLE and imported the residual at ~0.64 SEK/kWh while the battery held
+    4.34 kWh above reserve at a local shadow price of ~0.55 -- i.e. the
+    DP's own economics said covering it was cheaper (buy * eta_discharge =
+    0.607 > 0.549), but no executable action expressed it: sub-residual
+    lattice candidates do not exist, and every overshooting one is removed
+    by #497's executable-only rule.
+
+    Post-fix the residual-cover candidate (discharge exactly the forecast
+    net load, no export) is in the action space, so these periods plan
+    LOAD_SUPPORT with zero grid flows. Executability is asserted per
+    period rather than assumed: load-first delivers min(actual load,
+    ceiling), which at forecast equals the planned residual exactly, so
+    R == P holds to numerical noise -- the invariant #282/#497 exist to
+    protect and the reason this candidate plans a delivery rather than a
+    rate-step command."""
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
+    )
+
+    scenario = load_test_scenario("regression_bess_debug_2026_08_07")
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+    dt = inp["period_duration_hours"]
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / dt,
+            inp["battery_settings"],
+            shadow_price=pd.decision.shadow_price,
+            buy_price=inp["buy_price"][i],
+        )
+        for i, pd in enumerate(result.period_data)
+    ]
+    sim = simulate(
+        commands,
+        inp["solar_production"],
+        inp["home_consumption"],
+        inp["buy_price"],
+        inp["sell_price"],
+        scenario["battery"]["initial_soe"],
+        inp["battery_settings"],
+        dt,
+    )
+
+    for t in range(27, 31):  # 06:00, 06:15, 06:30, 06:45
+        assert_intent_at_hour(result, t, "LOAD_SUPPORT")
+        pd = result.period_data[t]
+        assert pd.energy.grid_imported == pytest.approx(0.0, abs=1e-6), (
+            f"period {t}: expected residual fully covered from battery, "
+            f"got grid import {pd.energy.grid_imported:.4f} kWh"
+        )
+        assert pd.energy.grid_exported == pytest.approx(0.0, abs=1e-6), (
+            f"period {t}: residual-cover must not export, "
+            f"got {pd.energy.grid_exported:.4f} kWh"
+        )
+        # Executed exactly as planned (R == P per period).
+        rp = sim.period_data[t]
+        assert rp.decision.battery_action == pytest.approx(
+            pd.decision.battery_action, abs=1e-6
+        ), (
+            f"period {t}: simulator delivered {rp.decision.battery_action:.4f} "
+            f"kWh vs planned {pd.decision.battery_action:.4f} kWh"
+        )
+        assert rp.economic.hourly_cost == pytest.approx(
+            pd.economic.hourly_cost, abs=1e-6
+        )
+
+    # Whole-horizon R == P: the cover candidate plans delivery, not a
+    # rate-step command, so execution reproduces the planned economics.
+    assert sim.realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=1e-6
+    )

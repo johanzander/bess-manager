@@ -25,6 +25,7 @@ from core.bess.dp_battery_algorithm import (
     _effective_ac_cap_kwh,
     _prefer_curtailed_charge_absorb,
     _prefer_load_covering_discharge,
+    _residual_cover_p,
     _soe_floor,
     _state_transition,
     _state_transition_grid,
@@ -123,6 +124,24 @@ def _pwl_candidate_values_at(
     max_soe = battery_settings.max_soe_kwh
     soe_col = X.reshape(-1, 1)
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+
+    # Residual load-cover candidate (#466 follow-up): the replay's
+    # `_discharge_candidates` offers it per period, so this pass must value
+    # it too -- the same one-action-set requirement `_backward_discharge_levels`
+    # and the `_discharge_is_unexecutable` mask below exist to uphold. It is
+    # per-period (the deficit is), so it extends the window-wide `power_row`
+    # here rather than in `_backward_discharge_levels`.
+    cover_p = _residual_cover_p(home_consumption[t], solar_production[t], dt, rate_step)
+    power_row = np.asarray(power_row).reshape(1, -1)
+    is_cover_row = np.zeros((1, power_row.shape[1] + (cover_p is not None)), dtype=bool)
+    if cover_p is not None:
+        power_row = np.concatenate([power_row.reshape(-1), [-cover_p]]).reshape(1, -1)
+        is_cover_row[0, -1] = True
 
     is_charge = power_row > POWER_TOLERANCE_KW
     is_discharge = power_row < -POWER_TOLERANCE_KW
@@ -190,16 +209,17 @@ def _pwl_candidate_values_at(
         # leaves is deliverable.
         ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar_production[t], ac_cap_kwh))
         max_discharge_power = np.minimum(max_discharge_power, ac_headroom_kwh / dt)
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
     affordable_discharge_power = (
         np.floor(max_discharge_power / rate_step + DISCHARGE_LATTICE_PCT_EPS)
         * rate_step
     )
-    feasible &= ~is_discharge | (np.abs(power_row) <= affordable_discharge_power)
+    # The cover candidate is deliberately off-lattice, so the lattice-floored
+    # affordability test does not apply to it -- its energy feasibility is the
+    # raw bound, exactly as `_discharge_candidates` gates it (`cover_p <= p_max`).
+    feasible &= (
+        ~is_discharge | is_cover_row | (np.abs(power_row) <= affordable_discharge_power)
+    )
+    feasible &= ~is_cover_row | (np.abs(power_row) <= max_discharge_power)
 
     # Same executability rule the replay pass applies when building its
     # candidate set (#497). `power_row` is built once for the whole window, so
@@ -661,6 +681,21 @@ def _pwl_window_seed_points(
         * dt
         / battery_settings.efficiency_discharge
     )
+    # The residual load-cover candidate (#466 follow-up) is one more
+    # translation-like discharge this period may offer -- seed its preimage
+    # kinks too, for the same speed reason as the lattice levels below.
+    seed_rate_step = (
+        discharge_resolution_kw
+        if discharge_resolution_kw is not None
+        else battery_settings.max_discharge_power_kw / 100
+    )
+    cover_p = _residual_cover_p(
+        home_consumption[t], solar_production[t], dt, seed_rate_step
+    )
+    if cover_p is not None:
+        discharge_energy = np.append(
+            discharge_energy, cover_p * dt / battery_settings.efficiency_discharge
+        )
     points.append(min_soe + discharge_energy)
     # Discharge preimages: discharge maps x -> x - e, so V[t+1]'s kink at b
     # is a kink of V[t] at b + e for every discharge level e. The reference

@@ -1364,7 +1364,7 @@ def _charge_candidate(
 # not a duplicate-removal tolerance, despite the duplicate candidates
 # (IDLE vs the SOLAR_EXPORT-below-max bypass, which land on the identical
 # next_soe) being what first exposed the problem. Removing literal
-# duplicates needs only ~SOE_STEP_KWH (0.05 kWh); 1.0 kWh is 20x that, and
+# duplicates needs only ~SOE_STEP_KWH; 1.0 kWh is 40x that (#512), and
 # per the calibration sweep it is the DOMINANT lever on the trigger rate,
 # not a safety margin around a smaller principled value. Sweeping it over
 # 0.05 -> 1.5 kWh moves suite-wide flagging from 15.6% of periods to 0.4%.
@@ -1379,8 +1379,8 @@ def _charge_candidate(
 # Two consequences worth knowing before touching this:
 #
 # 1. It suppresses the charge side almost entirely. _charge_candidate
-#    returns a single POWER_STEP_KW (0.2 kW) gradient probe, which moves
-#    SOE by only ~0.05 kWh at dt=0.25h (~0.19 kWh at dt=1h) -- always well
+#    returns a single POWER_STEP_KW (0.1 kW) gradient probe, which moves
+#    SOE by only ~0.025 kWh at dt=0.25h (~0.1 kWh at dt=1h) -- always well
 #    under this threshold. So the charge candidate can essentially never
 #    be the runner-up, and "charge now vs charge later" (the case the
 #    _tie_margin docstring names as the target) can only register as a tie
@@ -1489,12 +1489,21 @@ def _prefer_load_covering_discharge(
     if epsilon <= 0.0:
         return best_index
     best_value, best_power = candidates[best_index][0], candidates[best_index][1]
-    if abs(best_power) > POWER_TOLERANCE_KW:
-        return best_index
     balance_zero_p = (home_consumption - solar_production) / dt
     if balance_zero_p <= POWER_TOLERANCE_KW:
         return best_index
     max_cover_p = balance_zero_p + 1e-9
+    # Fire only when the argmax landed on IDLE or a *partial* load-cover.
+    # The original guard assumed exact ties always surface at IDLE (argmax
+    # returns the first maximum), but which tied candidate the argmax lands
+    # on is an enumeration-order accident -- at the #512 grid resolution it
+    # started landing on partial covers, silently bypassing the swap and
+    # leaving residual import exposed. Charges and genuine exports
+    # (discharge beyond the deficit) stay untouched, as before.
+    is_idle = abs(best_power) <= POWER_TOLERANCE_KW
+    is_partial_cover = -best_power > POWER_TOLERANCE_KW and -best_power <= max_cover_p
+    if not (is_idle or is_partial_cover):
+        return best_index
     swap_index = best_index
     swap_power = 0.0
     for index, candidate in enumerate(candidates):

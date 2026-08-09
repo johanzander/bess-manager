@@ -187,7 +187,10 @@ PLAN_EXECUTION_TOLERANCE_SEK = 0.001  # float-accumulation slack only
 # simulator's curtailment blindness. Goes to zero when the simulator learns
 # curtailment -- delete the entry then.
 KNOWN_PLAN_EXECUTION_GAP_SEK = {
-    "regression_2026_08_08_143843": +0.0203,  # #502: simulator can't curtail
+    # #502: simulator can't curtail. Re-measured at #512's finer grid (the
+    # curtailment-affected export volume shifts slightly with the plan);
+    # was +0.0203 under the 0.2 kW / 0.05 kWh grid.
+    "regression_2026_08_08_143843": +0.0214,
 }
 
 

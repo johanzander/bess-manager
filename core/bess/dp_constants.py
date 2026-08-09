@@ -32,10 +32,21 @@ so it is not derived from POWER_STEP_KW and is not defined here).
 # than that makes shadow_price's backward-difference report jagged/incorrect
 # values at intermediate grid points that aren't independently reachable
 # (verified empirically during the #275 Option B investigation).
-SOE_STEP_KWH = 0.05
+#
+# Resolution history: 0.2 kW / 0.05 kWh until #512, whose full-corpus
+# benchmark showed the coarser grid's value-function discretization left
+# 0.01-0.36 SEK/day unrealized on 19/33 fixtures vs a horizon-spanning
+# exact-PWL bound. Halving both steps (keeping the reachable-state
+# invariant above) recovers 2.08 SEK/day across the corpus -- planned and
+# realized identically, since #497/#511 made R == P structural -- net of
+# small non-monotone per-fixture regressions (worst +0.079). It also
+# *reduces* total solve latency: a finer grid produces fewer near-ties for
+# the #450 hybrid PWL re-solve to fire on. A further halving (0.05 kW)
+# bought only ~14% more at 4.4x the latency and was rejected.
+SOE_STEP_KWH = 0.025
 
 # Action space: power grid resolution (kW).
-POWER_STEP_KW = 0.2
+POWER_STEP_KW = 0.1
 
 # Noise floor for intent classification: "is this action big enough to be a
 # real, DP-chosen grid action, or a negligible residual." Set to half the

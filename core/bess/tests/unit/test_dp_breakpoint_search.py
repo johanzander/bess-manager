@@ -98,16 +98,75 @@ def _total_value(
     )
 
 
+def _exhaustive_candidate_value(
+    soe,
+    t,
+    V,
+    battery_settings,
+    dt,
+    home_consumption,
+    solar_production,
+    buy_prices,
+    sell_prices,
+):
+    """Best total value over the production candidate set, evaluated directly.
+
+    Enumerates IDLE, the charge candidate, and every discharge candidate via
+    the same public enumeration the search uses, then computes each one's
+    reward + interpolated continuation with the same V -- an independent
+    maximum the search must match at any grid resolution.
+    """
+    from core.bess.dp_battery_algorithm import _compute_reward, _state_transition
+
+    candidates = [0.0]
+    charge = _charge_candidate(
+        soe=soe, battery_settings=battery_settings, dt=dt, period_max_charge=None
+    )
+    if charge is not None:
+        candidates.append(charge)
+    candidates.extend(
+        -p
+        for p in _discharge_candidates(
+            soe,
+            battery_settings,
+            dt,
+            home_consumption[t],
+            solar_production[t],
+        )
+    )
+    best = None
+    for power in candidates:
+        next_soe = _state_transition(
+            soe, power, battery_settings, dt, solar_production[t], home_consumption[t]
+        )
+        reward, _, _ = _compute_reward(
+            power,
+            soe,
+            next_soe,
+            t,
+            home_consumption[t],
+            battery_settings,
+            dt,
+            buy_prices,
+            sell_prices,
+            solar_production[t],
+            0.0,
+        )
+        total = reward + _interpolate_value(V[t + 1, :], next_soe, battery_settings)
+        best = total if best is None else max(best, total)
+    return best
+
+
 def test_off_grid_discharge_closes_interpolation_gap_case_1():
-    """t=10, soe=13.083 kWh on the high-spread fixture: the design doc's
-    dense scan found a true (unconstrained-continuous) optimum of
-    -118.641847, but the production grid search (POWER_STEP_KW=0.2) only
-    found -118.675085 -- a 0.033 SEK single-period gap from missing the
-    true breakpoint between grid points. Here the hardware-percent grid
-    (1% of max_discharge_power_kw=6.0, i.e. 0.06 kW steps) is fine enough
-    to recover the dense-scan value almost exactly, unlike case_2 where the
-    availability constraint caps the achievable rate below what a finer
-    grid could otherwise reach."""
+    """t=10, soe=13.083 kWh on the high-spread fixture: the cell where the
+    old fixed POWER_STEP_KW grid search missed the best available action at
+    an off-grid SoE (0.033 SEK single-period gap in the design doc's
+    measurement). The breakpoint search must find the true maximum over its
+    own executable candidate set -- asserted against a reference computed
+    here by exhaustively evaluating every candidate with the same V, so the
+    test survives grid-resolution changes (#512) instead of pinning the
+    resolution-specific values the doc measured (-118.641847 vs
+    -118.675085 under the 0.2 kW / 0.05 kWh grid)."""
     (
         battery_settings,
         buy_prices,
@@ -130,10 +189,21 @@ def test_off_grid_discharge_closes_interpolation_gap_case_1():
         buy_prices,
         sell_prices,
     )
-    assert value >= -118.65, (
-        f"expected breakpoint search to recover the true optimum "
-        f"(~-118.641847), got {value} -- still stuck near the old grid-search "
-        f"value (-118.675085)"
+    reference = _exhaustive_candidate_value(
+        soe,
+        t,
+        V,
+        battery_settings,
+        dt,
+        home_consumption,
+        solar_production,
+        buy_prices,
+        sell_prices,
+    )
+    assert value == pytest.approx(reference, abs=1e-9), (
+        f"breakpoint search returned {value}, but exhaustively evaluating its "
+        f"own candidate set reaches {reference} -- the search is missing the "
+        f"best available action at an off-grid SoE"
     )
 
 
@@ -248,9 +318,12 @@ def test_charge_candidate_none_when_below_classification_threshold():
     `None` in that case (treat as no charge available) instead of a
     candidate the classifier can't recognize."""
     settings = make_battery_settings(max_charge_power_kw=10.0, efficiency_charge=1.0)
-    # available_capacity = max_soe_kwh - soe = 0.05 kWh -> max_charge_power
-    # = 0.05 kW at dt=1.0, below the 0.1 kW threshold.
-    soe = settings.max_soe_kwh - 0.05
+    # available_capacity = max_soe_kwh - soe -> max_charge_power equals that
+    # room at dt=1.0; pick the room at half the live classification threshold
+    # so the test tracks the grid resolution instead of hardcoding 0.05 kWh.
+    from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
+
+    soe = settings.max_soe_kwh - POWER_CLASSIFICATION_THRESHOLD_KW / 2
     candidate = _charge_candidate(
         soe=soe, battery_settings=settings, dt=1.0, period_max_charge=None
     )
@@ -426,16 +499,18 @@ def test_interpolate_value_extrapolates_below_min_soe():
     settings = make_battery_settings(
         total_capacity=20.0, min_soc=11.0
     )  # min_soe_kwh = 2.2
-    step = 0.05  # SOE_STEP_KWH
+    from core.bess.dp_constants import SOE_STEP_KWH
+
+    step = SOE_STEP_KWH
     # V_row has a gradient of 1.0 value/kWh between the first two grid points
     V_row = np.array([2.0, 2.0 + step, 4.0, 6.0])
 
     soe_one_step_below_floor = settings.min_soe_kwh - step
     value = _interpolate_value(V_row, soe_one_step_below_floor, settings)
 
-    # Extrapolating the V_row[0]->V_row[1] gradient one step below the
-    # floor should yield ~1.95, not the clamped-flat 2.0.
-    assert value == pytest.approx(1.95, abs=1e-9)
+    # Extrapolating the V_row[0]->V_row[1] gradient (1.0 value/kWh) one step
+    # below the floor should yield V_row[0] - step, not the clamped-flat 2.0.
+    assert value == pytest.approx(2.0 - step, abs=1e-9)
     assert value != pytest.approx(V_row[0], abs=1e-9)
 
 

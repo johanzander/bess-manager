@@ -78,7 +78,7 @@ def start() -> None
 
 **Algorithm Flow**:
 
-1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.1 kWh / 0.2 kW)
+1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.025 kWh / 0.1 kW -- halved in #512 after a full-corpus benchmark showed the coarser 0.05 kWh / 0.2 kW grid left 0.01-0.36 SEK/day unrealized on most fixtures)
 2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle) at each (period, SOE) cell
 3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value from the resulting SOE state
 4. **Policy Extraction**: Forward-simulate from the initial SOE, following the optimal action at each step to produce the final schedule

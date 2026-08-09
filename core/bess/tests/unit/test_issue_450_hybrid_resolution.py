@@ -30,9 +30,9 @@ from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
 
-def test_450_fixture_reaches_hybrid_resolved_cost():
+def _optimize(scenario_name):
     scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("regression_2026_08_02_043728")
+        build_scenario_inputs(scenario_name)
     )
     kwargs = {
         "buy_price": buy_prices,
@@ -49,12 +49,21 @@ def test_450_fixture_reaches_hybrid_resolved_cost():
     # Grid DP alone, tie detection suppressed: the behaviour #450 fixed.
     with patch("core.bess.tie_detection.detect_tie_windows", return_value=[]):
         grid_only = optimize_battery_schedule(**kwargs)
+    return result, grid_only
+
+
+def test_hybrid_resolution_improves_on_grid_dp():
+    # #450's original reproduction fixture (regression_2026_08_02_043728) no
+    # longer near-ties at #512's finer grid -- see the companion test below --
+    # so the mechanism is asserted on a fixture that still does. Measured at
+    # the 0.1 kW / 0.025 kWh grid: window (14, 19), advantage +0.0600 SEK.
+    result, grid_only = _optimize("synthetic_consumption_high_no_solar")
 
     advantage = grid_only.reward_objective_cost - result.reward_objective_cost
     assert advantage > 0.01, (
         f"hybrid window resolution is no longer improving on the grid DP "
-        f"(advantage {advantage:.9f} SEK, expected ~0.0124). Either tie "
-        f"detection stopped flagging this fixture's window (31, 40) or the "
+        f"(advantage {advantage:.9f} SEK, expected ~0.0600). Either tie "
+        f"detection stopped flagging this fixture's window (14, 19) or the "
         f"PWL resolution stopped being spliced in."
     )
 
@@ -64,4 +73,17 @@ def test_450_fixture_reaches_hybrid_resolved_cost():
     ), "reported summary drifted from the objective the DP actually minimised"
 
     # Absolute pin, tight enough to catch an unintended economics change.
-    assert result.reward_objective_cost == pytest.approx(-5.877720165000141, abs=1e-6)
+    assert result.reward_objective_cost == pytest.approx(249.70724, abs=1e-6)
+
+
+def test_450_original_fixture_no_longer_needs_resolution():
+    """#512's finer grid dissolves the near-tie that produced #450's original
+    mis-ranking on its reproduction fixture: value-function snap noise halved,
+    so the grid DP now ranks the window correctly on its own and tie detection
+    flags nothing. Pinning this documents the intended fewer-ties effect --
+    and if the fixture ever starts tying again (e.g. a TIE_NOISE_FACTOR
+    change), the assertion points straight at the mechanism."""
+    result, grid_only = _optimize("regression_2026_08_02_043728")
+    assert result.reward_objective_cost == pytest.approx(
+        grid_only.reward_objective_cost, abs=1e-9
+    ), "fixture near-ties again -- hybrid and grid-only diverged"

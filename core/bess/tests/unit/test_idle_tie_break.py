@@ -18,6 +18,7 @@ from core.bess.pwl_window_dp import (
 )
 from core.bess.settings import BatterySettings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.tie_detection import TIE_NOISE_FACTOR
 
 # Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
 IDLE = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
@@ -245,12 +246,15 @@ def test_pwl_replay_full_swap_at_soe_ceiling():
     # but np.interp clamps flat above xs[-1], so a naive central difference
     # straddling the ceiling averages in that flat segment and reports half
     # the true one-sided slope, understating epsilon exactly here (#466
-    # review finding). At slope=1.02 (just above buy=1.0) that halving is
-    # enough to shrink epsilon below the tie margin and only swap a partial
-    # discharge; the correctly one-sided slope keeps epsilon large enough to
-    # swap the full load-covering discharge.
+    # review finding). The slope is chosen so the full cover's margin
+    # (0.25 kWh x (slope-1) = 0.75x epsilon) swaps under the correct
+    # one-sided slope but not under the halved flat-clamped estimate --
+    # expressed via the live constants so the engineered margin tracks
+    # grid-resolution changes (#512) instead of hardcoding the 0.05 kWh
+    # era's slope=1.02.
     settings = _lossless_battery()
-    action = _pwl_replay_choice(value_slope=1.02, soe=settings.max_soe_kwh)
+    slope = 1.0 + 3.0 * TIE_NOISE_FACTOR * SOE_STEP_KWH
+    action = _pwl_replay_choice(value_slope=slope, soe=settings.max_soe_kwh)
     assert action < 0, f"expected load-covering discharge, got {action}"
     assert -action == pytest.approx(1.0, abs=0.05)
 
@@ -302,17 +306,15 @@ def test_466_tie_break_does_not_trip_idle_guardrail():
     ), "guardrail appears to have fired -- schedule is all-IDLE"
     assert result.period_data[45].decision.strategic_intent == "LOAD_SUPPORT"
 
-    # Period 32 was LOAD_SUPPORT until #497 and is now IDLE, correctly: its
-    # deficit is 0.0431 kWh while the smallest discharge this battery can be
-    # commanded to perform is 0.05 kWh (0.2 kW * 0.25 h, the first step above
-    # POWER_CLASSIFICATION_THRESHOLD_KW). Every available action overshoots by
-    # less than the export resolution, so none is executable as commanded and
-    # the DP proposes no discharge -- the home imports 0.0431 kWh instead.
-    #
-    # This is the deliberate cost of #497's rule, and it is measured, not
-    # assumed: realized cost on this fixture moved by -0.0001 SEK (i.e. very
-    # slightly cheaper), and across the whole fixture corpus the rule is a net
-    # 1.04 SEK improvement in realized cost. The DP no longer plans discharges
-    # the inverter cannot carry out, and declining a deficit smaller than one
-    # commandable step is what that means in practice.
-    assert result.period_data[32].decision.strategic_intent == "IDLE"
+    # Period 32's intent tracks the grid resolution, correctly each time. It
+    # was LOAD_SUPPORT until #497, then IDLE: its 0.0431 kWh deficit sat below
+    # the smallest commandable discharge under the 0.2 kW grid (0.05 kWh =
+    # 0.2 kW * 0.25 h, the first step above POWER_CLASSIFICATION_THRESHOLD_KW),
+    # every candidate overshot by less than the export resolution, and #497's
+    # rule rightly declined all of them. #512's finer grid halves the
+    # classification threshold, so a smaller under-covering discharge is now
+    # commandable and executable exactly as planned -- the period flips back
+    # to LOAD_SUPPORT, covering part of the deficit instead of importing all
+    # of it. Measured, not assumed: realized cost on this fixture improved by
+    # 0.0181 SEK under the finer grid, and R == P still holds corpus-wide.
+    assert result.period_data[32].decision.strategic_intent == "LOAD_SUPPORT"

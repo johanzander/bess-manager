@@ -39,13 +39,13 @@ def derive_control_command(
     reusing the production controller mappings so the simulator executes exactly
     what the real controller would write.
 
-    ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE
-    intra-period discharge gate (mirrors
-    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT is
-    deliberately NOT mirrored here even though production gates it since #520
-    -- see ``_map_rates``. Omit both to leave the gate closed -- callers that
-    don't care about it (most existing tests) see unchanged, pre-gate
-    behavior."""
+    ``shadow_price``/``buy_price`` feed the intra-period discharge gate, for
+    SOLAR_EXPORT/SOLAR_STORAGE only. Production also gates LOAD_SUPPORT since
+    #520; that is deliberately not reproduced here -- see ``_map_rates`` -- so
+    this is a mirror of ``BatterySystemManager._apply_period_schedule`` for
+    the two solar intents, not for all three. Omit both to leave the gate
+    closed -- callers that don't care about it (most existing tests) see
+    unchanged, pre-gate behavior."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
         strategic_intent, battery_action_kw, settings, shadow_price, buy_price

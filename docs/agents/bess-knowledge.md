@@ -365,7 +365,7 @@ headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT periods"
 measured **gate-openness**, not pacing-override: it means that in 76% of those
 periods battery-now genuinely beat grid-now.
 
-The breadth is real and corpus-wide — measured over the 34-fixture corpus
+The breadth is real and corpus-wide — measured over the 36-fixture corpus
 (603 LOAD_SUPPORT periods) the gate is open in **431 (71.5%)** and raises the
 ceiling above the DP's plan-scaled rate in **427** of them. That is expected
 under the argument above, and it is what makes the gate's correctness an
@@ -399,11 +399,22 @@ discharge rather than permit a gentle cover. The VPP half of #520 maps the
 gate's *decision* (release control / hold) rather than its rate, and is
 deferred to candidate-scoring work.
 
+A third limit, inherited rather than introduced: `DecisionData.shadow_price`
+defaults to `0.0` and the DP does not assign it when start-of-period SoE lands
+on the lowest grid level, so "worth zero" and "never computed" are the same
+value. `buy × eff_d ≥ 0` is always true, so the gate opens unconditionally
+there — 31 of the corpus's 603 LOAD_SUPPORT periods (5.1%) sit at exactly
+`0.0`. This predates #520 (SOLAR_EXPORT/SOLAR_STORAGE always had it);
+LOAD_SUPPORT now inherits it. Making the field `float | None` so an
+uncomputed value closes the gate is the fix, and is not part of #520.
+
 See `core/bess/tests/unit/test_load_support_discharge_gate.py` and
 `test_load_support_gate_regression_393.py` (real captured data,
-`regression_2026_07_26_203726.json`, still reproducing the 76% figure) — both
-assert the ceiling follows the gate. Their assertions were deliberately
-inverted by #520.
+`regression_2026_07_26_203726.json`) — both assert the ceiling follows the
+gate. Their assertions were deliberately inverted by #520. That fixture is
+still in the majority-gate-open regime #393 identified, though the exact
+figure has drifted with the DP: 41/68 (60.3%) on the current grid versus
+#393's 51/67 (76%).
 
 ### The inverter AC output cap (solar clipping avoidance)
 

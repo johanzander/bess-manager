@@ -77,6 +77,7 @@ from core.bess.models import (
 )
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
+    FLOW_NOISE_FLOOR_KWH,
     classify_strategic_intent,
     create_decision_data,
 )
@@ -962,9 +963,17 @@ def _run_dynamic_programming(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     import_cap_kwh: float | None = None,
+    discharge_resolution_kw: float | None = None,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
+
+    Also considers, per period, a residual load-cover column (#466
+    follow-up): discharge exactly the forecast net load when that residual
+    sits below the smallest lattice candidate (see _residual_cover_p) -- so
+    the value function knows holding is not the only option at a
+    sunrise/sunset crossover, keeping V consistent with the replay pass
+    whose candidate set (_discharge_candidates) contains the same action.
 
     Also considers, at every state, a distinct SOLAR_EXPORT-below-max
     candidate (#313) -- battery SOE held exactly unchanged (no passive
@@ -1020,6 +1029,7 @@ def _run_dynamic_programming(
     discharge_feasible = ~is_discharge | (np.abs(power_row) <= max_discharge_power)
 
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
 
     # Backward induction
     for t in reversed(range(horizon)):
@@ -1139,6 +1149,62 @@ def _run_dynamic_programming(
             )
             value_bypass = np.where(bypass_feasible, value_bypass, -np.inf)
         V[t, :] = np.maximum(V[t, :], value_bypass)
+
+        # Residual load-cover candidate (#466 follow-up): one extra
+        # O(n_states) column discharging exactly this period's forecast net
+        # load, mirroring _discharge_candidates' off-lattice cover candidate
+        # so the value function and the replay pass see the same action
+        # space. Same feasibility masks as the main grid: available energy,
+        # AC-stage headroom, SOE bounds, import cap.
+        cover_p = _residual_cover_p(
+            home_consumption[t], solar_production[t], dt, rate_step
+        )
+        if cover_p is not None:
+            cover_col = np.full_like(soe_col, -cover_p)
+            cover_feasible = (cover_p <= max_discharge_power).reshape(-1)
+            if ac_cap_kwh is not None:
+                ac_headroom_kwh = max(
+                    0.0, ac_cap_kwh - min(solar_production[t], ac_cap_kwh)
+                )
+                if cover_p * dt > ac_headroom_kwh:
+                    cover_feasible = np.zeros(n_states, dtype=bool)
+            next_soe_cover = _state_transition_grid(
+                soe_col,
+                cover_col,
+                battery_settings,
+                dt,
+                solar_production=solar_production[t],
+                home_consumption=home_consumption[t],
+                ac_cap_kwh=ac_cap_kwh,
+                import_cap_kwh=import_cap_kwh,
+            )
+            cover_feasible &= (
+                (next_soe_cover >= min_soe_kwh) & (next_soe_cover <= max_soe_kwh)
+            ).reshape(-1)
+            reward_cover, grid_imported_cover = _compute_reward_grid(
+                cover_col,
+                soe_col,
+                next_soe_cover,
+                home_consumption=home_consumption[t],
+                battery_settings=battery_settings,
+                dt=dt,
+                current_buy_price=buy_price[t],
+                current_sell_price=sell_price[t],
+                solar_production=solar_production[t],
+                import_cap_kwh=import_cap_kwh,
+            )
+            if effective_import_cap is not None:
+                cover_feasible &= (
+                    grid_imported_cover.reshape(-1)
+                    <= effective_import_cap.reshape(-1) + 1e-9
+                )
+            next_i_cover = np.round(
+                (next_soe_cover - min_soe_kwh) / SOE_STEP_KWH
+            ).astype(np.int64)
+            next_i_cover = np.clip(next_i_cover, 0, n_states - 1).reshape(-1)
+            value_cover = reward_cover.reshape(-1) + V[t + 1][next_i_cover]
+            value_cover = np.where(cover_feasible, value_cover, -np.inf)
+            V[t, :] = np.maximum(V[t, :], value_cover)
 
     return V
 
@@ -1260,6 +1326,70 @@ def _discharge_is_unexecutable(
     )
 
 
+def _residual_cover_p(
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+    rate_step: float,
+) -> float | None:
+    """Exact net-load residual as a discharge power (kW, positive), when the
+    percent lattice cannot represent covering it -- else None (#466
+    follow-up, sunrise crossover).
+
+    When forecast home load exceeds solar by less than the smallest lattice
+    candidate (`min_pct * rate_step`, see `_discharge_candidates`), the DP
+    has no executable action that covers the residual: sub-residual lattice
+    candidates don't exist, and every overshooting one is either excluded
+    by `_discharge_is_unexecutable` (#497) or exports for real -- so IDLE
+    wins by default and the home imports the residual at buy price even
+    when the battery's marginal value says covering it is cheaper. On
+    load-first hardware the exact-cover action is natively executable: the
+    inverter delivers `min(actual load, rate ceiling)`, so a planned
+    residual-cover discharge is delivered exactly at forecast
+    (`inverter_simulator.py::mode_to_power`; VPP LOAD_SUPPORT is rate-less
+    load-following, #413). Planning the *delivery* rather than a rate-step
+    *command* is what keeps exact plan-faithfulness -- the property that
+    ruled out keeping the smallest lattice step for this case in #497's
+    design (see the carve-out note in `_discharge_candidates`).
+
+    Two executability floors gate the candidate (both verified against the
+    execution path, not assumed):
+
+    - `residual * dt > 0.01 kWh`: `classify_strategic_intent`'s
+      sub-threshold fallthrough labels a discharge LOAD_SUPPORT only above
+      its `battery_discharged > 0.01` noise floor
+      (`strategic_intent.py`) -- at or below it the period classifies IDLE
+      and the command mapper would discharge nothing (R != P, the #282
+      failure shape).
+    - `residual <= round(residual / rate_step) * rate_step`: register/TOU
+      platforms write an integer percent (`_scale_to_percent` rounds to
+      nearest), and load-first delivery is `min(actual load, ceiling)` --
+      so the plan is only exact when the rounded rate ceiling covers the
+      residual. This subsumes the round-to-0% case (below half a step the
+      ceiling is 0 and nothing executes) and rejects the round-DOWN bands
+      `(k*rate_step, (k+0.5)*rate_step)` for k >= 1, where the commanded
+      ceiling would under-deliver the plan by up to half a step (caught in
+      review by executed repro: residual 0.12 kW -> 1% of 10 kW = 0.10 kW
+      ceiling -> realized 0.10 for a planned 0.12).
+
+    Residuals at or above the smallest lattice candidate return None: the
+    percent grid already contains candidates at or below the residual
+    there, and this helper must not widen #466's scope beyond the
+    unrepresentable gap.
+    """
+    residual_p = (home_consumption - solar_production) / dt
+    min_lattice_p = (
+        int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    ) * rate_step
+    if residual_p >= min_lattice_p:
+        return None
+    if residual_p * dt <= FLOW_NOISE_FLOOR_KWH:
+        return None
+    if residual_p > round(residual_p / rate_step) * rate_step:
+        return None
+    return residual_p
+
+
 def _discharge_candidates(
     soe: float,
     battery_settings: BatterySettings,
@@ -1315,6 +1445,14 @@ def _discharge_candidates(
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     if min_pct > max_pct:
+        # No lattice candidate fits, but the off-lattice residual-cover
+        # candidate (#466 follow-up, below) may still: it sits under the
+        # smallest lattice power by construction, so a nearly-empty battery
+        # can be able to cover a small net load while unable to sustain any
+        # percent-grid discharge.
+        cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
+        if cover_p is not None and cover_p <= p_max:
+            return [cover_p]
         return []
     candidates = {pct * rate_step for pct in range(min_pct, max_pct + 1)}
 
@@ -1332,11 +1470,26 @@ def _discharge_candidates(
     # period, 0.0034 kWh) to save a fraction of an öre, and reintroduced the
     # asymmetry between this pass and the PWL window that the whole predicate
     # exists to prevent.
-    return sorted(
+    executable = [
         p
         for p in candidates
         if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
-    )
+    ]
+
+    # #466 follow-up: one deliberate off-lattice candidate -- discharge
+    # exactly the forecast net-load residual when it is smaller than the
+    # smallest lattice candidate. This is not the carve-out the paragraph
+    # above rejects: that draft planned the smallest *step* and let the plan
+    # overstate delivery by the overshoot, breaking exact plan-faithfulness.
+    # This candidate plans the *delivery* itself -- load-first executes
+    # `min(actual load, ceiling)`, so commanding one rate step at a sub-step
+    # deficit delivers exactly the deficit -- which is why R == P holds
+    # exactly. See _residual_cover_p for the classify/round-to-percent gates.
+    cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
+    if cover_p is not None and cover_p <= p_max:
+        executable.append(cover_p)
+
+    return sorted(executable)
 
 
 def _charge_candidate(
@@ -2157,6 +2310,7 @@ def optimize_battery_schedule(
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
         import_cap_kwh=import_cap_kwh,
+        discharge_resolution_kw=discharge_resolution_kw,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.

@@ -11,9 +11,24 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from core.bess.dp_constants import GRID_FLOW_RESOLUTION_KWH
-
 logger = logging.getLogger(__name__)
+
+# Energy resolution floor for grid flows (kWh). Home Assistant's lifetime
+# energy counters report at 0.1 kWh resolution, so a measured grid flow below
+# this cannot be told apart from counter noise between two independent sensors.
+#
+# Single source of truth on purpose (#497). This value answers exactly one
+# question -- "is this export real, or is it below the resolution at which we
+# can know anything?" -- and it used to be answered in two places that drifted
+# apart: this module's noise fold hardcoded 0.1 while the DP's self-throttle
+# threshold used 0.01, leaving a band where the optimizer booked export revenue
+# for energy the flow calculator had already decided never left the property.
+# Same failure shape as the #275 postmortem (see dp_constants.py): one physical
+# boundary, two independent constants, no enforcement that they agree.
+#
+# Homed here, in the measurement/model layer, because it describes the sensors,
+# not the optimizer -- the DP's `_discharge_is_unexecutable` imports it.
+GRID_FLOW_RESOLUTION_KWH = 0.1
 
 __all__ = [
     "DecisionData",

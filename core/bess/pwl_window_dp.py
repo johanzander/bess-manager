@@ -22,7 +22,6 @@ from core.bess.dp_battery_algorithm import (
     _compute_reward_grid,
     _discharge_candidates,
     _discharge_is_unexecutable,
-    _discharge_rate_step_kw,
     _effective_ac_cap_kwh,
     _prefer_load_covering_discharge,
     _soe_floor,
@@ -455,7 +454,6 @@ def _pwl_best_action_at_continuous_state(
         home_consumption=home,
         solar_production=solar,
         dt=dt,
-        rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
 
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[

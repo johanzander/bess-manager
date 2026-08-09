@@ -680,8 +680,8 @@ constants, each added to patch one symptom:
 | Constant | Where | Purpose |
 |---|---|---|
 | ~~`self_throttle_export_threshold_kwh`~~ | *deleted by #497* | self-throttle export credit (#240) |
-| `GRID_FLOW_RESOLUTION_KWH` (0.1) | `dp_constants.py` | one constant for counter resolution, shared by `models.py`'s fold and the DP's executability rule (#497) |
-| `BATTERY_EXPORT_THRESHOLD_KWH` (0.01) | `dp_battery_algorithm.py` | intent classification boundary only |
+| `GRID_FLOW_RESOLUTION_KWH` (0.1) | `models.py` | one constant for counter resolution, shared by `models.py`'s fold and the DP's executability rule (#497) |
+| ~~`BATTERY_EXPORT_THRESHOLD_KWH`~~ | *deleted by #497 review follow-up* | was intent classification boundary; the #466 tie-break round-up band that used it is dead under the exclusion |
 | `0.01` battery_to_grid / grid_to_battery | `strategic_intent.py` | intent classification |
 | `_POWER_THRESHOLD_KW` (0.1) | `strategic_intent.py` | intent noise filter |
 | `POWER_TOLERANCE_KW` | `dp_battery_algorithm.py` | charge/discharge/idle branch selection |
@@ -689,7 +689,7 @@ constants, each added to patch one symptom:
 | `SOE_STEP_KWH` (0.1) | `dp_constants.py` | DP state grid resolution |
 | `rate_step` = max_discharge/100 | `dp_battery_algorithm.py` | hardware percent resolution |
 | `epsilon` (tie detection) | `tie_detection.py` | value-function noise band |
-| `max_cover_p` half-step band | `dp_battery_algorithm.py:1436` | #466 load-cover tie-break |
+| ~~`max_cover_p` half-step band~~ | *deleted by #497 review follow-up* | was #466 load-cover tie-break round-up; exact/under-cover only now |
 | `validate_energy_balance` tolerance (0.2) | `models.py` | cross-sensor balance warning |
 | `GRID_RESOLUTION_TOLERANCE` (0.10 SEK) | `test_plan_faithfulness.py` | plan-faithfulness slack |
 

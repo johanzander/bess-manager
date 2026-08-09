@@ -211,27 +211,20 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
     )
 
 
-def test_battery_export_threshold_matches_classification_boundary():
-    """_compute_reward's export-credit threshold must match
-    classify_strategic_intent's classification threshold (both 0.01 kWh) --
-    a discharge that gets classified BATTERY_EXPORT (and therefore actually
-    executes as a real export via grid_first) must also be credited as a
-    real export in the reward the DP's own search used to choose it.
-    Regression for the mismatch found during the final whole-branch review:
-    the two thresholds disagreed (0.1 vs 0.01) after Task 8b changed only
-    the classification side."""
-    from core.bess.dp_battery_algorithm import (
-        BATTERY_EXPORT_THRESHOLD_KWH,
-        _compute_reward,
-    )
+def test_compute_reward_credits_export_threshold_free():
+    """_compute_reward has no export-credit threshold (#497): it prices
+    whatever flows _ac_flows reports. Keeping sub-resolution overshoots out
+    of the plan is _discharge_is_unexecutable's job, applied to the action
+    set before anything is priced -- so this reward, computed for an action
+    the DP can never propose, still credits the export rather than zeroing
+    it (the old #240/#320 self-throttle band is gone, not relocated here)."""
+    from core.bess.dp_battery_algorithm import _compute_reward
     from core.bess.tests.helpers import make_battery_settings
-
-    assert BATTERY_EXPORT_THRESHOLD_KWH == 0.01
 
     settings = make_battery_settings()
     dt = 1.0
     home_consumption = 1.0
-    power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
+    power = -1.05  # 0.05 kWh overshoot -- inside the old self-throttle band
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
     reward, _, _ = _compute_reward(
         power=power,

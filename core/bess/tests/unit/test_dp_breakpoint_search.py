@@ -33,10 +33,8 @@ from core.bess.dp_battery_algorithm import (
     _run_dynamic_programming,
     _tie_margin,
 )
-from core.bess.dp_constants import (
-    GRID_FLOW_RESOLUTION_KWH,
-    POWER_CLASSIFICATION_THRESHOLD_KW,
-)
+from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
+from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
@@ -439,3 +437,61 @@ def test_interpolate_value_extrapolates_below_min_soe():
     # floor should yield ~1.95, not the clamped-flat 2.0.
     assert value == pytest.approx(1.95, abs=1e-9)
     assert value != pytest.approx(V_row[0], abs=1e-9)
+
+
+# --- #497 review follow-ups: the unexecutable-discharge exclusion must agree
+# --- with models.py's noise fold at both boundaries.
+
+
+def test_unexecutable_band_applies_down_to_zero_deficit():
+    """models.py's noise fold applies whenever battery_to_home > 0 -- any
+    positive deficit at all. The exclusion must use the same boundary: a
+    deficit inside (0, POWER_TOLERANCE_KW] must not stand the predicate
+    down, or the DP can still plan the exact #497 incoherent period there
+    (0.2 kW against a 0.0008 kW deficit -> 0.0498 kWh phantom export)."""
+    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+
+    assert _discharge_is_unexecutable(
+        0.2, home_consumption=0.0002, solar_production=0.0, dt=0.25
+    )
+
+
+def test_exact_resolution_overshoot_stays_excluded():
+    """An overshoot of exactly GRID_FLOW_RESOLUTION_KWH is excluded even
+    though models.py's fold bound is strict (`< GRID_FLOW_RESOLUTION_KWH`)
+    -- the inclusive upper bound is float safety margin, not drift. At the
+    exact boundary the DP (subtracting powers) and the fold (subtracting
+    energies) can land on opposite sides of the resolution, re-opening the
+    #497 incoherence: verified on synthetic_seasonal_summer period 16,
+    where admitting the boundary produced a planned 0.1 kWh export the
+    fold erased and a 0.16 SEK plan-vs-execution gap. See the predicate's
+    docstring."""
+    from core.bess.dp_battery_algorithm import _discharge_is_unexecutable
+
+    assert _discharge_is_unexecutable(
+        1.1, home_consumption=1.0, solar_production=0.0, dt=1.0
+    )
+
+
+def test_tiny_deficit_plan_has_coherent_flows():
+    """End-to-end regression for the residual (0, POWER_TOLERANCE_KW]
+    deficit band: every discharge this small battery can command overshoots
+    the 0.0008 kW deficit by less than GRID_FLOW_RESOLUTION_KWH, so the DP
+    must propose none of them -- proposing one yields a period whose
+    planned export the models.py fold erases (flows that do not add up)."""
+    from core.bess.dp_battery_algorithm import optimize_battery_schedule
+    from core.bess.tests.helpers import assert_flow_coherence
+
+    settings = make_battery_settings(max_discharge_power_kw=0.2)
+    horizon = 4
+    result = optimize_battery_schedule(
+        buy_price=[1.0] * horizon,
+        sell_price=[0.5] * horizon,
+        home_consumption=[0.0002] * horizon,
+        solar_production=[0.0] * horizon,
+        initial_soe=10.0,
+        battery_settings=settings,
+        period_duration_hours=0.25,
+    )
+    for pd in result.period_data:
+        assert_flow_coherence(pd)

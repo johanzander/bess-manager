@@ -579,9 +579,11 @@ def test_load_support_self_throttles_discretization_overshoot():
     """#240 regression: load-first hardware never exports a discharge that
     overshoots home_consumption -- it self-throttles to the actual deficit,
     regardless of what a coarser discretized plan might have assumed. This
-    locks in the physical behavior the #240 reward-model fix
-    (core/bess/dp_battery_algorithm.py's _compute_reward) now assumes:
-    before that fix, the plan credited export revenue for energy that was
+    locks in the physical behavior the DP now accounts for by excluding
+    such discharges from its action set outright (#497,
+    core/bess/dp_battery_algorithm.py's _discharge_is_unexecutable; the
+    earlier #240 fix instead zeroed the export credit in _compute_reward):
+    before that, the plan credited export revenue for energy that was
     never actually exported, breaking R == P for these periods -- a case
     the existing hand-crafted plan-faithfulness scenarios were deliberately
     designed to avoid (see their own docstrings), so nothing else covers it.

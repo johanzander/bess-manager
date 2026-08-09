@@ -73,9 +73,14 @@ def _eligible_indices(
     charge-early swap free: a candidate that stores more by *buying* the
     energy (the full-rate charge candidate inside a below-floor window) is
     never preferred over one that only absorbs surplus. Promoting it to a
-    table-wide guard is a deliberate strengthening -- the load-cover row
-    never needed it (a discharge can only reduce import), so the row is a
-    no-op there today and a standing bound if a future row is not so lucky.
+    table-wide guard is a deliberate strengthening. It does bind on the
+    load-cover row -- when the winner is itself a partial-cover discharge,
+    a *smaller* within-epsilon discharge imports more than the winner and
+    is excluded here (115 of 2194 selector calls across the fixture corpus
+    have such a candidate) -- but it never changes that row's outcome,
+    since row 3 only ever moves to a discharge at least as large as the
+    winner's, which by construction imports no more. Do not read this row
+    as inert for a future row: it is a live bound.
 
     Recorded foreclosure: in a negative-buy-price window a within-epsilon
     grid top-up is arguably the safer pick against a solar shortfall, and

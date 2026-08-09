@@ -110,7 +110,9 @@ indifference region it creates (generalizes the #269/#510 invariant in
 `core/bess/tie_policy.py` and is applied once, from
 `action_selector.select_action`. The two bespoke tie-break helpers this
 principle was written against are gone; a repo-wide grep for `_prefer_`
-returns nothing, which is the standing exit gate.
+over the source tree returns nothing, which is the standing exit gate.
+(The migration plan under `docs/superpowers/plans/` still names them,
+describing the code it retired.)
 
 Three things the baseline order above states loosely, as built:
 

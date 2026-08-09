@@ -487,9 +487,9 @@ Flooring the sell price creates *exact reward ties by construction*:
 whenever the remaining below-floor solar surplus exceeds battery headroom,
 "charge now, curtail later" and "curtail now, charge later" earn identical
 reward (signature in a bundle: `shadow_price == cycle_cost_per_kwh` in
-those periods). The replay therefore applies a charge-early tie-break
-(`_prefer_curtailed_charge_absorb`, mirrored in the PWL tie-window
-replay): among candidates within the #466 epsilon, prefer the highest
+those periods). The replay therefore applies a charge-early tie-break -- the tie
+policy's charge-early row (`tie_policy.py`, row 4), applied once for both
+the grid and PWL replays: among candidates within the #466 epsilon, prefer the highest
 `next_soe`, but never one that imports more grid energy than the argmax
 winner, and never overriding a discharge winner. Charge-early is
 stochastically dominant — equal model reward, strictly better under

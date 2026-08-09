@@ -20,7 +20,7 @@ _POWER_THRESHOLD_KW = POWER_CLASSIFICATION_THRESHOLD_KW
 # Energy noise floor (kWh) shared by every flow check in
 # classify_strategic_intent: flows at or below this are treated as noise,
 # not evidence of a real action. Exported because the DP's residual-cover
-# candidate gate (#466 follow-up, dp_battery_algorithm._residual_cover_p)
+# candidate gate (#466 follow-up, action_selector._residual_cover_p)
 # must plan only discharges that this classifier will recognize as
 # LOAD_SUPPORT -- a sub-floor planned discharge classifies IDLE and the
 # command mapper executes nothing (the #282 R != P failure shape). Keeping

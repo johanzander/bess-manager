@@ -375,6 +375,14 @@ class DecisionData:
         0.0  # DP value-to-go (continuation_value) from the resulting battery
         # level onward -- the best achievable outcome from here forward.
     )
+    curtailed: bool = (
+        False  # Planned PV curtailment (#501): grid_exported > 0 and
+        # sell_price below export_curtailment_price_floor while curtailment
+        # is active. Mirrors BSM's execution-time gate
+        # (_apply_period_schedule's should_curtail) so the plan can report
+        # what actuation will do, distinct from a genuinely profitable
+        # SOLAR_EXPORT.
+    )
 
     @classmethod
     def from_observed_flows(cls, energy_data: EnergyData) -> "DecisionData":

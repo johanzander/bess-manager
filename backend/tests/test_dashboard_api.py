@@ -402,6 +402,37 @@ def test_aggregate_hourly_data_source_stays_last_quarter_even_if_earlier_quarter
     assert hourly.dataSource == "predicted"
 
 
+def test_aggregate_hourly_curtailed_not_filtered_by_dominant_intent():
+    """Curtailment (#501) is intent-independent: a curtailed quarter can
+    classify as SOLAR_STORAGE (battery charging at rate limit, surplus above
+    it curtailed). An hour whose curtailed quarters lose the dominant-intent
+    vote must still report curtailed=True.
+    """
+    quarters = []
+    for i in range(4):
+        period = _make_period(i)
+        # 2 GRID_CHARGING + 2 curtailed SOLAR_STORAGE quarters: the 2-2 tie
+        # resolves to GRID_CHARGING on priority, so any intent-filtered
+        # aggregation would look only at the un-curtailed quarters.
+        period = replace(
+            period,
+            decision=DecisionData(
+                strategic_intent="GRID_CHARGING" if i < 2 else "SOLAR_STORAGE",
+                curtailed=i >= 2,
+            ),
+        )
+        quarters.append(
+            APIDashboardHourlyData.from_internal(
+                period, battery_capacity=15.0, currency="SEK"
+            )
+        )
+
+    [hourly] = _aggregate_quarterly_to_hourly(quarters, 15.0, "SEK")
+
+    assert hourly.strategicIntent == "GRID_CHARGING"
+    assert hourly.curtailed is True
+
+
 def test_net_grid_cost_excludes_battery_wear():
     def _hour(grid_cost, cycle_cost):
         return APIDashboardHourlyData.from_internal(

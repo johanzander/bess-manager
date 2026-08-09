@@ -476,6 +476,14 @@ def _aggregate_quarterly_to_hourly(
             [p.strategicIntent for p in quarter_periods]
         )
 
+        # Curtailment (#501) is independent of intent -- a curtailed quarter
+        # can classify as SOLAR_STORAGE (battery still charging at its rate
+        # limit while the surplus above it curtails), so never filter by the
+        # dominant intent. If any quarter was curtailed, the hour as
+        # displayed is (at least partly) a curtailed export, not a purely
+        # profitable one.
+        hour_curtailed = any(p.curtailed for p in quarter_periods)
+
         # Observed intent must aggregate across all 4 quarters too, not just
         # the last one — a re-plan only updates strategicIntent going
         # forward, so a stale strategicIntent can persist for an elapsed hour
@@ -652,6 +660,7 @@ def _aggregate_quarterly_to_hourly(
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
             strategicIntent=dominant_strategic_intent,
             observedIntent=hour_observed_intent,
+            curtailed=hour_curtailed,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 
@@ -1197,6 +1206,7 @@ async def get_growatt_detailed_schedule():
         try:
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
+            today_curtailed: list[bool] = []
             today_reconciled_intents: list[str] | None = None
             if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
@@ -1232,14 +1242,17 @@ async def get_growatt_detailed_schedule():
                             if pd_today.data_source == "actual" and observed_intent
                             else planned_intent
                         )
+                        today_curtailed.append(pd_today.decision.curtailed)
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
                         today_reconciled_intents.append(planned_intent)
+                        today_curtailed.append(False)
             raw_groups = schedule_manager.get_detailed_period_groups(
                 intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
+                curtailed=today_curtailed if today_curtailed else None,
             )
             prev_soc: float | None = None
             for group in raw_groups:
@@ -1280,6 +1293,7 @@ async def get_growatt_detailed_schedule():
                         "total_action_kwh": group["total_action_kwh"],
                         "soc_end_pct": soc_end,
                         "soc_delta_kwh": soc_delta_kwh,
+                        "curtailed": group["curtailed"],
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1296,6 +1310,7 @@ async def get_growatt_detailed_schedule():
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
+                tomorrow_curtailed: list[bool] = []
                 # Resolved by exact timestamp (not positional index -
                 # optimization_period) so a standalone next-day schedule
                 # (period_data[0] anchored to tomorrow 00:00 despite
@@ -1317,13 +1332,16 @@ async def get_growatt_detailed_schedule():
                             if battery_settings.total_capacity > 0
                             else None
                         )
+                        tomorrow_curtailed.append(pd.decision.curtailed)
                     else:
                         tomorrow_soc_values.append(None)
+                        tomorrow_curtailed.append(False)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
                         intents=tomorrow_intents,
                         actions=tomorrow_actions,
                         soc_values=tomorrow_soc_values,
+                        curtailed=tomorrow_curtailed,
                     )
                     tomorrow_period_groups = []
                     prev_soc_tmr: float | None = None
@@ -1371,6 +1389,7 @@ async def get_growatt_detailed_schedule():
                                 "total_action_kwh": group["total_action_kwh"],
                                 "soc_end_pct": soc_end,
                                 "soc_delta_kwh": soc_delta_kwh_tmr,
+                                "curtailed": group["curtailed"],
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:

@@ -704,11 +704,13 @@ class InverterController(ABC):
         intents: list[str] | None = None,
         actions: list[float] | None = None,
         soc_values: list[float | None] | None = None,
+        curtailed: list[bool] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
         Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
-        strategic intent, battery mode, grid charge, charge rate, and discharge rate.
+        strategic intent, battery mode, grid charge, charge rate, discharge
+        rate, and planned curtailment (#501).
 
         Args:
             intents: Optional list of strategic intents to group. If None,
@@ -718,6 +720,10 @@ class InverterController(ABC):
                      is also None or the period is out of range, action defaults to 0.0.
             soc_values: Optional per-period SOC end values (%). The last period's value
                         in each group is exposed as soc_end_pct in the result.
+            curtailed: Optional per-period planned-curtailment flags (#501),
+                       from PeriodData.decision.curtailed. Defaults to all
+                       False when omitted -- callers without curtailment
+                       data get the pre-#501 grouping behavior unchanged.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -741,6 +747,11 @@ class InverterController(ABC):
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
             )
+            period_curtailed = (
+                curtailed[period]
+                if curtailed is not None and period < len(curtailed)
+                else False
+            )
 
             action_kwh = 0.0
             if schedule_actions is not None and period < len(schedule_actions):
@@ -763,6 +774,7 @@ class InverterController(ABC):
                     "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
                     "action_kwh": action_kwh,
+                    "curtailed": period_curtailed,
                 }
             )
 
@@ -778,6 +790,7 @@ class InverterController(ABC):
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]
+                and ps["curtailed"] == current_group["curtailed"]
             ):
                 current_group["end_period"] = ps["period"]
                 current_group["count"] += 1
@@ -793,6 +806,7 @@ class InverterController(ABC):
                     "grid_charge": ps["grid_charge"],
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
+                    "curtailed": ps["curtailed"],
                     "count": 1,
                     "total_action_kwh": ps["action_kwh"],
                 }
@@ -827,6 +841,7 @@ class InverterController(ABC):
                     "duration_minutes": group["count"] * 15,
                     "total_action_kwh": group["total_action_kwh"],
                     "soc_end_pct": soc_end,
+                    "curtailed": group["curtailed"],
                 }
             )
         return result

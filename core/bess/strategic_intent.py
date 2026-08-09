@@ -64,6 +64,7 @@ def create_decision_data(
     energy_data: EnergyData,
     cost_basis: float,
     future_value: float,
+    curtailed: bool = False,
 ) -> DecisionData:
     """
     Create DecisionData for a DP-evaluated period.
@@ -78,6 +79,8 @@ def create_decision_data(
         future_value: The DP's value-to-go from the resulting state
             (continuation_value) -- the best achievable outcome from the
             resulting battery level onward.
+        curtailed: Caller-computed planned-curtailment flag (#501) -- mirrors
+            BSM's execution-time should_curtail condition.
 
     Returns:
         DecisionData with strategic intent and economic fields populated.
@@ -89,4 +92,5 @@ def create_decision_data(
         battery_action=battery_action_kwh,
         cost_basis=cost_basis,
         future_value=future_value,
+        curtailed=curtailed,
     )

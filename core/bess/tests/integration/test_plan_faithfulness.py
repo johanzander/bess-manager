@@ -150,9 +150,13 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
     }
     # Tolerance reflects the DP's 0.1 kWh SoE-grid resolution: the plan trajectory
     # is reconstructed continuously, but the policy LOOKUP still snaps SoE to the
-    # grid, leaving a sub-öre-per-period residual on solar-storage days. The
-    # structural mismodels (phantom export, store/export collisions) are gone — a
-    # gap beyond this band would be a real finding.
+    # grid, leaving a sub-öre-per-period residual on solar-storage days.
+    #
+    # These two scenarios are 6 periods long, so a 0.10 SEK band is loose enough
+    # to hide a real per-period mismodel -- it did exactly that for #497, whose
+    # phantom export runs ~0.03 SEK/period. The corpus-wide pin in
+    # test_realized_matches_planned_across_all_fixtures is what actually
+    # constrains this; these two stay as a fast, readable smoke check.
     GRID_RESOLUTION_TOLERANCE = 0.10  # SEK, for these short scenarios
     for name, sc in scenarios.items():
         result, realized = run_scenario_realized(sc)
@@ -161,6 +165,114 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
             f"{name}: R={realized:.4f} != P={planned:.4f} "
             f"(gap {realized - planned:+.4f} exceeds grid-resolution tolerance)"
         )
+
+
+# Per-fixture gap between what executing the plan actually costs (R, via the
+# inverter simulator) and what the optimizer predicted it would cost (P), in
+# SEK. Measured on 2026-08-08 at 18bccae4.
+#
+# A nonzero entry means the optimizer's predicted savings for that day are
+# wrong by that amount -- it is a defect budget, not a target. Almost all of
+# the positive mass is #497 (the plan books export revenue that load-following
+# hardware never earns, so R comes out more expensive than P). The one negative
+# entry runs the other way and has a different, still-undiagnosed cause.
+# `regression_2026_08_08_143843`'s entry has a second, distinct cause (#502,
+# see TODO.md's "From #502" entry): the simulator has no model of PV
+# export-limit curtailment, so it still pays the honest price for a period
+# BSM will actually curtail to zero -- not the plan being newly dishonest.
+#
+# Regenerate deliberately, never reflexively: a shrinking number is a fix, a
+# growing one is a regression, and either way the diff that moved it should say
+# why in its description.
+PLAN_EXECUTION_GAP_SEK = {
+    "historical_2024_08_16_high_spread_no_solar": -0.0330,
+    "historical_2025_01_05_no_spread_no_solar": +0.0000,
+    "historical_2025_01_12_evening_peak_no_solar": +0.0658,
+    "historical_2025_01_13_night_low_no_solar": +0.0236,
+    "historical_2025_06_02_high_solar_export": +0.1495,
+    "realworld_2026_03_24_225535": +0.0000,
+    "realworld_2026_04_11_004719": +0.0055,
+    "realworld_2026_04_19_084608": +0.0000,
+    "realworld_2026_04_22_202249": +0.0401,
+    "realworld_2026_04_24_090423": +0.0270,
+    "realworld_2026_04_27_184643": +0.0000,
+    "realworld_2026_04_27_211212": +0.7313,
+    "realworld_2026_04_29_195900": +0.0443,
+    "realworld_2026_04_29_220919": +0.5591,
+    "realworld_2026_07_13_155212": +0.0326,
+    "regression_2026_07_25_090230": +0.0139,
+    "regression_2026_07_26_203726": +0.0255,
+    "regression_2026_08_02_043728": +0.0894,
+    "regression_2026_08_06_466": +0.0033,
+    "regression_2026_08_08_143843": +0.0693,
+    "regression_frank_debug_before": +0.0453,
+    "synthetic_2024_08_16_high_spread_with_solar": +0.0000,
+    "synthetic_2025_01_12_evening_peak_with_solar": +0.2408,
+    "synthetic_clear_sky_ac_clipping": +0.1945,
+    "synthetic_consumption_efficient": +0.1499,
+    "synthetic_consumption_ev_charging": +0.4498,
+    "synthetic_consumption_high_no_solar": +0.0000,
+    "synthetic_extreme_negative_prices": +0.0000,
+    "synthetic_extreme_volatility": +0.0000,
+    "synthetic_historical_2024_08_16_high_spread_with_solar": +0.0000,
+    "synthetic_historical_2025_01_12_evening_peak_with_solar": +0.0000,
+    "synthetic_seasonal_spring": +0.0000,
+    "synthetic_seasonal_summer": +0.1939,
+    "synthetic_seasonal_winter": +0.4498,
+}
+
+# Enough slack to absorb float jitter, far below the smallest gap that means
+# anything (0.0033 SEK) -- so a real movement in any fixture still fails.
+GAP_PIN_TOLERANCE_SEK = 0.001
+
+
+@pytest.mark.slow
+def test_realized_matches_planned_across_all_fixtures():
+    """Pin R-vs-P per fixture across the whole corpus.
+
+    ``test_scenarios_are_plan_faithful_realized_equals_planned`` above checks
+    two hand-built 6-period scenarios under a 0.10 SEK band, which is loose
+    enough that a systematic per-period mismodel passes unnoticed -- #497 lived
+    there for months. This runs the same R-vs-P comparison over every fixture
+    in ``core/bess/tests/unit/data`` and pins each result, so any change to the
+    optimizer's economics has to account for its effect on plan faithfulness
+    explicitly.
+    """
+    from core.bess.tests.helpers import run_scenario_realized
+    from core.bess.tests.unit.test_scenarios import (
+        get_all_scenario_files,
+        load_test_scenario,
+    )
+
+    discovered = set(get_all_scenario_files())
+    pinned = set(PLAN_EXECUTION_GAP_SEK)
+    assert discovered == pinned, (
+        "Fixture corpus and the pinned gap table have drifted apart. Added "
+        f"fixtures with no pin: {sorted(discovered - pinned)}. Pinned entries "
+        f"with no fixture: {sorted(pinned - discovered)}. A new fixture must "
+        "record its own plan-execution gap -- silently exempting it is how a "
+        "mismodel gets in unmeasured."
+    )
+
+    drifted = []
+    for name in sorted(discovered):
+        result, realized = run_scenario_realized(load_test_scenario(name))
+        planned = result.economic_summary.battery_solar_cost
+        gap = realized - planned
+        expected = PLAN_EXECUTION_GAP_SEK[name]
+        if abs(gap - expected) > GAP_PIN_TOLERANCE_SEK:
+            drifted.append(
+                f"  {name}: gap {gap:+.4f} SEK, pinned {expected:+.4f} "
+                f"(moved {gap - expected:+.4f})"
+            )
+
+    assert not drifted, (
+        "Plan-execution gap moved on "
+        f"{len(drifted)} fixture(s).\n"
+        "Toward zero means plan faithfulness improved -- update the pin and say "
+        "so in the PR. Away from zero means the optimizer now predicts savings "
+        "it cannot deliver.\n" + "\n".join(drifted)
+    )
 
 
 def _battery(initial_soe):

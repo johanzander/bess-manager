@@ -237,20 +237,6 @@ class BatterySystemManager:
         return self._inverter_controller is not None
 
     @property
-    def export_curtailment_active(self) -> bool:
-        """Capability-aware export-curtailment flag, not just the raw user
-        setting (#459 review): planning/reporting as if curtailment will
-        happen on a platform that can't actually do it makes outcomes worse
-        than leaving the feature off. Entity misconfiguration on a supported
-        platform is a separate, self-correcting case surfaced by the runtime
-        failure banner in _apply_period_schedule, not checked here."""
-        return (
-            self.battery_settings.export_curtailment_enabled
-            and self._inverter_controller is not None
-            and self._inverter_controller.supports_export_limit_control
-        )
-
-    @property
     def controller(self) -> HomeAssistantAPIController:
         """Get the Home Assistant controller."""
         if self._controller is None:
@@ -324,6 +310,24 @@ class BatterySystemManager:
         if not self._inverter_controller:
             return False
         return self._inverter_controller.supports_charge_rate_control
+
+    @property
+    def export_curtailment_active(self) -> bool:
+        """Whether export curtailment is actually in effect for planning.
+
+        Capability-aware, not just the raw user setting (#459 review):
+        planning for curtailment on a platform that can't actually do it
+        makes outcomes worse than leaving the feature off (see
+        optimize_battery_schedule's export_curtailment_active docstring).
+        Entity misconfiguration on a supported platform is a separate,
+        self-correcting case surfaced by the runtime failure banner in
+        _apply_period_schedule, not checked here.
+        """
+        return (
+            self.battery_settings.export_curtailment_enabled
+            and self._inverter_controller is not None
+            and self._inverter_controller.supports_export_limit_control
+        )
 
     def _create_inverter_controller(self) -> InverterController | None:
         """Create an inverter controller for ``self.inverter_platform``.
@@ -2161,7 +2165,6 @@ class BatterySystemManager:
                 if self._inverter_controller is not None
                 else None
             )
-            export_curtailment_active = self.export_curtailment_active
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2176,7 +2179,7 @@ class BatterySystemManager:
                 max_charge_power_per_period=max_charge_power_per_period,
                 discharge_resolution_kw=discharge_resolution_kw,
                 self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-                export_curtailment_active=export_curtailment_active,
+                export_curtailment_active=self.export_curtailment_active,
                 home_settings=self.home_settings,
             )
 

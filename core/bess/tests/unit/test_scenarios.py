@@ -20,6 +20,7 @@ from core.bess.dp_battery_algorithm import (
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.tests.helpers import (
     _scenario_inputs,
+    assert_flow_coherence,
     assert_intent_absent,
     assert_intent_at_hour,
     assert_intent_present,
@@ -242,6 +243,15 @@ def test_all_scenarios(scenario_name):
                 assert (
                     abs(battery_action) <= battery["max_discharge_power_kw"] + tolerance
                 ), f"Battery discharging action {abs(battery_action):.2f} kW exceeds max discharge power {battery['max_discharge_power_kw']} kW"
+
+    # ── Flow coherence (unconditional) ──
+    # Not gated on expected_behavior. Whether a period's flows add up is not a
+    # per-fixture expectation a scenario author opts into -- it holds for every
+    # plan or the plan is wrong. Gating it the way soe_within_bounds is gated
+    # would silently exempt the three fixtures that declare no constraints
+    # block, which is exactly the kind of hole this check exists to close.
+    for pd in result.period_data:
+        assert_flow_coherence(pd)
 
     # ── Behavioral assertions (from expected_behavior in scenario JSON) ──
     if "expected_behavior" in scenario:

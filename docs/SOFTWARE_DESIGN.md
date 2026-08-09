@@ -644,12 +644,22 @@ specific sensors within the component must succeed for it to be ERROR
 rather than WARNING). `determine_health_status()`
 (`core/bess/health_check.py:80-127`) combines them into three outcomes: ERROR
 only when a *required* sensor is missing/failing, WARNING when only an
-*optional* sensor fails, and SKIPPED for sensors intentionally left
-unconfigured (these don't count as a failure at all). A component with
-`is_required=False` should never surface as ERROR — if it does, check
-whether `required_methods` was mistakenly passed as "all methods" instead
-of derived from `is_required` (see `TODO.md`'s "Simplify Health Check
-Severity Model" for the known fragility here).
+*optional* sensor fails, and SKIPPED for optional sensors intentionally left
+unconfigured — those don't count as a failure at all. `perform_health_check()`
+(`core/bess/health_check.py:138-`) never reports SKIPPED for a *required*
+sensor: when a required method's primary sensor mapping is `not_configured`,
+it still attempts to *call* the method, because some methods (e.g.
+`get_load_consumption_lifetime`) derive a value from other sensors when the
+direct one isn't mapped — the pre-check only validates the direct mapping,
+not whether a fallback path exists. That call resolves to OK (fallback
+succeeded), WARNING (returned `None`), or ERROR (raised); a required sensor
+with no working fallback still correctly drives the component to ERROR, it
+just does so via one of those three statuses rather than SKIPPED. A
+component with `is_required=False` should never surface as ERROR — if it
+does, check whether `required_methods` was mistakenly passed as "all
+methods" instead of derived from `is_required`
+(see `TODO.md`'s "Simplify Health Check Severity Model" for the known
+fragility here).
 
 ## API Architecture
 

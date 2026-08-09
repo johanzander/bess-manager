@@ -24,6 +24,7 @@ from core.bess.dp_battery_algorithm import (
     _discharge_candidates,
     _discharge_rate_step_kw,
     _effective_ac_cap_kwh,
+    _prefer_curtailed_charge_absorb,
     _prefer_load_covering_discharge,
     _soe_floor,
     _state_transition,
@@ -306,6 +307,7 @@ def _pwl_best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     import_cap_kwh: float | None = None,
+    sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float]:
     """One-step Bellman recompute at a true continuous SoE, using the
     already-known V[t+1, :] (linearly interpolated) as the continuation
@@ -442,15 +444,26 @@ def _pwl_best_action_at_continuous_state(
     # row has no grid snap; the slope for the shared epsilon definition comes
     # from `_pwl_local_value_slope` at the winner's next_soe.
     slope = _pwl_local_value_slope(V_next, candidates[best_index][2])
+    epsilon = epsilon_for_period(slope, SOE_STEP_KWH)
     best_index = _prefer_load_covering_discharge(
         candidates,
         best_index,
-        epsilon=epsilon_for_period(slope, SOE_STEP_KWH),
+        epsilon=epsilon,
         home_consumption=home,
         solar_production=solar,
         dt=dt,
         rate_step=_discharge_rate_step_kw(discharge_resolution_kw, battery_settings),
     )
+
+    # Charge-early tie-break under the #269 curtailment floor, mirroring the
+    # grid replay so a re-solved tie window cannot silently reinstate the
+    # deferred-charge pick the grid replay just swapped away.
+    if sell_price_floored is not None and sell_price_floored[t]:
+        best_index = _prefer_curtailed_charge_absorb(
+            candidates,
+            best_index,
+            epsilon=epsilon,
+        )
 
     _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
         best_index
@@ -891,6 +904,7 @@ def resolve_pwl_window(
     self_throttle_export_threshold_kwh: float = BATTERY_EXPORT_THRESHOLD_KWH,
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
+    sell_price_floored: list[bool] | None = None,
 ) -> list[tuple[float, float]]:
     """Forward-replay the window's resolved value table `V` (from
     `run_pwl_window_backward_induction`) into a concrete action sequence,
@@ -941,6 +955,7 @@ def resolve_pwl_window(
             discharge_resolution_kw=discharge_resolution_kw,
             self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
+            sell_price_floored=sell_price_floored,
         )
         actions.append((action, next_soe))
         soe = next_soe

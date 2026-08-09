@@ -134,12 +134,16 @@ def test_near_miss_segment_rejects_mismatched_input_lengths():
 # --------------------------------------------------------------------------
 
 
-def _run_450_fixture():
-    scenario = load_test_scenario("regression_2026_08_02_043728")
+def _run_fixture(name):
+    scenario = load_test_scenario(name)
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
     return inputs, diagnostics, result
+
+
+def _run_450_fixture():
+    return _run_fixture("regression_2026_08_02_043728")
 
 
 def _replay(inputs, result):
@@ -203,7 +207,10 @@ def test_reference_reproduces_the_hybrid_on_a_window_it_already_resolved():
     not depend on. The mis-slicing control below is what actually catches a
     bad slice.
     """
-    inputs, diagnostics, result = _run_450_fixture()
+    # #450's own fixture stopped flagging at #512's finer grid (the snap
+    # noise that near-tied it was halved away); use a fixture that still
+    # flags -- window (14, 19) measured at the 0.1 kW / 0.025 kWh grid.
+    inputs, diagnostics, result = _run_fixture("synthetic_consumption_high_no_solar")
     assert diagnostics["windows"], "fixture is expected to flag at least one window"
     window = diagnostics["windows"][0]
     period_costs, cost_bases = _replay(inputs, result)
@@ -223,8 +230,9 @@ def test_measures_the_closest_near_miss_on_the_450_fixture():
     counterfactual this suite exists to answer -- "how much SEK was left on
     the table by not flagging it".
 
-    On this fixture the answer is zero: the DP's closest miss (period 34, at
-    1.12x the detection threshold) was already the right call. Pinned as a
+    On this fixture the answer is zero: the DP's closest miss was already
+    the right call (re-measured at #512's finer grid, where the segment
+    shifts from (32, 37) to (34, 39) and the answer stays zero). Pinned as a
     value, not as an inequality -- the reference is not a proven optimum (see
     `segment_reference_cost`), so "reference <= hybrid" is not an invariant
     this suite may assert.
@@ -235,7 +243,7 @@ def test_measures_the_closest_near_miss_on_the_450_fixture():
         diagnostics["value_slopes"],
         soe_step_kwh=SOE_STEP_KWH,
     )
-    assert segment == Window(start=32, end=37)
+    assert segment == Window(start=34, end=39)
     period_costs, cost_bases = _replay(inputs, result)
 
     reference_cost = _reference(inputs, result, segment, cost_bases)
@@ -287,6 +295,13 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     plan no longer books export revenue it cannot collect; the property
     this test exists to check -- the reference not undershooting the
     hybrid -- is unaffected.
+
+    Re-pinned again for #512 (finer DP grid): 42.792260 / 42.792260. The
+    finer grid closes this segment's remaining quantization gap entirely,
+    so the delta is now exactly zero and the assertion relaxes from
+    strictly-positive to non-negative -- the regression this test guards
+    is a NEGATIVE delta (the reference coming out worse than the hybrid,
+    the #450 feasibility defect), which stays forbidden.
     """
     scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
     inputs = _scenario_inputs(scenario)
@@ -297,9 +312,9 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     reference_cost = _reference(inputs, result, Window(start=7, end=12), cost_bases)
 
     hybrid_cost = sum(period_costs[7:12])
-    assert hybrid_cost == pytest.approx(42.965278, abs=1e-5)
-    assert reference_cost == pytest.approx(42.945155, abs=1e-5)
-    assert hybrid_cost - reference_cost > 0.0
+    assert hybrid_cost == pytest.approx(42.792260, abs=1e-5)
+    assert reference_cost == pytest.approx(42.792260, abs=1e-5)
+    assert hybrid_cost - reference_cost >= -1e-9
 
 
 @pytest.mark.slow
@@ -373,15 +388,16 @@ def test_segment_reference_refuses_a_segment_longer_than_the_solver_can_certify(
     The exact solver seeds every discharge preimage of the next row's
     breakpoints, so its breakpoint set compounds per backward step: on this
     fixture it exhausts `PWL_MAX_PREIMAGE_SEED_POINTS` (1e6) at a horizon of 8
-    periods and raises. That wall is why this reference measures a padded
-    segment rather than the whole 78-period horizon. The raise is deliberately
+    periods and raises (a horizon of 10 at #512's finer grid). That wall is
+    why this reference measures a padded segment rather than the whole
+    78-period horizon. The raise is deliberately
     not caught -- an uncertifiable table has no honest use as a reference -- so callers must keep segments at the detector's own pad width.
     """
     inputs, _diagnostics, result = _run_450_fixture()
     _period_costs, cost_bases = _replay(inputs, result)
 
     with pytest.raises(PWLWindowUnderRefinedError):
-        _reference(inputs, result, Window(start=0, end=8), cost_bases)
+        _reference(inputs, result, Window(start=0, end=10), cost_bases)
 
 
 def test_segment_padding_matches_the_detectors_own():
@@ -399,8 +415,10 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     its own coverage -- so the near-miss segment is the only thing that can
     tell us whether the silence was earned. On this fixture it is not
     entirely: re-solving the five periods around the closest miss is worth a
-    real, non-zero amount (measured 0.078 SEK), which is exactly the kind of
-    finding the suite has to be able to surface.
+    real, non-zero amount (measured 0.0535 SEK at #512's finer grid), which
+    is exactly the kind of finding the suite has to be able to surface.
+    (The fixture is swapped from historical_2024_08_16_high_spread_no_solar,
+    whose near-miss the finer grid closed to exactly zero.)
 
     Interpreting the number: it is a *segment* delta with both ends pinned, so
     it under-counts what a free-horizon optimum could win, and it credits any
@@ -408,7 +426,7 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     itself. Both directions are stated in `segment_reference_cost`'s docstring
     and must survive into Task 6's reporting.
     """
-    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    scenario = load_test_scenario("synthetic_2024_08_16_high_spread_with_solar")
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
@@ -429,7 +447,7 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     # independently of whether the PWL solver itself found the true optimum
     # (it does not always; see the undershoot test above).
     delta = sum(period_costs[segment.start : segment.end]) - reference_cost
-    assert delta == pytest.approx(0.033190, abs=1e-5)
+    assert delta == pytest.approx(0.053490, abs=1e-5)
 
 
 @pytest.mark.slow
@@ -494,14 +512,14 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
 
     Same fixture and segment as
     `test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all` above,
-    which independently pins the delta at 0.033190 SEK by calling
+    which independently pins the delta at 0.053490 SEK by calling
     `replay_schedule`/`segment_reference_cost` directly. This test exercises
     the same numbers through the public `measure_scenario` entry point, so a
     wiring mistake in `measure_scenario` itself (wrong segment, wrong slice,
     wrong SOE trajectory) would show up here even though the lower-level
     pieces are already covered individually.
     """
-    scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
+    scenario = load_test_scenario("synthetic_2024_08_16_high_spread_with_solar")
 
     measurement = measure_scenario(scenario)
 
@@ -509,7 +527,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
     assert sum(measurement.margin_ratio_counts.values()) == len(
         scenario["home_consumption"]
     )
-    assert measurement.financial_impact_sek == pytest.approx(0.033190, abs=1e-5)
+    assert measurement.financial_impact_sek == pytest.approx(0.053490, abs=1e-5)
 
 
 @pytest.mark.slow

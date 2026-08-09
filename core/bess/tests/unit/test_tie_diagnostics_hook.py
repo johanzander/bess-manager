@@ -7,7 +7,11 @@ from core.bess.tests.unit.test_scenarios import load_test_scenario
 
 
 def test_tie_diagnostics_populated_when_dict_passed():
-    scenario = load_test_scenario("regression_2026_08_02_043728")
+    # A fixture that still near-ties at #512's finer grid (the original
+    # choice here, #450's reproduction case regression_2026_08_02_043728,
+    # stopped tying when the finer grid halved the snap noise -- see
+    # test_issue_450_hybrid_resolution.py). Window measured at (14, 19).
+    scenario = load_test_scenario("synthetic_consumption_high_no_solar")
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
 
@@ -27,8 +31,7 @@ def test_tie_diagnostics_populated_when_dict_passed():
     assert len(diagnostics["tie_margins"]) == horizon
     assert len(diagnostics["value_slopes"]) == horizon
     assert len(diagnostics["soe_trajectory"]) == horizon + 1
-    # This fixture is #450's own reproduction case -- known to flag exactly
-    # one window.
+    # Known to flag exactly one window at the current grid resolution.
     assert len(diagnostics["windows"]) == 1
     assert result.reward_objective_cost is not None
 

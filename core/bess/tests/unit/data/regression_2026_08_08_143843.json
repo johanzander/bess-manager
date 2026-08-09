@@ -567,11 +567,11 @@
     "initial_cost_basis": 0.03500000000000001
   },
   "expected_results": {
-    "base_cost": 7.881350979645832,
-    "battery_solar_cost": -2.7412198254551097,
-    "base_to_battery_solar_savings": 10.622570805100942,
-    "base_to_battery_solar_savings_pct": 134.7810906091419,
-    "_note": "Post-fix (charge-early tie-break under the #269 curtailment floor) pin. These economics do NOT discriminate pre/post fix at the harness's 1-decimal tolerance -- the defect is an exact reward tie, so planned cost barely moves. The discriminating pin is test_curtailment_charge_early_tiebreak.py, which asserts the SOE trajectory absorbs below-floor surplus immediately (full by period 6, not period 9). Re-pinned after #497 (PR #511) removed the phantom sub-resolution export revenue. Note this is the raw-DP figure test_scenarios measures (build_scenario_inputs does not pass export_curtailment_active); under helpers._scenario_inputs, which does pass it, #507's curtailed-period reporting adjustment moves the planned cost to -2.7615, leaving the +0.0203 execution gap pinned in test_plan_faithfulness.KNOWN_PLAN_EXECUTION_GAP_SEK (#502)."
+    "base_cost": 7.88135,
+    "battery_solar_cost": -2.74447,
+    "base_to_battery_solar_savings": 10.62582,
+    "base_to_battery_solar_savings_pct": 134.82235,
+    "_note": "Post-fix (charge-early tie-break under the #269 curtailment floor) pin. These economics do NOT discriminate pre/post fix at the harness's 1-decimal tolerance -- the defect is an exact reward tie, so planned cost barely moves. The discriminating pin is test_curtailment_charge_early_tiebreak.py, which asserts the SOE trajectory absorbs below-floor surplus immediately (full by period 6, not period 9). Re-pinned after #497 (PR #511) removed the phantom sub-resolution export revenue, and again at #512's finer DP grid. Note this is the raw-DP figure test_scenarios measures (build_scenario_inputs does not pass export_curtailment_active); under helpers._scenario_inputs, which does pass it, #507's curtailed-period reporting adjustment moves the planned cost to -2.76587, leaving the +0.0214 execution gap pinned in test_plan_faithfulness.KNOWN_PLAN_EXECUTION_GAP_SEK (#502)."
   },
   "expected_behavior": {
     "intents_present": [

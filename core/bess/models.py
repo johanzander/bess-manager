@@ -8,7 +8,7 @@ the BESS system, providing type safety and clear interfaces between components.
 """
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -36,6 +36,7 @@ __all__ = [
     "EnergyData",
     "OptimizationResult",
     "PeriodData",
+    "apply_export_curtailment_to_period_data",
     "infer_intent_from_flows",
 ]
 
@@ -91,9 +92,13 @@ class EnergyData:
     battery_soe_start: float  # kWh (changed from battery_soc_start)
     battery_soe_end: float  # kWh (changed from battery_soc_end)
 
-    # Solar lost to the inverter AC output cap (kWh) — DC production the
-    # inverter could neither convert to AC nor store in a full/rate-limited
-    # battery. Zero unless the inverter_max_ac_power_kw feature is enabled.
+    # Solar production never delivered as AC-side export/consumption (kWh).
+    # Two causes: the inverter AC output cap (DC production the inverter
+    # could neither convert to AC nor store in a full/rate-limited battery,
+    # zero unless inverter_max_ac_power_kw is enabled), or the solar-sourced
+    # share of a period's export curtailed to zero at runtime by PV
+    # export-limit curtailment (#502, zero unless export_curtailment_enabled
+    # -- see apply_export_curtailment_to_period_data).
     clipped_solar: float = 0.0
 
     # Detailed flows (calculated automatically in __post_init__)
@@ -470,6 +475,65 @@ class PeriodData:
             errors.append(f"Invalid end SOE: {self.energy.battery_soe_end}%")
 
         return errors
+
+
+def apply_export_curtailment_to_period_data(
+    period_data: PeriodData,
+    export_curtailment_active: bool,
+    export_curtailment_price_floor: float,
+) -> PeriodData:
+    """Return a reporting-only view of period_data with export curtailment
+    applied, for a period that will actually be curtailed to zero export at
+    runtime (#502): exporting at a sell price below the floor, with
+    export_curtailment_active True (the caller-computed, capability-aware
+    flag -- never the raw settings field, so reporting can't disagree with
+    what BSM's execution-time trigger will actually do on this platform).
+
+    The curtailed energy is reported as unharvested production (folded into
+    clipped_solar, mechanically identical to existing AC-cap clipping), not
+    as harvested and discarded -- because the hardware mechanism this models
+    only throttles PV/MPPT production (ha_api_controller.
+    set_growatt_export_limit's own comment), never battery discharge. Only
+    the solar-sourced share of grid_exported (energy.solar_to_grid) is
+    curtailed here; any battery-sourced export (energy.battery_to_grid)
+    still happens and is still reported at its real cost.
+
+    Returns period_data unchanged if curtailment doesn't apply, or if the
+    period's export was entirely battery-sourced (nothing PV-side to
+    curtail). Never mutates the input -- callers must apply this only at
+    reporting seams, never to the PeriodData BSM stores in schedule_store,
+    which the execution-time curtailment trigger and the DP's guardrail
+    comparison both require to stay at the honest, real price.
+    """
+    energy = period_data.energy
+    economic = period_data.economic
+    curtailed_solar_export = energy.solar_to_grid
+    if (
+        not export_curtailment_active
+        or energy.grid_exported <= 0
+        or economic.sell_price >= export_curtailment_price_floor
+        or curtailed_solar_export <= 0
+    ):
+        return period_data
+
+    adjusted_energy = EnergyData(
+        solar_production=energy.solar_production,
+        home_consumption=energy.home_consumption,
+        battery_charged=energy.battery_charged,
+        battery_discharged=energy.battery_discharged,
+        grid_imported=energy.grid_imported,
+        grid_exported=energy.grid_exported - curtailed_solar_export,
+        battery_soe_start=energy.battery_soe_start,
+        battery_soe_end=energy.battery_soe_end,
+        clipped_solar=energy.clipped_solar + curtailed_solar_export,
+    )
+    adjusted_economic = EconomicData.from_energy_data(
+        adjusted_energy,
+        economic.buy_price,
+        economic.sell_price,
+        economic.battery_cycle_cost,
+    )
+    return replace(period_data, energy=adjusted_energy, economic=adjusted_economic)
 
 
 @dataclass

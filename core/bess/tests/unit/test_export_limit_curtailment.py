@@ -36,6 +36,8 @@ from types import SimpleNamespace
 from typing import ClassVar
 from unittest.mock import MagicMock
 
+import pytest
+
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import (
@@ -420,3 +422,56 @@ class TestBellmanGuardrailNotFooledByFloor:
             export_curtailment_active=False,
         )
         assert any(p.energy.battery_discharged > 0 for p in result.period_data)
+
+
+class TestCurtailedPeriodsNotChargedInReportedCost:
+    """Issue #502: a curtailed period's reported cost must reflect what will
+    actually happen at runtime (no export, no phantom negative-price charge),
+    while PeriodData itself stays honest for BSM's execution-time trigger
+    (TestDPCurtailmentAwareReward.test_reported_sell_price_stays_the_real_market_price
+    above) and for the DP's own guardrail comparison."""
+
+    def test_battery_solar_cost_excludes_curtailed_export_charge(self):
+        """Same DP-produced scenario as
+        TestDPCurtailmentAwareReward: period 1 exports 1 kWh at -3.0 (battery
+        full, nowhere else for the solar to go) below the 0.0 floor, so it
+        will be curtailed to zero export at runtime. The reported aggregate
+        must not carry that period's -3.0 export revenue (i.e. +3.0 phantom
+        cost) into battery_solar_cost."""
+        result = _curtailment_scenario(export_curtailment_active=True)
+
+        period1 = result.period_data[1]
+        assert period1.energy.grid_exported == 1.0
+        assert period1.economic.sell_price == -3.0
+
+        assert result.economic_summary.battery_solar_cost == pytest.approx(0.0)
+
+    def test_unaffected_when_curtailment_inactive(self):
+        """Sanity check: with curtailment inactive, period 0 preemptively
+        discharges at a mild loss to defend against period 1's real
+        (uncurtailed) loss (TestDPCurtailmentAwareReward), so the reported
+        aggregate must be unaffected by the fix here -- confirms the fix is
+        conditional on export_curtailment_active, not a blanket change to
+        every plan's reported cost."""
+        result = _curtailment_scenario(export_curtailment_active=False)
+
+        assert result.economic_summary.battery_solar_cost == pytest.approx(0.1)
+
+    def test_solar_only_baseline_stays_consistent_with_curtailed_total(self):
+        """Regression (found in code review on this PR): solar_only_cost --
+        the "solar but no battery" baseline used to derive
+        solar_to_battery_solar_savings -- must be curtailment-adjusted by
+        the SAME transform as battery_solar_cost, or the savings subtraction
+        mixes a curtailed total against an honest baseline and misattributes
+        curtailment's own savings to the battery. Here the curtailed export
+        would happen identically with or without a battery (nothing else in
+        the scenario depends on the battery), so once both sides are
+        consistently curtailment-adjusted, the battery adds zero measurable
+        solar-only savings -- not the inflated ~3.0 SEK an unadjusted
+        baseline would report."""
+        result = _curtailment_scenario(export_curtailment_active=True)
+
+        assert result.economic_summary.solar_only_cost == pytest.approx(0.0)
+        assert result.economic_summary.solar_to_battery_solar_savings == pytest.approx(
+            0.0
+        )

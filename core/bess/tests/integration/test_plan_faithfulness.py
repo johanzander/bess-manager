@@ -178,6 +178,18 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
 # there is no band for one to hide in.
 PLAN_EXECUTION_TOLERANCE_SEK = 0.001  # float-accumulation slack only
 
+# The one surviving pinned gap, with a cause distinct from #497 (see TODO.md's
+# "From #502" entry): #507 stopped the *plan* charging the honest price for
+# periods BSM will curtail to zero at runtime, but the inverter simulator has
+# no model of PV export-limit curtailment, so *execution* still pays it. On
+# main this fixture pinned +0.0693 (that #502 share plus #497's +0.0490
+# phantom-export share); #497's fix removed its share, leaving exactly the
+# simulator's curtailment blindness. Goes to zero when the simulator learns
+# curtailment -- delete the entry then.
+KNOWN_PLAN_EXECUTION_GAP_SEK = {
+    "regression_2026_08_08_143843": +0.0203,  # #502: simulator can't curtail
+}
+
 
 @pytest.mark.slow
 def test_realized_matches_planned_across_all_fixtures():
@@ -200,10 +212,11 @@ def test_realized_matches_planned_across_all_fixtures():
     for name in sorted(get_all_scenario_files()):
         result, realized = run_scenario_realized(load_test_scenario(name))
         planned = result.economic_summary.battery_solar_cost
-        if abs(realized - planned) > PLAN_EXECUTION_TOLERANCE_SEK:
+        expected = KNOWN_PLAN_EXECUTION_GAP_SEK.get(name, 0.0)
+        if abs((realized - planned) - expected) > PLAN_EXECUTION_TOLERANCE_SEK:
             gaps.append(
                 f"  {name}: R={realized:.4f} P={planned:.4f} "
-                f"(gap {realized - planned:+.4f} SEK)"
+                f"(gap {realized - planned:+.4f} SEK, expected {expected:+.4f})"
             )
 
     assert not gaps, (

@@ -101,21 +101,25 @@ def test_charge_early_plan_is_faithful_and_costs_no_more():
     result, realized_cost = run_scenario_realized(scenario)
     planned_cost = result.economic_summary.battery_solar_cost
 
-    # R == P: the charge-early plan must execute faithfully through the
-    # inverter simulator, not just claim a number. When this test was
-    # written the fixture carried a +0.0490 SEK gap pinned in
-    # test_plan_faithfulness.py's per-fixture table; #497 (PR #511)
-    # removed the gap's cause (phantom sub-resolution export revenue) and
-    # collapsed the table to a single exact equality, which this fixture
-    # now meets like every other.
+    # R == P up to the one pinned residual: #497 (PR #511) removed this
+    # fixture's +0.0490 phantom-export share and collapsed the corpus-wide
+    # gap table to exact equality; what remains is the +0.0203 SEK #502
+    # share (the inverter simulator has no model of PV export-limit
+    # curtailment, so execution still pays the honest price for a period
+    # BSM will actually curtail to zero at runtime -- see TODO.md's "From
+    # #502" entry). Assert against that single source of truth rather than
+    # a bare tolerance.
     from core.bess.tests.integration.test_plan_faithfulness import (
+        KNOWN_PLAN_EXECUTION_GAP_SEK,
         PLAN_EXECUTION_TOLERANCE_SEK,
     )
 
     gap = realized_cost - planned_cost
-    assert abs(gap) <= PLAN_EXECUTION_TOLERANCE_SEK, (
-        f"plan-execution gap {gap:+.4f} SEK (R={realized_cost:.4f}, "
-        f"P={planned_cost:.4f}) -- execution no longer reproduces the plan"
+    pinned = KNOWN_PLAN_EXECUTION_GAP_SEK[SCENARIO]
+    assert abs(gap - pinned) <= PLAN_EXECUTION_TOLERANCE_SEK, (
+        f"plan-execution gap {gap:+.4f} SEK moved off its pin {pinned:+.4f} "
+        f"(R={realized_cost:.4f}, P={planned_cost:.4f}) -- re-measure and "
+        "re-pin in test_plan_faithfulness.py if the movement is intended"
     )
 
     # The tie-break must never buy earliness with money: no grid import

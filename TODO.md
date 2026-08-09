@@ -734,3 +734,9 @@ physical question answered by more than one constant is a latent #497. That
 inventory is a day's work and would tell us whether this is a real structural
 problem or a dozen unrelated coincidences — worth knowing before anyone
 proposes a redesign.
+
+---
+
+## From #502 (curtailed periods overcharged in reported cost) fix
+
+**`core/bess/simulation/inverter_simulator.py` has no concept of PV export-limit curtailment (#269).** `run_scenario_realized`'s `simulate()` only replays the DP's own charge/discharge commands via `derive_control_command` — it has no model of BSM's separate `apply_export_limit` hardware write, which is a second, independent control path issued alongside the DP-derived commands, not derived from them. #502 made the *reported* plan (`economic_summary.battery_solar_cost`) correctly exclude a curtailed period's cost, since BSM really will curtail it to zero at runtime — but the simulator's realized cost (R) still pays the full honest negative-price export for that period, since it has no way to know curtailment will fire. This opened a genuine, structural R-vs-P gap for any fixture with an actual curtailed period: `regression_2026_08_08_143843`'s pin moved from +0.0490 to +0.0693 SEK (re-pinned in #507; every other fixture in the corpus was unaffected — it's the only one with a real curtailed period). The gap is not the reported plan being newly dishonest — it is the simulator lacking fidelity for a feature it never modeled. Fix: teach `simulate()` to also apply export-limit curtailment (zero the solar-sourced export share, mirroring `apply_export_curtailment_to_period_data`'s logic) for periods where `export_curtailment_active` and the period's sell price is below the floor, closing the gap back toward zero. Left out of #507 since it's a simulator feature addition, not a reporting bug fix — the PR that fixes #502's reporting bug is not the place to also extend simulator fidelity.

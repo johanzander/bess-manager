@@ -45,11 +45,11 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 
 | Phase | Retires / unblocks | Class |
 |---|---|---|
-| 0 | in-flight WIP: #510, #511 (#497), #507 (#502), #508 (#501), fold-scoping PR | 2, 3 |
+| 0 | in-flight WIP: #510, #511 (#497), #506, #507 (#502), #508 (#501), #515, #516 (#512), #517 (#466 crossover) | 2, 3 |
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 |
-| 2 | #466 residual (sunrise crossover), #393; makes #485 trivial; subsumes #466/#510 tie-break code | 1, 3 |
+| 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 |
 | 3 | #497 fully, #459-class; formalizes the fold-scoping split | 2 |
-| 4 | #320, #352, #354 (close as superseded), #511-class recurrence | 2 |
+| 4 | #320, #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence | 2 |
 | parallel | #487 (input quality — independent, any time) | 1 input |
 | deferred | #513 (fix when touched; until then P6 treats PWL as heuristic), #512 (SOE-step sweep, gated on its own premise test) | 3 |
 
@@ -63,30 +63,45 @@ confusing.
 
 - [x] Merge PR #510 (merged 2026-08-08, `742d5906`; two optional test nits
       may follow up).
-- [ ] Land the flow-coherence pin test (`test_flow_coherence.py`, 182/1875
-      incoherent-period pin) — currently only in an unmerged WIP worktree,
-      **not on main**, yet it is Phase 3's acceptance anchor. Merge it (or
-      its successor from the fold-scoping PR) before Phase 3 starts.
-- [ ] Land `scripts/bench_pwl_everywhere.py` from branch
-      `bench/pwl-everywhere` (pushed, uncommitted to main) — it is the
-      #512 sweep gate referenced in the deferred track.
-- [ ] Land or explicitly park PR #511 (#497 executable-discharge fix). If
-      Phase 4 will supersede it within weeks, landing it anyway is correct:
-      it stops live bleeding and its tests become Phase 4 acceptance tests.
-- [ ] Land PRs #507 / #508 (curtailment reporting/UI — independent of the
-      optimizer core).
-- [ ] Land the fold-scoping PR from the 2026-08-08/09 session (the #350
-      fold moved out of `EnergyData._calculate_detailed_flows` into the
-      sensor-ingestion path) — **only after** its mock-HA E2E premise check
-      passed: small planned exports must physically clear on real
-      load-first/grid_first semantics (#240 threshold, #352 open bug), not
-      just in the simulator. If that check failed, the fold-scoping design
-      returns to review and Phase 3 inherits the question.
-- [ ] Close or re-park PR #354 with a note that Phase 4 supersedes it (do
-      not leave it half-open into Phase 4).
-- [ ] Post the #466 status comment: ridax67's principle ("IDLE = WANTS, not
-      EXPECTS") is now P2 of the target architecture; the sunrise-crossover
-      case lands with Phase 2.
+- [x] Flow-coherence pin test (`test_flow_coherence.py`) — already on
+      main; it landed as PR #506 on 2026-08-08, before this plan was
+      written. Phase 3's acceptance anchor is in place.
+- [x] Land `scripts/bench_pwl_everywhere.py` (PR #515, merged
+      2026-08-09) — the #512 sweep gate.
+- [x] PR #511 (#497 executable-discharge fix) merged 2026-08-09; #497
+      closed. Its tests become Phase 4 acceptance tests.
+- [x] PRs #507 / #508 (curtailment reporting/UI) merged 2026-08-09.
+- [x] Fold-scoping: **premise check FAILED and the design changed as a
+      result.** The mock-HA measurement found 130 periods planning small
+      (<0.15 kWh) exports, 117 of which derived a `grid_first` command at
+      ≤60% rate — squarely inside #352's live failure mode. The −5.51
+      SEK/day was simulator accounting: real under perfect 15-minute
+      average loads, but live it would have converted spike-robust
+      `load_first` periods into forced-rate `grid_first` ones. The #350
+      fold had been accidentally shielding users from #352 for that whole
+      class. Redesigned as candidate-set materiality at the DP level
+      (P3) and shipped as **PR #511** instead; the fold move itself is
+      demoted to non-urgent data hygiene for Phase 3.
+- [x] Park PR #354 with a Phase 4 pointer. NOT closeable as "already
+      fixed": #511 removed sub-material exports from the *plan*, but
+      #354's own body flags the **0.1–0.5 kWh home-dominant band** that
+      survives it — material exports the DP legitimately plans that still
+      commit the inverter to `grid_first` and forfeit load-following
+      headroom. #352 stays open for that residual. #354's mechanism is the
+      wrong layer (demoting at command-write means the DP already credited
+      revenue the mapping forgoes — the P>R optimism P3/P4 forbid), but
+      its **two-sided materiality test** is real domain knowledge to carry
+      into Phase 4: a near-full-rate export has almost no load-following
+      headroom left to protect, so a home-dominance-only rule would
+      permanently demote every export on a high-consumption house
+      (learned from live E2E, would otherwise be rediscovered the hard
+      way).
+- [ ] Post the #466 status comment: ridax67's principle ("IDLE = WANTS,
+      not EXPECTS") is now P2 of the target architecture, and the
+      sunrise/sunset crossover shipped in #517 — written in plain
+      language (no shadow price / backward induction / lattice jargon;
+      the reporter has said explicitly that vocabulary is not useful to
+      him).
 
 ## Phase 1: One selector (P1)
 
@@ -281,11 +296,26 @@ measured against `candidates[argmax_index].value` — never chained):
   *floor* — which trades real model value and may only be introduced with
   an explicit per-period forfeiture bound stated in the row docstring
   (and counted against the 0.05 SEK/fixture budget).
-  Acceptance: on the bundle fixture, the crossover period must resolve to
-  a tracking mode, not IDLE, whenever a lattice-feasible discharge ≤ net
-  load exists within the (possibly zero-width) band; where none exists
-  (86 W load vs 200 W minimum gear) IDLE legitimately stands and the test
-  pins that too.
+
+  **The sunrise/sunset crossover is NO LONGER this row's acceptance test
+  — see #517.** This plan originally specified ridax67's 06:00–06:59
+  period as the proof that dropping the early-return works. #517
+  established that period was never a tie at all: the action set was
+  *empty* (every lattice candidate overshot the 86 W residual and #497
+  correctly excluded the unexecutable ones), so IDLE won by default, not
+  by a coin flip. The fix was a new candidate — discharge exactly the
+  forecast residual — i.e. P3 (candidates are executable commands)
+  subsumed the case P2 was going to handle. An implementer who tests the
+  crossover here will be testing something already fixed by another
+  mechanism and may wrongly conclude the tie policy caused it.
+  Crossover acceptance now lives in Phase 4 (candidate space).
+
+  Row 3's remaining acceptance is therefore the *genuine* near-ties: the
+  original #466 evening periods (19:00 / 22:15 in bundle
+  2026-08-06-110152, decisive-margin holds must stay IDLE while coin
+  flips resolve to tracking) plus #393's overnight residual. Measure a
+  candidate period's actual margin before writing the RED test; the
+  epsilon-floor rule above still applies.
 - Rows apply uniformly in grid and PWL paths via Phase 1's single call
   site — the `#466-vs-#510 can't fight` argument becomes row ordering, not
   a guard-clause coincidence.
@@ -367,14 +397,20 @@ approval applies).**
         the reproduction bundle.
       - #352: a low-rate export plan either carries a command that
         tolerates load spikes or is not planned; the #352 reproduction
-        shows no avoidable spike import.
+        shows no avoidable spike import. Covers the 0.1–0.5 kWh
+        home-dominant band #511 does not reach, using #354's two-sided
+        materiality test (dominance OR forfeited headroom) as candidate
+        scoring rather than post-hoc demotion.
+      - #466 crossover: ridax67's 06:00–06:59 residual-cover case (#517)
+        keeps a regression test here, where it belongs — the candidate
+        space, not the tie policy.
       - #511-class: a planned discharge the inverter cannot execute is
         unrepresentable — the test constructs the old failing plans and
         shows the candidate space cannot express them.
       - R==P corpus: `PLAN_EXECUTION_GAP_SEK` pins move toward 0 and none
         regress.
-- [ ] Close #354 as superseded; fold PR #511's tests in as regression
-      tests.
+- [ ] Close #354 once Phase 4 covers its band; fold PRs #511 and #517's
+      tests in as regression tests.
 
 **Exit gate:** intent is an input; the corpus R==P gaps are at their
 floor; #320/#352 reproductions pass.
@@ -419,7 +455,7 @@ Phase 2 (preference table)    — closes #466 residual; then #485
    ▼
 Phase 3 (one flow record)     — closes #497; absorbs fold-scoping
    ▼
-Phase 4 (command candidates)  — closes #320/#352; supersedes #354
+Phase 4 (command candidates)  — closes #320/#352; subsumes #354's band
    
 #513 fix when touched; #512 sweep-gated; both may run between phases.
 ```

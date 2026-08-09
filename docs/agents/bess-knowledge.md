@@ -112,6 +112,17 @@ was "worth" `sell_price`, check this threshold first: below it, the relevant
 alternative-value comparison is against the buy price avoided, not the sell
 price (`core/bess/dp_battery_algorithm.py:511-522`).
 
+Note the throttle rewrites the *reward* only — `battery_discharged` and
+`next_soe` still carry the full commanded setpoint. For an overshoot between
+0.01 and 0.1 kWh the DP therefore books export revenue that load-following
+hardware never earns, and `EnergyData._calculate_detailed_flows` folds the
+orphaned export back into `battery_to_home` (#350), leaving a period whose
+flows do not add up. This is issue #497, open and measured: 182 of 1875
+fixture periods, pinned by
+`core/bess/tests/unit/test_flow_coherence.py`. Do not treat a
+`battery_to_home` that exceeds `home_consumption` in a planned period as
+evidence of a new bug until that pin reaches zero.
+
 **Cost basis tracking (weighted average)**: When the battery charges at
 different prices over time, the system tracks the cost of stored energy as a
 **weighted average**, not FIFO. On charge: `new_cost_basis = (soe *
@@ -424,6 +435,36 @@ configured.
   regulatory concept), and any change to `HomePowerMonitor`'s own runtime
   behavior — it remains the real-time safety net; this constraint just makes
   the *plan* agree with it.
+
+### Export curtailment and the charge-early tie-break (#269)
+
+When export curtailment is active (enabled AND the platform supports
+export-limit control), periods priced below the curtailment floor get an
+effective sell price of 0.0 for the DP's reward calculation only
+(`optimize_battery_schedule`'s `reward_sell_price`); reported economics
+and the execution-time trigger still use the real price. Execution-side,
+BSM writes the hardware export limit (Growatt "Meter 1" + 0%) on any
+period with planned export below the floor and releases it otherwise
+(`battery_system_manager.py`, `_export_limit_curtailed`).
+
+Flooring the sell price creates *exact reward ties by construction*:
+whenever the remaining below-floor solar surplus exceeds battery headroom,
+"charge now, curtail later" and "curtail now, charge later" earn identical
+reward (signature in a bundle: `shadow_price == cycle_cost_per_kwh` in
+those periods). The replay therefore applies a charge-early tie-break
+(`_prefer_curtailed_charge_absorb`, mirrored in the PWL tie-window
+replay): among candidates within the #466 epsilon, prefer the highest
+`next_soe`, but never one that imports more grid energy than the argmax
+winner, and never overriding a discharge winner. Charge-early is
+stochastically dominant — equal model reward, strictly better under
+forecast error in either direction (captures above-forecast PV that
+curtailment would otherwise clip at the panel; preserves slack toward the
+next positive-price block).
+
+**General invariant**: any reward shaping that flattens the objective
+(floors, caps, zeroing) manufactures indifference regions and MUST ship
+with an explicit tie-break policy stating which physically-preferred
+action wins inside the flat region — float noise is not a policy.
 
 
 ## Execution Layer: What Can Override the Schedule

@@ -63,31 +63,6 @@ SHARED_SENSOR_KEYS = frozenset(
 # real choice (see issue #118).
 VALID_CONTROL_MODES = ("tou", "vpp")
 
-# All valid inverter platform IDs.
-VALID_PLATFORMS = (
-    "growatt_server_min",
-    "growatt_server_sph",
-    "solax_modbus_growatt_min",
-    "solax_modbus_growatt_sph",
-    "solax_modbus_native",
-    "solis_modbus",
-    "huawei_solar_luna2000",
-)
-
-# Sensor keys that are shared across all platforms (not inverter-specific).
-SHARED_SENSOR_KEYS = frozenset(
-    {
-        "solar_forecast_today",
-        "solar_forecast_tomorrow",
-        "48h_avg_grid_import",
-        "current_l1",
-        "current_l2",
-        "current_l3",
-        "discharge_inhibit",
-        "weather_entity",
-    }
-)
-
 # The HA integration domain each platform's *vendor* service calls target.
 # Only two platforms make any: huawei_solar.set_tou_periods and the
 # growatt_server TOU/AC-charge services. Every other service call BESS makes

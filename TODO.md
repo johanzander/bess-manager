@@ -202,18 +202,6 @@
 
 ---
 
-### Health check silently skips genuinely-required-but-unmapped sensors
-
-**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/health_check.py`
-
-**Description**: `perform_health_check()`'s `not_configured` branch (`health_check.py:183-193`) always converts an unmapped sensor to `"SKIPPED"` and `determine_health_status()` (`health_check.py:99-102`) excludes SKIPPED checks from both `required_total` and `required_working` — regardless of whether the caller passed `is_required=True`. This means components that call `perform_health_check(is_required=True, ...)` with a sensor that is *entirely unmapped* (not just unavailable) currently report OK/pass instead of ERROR, the same underlying shortcoming just fixed for Power Monitoring (see `docs/superpowers/plans/2026-08-07-power-monitoring-sensor-gating.md`). Affected call sites: `growatt_min_controller.py:1387` (Battery Control), `solax_modbus_growatt_controller.py:757` (Battery Control), `sensor_collector.py:813,827` (Battery Monitoring, Energy Monitoring) — all pass `is_required=True` for sensors assumed always-present via platform suffix maps, but if a user manually deletes/unmaps one, the health check would not catch it.
-
-**Fix direction**: Make `not_configured` → `SKIPPED` conditional on `method_name not in required_methods`; when it *is* required, report `ERROR` instead. Needs care: verify none of the four call sites above have individually-optional sensors within their `all_methods` list that would wrongly start erroring.
-
-**Files**: `core/bess/health_check.py` (`perform_health_check`, `determine_health_status`)
-
----
-
 ### **Improve InfluxDB Health Check to Verify Sensor Coverage**
 
 **Impact**: Medium | **Effort**: Low-Medium | **Dependencies**: `health_check.py`, `influxdb_helper.py`
@@ -675,3 +663,7 @@ further.
 **`core/bess/settings_store.py` has duplicate top-level `VALID_PLATFORMS` and `SHARED_SENSOR_KEYS` definitions.** Both constants are defined twice — once around lines 36-58, again around lines 67-89 — byte-identical in each pair. The second definition silently shadows the first; nothing currently breaks because they're kept in sync by coincidence, but the duplication is dead code and a drift risk if one copy is ever edited without the other. Pre-existing on `main`, unrelated to and not introduced by `docs/superpowers/plans/2026-08-07-power-monitoring-sensor-gating.md`. Fix: delete one copy of each.
 
 ---
+
+## From the #497 flow-invariant suite (non-blocking)
+
+**`test_scenarios.py::test_all_scenarios` and `test_plan_faithfulness.py::test_realized_matches_planned_across_all_fixtures` use two different definitions of "realized" (R).** The inline block at the end of `test_all_scenarios` builds commands via `derive_control_command(...)` without `shadow_price`/`buy_price`; `helpers.run_scenario_realized` — which the new corpus-wide gap pin uses — passes both. So the two corpus-wide R-vs-P checks are not measuring the same R. Nothing is wrong today, but whoever fixes #497 and re-pins `PLAN_EXECUTION_GAP_SEK` will be re-pinning against one definition while the looser per-scenario check enforces the other. Fix: replace the inline block in `test_all_scenarios` with a `run_scenario_realized` call. Left out of the invariant-suite PR because it changes what an existing test asserts, which deserves its own diff rather than riding along with test-infrastructure additions.

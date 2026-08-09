@@ -16,6 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- Health checks for Battery Control, Battery Monitoring, and Energy Monitoring now report ERROR instead of OK when a required sensor is entirely unmapped, not just when it's unavailable.
 - Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))
 - Editing the Huawei battery Device ID in Settings now saves to the inverter section and applies without a restart, instead of being written to the Growatt section.
 - The Savings chart's bars could flicker invisible in Safari, especially with many thin bars (e.g. quarter-hourly resolution) — Safari fails to reliably anti-alias sub-pixel-width SVG shapes. Bars now use a fixed minimum width so they stay visible regardless of window size.
@@ -47,6 +48,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - The "Enable Live Control" pre-flight dialog showed a green check for optional components that were genuinely failing (e.g. a misconfigured InfluxDB), not just ones left unconfigured. Those now show an amber warning — they still never block enabling live control.
 - Settings → Savings History silently displayed "0 days recorded" when the disk-usage request failed, and swallowed errors when clearing the history. Both now surface the actual error.
+
+### Internal
+
+- Locked a real Growatt GEN4 VPP installation's config (`ridax67`) into the discovery regression suite as `ci-wizard-growatt-vpp-ridax-118`, covering a real-world ambiguous case (same `unique_id` suffix exposed on more than one HA domain) the synthetic VPP fixtures didn't exercise. ([#118](https://github.com/johanzander/bess-manager/issues/118))
 
 ## [10.0.1] - 2026-08-02
 

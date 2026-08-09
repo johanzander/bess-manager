@@ -99,11 +99,15 @@ def _write_regression_fixture(
             ),
             # Whether curtailment was actually ACTIVE at planning time
             # (enabled AND the platform supports export-limit control --
-            # battery_system_manager.py). Debug logs don't record the
-            # capability bit, so this defaults to the enabled flag; set it
-            # false by hand for a fixture from a platform that can't
-            # curtail, so replays don't take a DP path that never ran live.
-            "export_curtailment_active": bs.get("export_curtailment_enabled", False),
+            # battery_system_manager.py). Bundles export the resolved flag;
+            # older bundles predate it, so fall back to the enabled flag
+            # there and set it false by hand for a fixture from a platform
+            # that can't curtail, so replays don't take a DP path that
+            # never ran live.
+            "export_curtailment_active": bs.get(
+                "export_curtailment_active",
+                bs.get("export_curtailment_enabled", False),
+            ),
             "initial_soe": d["initial_soe"],
             "initial_cost_basis": d.get("initial_cost_basis"),
         },

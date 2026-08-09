@@ -21,6 +21,7 @@ from core.bess.debug_data_exporter import (
     _scrub_device,
 )
 from core.bess.models import EnergyData, PeriodData
+from core.bess.settings import BatterySettings
 
 
 class TestIsSecretKey:
@@ -278,6 +279,31 @@ def _make_energy() -> EnergyData:
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
+
+
+class TestSerializeBatterySettings:
+    def _make_aggregator(self, battery_settings, export_curtailment_active):
+        agg = DebugDataAggregator.__new__(DebugDataAggregator)
+        agg.system = MagicMock()
+        agg.system.battery_settings = battery_settings
+        agg.system.export_curtailment_active = export_curtailment_active
+        return agg
+
+    def test_includes_resolved_export_curtailment_active(self):
+        # enabled=True but the platform can't curtail: the exported dict must
+        # carry the resolved flag so from_debug_log.py doesn't have to guess
+        # it from the enabled bit.
+        settings = BatterySettings(export_curtailment_enabled=True)
+        agg = self._make_aggregator(settings, export_curtailment_active=False)
+        out = agg._serialize_battery_settings()
+        assert out["export_curtailment_enabled"] is True
+        assert out["export_curtailment_active"] is False
+
+    def test_active_true_when_enabled_and_supported(self):
+        settings = BatterySettings(export_curtailment_enabled=True)
+        agg = self._make_aggregator(settings, export_curtailment_active=True)
+        out = agg._serialize_battery_settings()
+        assert out["export_curtailment_active"] is True
 
 
 class TestSerializePreviousDays:

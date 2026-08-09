@@ -32,7 +32,7 @@ export interface HourlyData {
   solarToHome?: FormattedValue;
   solarToBattery?: FormattedValue;
   solarToGrid?: FormattedValue;
-  clippedSolar?: FormattedValue; // solar lost to the inverter AC output cap
+  clippedSolar?: FormattedValue; // solar never delivered as AC export/consumption: inverter AC output cap, or curtailed by PV export-limit curtailment (#502)
   gridToHome?: FormattedValue;
   gridToBattery?: FormattedValue;
   batteryToHome?: FormattedValue;

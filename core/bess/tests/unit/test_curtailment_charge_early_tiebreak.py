@@ -104,10 +104,11 @@ def test_charge_early_plan_is_faithful_and_costs_no_more():
     # R == P: the charge-early plan must execute faithfully through the
     # inverter simulator, not just claim a number. Assert against the
     # corpus-wide pin (single source of truth) rather than a bare
-    # tolerance -- this fixture's gap (+0.0490) sits within 0.001 of the
-    # generic 0.05 budget, so a bare `< 0.05` would fail with a
-    # misleading "diverged beyond tolerance" message on any tiny drift
-    # the pin table is designed to track explicitly.
+    # tolerance -- the pin table is designed to track drift explicitly.
+    # This fixture's gap moved to +0.0693 SEK (#502): the simulator has no
+    # model of PV export-limit curtailment, so it still pays the honest
+    # price for a period BSM will actually curtail to zero at runtime --
+    # see TODO.md's "From #502" entry.
     from core.bess.tests.integration.test_plan_faithfulness import (
         GAP_PIN_TOLERANCE_SEK,
         PLAN_EXECUTION_GAP_SEK,

@@ -40,6 +40,7 @@ from .models import (
     EconomicData,
     EconomicSummary,
     PeriodData,
+    apply_export_curtailment_to_period_data,
     infer_intent_from_flows,
 )
 from .octopus_energy_source import OctopusEnergySource
@@ -789,7 +790,9 @@ class BatterySystemManager:
         """
         try:
             # Build daily view (merges actuals + predictions)
-            daily_view = self.daily_view_builder.build_daily_view(optimization_period)
+            daily_view = self.daily_view_builder.build_daily_view(
+                optimization_period, self.export_curtailment_active
+            )
 
             # Get current Growatt schedule
             growatt_schedule = self._inverter_controller.tou_intervals.copy()
@@ -2404,11 +2407,30 @@ class BatterySystemManager:
                 today_base_cost = sum(
                     pd.economic.grid_only_cost for pd in today_result_periods
                 )
+                # Reported cost must reflect what will actually happen at
+                # runtime, not the honest physics-only price PeriodData
+                # itself keeps (#502) -- see the matching comment in
+                # dp_battery_algorithm.py's own battery_solar_cost
+                # aggregation for why the raw period_data_list stays
+                # untouched. today_solar_only_cost must come from the SAME
+                # curtailment-adjusted copies as today_optimized_cost, not
+                # the honest periods, or the battery-vs-solar-only savings
+                # subtraction below mixes a curtailed total against an
+                # uncurtailed baseline (code review finding).
+                today_curtailment_adjusted_periods = [
+                    apply_export_curtailment_to_period_data(
+                        pd,
+                        self.export_curtailment_active,
+                        self.battery_settings.export_curtailment_price_floor,
+                    )
+                    for pd in today_result_periods
+                ]
                 today_solar_only_cost = sum(
-                    pd.economic.solar_only_cost for pd in today_result_periods
+                    pd.economic.solar_only_cost
+                    for pd in today_curtailment_adjusted_periods
                 )
                 today_optimized_cost = sum(
-                    pd.economic.hourly_cost for pd in today_result_periods
+                    pd.economic.hourly_cost for pd in today_curtailment_adjusted_periods
                 )
                 today_charged = sum(
                     pd.energy.battery_charged for pd in today_result_periods
@@ -3299,7 +3321,9 @@ class BatterySystemManager:
                 )
 
         # Build daily view with current period
-        return self.daily_view_builder.build_daily_view(current_period)
+        return self.daily_view_builder.build_daily_view(
+            current_period, self.export_curtailment_active
+        )
 
     def _persist_today_view(self) -> None:
         """Best-effort snapshot of today's merged view to disk.

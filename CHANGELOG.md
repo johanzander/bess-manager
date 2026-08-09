@@ -34,6 +34,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Dashboard could crash with "Minified React error #310" during a background data refresh — the timeline's tooltip state hook was declared after two conditional early returns, changing the number of hooks called between renders.
 - **Planned PV curtailment is now shown as "Curtailed"** across the dashboard's schedule, timeline, and status views, instead of looking like a profitable Solar Export. ([#501](https://github.com/johanzander/bess-manager/issues/501))
 - **"-0.00" no longer displays for values that round to zero** — e.g. a curtailed period's export revenue now shows as "0.00".
+- **Reported cost and savings no longer include a phantom charge for periods that will actually be curtailed at runtime by PV export-limit curtailment.** ([#502](https://github.com/johanzander/bess-manager/issues/502))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

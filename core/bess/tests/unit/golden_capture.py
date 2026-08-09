@@ -40,9 +40,9 @@ def capture_fixture(name: str) -> dict:
     # -- so `regression_2026_08_08_143843`, which sets
     # `export_curtailment_active` precisely to pin #510's charge-early
     # tie-break, was captured with curtailment OFF. That left
-    # `sell_price_floored` permanently None and
-    # `_prefer_curtailed_charge_absorb` -- one of the two tie-breaks Phase 1
-    # physically moves -- unentered by all 36 goldens, alongside the #429
+    # `sell_price_floored` permanently None and the charge-early tie-break
+    # -- one of the two tie-breaks Phase 1 physically moves and Phase 2
+    # rewrites -- unentered by all 36 goldens, alongside the #429
     # import-cap filter and the 8 fixtures carrying `initial_cost_basis`.
     # Re-listing keys here is exactly the second copy of the run
     # configuration this module's docstring exists to forbid.

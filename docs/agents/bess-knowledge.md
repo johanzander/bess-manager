@@ -449,6 +449,36 @@ configured.
   behavior — it remains the real-time safety net; this constraint just makes
   the *plan* agree with it.
 
+### Export curtailment and the charge-early tie-break (#269)
+
+When export curtailment is active (enabled AND the platform supports
+export-limit control), periods priced below the curtailment floor get an
+effective sell price of 0.0 for the DP's reward calculation only
+(`optimize_battery_schedule`'s `reward_sell_price`); reported economics
+and the execution-time trigger still use the real price. Execution-side,
+BSM writes the hardware export limit (Growatt "Meter 1" + 0%) on any
+period with planned export below the floor and releases it otherwise
+(`battery_system_manager.py`, `_export_limit_curtailed`).
+
+Flooring the sell price creates *exact reward ties by construction*:
+whenever the remaining below-floor solar surplus exceeds battery headroom,
+"charge now, curtail later" and "curtail now, charge later" earn identical
+reward (signature in a bundle: `shadow_price == cycle_cost_per_kwh` in
+those periods). The replay therefore applies a charge-early tie-break
+(`_prefer_curtailed_charge_absorb`, mirrored in the PWL tie-window
+replay): among candidates within the #466 epsilon, prefer the highest
+`next_soe`, but never one that imports more grid energy than the argmax
+winner, and never overriding a discharge winner. Charge-early is
+stochastically dominant — equal model reward, strictly better under
+forecast error in either direction (captures above-forecast PV that
+curtailment would otherwise clip at the panel; preserves slack toward the
+next positive-price block).
+
+**General invariant**: any reward shaping that flattens the objective
+(floors, caps, zeroing) manufactures indifference regions and MUST ship
+with an explicit tie-break policy stating which physically-preferred
+action wins inside the flat region — float noise is not a policy.
+
 
 ## Execution Layer: What Can Override the Schedule
 

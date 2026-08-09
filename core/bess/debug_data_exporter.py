@@ -530,7 +530,14 @@ class DebugDataAggregator:
             Battery settings as dictionary
         """
         try:
-            return asdict(self.system.battery_settings)
+            settings = asdict(self.system.battery_settings)
+            # Resolved capability-aware flag (enabled AND the platform
+            # supports export-limit control) -- not a stored setting, so
+            # from_debug_log.py can't reconstruct it from the settings alone.
+            settings["export_curtailment_active"] = (
+                self.system.export_curtailment_active
+            )
+            return settings
         except Exception as e:
             logger.warning("Failed to serialize battery settings: %s", e)
             return {}

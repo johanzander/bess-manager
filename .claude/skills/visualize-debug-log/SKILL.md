@@ -30,7 +30,8 @@ output, not sensor-derived.
 tooltip shows (which price the shadow price is weighed against, whether it
 clears, breakeven/profit, reward/total value, net savings) is computed once
 in Python (`build_chart.py`'s `compute_decision_view`), reusing the same
-`POWER_CLASSIFICATION_THRESHOLD_KW` core's own code classifies flows with.
+`strategic_intent.FLOW_NOISE_FLOOR_KWH` core's own code classifies flows
+with — the same constant, in the same domain (energy, not power).
 `template_tail.js` only formats the resulting `view` dict per row — it never
 re-derives a threshold or an economic formula from raw numbers. A bug fix or
 behavior change in the real economics only has to happen in Python to reach
@@ -120,6 +121,20 @@ frontend) — this is for a point-in-time bundle snapshot only.
   tooltip needs a new derived number, add it to `compute_decision_view` in
   `build_chart.py` and read it off `r.view` in JS — don't re-derive it from
   raw fields in JavaScript, even for "just this one case."
+- **Re-deriving a threshold in the presentation layer — including in
+  Python.** "Reuse production code" covers the *computation*; it is just as
+  binding on the chart's own thresholds, which feel like display polish but
+  are domain decisions. Import the constant core already owns and apply it
+  in the same domain core applies it. Importing a production constant is
+  NOT the same as reusing production semantics: `_clean_flow` once compared
+  a kWh flow against `POWER_CLASSIFICATION_THRESHOLD_KW`, a *power*
+  constant, zeroing every flow under 0.05 kWh instead of
+  `strategic_intent.FLOW_NOISE_FLOOR_KWH`'s 0.01 kWh. The chart then drew a
+  period labelled LOAD_SUPPORT (label from production) with a zeroed
+  battery flow (suppressed by a rule production never had) — hiding
+  #517's sub-lattice residual covers in the very chart built to show them.
+  If the chart's own filter can contradict the intent label beside it, the
+  filter is wrong.
 - **Forgetting `--title`.** Without it the title is auto-generated from
   period counts only (no bundle date/version) — fine for a quick look, but
   add a real title when publishing something you'll want to find again.

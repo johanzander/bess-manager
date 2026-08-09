@@ -25,8 +25,8 @@ REPO_ROOT = SCRIPT_DIR.parents[
 ]  # .claude/skills/visualize-debug-log/scripts -> repo root
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW  # noqa: E402
 from core.bess.models import EnergyData, infer_intent_from_flows  # noqa: E402
+from core.bess.strategic_intent import FLOW_NOISE_FLOOR_KWH  # noqa: E402
 
 
 def _extract_json_block(text: str, anchor: str) -> str:
@@ -62,13 +62,22 @@ def parse_bundle(text: str) -> dict:
 def _clean_flow(v: float) -> float:
     """Zero out sub-threshold energy flows.
 
-    Below core's own POWER_CLASSIFICATION_THRESHOLD_KW, a flow value is
-    floating-point/cross-sensor noise, not a real physical transfer (same
-    threshold core.bess.strategic_intent uses to classify flows) --
-    reused here so the chart never displays a phantom "0.00 grid" a raw
-    float epsilon would otherwise trigger.
+    Consumes core's own energy-domain noise floor
+    (`strategic_intent.FLOW_NOISE_FLOOR_KWH`) -- the same constant
+    `classify_strategic_intent` uses to decide whether a flow is a real
+    physical transfer or sensor/float noise. Reused directly so the chart
+    can never disagree with the intent label it renders beside the flow.
+
+    Previously this compared a kWh flow against
+    POWER_CLASSIFICATION_THRESHOLD_KW, a *power* constant (0.05 kW): a unit
+    mismatch that zeroed every flow below 0.05 kWh instead of 0.01 kWh.
+    It hid, among others, the sub-lattice residual-cover discharges #517
+    introduced -- a real 0.0214 kWh battery_to_home rendered as 0.0000
+    while SOE visibly drained, in the very chart meant to show that fix
+    working. Importing a production constant is not the same as reusing
+    production semantics; the domain (power vs energy) has to match too.
     """
-    return v if abs(v) > POWER_CLASSIFICATION_THRESHOLD_KW else 0.0
+    return v if abs(v) > FLOW_NOISE_FLOOR_KWH else 0.0
 
 
 def compute_decision_view(r: dict, cycle_cost: float) -> dict:

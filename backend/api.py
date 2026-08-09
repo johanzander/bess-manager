@@ -1932,7 +1932,7 @@ async def get_savings_aggregate(
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             today_view = bess_controller.system.daily_view_builder.build_daily_view(
-                current_period
+                current_period, bess_controller.system.export_curtailment_active
             )
 
         buckets = build_buckets(
@@ -2022,7 +2022,7 @@ async def get_prediction_comparison(
 
         # Build current daily view
         current_daily_view = bess_controller.system.daily_view_builder.build_daily_view(
-            current_period
+            current_period, bess_controller.system.export_curtailment_active
         )
 
         # Get current Growatt schedule

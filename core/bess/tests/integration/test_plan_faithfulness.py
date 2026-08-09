@@ -176,6 +176,10 @@ def test_scenarios_are_plan_faithful_realized_equals_planned():
 # the positive mass is #497 (the plan books export revenue that load-following
 # hardware never earns, so R comes out more expensive than P). The one negative
 # entry runs the other way and has a different, still-undiagnosed cause.
+# `regression_2026_08_08_143843`'s entry has a second, distinct cause (#502,
+# see TODO.md's "From #502" entry): the simulator has no model of PV
+# export-limit curtailment, so it still pays the honest price for a period
+# BSM will actually curtail to zero -- not the plan being newly dishonest.
 #
 # Regenerate deliberately, never reflexively: a shrinking number is a fix, a
 # growing one is a regression, and either way the diff that moved it should say
@@ -200,7 +204,7 @@ PLAN_EXECUTION_GAP_SEK = {
     "regression_2026_07_26_203726": +0.0255,
     "regression_2026_08_02_043728": +0.0894,
     "regression_2026_08_06_466": +0.0033,
-    "regression_2026_08_08_143843": +0.0490,
+    "regression_2026_08_08_143843": +0.0693,
     "regression_frank_debug_before": +0.0453,
     "synthetic_2024_08_16_high_spread_with_solar": +0.0000,
     "synthetic_2025_01_12_evening_peak_with_solar": +0.2408,

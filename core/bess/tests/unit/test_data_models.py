@@ -6,11 +6,14 @@ Tests the EnergyData, EconomicData, DecisionData, and PeriodData structures
 
 from datetime import datetime
 
+import pytest
+
 from core.bess.models import (
     DecisionData,
     EconomicData,
     EnergyData,
     PeriodData,
+    apply_export_curtailment_to_period_data,
     infer_intent_from_flows,
 )
 
@@ -481,3 +484,123 @@ class TestPeriodData:
 
         assert hourly.timestamp is not None
         assert before <= hourly.timestamp <= after
+
+
+class TestApplyExportCurtailmentToPeriodData:
+    """Unit tests for the #502 reporting-only curtailment transform."""
+
+    def _curtailable_period(self) -> PeriodData:
+        energy = EnergyData(
+            solar_production=1.0,
+            home_consumption=0.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=0.0,
+            grid_exported=1.0,
+            battery_soe_start=10.0,
+            battery_soe_end=10.0,
+        )
+        economic = EconomicData.from_energy_data(
+            energy, buy_price=1.0, sell_price=-0.02
+        )
+        return PeriodData.from_optimization(
+            period=5,
+            energy_data=energy,
+            economic_data=economic,
+            decision_data=DecisionData(strategic_intent="SOLAR_STORAGE"),
+        )
+
+    def test_zeroes_export_and_folds_it_into_clipped_solar(self):
+        period = self._curtailable_period()
+
+        adjusted = apply_export_curtailment_to_period_data(
+            period, export_curtailment_active=True, export_curtailment_price_floor=0.0
+        )
+
+        assert adjusted.energy.grid_exported == 0.0
+        assert adjusted.energy.clipped_solar == 1.0
+        assert adjusted.economic.export_revenue == 0.0
+        assert adjusted.economic.hourly_cost == 0.0
+
+    def test_does_not_mutate_the_input(self):
+        period = self._curtailable_period()
+
+        apply_export_curtailment_to_period_data(
+            period, export_curtailment_active=True, export_curtailment_price_floor=0.0
+        )
+
+        assert period.energy.grid_exported == 1.0
+        assert period.economic.sell_price == -0.02
+
+    def test_returns_unchanged_when_curtailment_inactive(self):
+        period = self._curtailable_period()
+
+        adjusted = apply_export_curtailment_to_period_data(
+            period,
+            export_curtailment_active=False,
+            export_curtailment_price_floor=0.0,
+        )
+
+        assert adjusted is period
+
+    def test_returns_unchanged_when_price_above_floor(self):
+        period = self._curtailable_period()
+        period.economic.sell_price = 0.05
+
+        adjusted = apply_export_curtailment_to_period_data(
+            period, export_curtailment_active=True, export_curtailment_price_floor=0.0
+        )
+
+        assert adjusted is period
+
+    def test_curtails_only_the_solar_sourced_share_of_a_mixed_export(self):
+        """Regression: the export-limit hardware only throttles PV/MPPT
+        production (ha_api_controller.set_growatt_export_limit's own
+        comment), never battery discharge. A period exporting 2 kWh made of
+        1 kWh solar + 1 kWh battery discharge must only have the 1 kWh
+        solar-sourced share curtailed -- the battery-sourced kWh still
+        really exports and still really costs money. Folding the whole
+        export into clipped_solar corrupted the solar_only_cost baseline
+        and flipped hourly_savings from a real loss to a false gain (found
+        in code review)."""
+        energy = EnergyData(
+            solar_production=2.0,
+            home_consumption=1.0,
+            battery_charged=0.0,
+            battery_discharged=1.0,
+            grid_imported=0.0,
+            grid_exported=2.0,
+            battery_soe_start=10.0,
+            battery_soe_end=9.0,
+        )
+        assert energy.solar_to_grid == pytest.approx(1.0)
+        assert energy.battery_to_grid == pytest.approx(1.0)
+
+        economic = EconomicData.from_energy_data(energy, buy_price=1.0, sell_price=-3.0)
+        period = PeriodData.from_optimization(
+            period=7,
+            energy_data=energy,
+            economic_data=economic,
+            decision_data=DecisionData(strategic_intent="BATTERY_EXPORT"),
+        )
+        assert economic.hourly_savings == pytest.approx(-3.0)
+
+        adjusted = apply_export_curtailment_to_period_data(
+            period, export_curtailment_active=True, export_curtailment_price_floor=0.0
+        )
+
+        # Only the solar-sourced 1 kWh is curtailed -- the battery-sourced
+        # 1 kWh still exports and still costs real money.
+        assert adjusted.energy.grid_exported == pytest.approx(1.0)
+        assert adjusted.energy.clipped_solar == pytest.approx(1.0)
+        assert adjusted.economic.hourly_savings == pytest.approx(-3.0)
+
+    def test_returns_unchanged_when_nothing_exported(self):
+        period = self._curtailable_period()
+        period.energy.grid_exported = 0.0
+
+        adjusted = apply_export_curtailment_to_period_data(
+            period, export_curtailment_active=True, export_curtailment_price_floor=0.0
+        )
+
+        assert adjusted is period

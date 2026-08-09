@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Changed
 
-- **Finer battery optimization grid** — the DP's state/action resolution is halved (0.1 kW / 0.025 kWh), recovering ~2.4 SEK/day of savings across the benchmark corpus while slightly reducing solve time. ([#512](https://github.com/johanzander/bess-manager/issues/512))
+- **Finer battery optimization grid** — the DP's state/action resolution is halved (0.1 kW / 0.025 kWh), recovering 2.43 SEK/day of savings across the benchmark corpus while reducing solve time. ([#512](https://github.com/johanzander/bess-manager/issues/512))
 
 ### Fixed
 

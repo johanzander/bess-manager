@@ -36,13 +36,29 @@ so it is not derived from POWER_STEP_KW and is not defined here).
 # Resolution history: 0.2 kW / 0.05 kWh until #512, whose full-corpus
 # benchmark showed the coarser grid's value-function discretization left
 # 0.01-0.36 SEK/day unrealized on 19/33 fixtures vs a horizon-spanning
-# exact-PWL bound. Halving both steps (keeping the reachable-state
-# invariant above) recovers 2.08 SEK/day across the corpus -- planned and
-# realized identically, since #497/#511 made R == P structural -- net of
-# small non-monotone per-fixture regressions (worst +0.079). It also
-# *reduces* total solve latency: a finer grid produces fewer near-ties for
-# the #450 hybrid PWL re-solve to fire on. A further halving (0.05 kW)
-# bought only ~14% more at 4.4x the latency and was rejected.
+# exact-PWL bound.
+#
+# Every figure below is from one measurement run over the 35-fixture
+# corpus (PR #516 head vs the #511 merge base), realized cost through the
+# inverter simulator -- not planned cost, and not several runs stitched
+# together. Halving both steps (keeping the reachable-state invariant
+# above) recovers 2.43 SEK/day: 26 fixtures better, 8 worse, 1 unchanged,
+# worst single-fixture regression +0.0498 -- inside, but only just inside,
+# the 0.05 SEK/fixture budget in
+# docs/superpowers/plans/2026-08-09-optimizer-target-architecture.md.
+# Planned and realized deltas agree to 0.001 SEK because #497/#511 made
+# R == P structural. It also *reduces* solve latency (corpus 15.2s ->
+# 11.2s, worst single fixture 4.79s -> 1.81s): a finer grid produces fewer
+# near-ties for the #450 hybrid PWL re-solve to fire on, which more than
+# offsets ~4x the backward-induction work.
+#
+# A further halving (0.05 kW / 0.0125 kWh) was measured in the same run
+# and rejected on the budget, not on cost: it recovers 25% more
+# (3.03 SEK/day) at 2.3x the latency, but breaches the 0.05 SEK/fixture
+# budget on two fixtures (+0.0671 realworld_2026_04_27_211212, +0.0651
+# synthetic_clear_sky_ac_clipping). Grid refinement is not per-fixture
+# monotone, so a finer grid is not automatically safer -- any future
+# refinement has to re-measure the per-fixture tail, not just the total.
 SOE_STEP_KWH = 0.025
 
 # Action space: power grid resolution (kW).

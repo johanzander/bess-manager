@@ -232,12 +232,32 @@ measured against `candidates[argmax_index].value` — never chained):
    safer pick against a solar shortfall, and this row permanently bans it.
    That codifies today's behavior; a future amendment relaxing it must
    cite this note and bring field evidence.)
-2. **Guard:** if the argmax winner is any non-idle action
-   (`abs(power) > POWER_TOLERANCE_KW` — charge OR discharge), return it.
-   This is exact parity with today: both `_prefer_*` functions bail on any
-   non-idle winner (dp:1430, dp:1494). Narrowing this to discharge-only
-   would let row 3 flip a within-epsilon charge winner to a discharge —
-   an undeclared semantic change this plan does not make.
+2. **Guard (per-preference, not shared — see below):** row 3 returns the
+   argmax winner unchanged when it is a **charge**
+   (`power > POWER_TOLERANCE_KW`) or a discharge **already beyond the load
+   cover** (`-power > max_cover_p`, row 3's own eligibility bound). An
+   IDLE winner *or a partial-cover discharge winner* stays eligible, so
+   row 3 can improve a partial cover to a larger within-epsilon one.
+   Row 4 keeps its own, different guard: it bails on any **discharge**
+   winner and may still improve a charge winner.
+
+   Charge winners are never flipped to discharges — that part is
+   unchanged and still intended: it would be an undeclared semantic change
+   this plan does not make.
+
+   **This row previously claimed "both `_prefer_*` functions bail on any
+   non-idle winner", and that parity claim is now false in both
+   directions.** #512 widened `_prefer_load_covering_discharge` to fire on
+   partial-cover winners as well as IDLE: which candidate `argmax` returns
+   among tied candidates is an enumeration-order accident, and at #512's
+   finer grid it started landing on partial covers, silently skipping the
+   swap and leaving residual import exposed — the hole a literal
+   implementation of the old row 2 would re-open. In the other direction,
+   `_prefer_curtailed_charge_absorb` bails on discharge winners, not on
+   all non-idle ones, so it can already improve a charge winner today.
+   The asymmetry between the two rules is therefore deliberate and must
+   survive the merge into `apply_tie_policy`; a single shared non-idle
+   guard cannot express it.
 3. **Prefer** the largest load-tracking discharge ≤ net load (+half a
    rate step, capped at `BATTERY_EXPORT_THRESHOLD_KWH/dt`) within epsilon
    — the #466 rule, now firing on **all** within-epsilon ties, including

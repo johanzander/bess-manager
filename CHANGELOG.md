@@ -20,7 +20,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- Minor internal cleanup in the debug export.
 - Near-tied battery decisions now prefer the fullest load-covering discharge even when the tie surfaces at a partial cover, closing a gap where residual import stayed exposed to consumption spikes. ([#512](https://github.com/johanzander/bess-manager/issues/512))
 - Health checks for Battery Control, Battery Monitoring, and Energy Monitoring now report ERROR instead of OK when a required sensor is entirely unmapped, not just when it's unavailable.
 - Huawei TOU writes no longer fail on installs with no working-mode select (e.g. behind an EMMA energy manager); the health check reports this explicitly. ([#412](https://github.com/johanzander/bess-manager/pull/412))
@@ -61,6 +60,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Internal
 
 - Locked a real Growatt GEN4 VPP installation's config (`ridax67`) into the discovery regression suite as `ci-wizard-growatt-vpp-ridax-118`, covering a real-world ambiguous case (same `unique_id` suffix exposed on more than one HA domain) the synthetic VPP fixtures didn't exercise. ([#118](https://github.com/johanzander/bess-manager/issues/118))
+
+## [10.0.2] - 2026-08-10
+
+### Fixed
+
+- Minor internal cleanup in the debug export.
 
 ## [10.0.1] - 2026-08-02
 

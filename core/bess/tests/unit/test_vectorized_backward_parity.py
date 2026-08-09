@@ -29,6 +29,7 @@ from core.bess.action_selector import _residual_cover_p
 from core.bess.dp_battery_algorithm import (
     _compute_reward,
     _compute_reward_grid,
+    _effective_ac_cap_kwh,
     _run_dynamic_programming,
     _state_transition,
     _state_transition_grid,
@@ -63,7 +64,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
         DT,
         solar_production=solar,
         home_consumption=home,
-        ac_cap_kwh=settings.inverter_max_ac_power_kw * DT,
+        ac_cap_kwh=_effective_ac_cap_kwh(settings, DT),
         import_cap_kwh=import_cap_kwh,
     )
     grid_reward, grid_imported = _compute_reward_grid(
@@ -88,7 +89,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
                 DT,
                 solar_production=solar,
                 home_consumption=home,
-                ac_cap_kwh=settings.inverter_max_ac_power_kw * DT,
+                ac_cap_kwh=_effective_ac_cap_kwh(settings, DT),
                 import_cap_kwh=import_cap_kwh,
             )
             assert grid_next_soe[i, j] == scalar_next_soe, (

@@ -283,6 +283,7 @@ def _group_per_period(**kwargs) -> list[dict]:
             "grid_charge": False,
             "total_action_kwh": 0.0,
             "soc_end_pct": None,
+            "curtailed": False,
         }
         for i in range(len(intents))
     ]
@@ -414,6 +415,7 @@ def _group_per_period_vpp(**kwargs) -> list[dict]:
             "grid_charge": False,
             "total_action_kwh": 0.0,
             "soc_end_pct": None,
+            "curtailed": False,
         }
         for i in range(len(intents))
     ]

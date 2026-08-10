@@ -449,6 +449,23 @@ def _state_transition(
     battery up to capacity, clamped by the inverter's max charge rate. This models
     the economically correct baseline: free solar energy is more valuable stored
     for later use than exported at the (typically lower) sell price.
+
+    `ac_cap_kwh` is a live footgun and callers should pass
+    `_effective_ac_cap_kwh(battery_settings, dt)` rather than omitting it. It is
+    read only inside the `import_cap_kwh` branch, to throttle grid charging
+    against the house fuse (#429), so a caller that passes an import cap while
+    omitting this one computes `next_soe` under a different inverter limit than
+    `_period_flows` derives for the very same action -- the reward-vs-flows
+    divergence P4 exists to remove.
+
+    It cannot be asserted away, which is the trap: `_effective_ac_cap_kwh`
+    returns None for a battery with no AC cap configured, so None is a
+    legitimate value here and is indistinguishable from a forgotten argument.
+    The real remedy is to derive the cap inside this function, as
+    `_period_flows` and `_price_flows` now do -- deferred rather than done here
+    only because this is the bit-parity-pinned physics core the migration plan
+    says to refactor around. Today `select_action` is the only caller passing an
+    import cap and it passes the derived value, so nothing is presently wrong.
     """
     if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
         surplus = max(0.0, solar_production - home_consumption)
@@ -2135,16 +2152,27 @@ def optimize_battery_schedule(
         # from moved.
         #
         # This restores the flow record's agreement with the period's own
-        # *start* state, which is what the splice moved. It does not make a
-        # room-limited STORE boundary's `battery_charged` agree with
-        # `battery_soe_end - battery_soe_start`: `next_soe` still reflects the
-        # pre-splice start, so the two are derived from different states.
-        # That gap is pre-existing, not introduced here -- `_build_period_data`
-        # has always derived STORE throughput from `soe` (via room/rate) while
-        # taking `next_soe` from the trajectory, so the same mismatch existed
-        # before this pass stopped re-deriving. It is bounded by
-        # `_end_soe_pin_tolerance`, and closing it means re-deriving the
-        # post-window trajectory, which the pin exists precisely to avoid.
+        # *start* state, which is what the splice moved. One case it does not
+        # reconcile: a RATE-limited (or import-capped) STORE boundary, where
+        # throughput is `min(rate_throughput, room_throughput) =
+        # rate_throughput` and therefore independent of `soe`, while the stale
+        # `next_soe` still encodes the pre-splice start -- so
+        # `battery_soe_end - battery_soe_start` overstates `battery_charged`
+        # by exactly the pin drift.
+        #
+        # Room-limited STORE is NOT affected, despite being the intuitive
+        # suspect: there throughput is `(max_soe - soe) / eff`, so
+        # `energy_stored == max_soe - soe`, and `_state_transition` clamps
+        # `next_soe` to `max_soe` -- the two agree for any start SOE,
+        # including a spliced one.
+        #
+        # The gap is pre-existing, not introduced here: `_build_period_data`
+        # has always derived STORE throughput from `soe` via room/rate while
+        # taking `next_soe` from the trajectory (verified against origin/main),
+        # so the same mismatch existed before this pass stopped re-deriving. It
+        # is bounded by `_end_soe_pin_tolerance`, and closing it means
+        # re-deriving the post-window trajectory, which the pin exists
+        # precisely to avoid.
         for window in windows:
             if window.end >= horizon:
                 continue

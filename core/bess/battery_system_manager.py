@@ -3024,6 +3024,18 @@ class BatterySystemManager:
                 # grid charging would have booked the whole charge as nearly
                 # free. Caught in review on this repo's own evidence bundle,
                 # `historical_2026_07_18_charge_attribution.json` period 39.
+                #
+                # Known asymmetry, deliberate: this can only push the basis UP.
+                # A grid counter that under-reads leaves a positive remainder
+                # priced here at buy price, while one that over-reads is
+                # absorbed into `grid_to_home` upstream and leaves nothing, so
+                # rounding never nets out. Measured on that bundle the bias is
+                # +0.003 SEK/kWh (0.9844 -> 0.9875) over a day, but it scales
+                # with charging periods and with buy price. Accepted because
+                # the direction is the safe one -- an overstated basis makes
+                # the DP more reluctant to discharge, never less -- and because
+                # the retired formula priced the same energy at buy price too,
+                # uncapped, so this is not a regression against it.
                 unattributed = max(
                     0.0,
                     event.energy.battery_charged - solar_to_battery - grid_to_battery,

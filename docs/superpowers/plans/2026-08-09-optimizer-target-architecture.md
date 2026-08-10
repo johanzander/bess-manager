@@ -635,7 +635,7 @@ floor; #320/#352 reproductions pass.
 Five things Phase 3 found or left behind. Recorded here because until now
 they existed only in code comments and commit messages, which nobody greps.
 
-- [ ] **Regime-aware charge-source split (the one with money in it).**
+- [ ] **#536 — regime-aware charge-source split (the one with money in it).**
       `EnergyData` allocates solar to the home first. That is right for
       `load_first` surplus charging and wrong during deliberate
       `GRID_CHARGING` (`battery_first`), where PV is DC-coupled straight to

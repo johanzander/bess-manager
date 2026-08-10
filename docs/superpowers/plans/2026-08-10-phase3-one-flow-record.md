@@ -46,6 +46,34 @@ Re-measure and record in the PR body:
 If any re-measurement contradicts the stale figure materially, **stop and
 re-scope** rather than proceeding on this plan's assumptions.
 
+### Task 0 results — measured 2026-08-10 on `a81ac613`
+
+| Measurement | Stale claim | Re-measured | Verdict |
+|---|---|---|---|
+| Fixtures / planned periods | 32 fixtures | **36 / 2168** | as expected |
+| `_compute_reward` vs `_build_period_data`, `grid_imported` | 0.0 | **0.0** (0 of 2461 rows differ) | confirmed |
+| Same, wear cost | ≤6.7e-16 | **≤6.661e-16** (42 of 2461 rows) | confirmed |
+| Knife-edge selections | 46 / 2194 | **56 / 2194** (29 bit-exact + 27 <1e-12) | see below |
+| Fixtures firing the idle guardrail | 0 of 32 | **0 of 36** | confirmed |
+| `EnergyData` heuristic firings on planned data | 0 | **0** | confirmed |
+
+No re-measurement contradicted the plan materially, so the scope stands.
+Two notes on the details:
+
+- **`grid_imported` agrees exactly, so the consolidation is hygiene, not a
+  bugfix** — stated plainly as this task requires. The only deviation
+  between the two sites is the wear term's two algebraically-identical
+  formulations, at float-noise magnitude.
+- **The knife-edge count is higher than the stale figure, not lower**, and
+  the stale definition was not reproducible anyway (Phase 2 replaced tie
+  resolution). Measured here against the question that actually matters for
+  bit-parity: how often is the strict-`>` argmax decided by a gap under
+  1e-12 against a candidate the goldens would record *differently* (in
+  `power` or `next_soe`). 56 is a risk figure, and it argues *harder* for
+  the plan's "do not re-associate the reward arithmetic" instruction. For
+  contrast, ties by the codebase's own ambiguity criterion
+  (`TIE_DEDUP_SOE_KWH`, 1.0 kWh) number only 4.
+
 ---
 
 ## Acceptance gate (whole phase)
@@ -172,12 +200,38 @@ reconcile independent counters" clamps. They currently run on **planned and
 simulated** flows too, which is a literal P4 violation ("planned and
 simulated flows must never pass through a noise model").
 
-- [ ] Gate them on a construction-time flag (or a separate exact
-      constructor) so exact data provably bypasses them.
-- [ ] Confirm via Task 0 that they fire 0 times on exact data, making this a
-      zero-behaviour-change compliance move.
-- [ ] Do **not** touch their ingest semantics — they are required by real
-      measured data and pinned by `tests/helpers.py`.
+- [x] **ATTEMPTED AND BACKED OUT 2026-08-10 — the premise failed.** Its own
+      gating condition was "a zero-behaviour-change compliance move", and it
+      is not one.
+
+      Two of the three are not noise heuristics at all: the `grid_to_home`
+      and `battery_to_grid` clamps are **physical bounds** (a flow cannot
+      exceed its source). Gating them let an exact record attribute more
+      export to the battery than the battery discharged — inventing energy,
+      the opposite of the non-invention rule. They stay unconditional.
+
+      The third, the #350 fold, genuinely is a noise model, but bypassing it
+      **is** a behaviour change and it reaches hardware. Whenever
+      `ac_cap < home_consumption < solar_production`, `_discharge_is_unexecutable`
+      (#497) stands down — it computes its deficit as `home - solar`, from
+      RAW solar, blind to AC clipping — while the AC stage still leaves the
+      battery covering a deficit it can overshoot by less than
+      `GRID_FLOW_RESOLUTION_KWH`. Ungating the fold there flips planned intent
+      LOAD_SUPPORT → BATTERY_EXPORT, which `inverter_controller` maps to
+      `grid_first`: the export feedback loop `battery_system_manager`
+      documents. Constructed and confirmed, not hypothesised.
+
+      Task 0's "0 firings on 2168 planned periods" was weak cover: only 4 of
+      36 fixtures have an AC cap at all, and a 2170-run sweep over caps
+      2–10 kW found 0 hits **but never entered the `ac_cap < home` regime**,
+      which is the only regime where the band is reachable.
+
+      **The P4 violation therefore still stands on `main`**, documented by
+      `test_planned_flows_still_pass_through_the_ingest_fold`. Closing it
+      needs an AC-aware candidate filter — a candidate-space change, i.e.
+      Phase 4 — not a model-layer flag. That test should flip when the gate
+      finally lands, not be deleted.
+- [x] Ingest semantics untouched, as required.
 
 ## Task 6 — correct the parent plan's own claims
 

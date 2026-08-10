@@ -33,6 +33,7 @@ from core.bess.simulation.inverter_simulator import (
 from core.bess.strategic_intent import classify_strategic_intent
 from core.bess.tests.helpers import (
     _scenario_inputs,
+    flows_for,
     make_battery_settings,
     run_scenario,
     run_scenario_realized,
@@ -101,6 +102,7 @@ def test_idle_full_battery_clips_above_cap():
     assert next_soe == full
 
     pd = _build_period_data(
+        flows=flows_for(0.0, full, next_soe, 0.15, 1.75, bs, DT),
         power=0.0,
         soe=full,
         next_soe=next_soe,
@@ -198,6 +200,7 @@ def test_bypass_preserves_soe_and_classifies_as_solar_export():
     soe = 5.0
 
     pd = _build_period_data(
+        flows=flows_for(0.0, soe, soe, 0.15, 1.0, bs, DT),
         power=0.0,
         soe=soe,
         next_soe=soe,
@@ -226,6 +229,7 @@ def test_store_absorbs_above_cap_overflow_dc_side():
         soe, 5.0, bs, DT, solar_production=1.75, home_consumption=0.15
     )
     pd = _build_period_data(
+        flows=flows_for(5.0, soe, next_soe, 0.15, 1.75, bs, DT),
         power=5.0,
         soe=soe,
         next_soe=next_soe,

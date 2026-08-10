@@ -11,6 +11,7 @@ from core.bess.battery_system_manager import intra_period_discharge_gate
 from core.bess.dp_battery_algorithm import (
     _build_period_data,
     _effective_ac_cap_kwh,
+    _period_flows,
     _state_transition,
 )
 from core.bess.inverter_controller import InverterController
@@ -241,7 +242,17 @@ def simulate(
                 solar_production=solar_production[t],
                 home_consumption=home_consumption[t],
             )
+        flows = _period_flows(
+            power=power,
+            soe=soe,
+            next_soe=next_soe,
+            home_consumption=home_consumption[t],
+            solar_production=solar_production[t],
+            battery_settings=settings,
+            dt=dt,
+        )
         pd = _build_period_data(
+            flows=flows,
             power=power,
             soe=soe,
             next_soe=next_soe,

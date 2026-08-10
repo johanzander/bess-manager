@@ -56,6 +56,7 @@ __all__ = [
 
 
 import logging
+from dataclasses import dataclass
 from enum import Enum
 
 import numpy as np
@@ -65,7 +66,6 @@ from core.bess.dp_constants import (
     SOE_STEP_KWH,
 )
 from core.bess.models import (
-    DecisionData,
     EconomicData,
     EconomicSummary,
     EnergyData,
@@ -75,7 +75,6 @@ from core.bess.models import (
 )
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
-    classify_strategic_intent,
     create_decision_data,
 )
 
@@ -274,6 +273,159 @@ def _ac_flows_grid(
     return home_consumption - home_served, ac_output - home_served
 
 
+@dataclass(frozen=True)
+class PeriodFlows:
+    """Every physical energy flow one candidate action produces in one period
+    (kWh) -- the single flow record principle P4 requires
+    (`docs/agents/optimizer-architecture.md`).
+
+    Flows only. **No prices and no costs belong on this record**, deliberately:
+    the DP's objective is evaluated at the #269 floored `reward_sell_price`
+    while the reported `PeriodData` is priced at the real `sell_price`, so a
+    single costed record would collapse a distinction the optimizer depends
+    on. The record says what moved; each consumer prices it.
+
+    `energy_stored` is the charge-throughput basis `(solar_to_battery +
+    grid_to_battery) * efficiency_charge` -- the quantity the reward's wear
+    term is charged on. `_build_period_data` deliberately keeps charging wear
+    on the SoE-delta basis `max(0, next_soe - soe)` instead: the two are
+    algebraically identical but take different float paths, and the reported
+    economics are pinned bit-identically against goldens computed on the
+    SoE-delta form.
+    """
+
+    solar_to_battery: float
+    grid_to_battery: float
+    battery_charged: float
+    battery_discharged: float
+    grid_imported: float
+    grid_exported: float
+    clipped_solar: float
+    energy_stored: float
+
+
+def _period_flows(
+    power: float,
+    soe: float,
+    next_soe: float,
+    home_consumption: float,
+    solar_production: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    import_cap_kwh: float | None = None,
+) -> PeriodFlows:
+    """Derive one candidate action's complete flow set -- the only place a
+    planned period's *reported and priced* flows are computed.
+
+    Not the only place the charge split appears, and the difference matters
+    if you are about to edit it: `_state_transition` carries its own copy to
+    produce `next_soe`, and the two numpy mirrors (`_state_transition_grid`,
+    `_compute_reward_grid`) carry vectorized copies that P1(a) permits the
+    backward passes. A change to the split here must be made there too, or
+    reported `battery_soe_end` will stop agreeing with reported
+    `battery_charged`.
+
+    Before Phase 3 this arithmetic existed three MORE times over
+    (`_compute_reward`, `_build_period_data`, `_create_idle_schedule`), which
+    is the reward-vs-flows divergence class P4 forbids: an edit to the reward
+    side that did not reach the reporting side produced periods whose priced
+    energy and reported energy disagreed (#497/#459).
+
+    The term order and the in-place `grid_imported += grid_to_battery` are
+    load-bearing, not stylistic. 56 of the corpus's 2194 selections are
+    decided by a value gap under 1e-12 between candidates with different
+    recorded actions (measured 2026-08-10), so re-associating this arithmetic
+    -- "compute once, then multiply out" -- moves ULPs and flips them.
+
+    The AC cap is derived here rather than accepted as an argument, and
+    `_price_flows` derives it the same way. It used to be a parameter, which
+    meant a caller could produce flows under one cap and have them priced
+    under another -- the reward-vs-flows divergence class P4 exists to
+    remove, merely relocated from the physics to its inputs. Every caller
+    passed `_effective_ac_cap_kwh(battery_settings, dt)` anyway, so there was
+    nothing to express and something to get wrong.
+    """
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+
+    if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
+        surplus = max(0.0, solar_production - home_consumption)
+        room_throughput = (
+            battery_settings.max_soe_kwh - soe
+        ) / battery_settings.efficiency_charge
+        rate_throughput = battery_settings.max_charge_power_kw * dt
+        solar_to_battery = min(surplus, rate_throughput, room_throughput)
+        remaining_rate = max(
+            0.0, min(rate_throughput, room_throughput) - solar_to_battery
+        )
+        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
+
+        # genuine excess solar (above rate/room) is exported; deliberate grid
+        # top-up imported
+        grid_imported, grid_exported, clipped_solar = _ac_flows(
+            solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
+        )
+        if import_cap_kwh is not None:
+            # Grid charging must not push total import (load + charging) over
+            # the house fuse's import cap (#429) -- throttle the grid-charge
+            # component to whatever headroom the load leaves.
+            grid_to_battery = min(
+                grid_to_battery, max(0.0, import_cap_kwh - grid_imported)
+            )
+        energy_stored = (
+            solar_to_battery + grid_to_battery
+        ) * battery_settings.efficiency_charge
+        grid_imported += grid_to_battery
+        return PeriodFlows(
+            solar_to_battery=solar_to_battery,
+            grid_to_battery=grid_to_battery,
+            battery_charged=solar_to_battery + grid_to_battery,
+            battery_discharged=0.0,
+            grid_imported=grid_imported,
+            grid_exported=grid_exported,
+            clipped_solar=clipped_solar,
+            energy_stored=energy_stored,
+        )
+
+    if power < -POWER_TOLERANCE_KW:  # Discharging
+        battery_discharged = abs(power) * dt
+        grid_imported, grid_exported, clipped_solar = _ac_flows(
+            solar_production, home_consumption, 0.0, battery_discharged, ac_cap_kwh
+        )
+        return PeriodFlows(
+            solar_to_battery=0.0,
+            grid_to_battery=0.0,
+            battery_charged=0.0,
+            battery_discharged=battery_discharged,
+            grid_imported=grid_imported,
+            grid_exported=grid_exported,
+            clipped_solar=clipped_solar,
+            energy_stored=0.0,
+        )
+
+    # IDLE -- passive solar charging; the battery never discharges here
+    # (`_idle_battery_flows` returns 0.0 for it by construction).
+    battery_charged, battery_discharged = _idle_battery_flows(
+        soe, next_soe, battery_settings
+    )
+    grid_imported, grid_exported, clipped_solar = _ac_flows(
+        solar_production,
+        home_consumption,
+        battery_charged,
+        battery_discharged,
+        ac_cap_kwh,
+    )
+    return PeriodFlows(
+        solar_to_battery=battery_charged,
+        grid_to_battery=0.0,
+        battery_charged=battery_charged,
+        battery_discharged=battery_discharged,
+        grid_imported=grid_imported,
+        grid_exported=grid_exported,
+        clipped_solar=clipped_solar,
+        energy_stored=next_soe - soe,
+    )
+
+
 def _state_transition(
     soe: float,
     power: float,
@@ -297,6 +449,23 @@ def _state_transition(
     battery up to capacity, clamped by the inverter's max charge rate. This models
     the economically correct baseline: free solar energy is more valuable stored
     for later use than exported at the (typically lower) sell price.
+
+    `ac_cap_kwh` is a live footgun and callers should pass
+    `_effective_ac_cap_kwh(battery_settings, dt)` rather than omitting it. It is
+    read only inside the `import_cap_kwh` branch, to throttle grid charging
+    against the house fuse (#429), so a caller that passes an import cap while
+    omitting this one computes `next_soe` under a different inverter limit than
+    `_period_flows` derives for the very same action -- the reward-vs-flows
+    divergence P4 exists to remove.
+
+    It cannot be asserted away, which is the trap: `_effective_ac_cap_kwh`
+    returns None for a battery with no AC cap configured, so None is a
+    legitimate value here and is indistinguishable from a forgotten argument.
+    The real remedy is to derive the cap inside this function, as
+    `_period_flows` and `_price_flows` now do -- deferred rather than done here
+    only because this is the bit-parity-pinned physics core the migration plan
+    says to refactor around. Today `select_action` is the only caller passing an
+    import cap and it passes the derived value, so nothing is presently wrong.
     """
     if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
         surplus = max(0.0, solar_production - home_consumption)
@@ -547,8 +716,8 @@ def _compute_reward(
     solar_production: float,
     cost_basis: float,
     import_cap_kwh: float | None = None,
-) -> tuple[float, float, float]:
-    """Hot-path reward computation — returns scalars only, no dataclass allocation.
+) -> tuple[float, float, PeriodFlows]:
+    """Hot-path reward computation — prices the period's `PeriodFlows` record.
 
     CYCLE COST POLICY:
     - Applied only to charging operations (not discharging)
@@ -568,13 +737,73 @@ def _compute_reward(
       action set outright (`_discharge_is_unexecutable`), never priced here.
 
     Returns:
-        (reward, new_cost_basis, grid_imported). `grid_imported` is exposed
-        so callers can enforce the import-cap feasibility constraint (#429)
-        without recomputing these flows.
+        (reward, new_cost_basis, flows). The `PeriodFlows` record is exposed
+        so callers get this candidate's complete physical flows without
+        recomputing them -- the import-cap feasibility constraint (#429) and
+        the reported `PeriodData` both read it rather than re-deriving (P4).
+    """
+    flows = _period_flows(
+        power=power,
+        soe=soe,
+        next_soe=next_soe,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        battery_settings=battery_settings,
+        dt=dt,
+        import_cap_kwh=import_cap_kwh,
+    )
+    reward, new_cost_basis = _price_flows(
+        flows=flows,
+        power=power,
+        soe=soe,
+        next_soe=next_soe,
+        period=period,
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        solar_production=solar_production,
+        cost_basis=cost_basis,
+    )
+    return reward, new_cost_basis, flows
+
+
+def _price_flows(
+    flows: PeriodFlows,
+    power: float,
+    soe: float,
+    next_soe: float,
+    period: int,
+    home_consumption: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    buy_price: list[float],
+    sell_price: list[float],
+    solar_production: float,
+    cost_basis: float,
+) -> tuple[float, float]:
+    """Price an already-derived `PeriodFlows` record: returns
+    `(reward, new_cost_basis)`.
+
+    Split from `_compute_reward` so the objective is demonstrably a function
+    *of the record* rather than of a second derivation of the physics (P4).
+    That is what lets `_replay_accounting_pass` price the stored records a
+    PWL splice produced instead of re-deriving flows from the spliced
+    trajectory -- where a caller passing a different `import_cap_kwh` than
+    the selection loop used would otherwise silently price a period the plan
+    never contained.
+
+    Takes no `import_cap_kwh`: the cap is a constraint on *flows*, already
+    applied inside `_period_flows`. Re-applying it here could only
+    disagree.
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+
+    grid_imported = flows.grid_imported
+    grid_exported = flows.grid_exported
 
     # ============================================================================
     # BATTERY CYCLE COST AND COST BASIS CALCULATION
@@ -582,33 +811,10 @@ def _compute_reward(
     new_cost_basis = cost_basis
 
     if power > POWER_TOLERANCE_KW:  # STORE disposition
-        surplus = max(0.0, solar_production - home_consumption)
-        room_throughput = (
-            battery_settings.max_soe_kwh - soe
-        ) / battery_settings.efficiency_charge
-        rate_throughput = battery_settings.max_charge_power_kw * dt
-        solar_to_battery = min(surplus, rate_throughput, room_throughput)
-        remaining_rate = max(
-            0.0, min(rate_throughput, room_throughput) - solar_to_battery
-        )
-        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
-
-        # genuine excess solar (above rate/room) is exported; deliberate grid top-up imported
-        grid_imported, grid_exported, _ = _ac_flows(
-            solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
-        )
-        if import_cap_kwh is not None:
-            # Grid charging must not push total import (load + charging)
-            # over the house fuse's import cap (#429).
-            grid_to_battery = min(
-                grid_to_battery, max(0.0, import_cap_kwh - grid_imported)
-            )
-
-        energy_stored = (
-            solar_to_battery + grid_to_battery
-        ) * battery_settings.efficiency_charge
+        solar_to_battery = flows.solar_to_battery
+        grid_to_battery = flows.grid_to_battery
+        energy_stored = flows.energy_stored
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
-        grid_imported += grid_to_battery
 
         if ac_cap_kwh is None:
             solar_opportunity_cost = solar_to_battery * current_sell_price
@@ -636,21 +842,14 @@ def _compute_reward(
             - grid_exported * current_sell_price
             + battery_wear_cost
         )
-        return -total_cost, new_cost_basis, grid_imported
+        return -total_cost, new_cost_basis
 
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0
-        battery_discharged = abs(power) * dt
-        grid_imported, grid_exported, _ = _ac_flows(
-            solar_production, home_consumption, 0.0, battery_discharged, ac_cap_kwh
-        )
 
     else:  # IDLE — passive solar charging
-        battery_charged, _ = _idle_battery_flows(soe, next_soe, battery_settings)
-        grid_imported, grid_exported, _ = _ac_flows(
-            solar_production, home_consumption, battery_charged, 0.0, ac_cap_kwh
-        )
-        energy_stored = next_soe - soe  # kWh stored in battery after efficiency
+        battery_charged = flows.battery_charged
+        energy_stored = flows.energy_stored  # kWh stored in battery after efficiency
         battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
         if energy_stored > 0 and next_soe > battery_settings.min_soe_kwh:
             if ac_cap_kwh is None:
@@ -677,7 +876,7 @@ def _compute_reward(
         - grid_exported * current_sell_price
         + battery_wear_cost
     )
-    return -total_cost, new_cost_basis, grid_imported
+    return -total_cost, new_cost_basis
 
 
 def _record_marginal_value(
@@ -719,6 +918,7 @@ def _record_marginal_value(
 
 
 def _build_period_data(
+    flows: PeriodFlows,
     power: float,
     soe: float,
     next_soe: float,
@@ -732,13 +932,19 @@ def _build_period_data(
     new_cost_basis: float,
     currency: str,
     continuation_value: float = 0.0,
-    import_cap_kwh: float | None = None,
     export_curtailment_active: bool = False,
 ) -> PeriodData:
     """Build full PeriodData for the winning action of a DP cell.
 
-    Called once per (t, i) cell after the inner power loop identifies the best action.
-    Separated from _compute_reward to eliminate dataclass allocation in the hot path.
+    `flows` is the record `_compute_reward` already produced for this same
+    action (P4): reporting prices exactly the energy the objective priced,
+    and there is no second derivation here that an edit to the reward side
+    could fail to reach. It is a required argument with no recomputing
+    fallback on purpose -- a default that re-derived the flows would be the
+    second construction site this phase exists to remove. `import_cap_kwh` is
+    likewise gone from the signature: the cap shapes `grid_to_battery` inside
+    `_period_flows`, so a reporting-side copy of that throttle could only
+    ever disagree with the priced one.
 
     continuation_value: the DP's actual value-to-go from the resulting state
     (_interpolate_value(V_next, next_soe, ...), the same term
@@ -756,74 +962,38 @@ def _build_period_data(
     """
     current_buy_price = buy_price[period]
     current_sell_price = sell_price[period]
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
     if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
-        surplus = max(0.0, solar_production - home_consumption)
-        room_throughput = (
-            battery_settings.max_soe_kwh - soe
-        ) / battery_settings.efficiency_charge
-        rate_throughput = battery_settings.max_charge_power_kw * dt
-        solar_to_battery = min(surplus, rate_throughput, room_throughput)
-        remaining_rate = max(
-            0.0, min(rate_throughput, room_throughput) - solar_to_battery
-        )
-        grid_to_battery = remaining_rate  # solar fills first, grid tops up the rest
-        if import_cap_kwh is not None:
-            # Grid charging must not push total import (load + charging)
-            # over the house fuse's import cap (#429).
-            load_import, _, _ = _ac_flows(
-                solar_production, home_consumption, solar_to_battery, 0.0, ac_cap_kwh
-            )
-            grid_to_battery = min(
-                grid_to_battery, max(0.0, import_cap_kwh - load_import)
-            )
-        battery_charged = solar_to_battery + grid_to_battery
-        battery_discharged = 0.0
         # STORE physics are binary (any positive power charges at rate_throughput),
         # so the DP's tie-break can report an arbitrary small `power`. Use the
         # achieved throughput instead — see #203.
-        battery_action_kwh = battery_charged
-    elif power < -POWER_TOLERANCE_KW:  # Active discharging
-        battery_charged = 0.0
-        battery_discharged = abs(power) * dt
+        battery_action_kwh = flows.battery_charged
+    else:  # Active discharging, or IDLE holding while surplus exports
         battery_action_kwh = power * dt
-        solar_to_battery = 0.0
-        grid_to_battery = 0.0
-    else:  # IDLE — EXPORT disposition: battery holds, surplus exported
-        battery_charged, battery_discharged = _idle_battery_flows(
-            soe, next_soe, battery_settings
-        )
-        battery_action_kwh = power * dt
-        solar_to_battery = battery_charged
-        grid_to_battery = 0.0
-
-    grid_imported, grid_exported, clipped_solar = _ac_flows(
-        solar_production,
-        home_consumption,
-        solar_to_battery,
-        battery_discharged,
-        ac_cap_kwh,
-    )
-    grid_imported += grid_to_battery
 
     energy_data = EnergyData(
         solar_production=solar_production,
         home_consumption=home_consumption,
-        battery_charged=battery_charged,
-        battery_discharged=battery_discharged,
-        grid_imported=grid_imported,
-        grid_exported=grid_exported,
+        battery_charged=flows.battery_charged,
+        battery_discharged=flows.battery_discharged,
+        grid_imported=flows.grid_imported,
+        grid_exported=flows.grid_exported,
         battery_soe_start=soe,
         battery_soe_end=next_soe,
-        clipped_solar=clipped_solar,
+        clipped_solar=flows.clipped_solar,
     )
 
+    # Charging wear on the SoE-delta basis, not `flows.energy_stored`'s
+    # charge-throughput basis. The two are algebraically identical and differ
+    # only in float path (measured: 42 of 2461 corpus rows, max 6.66e-16),
+    # but the reported economics are pinned bit-identically against goldens
+    # captured on this form -- so the reward keeps its basis and reporting
+    # keeps its own. See `PeriodFlows.energy_stored`.
     energy_stored = max(0.0, next_soe - soe)
     battery_wear_cost = energy_stored * battery_settings.cycle_cost_per_kwh
 
     curtailed = export_curtailment_active and battery_settings.should_curtail_export(
-        grid_exported, current_sell_price
+        flows.grid_exported, current_sell_price
     )
 
     decision_data = create_decision_data(
@@ -1309,7 +1479,7 @@ def _best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> tuple[float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, PeriodFlows, float, float]:
     """The grid DP's forward replay: `action_selector.select_action` with the
     continuation value read off the already-known V[t+1, :] row, linearly
     interpolated at the candidate's true continuous SoE instead of snapped to
@@ -1325,7 +1495,10 @@ def _best_action_at_continuous_state(
     `_discretize_state_action_space`.
 
     Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
-    tie_margin, value_slope). `tie_margin` is the gap between the *argmax*
+    best_flows, tie_margin, value_slope). `best_flows` is the winning
+    candidate's own `PeriodFlows`, handed straight to `_build_period_data` so
+    the reported period describes the physics the objective actually scored
+    (P4). `tie_margin` is the gap between the *argmax*
     action's value and the best behaviourally distinct runner-up's --
     float("inf") if no distinct alternative was feasible, meaning "not tied,
     no comparison possible" -- and is measured pre-tie-break on purpose (see
@@ -1364,6 +1537,7 @@ def _best_action_at_continuous_state(
         result.chosen.next_soe,
         result.chosen.new_cost_basis,
         result.chosen.reward,
+        result.chosen.flows,
         result.tie_margin,
         result.value_slope,
     )
@@ -1378,6 +1552,7 @@ def _create_idle_schedule(
     initial_soe: float,
     battery_settings: BatterySettings,
     dt: float,
+    currency: str,
 ) -> OptimizationResult:
     """
     Create an all-IDLE schedule where battery passively charges from excess solar.
@@ -1385,6 +1560,23 @@ def _create_idle_schedule(
     Used by the all-IDLE safety net, which swaps this in only when it is
     strictly cheaper than the DP's own schedule (there is no profit gate).
     Excess solar charges the battery up to capacity; only overflow exports to grid.
+
+    Built from the same `_period_flows` / `_price_flows` / `_build_period_data`
+    chain as every other path (P4). It used to carry a fourth independent copy
+    of the IDLE physics, which had already drifted: it charged the full
+    `battery_charged * sell_price` as solar opportunity cost, where
+    `_price_flows` discounts the share that would have been AC-clipped anyway
+    and therefore cost nothing to absorb. Collapsing the copy adopts the
+    correct basis -- see the note at the `_price_flows` call below.
+
+    That correction is not purely internal, and the distinction is worth
+    keeping straight: the guardrail *decision* cannot see it, because the
+    comparison reads `economic_summary.battery_solar_cost` (summed from each
+    period's `hourly_cost`) and `cost_basis` feeds none of it. But when the
+    guardrail does fire, this schedule is what gets returned -- so on an
+    AC-capped system every period's reported `decision.cost_basis` shifts,
+    measured at up to 0.049977 SEK/kWh. No comparison moves; a reported field
+    does.
     """
     period_data_list = []
     current_soe = initial_soe
@@ -1400,70 +1592,58 @@ def _create_idle_schedule(
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
         )
-        passive_stored = next_soe - current_soe
-        battery_charged, _ = _idle_battery_flows(
-            current_soe, next_soe, battery_settings
-        )
-        battery_wear_cost = passive_stored * battery_settings.cycle_cost_per_kwh
-        solar_opportunity_cost = battery_charged * sell_price[t]
-
-        # Update cost basis for passively stored solar
-        if passive_stored > 0 and next_soe > battery_settings.min_soe_kwh:
-            existing_cost = current_soe * current_cost_basis
-            current_cost_basis = (
-                existing_cost + solar_opportunity_cost + battery_wear_cost
-            ) / next_soe
-
-        grid_imported, grid_exported, clipped_solar = _ac_flows(
-            solar_production[t],
-            home_consumption[t],
-            battery_charged,
-            0.0,
-            _effective_ac_cap_kwh(battery_settings, dt),
-        )
-        energy_data = EnergyData(
-            solar_production=solar_production[t],
+        flows = _period_flows(
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
             home_consumption=home_consumption[t],
-            battery_charged=battery_charged,
-            battery_discharged=0.0,
-            grid_imported=grid_imported,
-            grid_exported=grid_exported,
-            battery_soe_start=current_soe,
-            battery_soe_end=next_soe,
-            clipped_solar=clipped_solar,
+            solar_production=solar_production[t],
+            battery_settings=battery_settings,
+            dt=dt,
         )
-
-        economic_data = EconomicData.from_energy_data(
-            energy_data=energy_data,
-            buy_price=buy_price[t],
-            sell_price=sell_price[t],
-            battery_cycle_cost=battery_wear_cost,
-        )
-
-        decision_data = DecisionData(
-            strategic_intent=classify_strategic_intent(0.0, energy_data),
-            battery_action=0.0,
-            cost_basis=current_cost_basis,
-            # No value function exists on this path -- it is the numerical
-            # safety net returned when the optimized plan scores worse than
-            # doing nothing, so there is no dV/dSoE to authorize against.
-            # Stated explicitly rather than inherited from the field default
-            # (#526): absence of an economic basis is not permission, and on a
-            # sunny all-IDLE day classify_strategic_intent can return
-            # SOLAR_EXPORT here, which IS a gate-consulting intent. Before
-            # #526 that period's shadow_price defaulted to 0.0 and opened the
-            # ceiling to 100 on a value nothing had computed; it is now 0.
-            intra_period_discharge_allowed=False,
-        )
-
-        period_data = PeriodData(
+        # Cost basis only. The reward is discarded: this schedule's cost is
+        # summed from the reported PeriodData below, exactly as before, and
+        # the guardrail comparison reads that sum -- not this term.
+        _reward, current_cost_basis = _price_flows(
+            flows=flows,
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
             period=t,
-            energy=energy_data,
-            timestamp=None,
-            data_source="predicted",
-            economic=economic_data,
-            decision=decision_data,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            cost_basis=current_cost_basis,
         )
+
+        period_data = _build_period_data(
+            flows=flows,
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            new_cost_basis=current_cost_basis,
+            currency=currency,
+        )
+        # `_record_marginal_value` is deliberately NOT called here, so
+        # `intra_period_discharge_allowed` keeps its `False` default (#526).
+        # No value function exists on this path -- it is the numerical safety
+        # net returned when the optimized plan scores worse than doing
+        # nothing, so there is no dV/dSoE to authorize against. That matters
+        # concretely: on a sunny all-IDLE day `classify_strategic_intent` can
+        # return SOLAR_EXPORT here, which IS a gate-consulting intent. Before
+        # #526 the period's shadow_price defaulted to 0.0 and opened the
+        # ceiling to 100 on a value nothing had computed. Absence of an
+        # economic basis is not permission.
 
         period_data_list.append(period_data)
         current_soe = next_soe
@@ -1511,6 +1691,7 @@ def _replay_accounting_pass(
     horizon: int,
     actions: list[float],
     soe_trajectory: list[float],
+    flows_trajectory: list[PeriodFlows],
     initial_cost_basis: float,
     V: np.ndarray,
     soe_levels: np.ndarray,
@@ -1522,11 +1703,10 @@ def _replay_accounting_pass(
     battery_settings: BatterySettings,
     dt: float,
     currency: str,
-    import_cap_kwh: float | None = None,
     export_curtailment_active: bool = False,
 ) -> tuple[list[PeriodData], float]:
     """Rebuild PeriodData (and the reward-objective cost) for a given
-    (action, SOE) trajectory.
+    (action, SOE, flows) trajectory.
 
     Only used by the hybrid PWL path (#450): once a tied window's actions have
     been re-solved exactly and spliced in, the accounting produced inline by
@@ -1534,15 +1714,22 @@ def _replay_accounting_pass(
     trajectory and must be recomputed. The no-tie path never calls this, so its
     output is bit-for-bit whatever the selection loop produced.
 
-    Rewards are recomputed with the same `_compute_reward` call the selection
-    loop's `_best_action_at_continuous_state` makes internally (same explicit
-    next_soe, so the SOLAR_EXPORT-below-max bypass replays exactly), against
-    `reward_sell_price` -- the DP's own objective -- while the reported
-    PeriodData still carries the real `sell_price`.
+    Only the *prices* are re-applied here. The flows are the records the
+    selection loop and the PWL window solve already produced, spliced
+    together by `splice_schedule` and priced through `_price_flows` -- this
+    pass never re-derives physics (P4). Re-deriving would be a second
+    derivation of a trajectory whose actions were chosen elsewhere, and it is
+    why this function no longer takes `import_cap_kwh`: the cap shaped
+    `grid_to_battery` when the flows were produced, and a replay handed a
+    different cap than the solve ran under would otherwise have silently
+    priced a period the plan never contained.
 
-    `import_cap_kwh` is the same fuse-derived grid-import cap (#429) the
-    selection loop optimized against, so the replayed flows describe the same
-    throttled grid charging the schedule actually plans.
+    Costs are chained rather than stored: `cost_basis` depends on the
+    preceding period's outcome, which splicing changes, so it is the one
+    quantity that genuinely must be recomputed here.
+
+    Rewards are priced against `reward_sell_price` -- the DP's own objective
+    -- while the reported PeriodData carries the real `sell_price`.
     """
     hourly_results: list[PeriodData] = []
     reward_objective_cost = 0.0
@@ -1551,7 +1738,9 @@ def _replay_accounting_pass(
     for t in range(horizon):
         soe = soe_trajectory[t]
         next_soe = soe_trajectory[t + 1]
-        action_reward, new_cost_basis, _grid_imported = _compute_reward(
+        action_flows = flows_trajectory[t]
+        action_reward, new_cost_basis = _price_flows(
+            flows=action_flows,
             power=actions[t],
             soe=soe,
             next_soe=next_soe,
@@ -1563,10 +1752,13 @@ def _replay_accounting_pass(
             sell_price=reward_sell_price,
             solar_production=solar_production[t],
             cost_basis=cost_basis,
-            import_cap_kwh=import_cap_kwh,
         )
 
         period_data = _build_period_data(
+            # The same stored record the reward above was priced from --
+            # prices differ between the objective (`reward_sell_price`) and
+            # the report (`sell_price`), the physics does not.
+            flows=action_flows,
             power=actions[t],
             soe=soe,
             next_soe=next_soe,
@@ -1579,7 +1771,6 @@ def _replay_accounting_pass(
             solar_production=solar_production[t],
             new_cost_basis=new_cost_basis,
             currency=currency,
-            import_cap_kwh=import_cap_kwh,
             continuation_value=_interpolate_value(V[t + 1], next_soe, battery_settings),
             export_curtailment_active=export_curtailment_active,
         )
@@ -1766,38 +1957,50 @@ def optimize_battery_schedule(
     # tie is actually detected.
     actions: list[float] = []
     soe_trajectory: list[float] = [initial_soe]
+    # The chosen candidate's flow record per period, recorded alongside the
+    # action so a splice can carry physics and action together (P4) and the
+    # accounting replay never re-derives either.
+    flows_trajectory: list[PeriodFlows] = []
     cost_basis_trajectory: list[float] = []
     for t in range(horizon):
         # Recompute the action directly at the true continuous SoE using the
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
-        action, next_soe, new_cost_basis, action_reward, tie_margin, value_slope = (
-            _best_action_at_continuous_state(
-                soe=current_soe,
-                t=t,
-                V_next=V[t + 1],
-                power_levels=power_levels,
-                home_consumption=home_consumption,
-                battery_settings=battery_settings,
-                dt=dt,
-                solar_production=solar_production,
-                buy_price=buy_price,
-                sell_price=reward_sell_price,
-                cost_basis=current_cost_basis,
-                max_charge_power_per_period=max_charge_power_per_period,
-                discharge_resolution_kw=discharge_resolution_kw,
-                import_cap_kwh=import_cap_kwh,
-                sell_price_floored=sell_price_floored,
-            )
+        (
+            action,
+            next_soe,
+            new_cost_basis,
+            action_reward,
+            action_flows,
+            tie_margin,
+            value_slope,
+        ) = _best_action_at_continuous_state(
+            soe=current_soe,
+            t=t,
+            V_next=V[t + 1],
+            power_levels=power_levels,
+            home_consumption=home_consumption,
+            battery_settings=battery_settings,
+            dt=dt,
+            solar_production=solar_production,
+            buy_price=buy_price,
+            sell_price=reward_sell_price,
+            cost_basis=current_cost_basis,
+            max_charge_power_per_period=max_charge_power_per_period,
+            discharge_resolution_kw=discharge_resolution_kw,
+            import_cap_kwh=import_cap_kwh,
+            sell_price_floored=sell_price_floored,
         )
         tie_margins.append(tie_margin)
         value_slopes.append(value_slope)
         cost_basis_trajectory.append(current_cost_basis)
         actions.append(action)
         soe_trajectory.append(next_soe)
+        flows_trajectory.append(action_flows)
 
         period_data = _build_period_data(
+            flows=action_flows,
             power=action,
             soe=current_soe,
             next_soe=next_soe,
@@ -1810,7 +2013,6 @@ def optimize_battery_schedule(
             solar_production=solar_production[t],
             new_cost_basis=new_cost_basis,
             currency=currency,
-            import_cap_kwh=import_cap_kwh,
             # Same continuation-value term _best_action_at_continuous_state
             # added internally to choose this action (dp_battery_algorithm.py
             # _best_action_at_continuous_state's `value = reward +
@@ -1880,7 +2082,7 @@ def optimize_battery_schedule(
             len(windows),
             [(w.start, w.end) for w in windows],
         )
-        window_resolutions: dict[int, list[tuple[float, float]]] = {}
+        window_resolutions: dict[int, list[tuple[float, float, PeriodFlows]]] = {}
         for window in windows:
             window_horizon = window.end - window.start
             sl = slice(window.start, window.end)
@@ -1939,13 +2141,65 @@ def optimize_battery_schedule(
                 sell_price_floored=window_floored,
             )
 
-        actions, soe_trajectory = splice_schedule(
-            actions, soe_trajectory, windows, window_resolutions
+        actions, soe_trajectory, flows_trajectory = splice_schedule(
+            actions, soe_trajectory, flows_trajectory, windows, window_resolutions
         )
+
+        # A window owns periods [start, end), but writes the SOE at `end` --
+        # that is the pinned exit state. The period AT `end` is not re-solved,
+        # so it keeps the flow record the selection loop derived from its
+        # PRE-splice start SOE, while now reporting the post-splice one. The
+        # pin only guarantees the exit lands within `_end_soe_pin_tolerance`,
+        # not exactly, so those two can differ -- and a STORE or IDLE period's
+        # charge depends on its start SOE (through `room_throughput` and
+        # `next_soe - soe`). Left alone, that period would report a
+        # `battery_soe_start` its own `battery_charged` cannot produce.
+        #
+        # Re-derive exactly that one period per window, which is what the
+        # pre-Phase-3 replay did for every period. Its action and its
+        # `next_soe` are untouched by the splice; only the state it starts
+        # from moved.
+        #
+        # This restores the flow record's agreement with the period's own
+        # *start* state, which is what the splice moved. One case it does not
+        # reconcile: a RATE-limited (or import-capped) STORE boundary, where
+        # throughput is `min(rate_throughput, room_throughput) =
+        # rate_throughput` and therefore independent of `soe`, while the stale
+        # `next_soe` still encodes the pre-splice start -- so
+        # `battery_soe_end - battery_soe_start` overstates `battery_charged`
+        # by exactly the pin drift.
+        #
+        # Room-limited STORE is NOT affected, despite being the intuitive
+        # suspect: there throughput is `(max_soe - soe) / eff`, so
+        # `energy_stored == max_soe - soe`, and `_state_transition` clamps
+        # `next_soe` to `max_soe` -- the two agree for any start SOE,
+        # including a spliced one.
+        #
+        # The gap is pre-existing, not introduced here: `_build_period_data`
+        # has always derived STORE throughput from `soe` via room/rate while
+        # taking `next_soe` from the trajectory (verified against origin/main),
+        # so the same mismatch existed before this pass stopped re-deriving. It
+        # is bounded by `_end_soe_pin_tolerance`, and closing it means
+        # re-deriving the post-window trajectory, which the pin exists
+        # precisely to avoid.
+        for window in windows:
+            if window.end >= horizon:
+                continue
+            flows_trajectory[window.end] = _period_flows(
+                power=actions[window.end],
+                soe=soe_trajectory[window.end],
+                next_soe=soe_trajectory[window.end + 1],
+                home_consumption=home_consumption[window.end],
+                solar_production=solar_production[window.end],
+                battery_settings=battery_settings,
+                dt=dt,
+                import_cap_kwh=import_cap_kwh,
+            )
         hourly_results, reward_objective_cost = _replay_accounting_pass(
             horizon=horizon,
             actions=actions,
             soe_trajectory=soe_trajectory,
+            flows_trajectory=flows_trajectory,
             initial_cost_basis=initial_cost_basis,
             V=V,
             soe_levels=soe_levels,
@@ -1957,7 +2211,6 @@ def optimize_battery_schedule(
             battery_settings=battery_settings,
             dt=dt,
             currency=currency,
-            import_cap_kwh=import_cap_kwh,
             export_curtailment_active=export_curtailment_active,
         )
 
@@ -2042,6 +2295,7 @@ def optimize_battery_schedule(
         initial_soe=initial_soe,
         battery_settings=battery_settings,
         dt=dt,
+        currency=currency,
     )
 
     # When export_curtailment_active, the DP's action selection optimized
@@ -2074,6 +2328,7 @@ def optimize_battery_schedule(
             initial_soe=initial_soe,
             battery_settings=battery_settings,
             dt=dt,
+            currency=currency,
         ).economic_summary.battery_solar_cost
 
     if guardrail_idle_cost < guardrail_optimized_cost:

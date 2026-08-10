@@ -441,6 +441,7 @@ class TestBellmanGuardrailNotFooledByFloor:
             initial_soe=self.INITIAL_SOE,
             battery_settings=self._battery_settings(),
             dt=0.25,
+            currency="SEK",
         )
 
         result = optimize_battery_schedule(

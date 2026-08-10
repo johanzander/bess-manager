@@ -8,7 +8,10 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.dp_battery_algorithm import (
+    _period_flows,
+    optimize_battery_schedule,
+)
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import (
     ADDITIONAL_COSTS,
@@ -337,6 +340,38 @@ def assert_flow_coherence(pd) -> None:
             f"Period {pd.period}: {flow_name} is negative ({value:.4f}) -- a flow "
             f"between two entities cannot run backwards"
         )
+
+
+def flows_for(
+    power: float,
+    soe: float,
+    next_soe: float,
+    home_consumption: float,
+    solar_production: float,
+    battery_settings,
+    dt: float,
+    import_cap_kwh: float | None = None,
+):
+    """The `PeriodFlows` record for one action, for tests that call
+    `_build_period_data` directly.
+
+    `_build_period_data` takes the flows as a required argument (Phase 3, P4)
+    so that reporting cannot re-derive physics the objective already priced.
+    Tests exercising it therefore have to produce the record the same way
+    production does -- through `_period_flows` -- rather than hand-building
+    one, which would reintroduce exactly the second derivation the signature
+    exists to prevent. This wrapper only fills in the AC cap.
+    """
+    return _period_flows(
+        power=power,
+        soe=soe,
+        next_soe=next_soe,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        battery_settings=battery_settings,
+        dt=dt,
+        import_cap_kwh=import_cap_kwh,
+    )
 
 
 def make_battery_settings(**overrides):

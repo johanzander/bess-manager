@@ -10,19 +10,34 @@ used to refuse.
 import pytest
 
 from core.bess.action_selector import Candidate
+from core.bess.dp_battery_algorithm import PeriodFlows
 from core.bess.tie_policy import TieContext, _eligible_indices, apply_tie_policy
 
 
 def _candidate(value, power, next_soe, new_cost_basis, reward, grid_imported):
     """Build a `Candidate` from the positional layout these fixtures were
     written against, so the cases below stay literally what they were when
-    the tie-breaks lived on 6-tuples."""
+    the tie-breaks lived on 6-tuples.
+
+    `grid_imported` now reaches the candidate inside its `PeriodFlows` record
+    (Phase 3). The tie policy reads only that one flow, so the rest of the
+    record is zeroed rather than invented -- these fixtures pin preference
+    ordering, not physics."""
     return Candidate(
         power=power,
         next_soe=next_soe,
         reward=reward,
         new_cost_basis=new_cost_basis,
-        grid_imported=grid_imported,
+        flows=PeriodFlows(
+            solar_to_battery=0.0,
+            grid_to_battery=0.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=grid_imported,
+            grid_exported=0.0,
+            clipped_solar=0.0,
+            energy_stored=0.0,
+        ),
         value=value,
     )
 

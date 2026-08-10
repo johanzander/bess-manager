@@ -31,6 +31,7 @@ from core.bess.action_selector import (
     _tie_margin,
 )
 from core.bess.dp_battery_algorithm import (
+    PeriodFlows,
     _best_action_at_continuous_state,
     _discretize_state_action_space,
     _interpolate_value,
@@ -43,13 +44,26 @@ from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 
 
 def _candidate(value: float, power: float, next_soe: float) -> Candidate:
-    """A `Candidate` carrying only the three fields `_tie_margin` reads."""
+    """A `Candidate` carrying only the three fields `_tie_margin` reads.
+
+    The flow record is zeroed rather than derived: `_tie_margin` compares
+    values and next_soe only, so inventing physics here would suggest these
+    fixtures pin something they do not."""
     return Candidate(
         power=power,
         next_soe=next_soe,
         reward=0.0,
         new_cost_basis=0.0,
-        grid_imported=0.0,
+        flows=PeriodFlows(
+            solar_to_battery=0.0,
+            grid_to_battery=0.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=0.0,
+            grid_exported=0.0,
+            clipped_solar=0.0,
+            energy_stored=0.0,
+        ),
         value=value,
     )
 
@@ -94,7 +108,7 @@ def _total_value(
     sell_prices,
 ):
     _, power_levels = _discretize_state_action_space(battery_settings)
-    _, best_next_soe, _, best_reward, _, _ = _best_action_at_continuous_state(
+    _, best_next_soe, _, best_reward, _, _, _ = _best_action_at_continuous_state(
         soe=soe,
         t=t,
         V_next=V[t + 1, :],
@@ -535,10 +549,11 @@ def test_best_action_returns_tie_margin():
         cost_basis=0.0,
         max_charge_power_per_period=None,
     )
-    assert (
-        len(result) == 6
-    ), "expected (action, next_soe, cost_basis, reward, tie_margin, value_slope)"
-    _, _, _, _, tie_margin, _ = result
+    assert len(result) == 7, (
+        "expected (action, next_soe, cost_basis, reward, flows, tie_margin, "
+        "value_slope)"
+    )
+    _, _, _, _, _, tie_margin, _ = result
     assert (
         tie_margin >= 0.0
     ), "margin must be non-negative (best >= second-best by construction)"

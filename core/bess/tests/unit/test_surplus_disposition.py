@@ -4,7 +4,7 @@ updated to the target behaviour in Task 2/3 (the change is intentional)."""
 
 from core.bess.dp_battery_algorithm import _compute_reward, _state_transition
 from core.bess.models import EnergyData
-from core.bess.tests.helpers import make_battery_settings
+from core.bess.tests.helpers import flows_for, make_battery_settings
 
 DT = 0.25
 PRICES_BUY = [1.0]
@@ -116,6 +116,7 @@ def test_build_period_data_store_disposition_flows():
         5.0, 0.4, bs, DT, solar_production=1.5, home_consumption=0.1
     )
     pd = _build_period_data(
+        flows=flows_for(0.4, 5.0, nxt, 0.1, 1.5, bs, DT),
         power=0.4,
         soe=5.0,
         next_soe=nxt,
@@ -231,6 +232,9 @@ def test_store_with_surplus_draws_grid_to_fill_remaining_rate():
     )
 
     pd = _build_period_data(
+        flows=flows_for(
+            power, 5.0, next_soe, home_consumption, solar_production, bs, DT
+        ),
         power=power,
         soe=5.0,
         next_soe=next_soe,
@@ -322,6 +326,7 @@ def test_grid_charging_action_reports_achieved_throughput_not_tied_power():
         soe, tied_power, bs, DT, solar_production=0.0, home_consumption=0.0
     )
     pd = _build_period_data(
+        flows=flows_for(tied_power, soe, next_soe, 0.0, 0.0, bs, DT),
         power=tied_power,
         soe=soe,
         next_soe=next_soe,

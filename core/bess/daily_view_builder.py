@@ -85,6 +85,9 @@ class DailyViewBuilder:
                 grid_exported=0.0,
                 battery_soe_start=0.0,
                 battery_soe_end=0.0,
+                # A placeholder for a period with no data at all -- nothing
+                # was measured, so there is no counter noise to reconcile.
+                measured=False,
             ),
             timestamp=timestamp,
             data_source="missing",

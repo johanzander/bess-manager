@@ -389,6 +389,11 @@ class SensorCollector:
             grid_exported=flow_dict.get("export_to_grid", 0.0),
             battery_soe_start=soe_start,
             battery_soe_end=soe_end,
+            # The one true ingest site: these come off independent lifetime
+            # counters that do not reconcile exactly, so the reconciliation
+            # heuristics belong here and only here (P4). Stated explicitly
+            # rather than inherited from the default.
+            measured=True,
         )
 
         logger.debug(

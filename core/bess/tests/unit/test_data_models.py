@@ -197,6 +197,40 @@ class TestEnergyData:
         power = energy.battery_charged - energy.battery_discharged
         assert infer_intent_from_flows(power, energy) == "LOAD_SUPPORT"
 
+    def test_exact_flows_bypass_the_ingest_noise_model(self):
+        """P4: planned and simulated flows must never pass through a noise
+        model (`docs/agents/optimizer-architecture.md`).
+
+        Same period as the #350 fold test above, but declared exact rather
+        than measured. On measured data the sub-resolution export is counter
+        noise and folds into battery_to_home; on exact data there are no
+        independent counters to disagree, so a planned 0.0177 kWh export is a
+        real export the DP priced, and rewriting it would make the reported
+        flows contradict the objective.
+        """
+        kwargs = {
+            "solar_production": 0.0,
+            "home_consumption": 0.14528749999999999,
+            "grid_imported": 0.0,
+            "grid_exported": 0.0177,
+            "battery_charged": 0.0,
+            "battery_discharged": 0.14584375,
+            "battery_soe_start": 5.0,
+            "battery_soe_end": 4.8,
+        }
+
+        measured = EnergyData(**kwargs, measured=True)
+        exact = EnergyData(**kwargs, measured=False)
+
+        assert measured.battery_to_grid == 0.0
+        assert exact.battery_to_grid == pytest.approx(0.0177)
+
+        # And the intent follows the flows, which is the consequence that
+        # actually reaches hardware.
+        power = -kwargs["battery_discharged"]
+        assert infer_intent_from_flows(power, measured) == "LOAD_SUPPORT"
+        assert infer_intent_from_flows(power, exact) == "BATTERY_EXPORT"
+
     def test_real_export_above_resolution_floor_is_not_folded(self):
         """A genuine, well-above-resolution battery export must survive the
         #350 fix untouched — only sub-0.1 kWh residuals get folded.

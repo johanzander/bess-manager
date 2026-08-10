@@ -312,7 +312,6 @@ def _period_flows(
     solar_production: float,
     battery_settings: BatterySettings,
     dt: float,
-    ac_cap_kwh: float | None,
     import_cap_kwh: float | None = None,
 ) -> PeriodFlows:
     """Derive one candidate action's complete flow set -- the only place a
@@ -337,7 +336,17 @@ def _period_flows(
     decided by a value gap under 1e-12 between candidates with different
     recorded actions (measured 2026-08-10), so re-associating this arithmetic
     -- "compute once, then multiply out" -- moves ULPs and flips them.
+
+    The AC cap is derived here rather than accepted as an argument, and
+    `_price_flows` derives it the same way. It used to be a parameter, which
+    meant a caller could produce flows under one cap and have them priced
+    under another -- the reward-vs-flows divergence class P4 exists to
+    remove, merely relocated from the physics to its inputs. Every caller
+    passed `_effective_ac_cap_kwh(battery_settings, dt)` anyway, so there was
+    nothing to express and something to get wrong.
     """
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+
     if power > POWER_TOLERANCE_KW:  # STORE disposition (+ optional grid charge)
         surplus = max(0.0, solar_production - home_consumption)
         room_throughput = (
@@ -724,7 +733,6 @@ def _compute_reward(
         solar_production=solar_production,
         battery_settings=battery_settings,
         dt=dt,
-        ac_cap_kwh=_effective_ac_cap_kwh(battery_settings, dt),
         import_cap_kwh=import_cap_kwh,
     )
     reward, new_cost_basis = _price_flows(
@@ -1547,7 +1555,6 @@ def _create_idle_schedule(
     period_data_list = []
     current_soe = initial_soe
     current_cost_basis = battery_settings.cycle_cost_per_kwh
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
     for t in range(horizon):
         # Passive solar charging: excess solar goes to battery, overflow to grid
@@ -1567,7 +1574,6 @@ def _create_idle_schedule(
             solar_production=solar_production[t],
             battery_settings=battery_settings,
             dt=dt,
-            ac_cap_kwh=ac_cap_kwh,
         )
         # Cost basis only. The reward is discarded: this schedule's cost is
         # summed from the reported PeriodData below, exactly as before, and
@@ -2127,7 +2133,18 @@ def optimize_battery_schedule(
         # pre-Phase-3 replay did for every period. Its action and its
         # `next_soe` are untouched by the splice; only the state it starts
         # from moved.
-        boundary_ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+        #
+        # This restores the flow record's agreement with the period's own
+        # *start* state, which is what the splice moved. It does not make a
+        # room-limited STORE boundary's `battery_charged` agree with
+        # `battery_soe_end - battery_soe_start`: `next_soe` still reflects the
+        # pre-splice start, so the two are derived from different states.
+        # That gap is pre-existing, not introduced here -- `_build_period_data`
+        # has always derived STORE throughput from `soe` (via room/rate) while
+        # taking `next_soe` from the trajectory, so the same mismatch existed
+        # before this pass stopped re-deriving. It is bounded by
+        # `_end_soe_pin_tolerance`, and closing it means re-deriving the
+        # post-window trajectory, which the pin exists precisely to avoid.
         for window in windows:
             if window.end >= horizon:
                 continue
@@ -2139,7 +2156,6 @@ def optimize_battery_schedule(
                 solar_production=solar_production[window.end],
                 battery_settings=battery_settings,
                 dt=dt,
-                ac_cap_kwh=boundary_ac_cap_kwh,
                 import_cap_kwh=import_cap_kwh,
             )
         hourly_results, reward_objective_cost = _replay_accounting_pass(

@@ -3008,21 +3008,28 @@ class BatterySystemManager:
                 # reading (`EnergyData`'s non-invention rule), so the two can
                 # sum to LESS than what the battery recorded taking in.
                 #
-                # That remainder still has to carry a cost. Every kWh added to
-                # `running_energy` divides into `running_total_cost` below, so
-                # adding energy without a cost silently dilutes the basis
-                # downward -- the same direction as the defect this method was
-                # just fixed for, and it would grow with counter drift rather
-                # than being bounded by it. Nothing here can say where that
-                # energy came from, so it is priced the way this method
-                # already prices energy of unknown provenance: at cycle cost,
-                # exactly as the pre-existing charge at `initial_soe` above.
+                # That remainder is priced at the GRID price, not at cycle
+                # cost. A battery charges from solar or from the grid; there is
+                # no third source. If `solar_to_battery` cannot account for the
+                # energy then the grid supplied it and the grid *counter*
+                # under-read, so what it cost is what grid energy costs.
+                #
+                # Pricing it at cycle cost instead (an earlier revision of this
+                # fix) is strictly worse than the formula being replaced here:
+                # the retired split assigned every kWh above solar to the grid
+                # at buy price, so on a period with an under-reading counter
+                # that "fix" priced the energy CHEAPER than the bug did --
+                # understating the basis, which is the exact failure Task 4
+                # exists to close. Degenerately, a reset grid counter during
+                # grid charging would have booked the whole charge as nearly
+                # free. Caught in review on this repo's own evidence bundle,
+                # `historical_2026_07_18_charge_attribution.json` period 39.
                 unattributed = max(
                     0.0,
                     event.energy.battery_charged - solar_to_battery - grid_to_battery,
                 )
-                unattributed_cost = (
-                    unattributed * self.battery_settings.cycle_cost_per_kwh
+                unattributed_cost = unattributed * (
+                    event.economic.buy_price + self.battery_settings.cycle_cost_per_kwh
                 )
 
                 new_energy_cost = solar_cost + grid_cost + unattributed_cost

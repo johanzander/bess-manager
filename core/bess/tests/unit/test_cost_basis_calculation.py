@@ -315,9 +315,14 @@ class TestChargeSourceAttribution:
         the battery recorded taking in. That remainder still divides into the
         running total, so leaving it uncosted dilutes the basis downward --
         the same direction as the defect this method was fixed for, and
-        unbounded by counter drift rather than limited by it. Energy of
-        unknown provenance is priced at cycle cost, as the pre-existing
-        charge already is.
+        unbounded by counter drift rather than limited by it.
+
+        The remainder is priced at the grid price. A battery charges from
+        solar or from the grid; if `solar_to_battery` cannot account for the
+        energy then the grid supplied it and the counter under-read. Pricing
+        it at cycle cost instead would be cheaper than the formula this fix
+        replaced -- which charged everything above solar at buy price -- and
+        so would understate the basis in exactly the case Task 4 targets.
         """
         cycle_cost = base_system.battery_settings.cycle_cost_per_kwh
         buy_price = 2.0
@@ -358,8 +363,7 @@ class TestChargeSourceAttribution:
 
         expected = (
             event.energy.solar_to_battery * cycle_cost
-            + event.energy.grid_to_battery * (buy_price + cycle_cost)
-            + unattributed * cycle_cost
+            + (event.energy.grid_to_battery + unattributed) * (buy_price + cycle_cost)
         ) / 3.5
         assert cost_basis == pytest.approx(expected)
 
@@ -369,3 +373,13 @@ class TestChargeSourceAttribution:
             + event.energy.grid_to_battery * (buy_price + cycle_cost)
         ) / 3.5
         assert cost_basis > uncosted
+
+        # And pricing it at cycle cost -- an earlier revision of this fix --
+        # would be cheaper still than the retired formula charged for the same
+        # kWh, so it must land strictly above that too.
+        at_cycle_cost = (
+            event.energy.solar_to_battery * cycle_cost
+            + event.energy.grid_to_battery * (buy_price + cycle_cost)
+            + unattributed * cycle_cost
+        ) / 3.5
+        assert cost_basis > at_cycle_cost

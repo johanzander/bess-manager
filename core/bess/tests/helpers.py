@@ -9,7 +9,6 @@ Reduces boilerplate across test files by providing:
 """
 
 from core.bess.dp_battery_algorithm import (
-    _effective_ac_cap_kwh,
     _period_flows,
     optimize_battery_schedule,
 )
@@ -371,7 +370,6 @@ def flows_for(
         solar_production=solar_production,
         battery_settings=battery_settings,
         dt=dt,
-        ac_cap_kwh=_effective_ac_cap_kwh(battery_settings, dt),
         import_cap_kwh=import_cap_kwh,
     )
 

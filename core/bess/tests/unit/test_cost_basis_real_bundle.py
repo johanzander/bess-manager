@@ -88,10 +88,8 @@ def _replay_cost_basis(rows, cycle_cost, attribute):
         if e.battery_charged > 0:
             s2b, g2b = attribute(e)
             unattributed = max(0.0, e.battery_charged - s2b - g2b)
-            cost += (
-                s2b * cycle_cost
-                + g2b * (row["buy_price"] + cycle_cost)
-                + unattributed * cycle_cost
+            cost += s2b * cycle_cost + (g2b + unattributed) * (
+                row["buy_price"] + cycle_cost
             )
             energy += e.battery_charged
         if e.battery_discharged > 0 and energy > 0:
@@ -212,4 +210,16 @@ def test_real_day_has_charge_neither_source_explains(base_system):
     assert actual > _replay_uncosted(), (
         "unattributed charge is being added to the running energy without a "
         "cost, which dilutes the basis downward"
+    )
+
+    # And it must not be priced BELOW what the retired formula charged for the
+    # same energy. The retired split assigned everything above solar to the
+    # grid at buy price, so pricing the remainder at cycle cost would have been
+    # cheaper than the bug -- understating the basis, the very failure this
+    # method was fixed for. This is the direction the first version of this
+    # test could not see, because it only compared against costing at zero.
+    retired = _replay_cost_basis(rows, cycle_cost, _retired)
+    assert actual >= retired, (
+        "the unattributed remainder is priced below what the retired split "
+        "charged for it -- a 'fix' cheaper than the bug"
     )

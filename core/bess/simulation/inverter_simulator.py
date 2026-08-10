@@ -250,7 +250,6 @@ def simulate(
             solar_production=solar_production[t],
             battery_settings=settings,
             dt=dt,
-            ac_cap_kwh=_effective_ac_cap_kwh(settings, dt),
         )
         pd = _build_period_data(
             flows=flows,

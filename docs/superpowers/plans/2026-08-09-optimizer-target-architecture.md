@@ -485,7 +485,8 @@ consolidation that changes no bit has demonstrably not changed behavior;
 one that does has a delta to state and defend against the 0.05
 SEK/fixture budget.
 
-- [ ] Write the detailed plan (superpowers:writing-plans) covering:
+- [x] **DONE** — detailed plan written and merged as PR #533
+      (`2026-08-10-phase3-one-flow-record.md`). Covered:
       per-candidate flow record computed once in
       `action_selector.select_action` (extending `_compute_reward`'s
       existing flow math, not duplicating it); reward derived from that
@@ -521,20 +522,43 @@ SEK/fixture budget.
       (`_build_period_data`), `daily_view_builder.py`, `models.py`
       (`apply_export_curtailment_to_period_data`) and
       `prediction_snapshot.py`.
-- [ ] **Acceptance — golden bit-parity across every fixture in
+- [x] **MET — bit-parity held on all 36 fixtures at every task**, byte
+      identical on `actions`, `soe_trajectory` and `battery_solar_cost`. A
+      full-field diff (every energy/economic/decision field, all 2168
+      periods) found **0 differences** against pre-refactor `main`; the only
+      behavioural delta anywhere is Task 3's intended cost-basis correction,
+      one fixture, 0.049977 SEK/kWh. Original acceptance text:
+- [x] **Acceptance — golden bit-parity across every fixture in
       `core/bess/tests/unit/data/`**, reusing Phase 1's
       `golden_capture.py` machinery and its regeneration discipline. Any
       non-zero delta means the consolidation changed behavior: state the
       measured value in the PR body and justify it against the 0.05
       SEK/fixture budget, or fix it. `assert_flow_coherence` must stay
       green throughout (floor, not goal — it is already at 0/2168).
-- [ ] Full + slow + E2E per the detailed plan; draft PR; `/code-review`.
+- [x] **DONE** — 1690 fast + 458 slow green, mock-HA E2E run, draft PR,
+      `/code-review` at high effort (22 agents) plus two maintainer review
+      rounds. Every CONFIRMED finding fixed before merge; the review rounds
+      found four real defects this phase introduced, all of which are
+      recorded with their measurements in PR #534.
 
-**Exit gate:** bit-parity holds; no reward-only or flows-only code path
-survives (`P4` compliance grep in the PR body); the duplicated
+**Exit gate — MET, with one part of P4 explicitly not closed.** Bit-parity
+holds. No reward-only or flows-only code path survives. The duplicated
 planning-side flow derivations are one (`_period_flows`), with
 `_state_transition`, the two numpy mirrors and the PWL gain remaining
 deliberately — see the census note above.
+
+**P4's noise-model half did NOT land.** Task 5 (gate the ingest heuristics
+so exact data bypasses them) was attempted and withdrawn: two of the three
+are physical bounds rather than noise models, and gating the third (#350's
+fold) flips planned intent to BATTERY_EXPORT — hence `grid_first` — in the
+reachable regime `ac_cap < home < solar`, where #497's pre-clipping deficit
+leaves the candidate admitted. Closing it needs an AC-aware candidate
+filter, i.e. Phase 4. Pinned by
+`test_planned_flows_still_pass_through_the_ingest_fold`, which should
+**flip** when the gate lands rather than be deleted.
+
+**Phase 3 is closed.** Its follow-ups are triaged below; none blocks a
+release.
 
 ## Phase 4: Executable-command candidates (P3)
 
@@ -635,7 +659,18 @@ floor; #320/#352 reproductions pass.
 Five things Phase 3 found or left behind. Recorded here because until now
 they existed only in code comments and commit messages, which nobody greps.
 
-- [ ] **#536 — regime-aware charge-source split (the one with money in it).**
+- [ ] **#536 — regime-aware charge-source split. MEASURED, NOT SCHEDULED —
+      does not block a release.** Costs **+3.85 SEK** overstated across all
+      30 bundles (26 periods, worst single +0.524 SEK) against the
+      **+55.15 SEK** Phase 3 correctly attributes — ~7%, and in the safe
+      direction, since an overstated basis makes the DP *less* eager to
+      discharge. Not fixed because the only viable detection keys off
+      `decision.strategic_intent`, which on a recorded period is the
+      *planned* intent: the flows genuinely cannot distinguish
+      "solar→home + grid→battery" from "solar→battery + grid→home" when all
+      three are non-zero. That would couple historical cost accounting to
+      plan-vs-execution fidelity to recover ~0.13 SEK/day. Revisit on
+      evidence from a user who grid-charges heavily with concurrent PV.
       `EnergyData` allocates solar to the home first. That is right for
       `load_first` surplus charging and wrong during deliberate
       `GRID_CHARGING` (`battery_first`), where PV is DC-coupled straight to

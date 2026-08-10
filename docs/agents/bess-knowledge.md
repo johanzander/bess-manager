@@ -436,16 +436,19 @@ now gated" section.
 
 Scope: this is **Growatt VPP** control mode (`solax_modbus_growatt_min` /
 `_sph` — Growatt GEN3/GEN4 hardware driven through the solax_modbus
-integration), not the separate SolaX VPP platform. The control mode is marked
-experimental, but it is not untested hardware: #118's LOAD_SUPPORT behaviour
-was reported by two real-hardware testers running Growatt MIN with
-`control_mode=vpp`.
+integration), not the separate SolaX VPP platform. It is in real production
+use and well exercised in the field.
 
-What is unvalidated is narrower — the two *hold* branches this builds on
-(`battery_first` #466, `grid_first` #355) ship pending confirmation, so the
-gate-closed command specifically wants a real-hardware check. The corpus
-cannot supply one: the simulator is Growatt MIN/cloud **TOU** only and has no
-VPP mode at all.
+The `*(experimental)*` marker in `INVERTER_PLATFORMS.md` and the
+"ships experimental pending confirmation" notes on individual branches in
+`solax_modbus_growatt_controller.py` date from when those branches shipped
+and have not been revisited since they proved out — do not read them as a
+current statement that the platform is unproven.
+
+What *is* new here is the gate-closed command itself, which has not yet run
+in the field. That is ordinary new-behaviour risk, not a change stacked on an
+unvalidated foundation. The corpus cannot cover it either way: the simulator
+is Growatt MIN/cloud **TOU** only and has no VPP mode at all (see #538).
 
 The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
 inherited (an uncomputed bottom-grid-level value opening the ceiling

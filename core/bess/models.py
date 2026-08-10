@@ -369,7 +369,19 @@ class DecisionData:
     cost_basis: float = 0.0  # per kWh - cost basis of stored energy
     shadow_price: float = (
         0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
-        # (DP value-function gradient dV/dSoE). Used to gate SOLAR_EXPORT discharge.
+        # (DP value-function gradient dV/dSoE). REPORTING ONLY (#526): it is a
+        # backward difference, so it does not exist at the bottom grid level,
+        # and 0.0 is indistinguishable between "computed as worthless" and
+        # "never computed". No consumer may re-derive a decision from it --
+        # read intra_period_discharge_allowed instead.
+    )
+    intra_period_discharge_allowed: bool = (
+        False  # DP's decision (#526): may the sub-period discharge ceiling be
+        # opened for this period? Decided where the value function is owned,
+        # using dV/dSoE when it exists. False where no shadow price is
+        # computable: at the bottom grid level there is no removable kWh below
+        # this state, so there is nothing to authorize. Absence is never
+        # permission -- a decision this DP did not make stays False.
     )
     future_value: float = (
         0.0  # DP value-to-go (continuation_value) from the resulting battery

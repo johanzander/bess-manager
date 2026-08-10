@@ -317,6 +317,24 @@ decided per period from the **shadow price** (above):
 > (The efficiency factor applies only to the buy side — the shadow price is
 > already per-kWh-of-stored-energy.)
 
+**Where that comparison happens (#526).** It is made *inside the DP*, in
+`_record_marginal_value`, at the point where the value function `V` is still in
+hand — not downstream in `battery_system_manager.py`. The result is recorded as
+`DecisionData.intra_period_discharge_allowed`, a plain boolean, and every
+consumer (the BSM apply path and the inverter simulator) reads that boolean
+rather than re-deriving the comparison.
+
+The reason is that `shadow_price` is a *backward difference* between adjacent
+SoE grid levels, so it does not exist at the bottom level — and a SoE at or
+below the reserve floor clamps there. The DP used to skip the assignment in
+that case, leaving the field at its `0.0` default, which is also what a
+genuinely worthless kWh produces. Any consumer comparing against the scalar
+therefore read "never computed" as "worth nothing", and `0.0` satisfies the
+inequality for any positive buy price — so the ceiling opened on data nothing
+had computed. **`shadow_price` is now reporting-only; do not derive a decision
+from it.** Where no shadow price is computable there is no removable kWh below
+that state, so the authorization is `False`: absence is not permission.
+
 What this works out to in practice — important for analysis:
 - During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal
   kWh is only worth the **export (sell) price** — the surplus refills it for

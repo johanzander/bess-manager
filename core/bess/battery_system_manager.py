@@ -71,10 +71,8 @@ from .weather import fetch_temperature_forecast
 logger = logging.getLogger(__name__)
 
 
-def intra_period_discharge_gate(
-    buy_price: float, shadow_price: float, eff_d: float
-) -> int:
-    """Intra-period discharge gate for a SOLAR_EXPORT, SOLAR_STORAGE, or
+def intra_period_discharge_gate(allowed: bool) -> int:
+    """Intra-period discharge ceiling for a SOLAR_EXPORT, SOLAR_STORAGE, or
     LOAD_SUPPORT period.
 
     All three intents map to load_first; SOLAR_EXPORT/SOLAR_STORAGE plan
@@ -84,15 +82,17 @@ def intra_period_discharge_gate(
     from battery only when the stored energy is worth less than buying from
     grid now.
 
-    Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
-    ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
-    that kWh of SoE (dV/dSoE), already in per-kWh-of-SoE units with future
-    efficiencies baked in — so ``eff_d`` multiplies only the buy side.
+    That comparison is made by the DP (`_record_marginal_value`), which owns
+    the value function the marginal value comes from, and arrives here as
+    ``decision.intra_period_discharge_allowed``. This function does not
+    re-derive it: doing so from a ``shadow_price`` scalar could not tell a
+    computed zero from a never-computed one, and opened the ceiling on absent
+    data (#526).
 
-    Returns 100 (allow discharge) when ``buy_price * eff_d >= shadow_price``,
-    else 0 (hold the reserve, buy the dip from grid).
+    Returns 100 (allow discharge) or 0 (hold the reserve, buy the dip from
+    grid).
     """
-    return 100 if buy_price * eff_d >= shadow_price else 0
+    return 100 if allowed else 0
 
 
 class BatterySystemManager:
@@ -2681,17 +2681,12 @@ class BatterySystemManager:
             target_timestamp = time_utils.period_index_to_timestamp(period)
             period_data = self.schedule_store.get_period_data_at(target_timestamp)
             if period_data is not None:
-                shadow = period_data.decision.shadow_price
-                buy_prices, _ = self.price_manager.get_available_prices()
-                if period < len(buy_prices):
-                    discharge_rate = max(
-                        discharge_rate,
-                        intra_period_discharge_gate(
-                            buy_prices[period],
-                            shadow,
-                            self.battery_settings.efficiency_discharge,
-                        ),
-                    )
+                discharge_rate = max(
+                    discharge_rate,
+                    intra_period_discharge_gate(
+                        period_data.decision.intra_period_discharge_allowed
+                    ),
+                )
 
         # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
         # decision — curtail whenever this period is exporting at a sell

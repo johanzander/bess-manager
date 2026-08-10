@@ -36,8 +36,7 @@ def verify_plan_faithfulness(
             pd.decision.strategic_intent,
             pd.decision.battery_action / dt,
             settings,
-            shadow_price=pd.decision.shadow_price,
-            buy_price=buy_price[i],
+            intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
         )
         for i, pd in enumerate(result.period_data)
     ]
@@ -136,8 +135,7 @@ def realized_under_solar_error(
             pd.decision.strategic_intent,
             pd.decision.battery_action / dt,
             settings,
-            shadow_price=pd.decision.shadow_price,
-            buy_price=buy_price[i],
+            intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
         )
         for i, pd in enumerate(result.period_data)
     ]

@@ -68,10 +68,10 @@ def _set_intent_with_action(
     bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
 
 
-def _store_shadow_price(
-    bsm: BatterySystemManager, period: int, shadow_price: float
-) -> None:
-    """Populate the schedule store with a LOAD_SUPPORT period at the given shadow price."""
+def _store_authorization(bsm: BatterySystemManager, period: int, allowed: bool) -> None:
+    """Populate the schedule store with a LOAD_SUPPORT period carrying the DP's
+    sub-period discharge authorization (#526 -- the BSM reads the decision, not
+    the shadow price it was derived from)."""
     energy = EnergyData(
         solar_production=0.0,
         home_consumption=0.0,
@@ -82,7 +82,9 @@ def _store_shadow_price(
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    decision = DecisionData(strategic_intent="LOAD_SUPPORT", shadow_price=shadow_price)
+    decision = DecisionData(
+        strategic_intent="LOAD_SUPPORT", intra_period_discharge_allowed=allowed
+    )
     period_data = PeriodData(
         period=period,
         energy=energy,
@@ -96,29 +98,29 @@ def _store_shadow_price(
 
 class TestLoadSupportDischargeCap:
     """BSM-integration coverage: proves LOAD_SUPPORT's discharge_rate stays at
-    the DP's plan-scaled baseline regardless of shadow_price/buy_price, i.e.
+    the DP's plan-scaled baseline regardless of the DP's authorization, i.e.
     the gate is never consulted for this intent. Mirrors
     TestSolarExportDischargeGate's structure, inverted expectations."""
 
     def test_baseline_preserved_even_when_gate_condition_would_be_favorable(self):
-        """High buy price, low shadow price -- exactly the condition that used
-        to open the gate to 100% -- now leaves the plan-scaled baseline
-        untouched."""
+        """The DP authorized sub-period discharge -- exactly the condition that
+        used to open the gate to 100% -- and that now leaves the plan-scaled
+        baseline untouched."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
-        _store_shadow_price(bsm, PERIOD, shadow_price=0.5)
+        _store_authorization(bsm, PERIOD, allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 
         assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
 
-    def test_baseline_preserved_when_shadow_price_high(self):
-        """Low buy price, high shadow price -- the DP's own planned discharge
+    def test_baseline_preserved_when_dp_withholds_authorization(self):
+        """DP withheld authorization -- the DP's own planned discharge
         (the baseline) is NOT zeroed out -- LOAD_SUPPORT already has a nonzero
         plan to protect, and nothing may lower it (that would regress #147)."""
         bsm, controller = _make_bsm(buy_prices=[0.2] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
-        _store_shadow_price(bsm, PERIOD, shadow_price=4.0)
+        _store_authorization(bsm, PERIOD, allowed=False)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -136,7 +138,8 @@ class TestLoadSupportDischargeCap:
 
     def test_battery_export_is_unaffected(self):
         """BATTERY_EXPORT has no deficit backstop (grid_first) -- it was never
-        part of this gate and still isn't, regardless of shadow price."""
+        part of this gate and still isn't, even when the DP authorized
+        sub-period discharge."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "BATTERY_EXPORT", BASELINE_ACTION_KWH)
         energy = EnergyData(
@@ -149,7 +152,9 @@ class TestLoadSupportDischargeCap:
             battery_soe_start=10.0,
             battery_soe_end=10.0,
         )
-        decision = DecisionData(strategic_intent="BATTERY_EXPORT", shadow_price=0.5)
+        decision = DecisionData(
+            strategic_intent="BATTERY_EXPORT", intra_period_discharge_allowed=True
+        )
         period_data = PeriodData(
             period=PERIOD,
             energy=energy,

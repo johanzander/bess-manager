@@ -82,23 +82,28 @@ def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
         "scenario sanity check failed -- expected a LOAD_SUPPORT period at "
         f"index {LOAD_SUPPORT_PERIOD}, got {pd.decision.strategic_intent}"
     )
-    expected_gate = intra_period_discharge_gate(
-        buy_price[LOAD_SUPPORT_PERIOD],
-        pd.decision.shadow_price,
-        settings.efficiency_discharge,
+    assert (
+        intra_period_discharge_gate(pd.decision.intra_period_discharge_allowed) == 100
+    ), (
+        "scenario sanity check failed -- expected the DP to authorize "
+        f"sub-period discharge at period {LOAD_SUPPORT_PERIOD} (the point of "
+        "this test is that an authorized period is still ignored for "
+        "LOAD_SUPPORT)"
     )
-    assert expected_gate == 100, (
-        "scenario sanity check failed -- expected the shadow-price gate "
-        f"condition to be favorable at period {LOAD_SUPPORT_PERIOD} (the "
-        "point of this test is that a favorable condition is still ignored)"
+    assert (
+        buy_price[LOAD_SUPPORT_PERIOD] * settings.efficiency_discharge
+        >= pd.decision.shadow_price
+    ), (
+        "scenario sanity check failed -- the DP's authorization here must "
+        "come from a genuinely favorable buy-vs-hold comparison, not from an "
+        "uncomputed shadow price (#526)"
     )
 
     cmd = derive_control_command(
         pd.decision.strategic_intent,
         pd.decision.battery_action / dt,
         settings,
-        shadow_price=pd.decision.shadow_price,
-        buy_price=buy_price[LOAD_SUPPORT_PERIOD],
+        intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
     )
     baseline = min(
         100,

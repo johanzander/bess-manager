@@ -32,23 +32,27 @@ def derive_control_command(
     strategic_intent: str,
     battery_action_kw: float,
     settings: BatterySettings,
-    shadow_price: float | None = None,
-    buy_price: float | None = None,
+    intra_period_discharge_allowed: bool | None = None,
 ) -> ControlCommand:
     """Map a plan period (intent + planned battery power) to the applied command,
     reusing the production controller mappings so the simulator executes exactly
     what the real controller would write.
 
-    ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE
-    intra-period discharge gate (mirrors
-    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT does NOT
-    use this gate (#393 -- reverted #384/#385's extension, see
-    test_load_support_discharge_gate.py). Omit both to leave the gate closed
-    -- callers that don't care about it (most existing tests) see unchanged,
-    pre-gate behavior."""
+    ``intra_period_discharge_allowed`` is the DP's decision for this period
+    (``DecisionData.intra_period_discharge_allowed``) and feeds the
+    SOLAR_EXPORT/SOLAR_STORAGE intra-period discharge gate, mirroring
+    ``BatterySystemManager._apply_period_schedule``. LOAD_SUPPORT does NOT use
+    this gate (#393 -- reverted #384/#385's extension, see
+    test_load_support_discharge_gate.py).
+
+    ``None`` means "this caller is not exercising the gate" and leaves it
+    closed -- distinct from ``False``, which is the DP deciding against opening
+    it. Keeping the opt-out its own value is what stops the parameter from
+    re-acquiring the two-meanings-one-value defect that #526 removed from
+    ``shadow_price``."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
-        strategic_intent, battery_action_kw, settings, shadow_price, buy_price
+        strategic_intent, battery_action_kw, settings, intra_period_discharge_allowed
     )
     return ControlCommand(
         battery_mode=battery_mode,
@@ -60,35 +64,27 @@ def derive_control_command(
 
 def _gated_discharge_rate(
     baseline: int,
-    settings: BatterySettings,
-    shadow_price: float | None,
-    buy_price: float | None,
+    intra_period_discharge_allowed: bool | None,
 ) -> int:
-    """Apply the shadow-price intra-period discharge gate on top of a planned
+    """Apply the DP's intra-period discharge decision on top of a planned
     baseline rate, mirroring `BatterySystemManager._apply_period_schedule`'s
     `max(baseline, gate)` -- the gate may only raise the ceiling, never lower
-    an already-committed plan. No-op (returns baseline) when the caller
-    didn't supply shadow_price/buy_price.
+    an already-committed plan. No-op (returns baseline) when the caller opted
+    out by passing None.
 
     Omits production's `discharge_rate_is_load_following` platform guard --
     this simulator is Growatt MIN/cloud only (see module docstring), which is
     always load-following, so the guard would always be true here."""
-    if shadow_price is None or buy_price is None:
+    if intra_period_discharge_allowed is None:
         return baseline
-    return max(
-        baseline,
-        intra_period_discharge_gate(
-            buy_price, shadow_price, settings.efficiency_discharge
-        ),
-    )
+    return max(baseline, intra_period_discharge_gate(intra_period_discharge_allowed))
 
 
 def _map_rates(
     intent: str,
     action_kw: float,
     settings: BatterySettings,
-    shadow_price: float | None = None,
-    buy_price: float | None = None,
+    intra_period_discharge_allowed: bool | None = None,
 ) -> tuple[bool, int, int]:
     """Mirror of InverterController._map_intent_to_rates without needing a live
     controller instance. Returns (grid_charge, discharge_rate_pct, charge_rate_pct)."""
@@ -104,12 +100,12 @@ def _map_rates(
     if intent == "IDLE":
         return False, 0, 100
     if intent == "SOLAR_STORAGE":
-        rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
+        rate = _gated_discharge_rate(0, intra_period_discharge_allowed)
         return False, rate, 100
     if intent == "SOLAR_EXPORT":
         # #313: charge_rate=0 blocks passive solar->battery charging so solar
         # bypasses to grid even below max SOE -- unlike IDLE/SOLAR_STORAGE.
-        rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
+        rate = _gated_discharge_rate(0, intra_period_discharge_allowed)
         return False, rate, 0
     if intent == "LOAD_SUPPORT":
         # No shadow-price gate (#393): reverted #384/#385's extension -- see

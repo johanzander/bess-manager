@@ -88,9 +88,18 @@ def _eligible_indices(
     amendment relaxing it must cite this note and bring field evidence.
 
     **Row 2 -- within epsilon of the argmax value.** Measured once, against
-    `candidates[argmax_index].value`, never against a previous row's output:
-    chaining let two rows spend up to `2 * epsilon` between them, which is
-    the epsilon-compounding P2 exists to make unrepresentable.
+    `candidates[argmax_index].value`, never against a previous row's output.
+
+    Precision about what this fixes: the retired chained pair could not
+    actually spend `2 * epsilon` in any reachable state --
+    `_prefer_load_covering_discharge` returned either the argmax or a
+    discharge, and `_prefer_curtailed_charge_absorb` returned immediately on
+    a discharge winner, so the two bands could never compound. Anchoring
+    every row at the argmax makes epsilon-compounding **unrepresentable
+    rather than merely unreachable**: it survives inserting a row, widening
+    an existing one, or reordering the table, none of which the old
+    arrangement would have survived. This is not a record of a past
+    miscomputation.
 
     The band is inclusive (`<= epsilon`), which is what makes the table live
     at `epsilon == 0`. Both retired tie-breaks returned early on a
@@ -188,7 +197,10 @@ def _row_load_covering_discharge(
 
 
 def _row_stored_energy(
-    candidates: "list[Candidate]", eligible: list[int], incoming_index: int
+    candidates: "list[Candidate]",
+    eligible: list[int],
+    incoming_index: int,
+    argmax_index: int,
 ) -> int:
     """Row 4 (#510): under the #269 curtailment sell-price floor, prefer the
     eligible candidate that stores the most energy.
@@ -222,12 +234,21 @@ def _row_stored_energy(
     construction, since a floored sell price makes both options earn
     literally the same reward.
     """
-    incoming = candidates[incoming_index]
-    if incoming.power < -POWER_TOLERANCE_KW:
+    if candidates[incoming_index].power < -POWER_TOLERANCE_KW:
         return incoming_index
 
-    chosen_index = incoming_index
-    chosen_next_soe = incoming.next_soe
+    # Baseline SOE comes from the ARGMAX, not from `incoming_index`. The
+    # guard above is this row's only read of a previous row's output (see
+    # the winner-guard note); seeding the comparison from it too would be
+    # the one surviving piece of row-to-row chaining in a module whose
+    # premise is that no row reads another's. Behaviour-identical today --
+    # row 3 returns either the argmax or a discharge, and a discharge trips
+    # the guard -- but inserting a row between 3 and 4, or widening row 3 to
+    # return a non-discharge index, would silently re-anchor this row on
+    # that row's output. Anchoring here makes the invariant hold by
+    # construction instead of by a coincidence no test covers.
+    chosen_index = argmax_index
+    chosen_next_soe = candidates[argmax_index].next_soe
     for index in eligible:
         candidate = candidates[index]
         if candidate.power < -POWER_TOLERANCE_KW:
@@ -251,5 +272,7 @@ def apply_tie_policy(
     eligible = _eligible_indices(candidates, argmax_index, ctx)
     chosen_index = _row_load_covering_discharge(candidates, eligible, argmax_index, ctx)
     if ctx.sell_price_floored:
-        chosen_index = _row_stored_energy(candidates, eligible, chosen_index)
+        chosen_index = _row_stored_energy(
+            candidates, eligible, chosen_index, argmax_index
+        )
     return chosen_index

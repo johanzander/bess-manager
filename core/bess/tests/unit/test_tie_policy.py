@@ -10,7 +10,7 @@ used to refuse.
 import pytest
 
 from core.bess.action_selector import Candidate
-from core.bess.tie_policy import TieContext, apply_tie_policy
+from core.bess.tie_policy import TieContext, _eligible_indices, apply_tie_policy
 
 
 def _candidate(value, power, next_soe, new_cost_basis, reward, grid_imported):
@@ -190,15 +190,40 @@ def test_row_3_swap_survives_row_4():
 
 
 def test_epsilon_band_is_measured_against_the_argmax_not_the_previous_row():
-    # Epsilon-compounding: a candidate 1.5x epsilon behind the argmax is
-    # ineligible, even though it sits within epsilon of the candidate an
-    # earlier row would have chosen. Chaining the bands -- what the two
-    # retired helpers did -- would let the table spend 2x epsilon.
+    """The band is anchored at the argmax: a candidate 1.5x epsilon behind
+    it is ineligible even though it sits within epsilon of `near`.
+
+    HONEST SCOPE (review finding): this pins the anchor, but it does NOT
+    discriminate against the retired chained helpers -- they return the
+    same index here, because with home == solar == 0 row 3 stands down and
+    the chained anchor *is* the argmax.
+
+    No end-to-end case can discriminate, and that is a property of the
+    table rather than a gap in the fixture: row 3 returns either the argmax
+    or a discharge, and row 4 returns immediately on a discharge winner, so
+    the two anchors provably coincide whenever row 4 actually runs. (The
+    Phase 2 measurement confirmed it empirically: 0 divergences across 2194
+    selector calls.) Anchoring is therefore a structural guarantee that
+    survives a future row being inserted, widened, or reordered -- none of
+    which the chained arrangement would have survived -- not a behavior
+    difference observable today.
+
+    What IS discriminating is the direct assertion below: eligibility is
+    computed from `argmax_index`, so re-pointing it at any other index
+    fails here.
+    """
     epsilon = 0.01
     winner = _candidate(10.0, 0.0, 12.0, 0.035, 0.0, 0.0)
     near = _candidate(10.0 - 0.9 * epsilon, 1.0, 12.4, 0.035, 0.0, 0.0)
     far = _candidate(10.0 - 1.5 * epsilon, 2.0, 12.9, 0.035, 0.0, 0.0)
     assert _pick_floored([winner, near, far], 0, epsilon=epsilon) == 1
+
+    # Anchor pinned directly: measured from candidate 0 (the argmax), only
+    # `winner` and `near` are within the band. Measured from `near` instead
+    # -- the chained anchor -- `far` would also qualify.
+    candidates = [winner, near, far]
+    ctx = _ctx(epsilon=epsilon, home=0.0, solar=0.0, floored=True)
+    assert _eligible_indices(candidates, 0, ctx) == [0, 1]
 
 
 # ------------------------------------------------------- epsilon == 0 (P2)

@@ -99,6 +99,21 @@ confusing.
       wrong filename in this doc sent at least one session looking for a
       pin that does not exist. See Phase 3 for what this does to its
       acceptance criteria.
+
+      **No coverage was lost — provenance, so nobody re-opens this.**
+      `9da0f539` (PR #506) added `test_flow_coherence.py`; `33f62129`
+      (PR #511) deleted it *and* migrated its content, in the same commit,
+      into `helpers.py` (+36 lines) and `test_scenarios.py` (+14). That
+      commit's own message states the reason: "All 182 incoherent periods
+      are gone, and **the two invariants that were pinned as debt are
+      ordinary assertions now**." So the standalone pin was retired
+      because it had been promoted, not dropped — and today's
+      `assert_flow_coherence` is a strict superset of it (6 invariants:
+      four source/destination balances, the home-consumption balance, and
+      non-negativity across all 7 named flows). Stale copies of the
+      deleted file survive in unmerged worktrees and branches
+      (`origin/test/period-flow-invariants` among others); finding one
+      there is not evidence that coverage went missing.
 - [x] Land `scripts/bench_pwl_everywhere.py` (PR #515, merged
       2026-08-09) — the #512 sweep gate.
 - [x] PR #511 (#497 executable-discharge fix) merged 2026-08-09; #497

@@ -8,6 +8,23 @@
 > `implement-issue` where a phase maps 1:1 to an issue). Do NOT execute
 > later phases from this document alone. Steps use checkbox (`- [ ]`)
 > syntax for tracking.
+>
+> **How disagreements are settled (added 2026-08-10, after three sessions
+> reached three different orderings from this same text).** Claims here are
+> settled by *measurement against fixtures, live bundles, or the code as it
+> stands on `origin/main`* — never by re-reading the plan text. A session
+> that disagrees with an ordering must bring a newer measurement, and must
+> record it in this document, inline, with its date and how it was
+> obtained. Every reordering below carries its evidence for exactly that
+> reason: the 2026-08-10 three-way disagreement happened because the
+> winning measurements lived only in session transcripts while the doc kept
+> asserting stale premises. A conclusion recorded without its measurement
+> is how this recurs.
+>
+> **Tick the boxes.** Phases 1 and 2 both shipped with every box in this
+> document still unchecked, which made the doc useless as a status source
+> and was an independent cause of the same confusion. A merged phase ticks
+> its boxes in the merging PR.
 
 **Goal:** Migrate the optimizer to the normative architecture in
 `docs/agents/optimizer-architecture.md` (P1–P7), retiring the
@@ -43,15 +60,23 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 
 ## Issue map (what each phase retires)
 
-| Phase | Retires / unblocks | Class |
-|---|---|---|
-| 0 | in-flight WIP: #510, #511 (#497), #506, #507 (#502), #508 (#501), #515, #516 (#512), #517 (#466 crossover) | 2, 3 |
-| 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 |
-| 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 |
-| 3 | #497 fully, #459-class; formalizes the fold-scoping split | 2 |
-| 4 | #320, #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence | 2 |
-| parallel | #487 (input quality — independent, any time) | 1 input |
-| deferred | #513 (fix when touched; until then P6 treats PWL as heuristic), #512 (SOE-step sweep, gated on its own premise test) | 3 |
+| Phase | Retires / unblocks | Class | Status |
+|---|---|---|---|
+| 0 | in-flight WIP: #510, #511 (#497), #506, #507 (#502), #508 (#501), #515, #516 (#512), #517 (#466 crossover) | 2, 3 | **DONE** |
+| 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
+| 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
+| 3 | #459-class; collapses the six flow derivations into one record. **No longer closes #497** — #511 already did | 2 | re-scoped 2026-08-10 |
+| 4 | #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | gated on #520/#524 |
+| prerequisite | #526 (live latent defect; blocks #520 → #524 → Phase 4's R==P claim) | 2 | next |
+| parallel | #487 (input quality — premise check first, independent) | 1 input | next |
+| deferred | #513 (fix when touched; until then P6 treats PWL as heuristic), #512 (SOE-step sweep, gated on its own premise test), **P6 splice cost-gate** (measured non-firing — see Phase 2) | 3 | last |
+
+**#320 is CLOSED (2026-08-09)** and is no longer a live driver for any
+phase. It appears above only as regression cover. Measured on its own
+reproduction fixture before closing: 23/129 `BATTERY_EXPORT` periods with
+**zero** sub-threshold exports, against 62/129 with 31 sub-threshold when
+the issue was filed — #511 and #517 between them removed the mechanism.
+Any session citing #320 as a reason to reorder is working from stale text.
 
 ---
 
@@ -63,9 +88,17 @@ confusing.
 
 - [x] Merge PR #510 (merged 2026-08-08, `742d5906`; two optional test nits
       may follow up).
-- [x] Flow-coherence pin test (`test_flow_coherence.py`) — already on
-      main; it landed as PR #506 on 2026-08-08, before this plan was
-      written. Phase 3's acceptance anchor is in place.
+- [x] Flow-coherence invariant — landed as PR #506 on 2026-08-08, before
+      this plan was written. **Correction (2026-08-10): there is no
+      `test_flow_coherence.py` on `origin/main`.** The invariant lives as
+      `assert_flow_coherence` in `core/bess/tests/helpers.py:288` and is
+      called from the canonical scenario harness
+      (`test_scenarios.py:254`), `test_dp_breakpoint_search.py:663`, and
+      `helpers.py:260` — i.e. it runs over the whole fixture corpus rather
+      than from a file of its own. That is the better arrangement, but the
+      wrong filename in this doc sent at least one session looking for a
+      pin that does not exist. See Phase 3 for what this does to its
+      acceptance criteria.
 - [x] Land `scripts/bench_pwl_everywhere.py` (PR #515, merged
       2026-08-09) — the #512 sweep gate.
 - [x] PR #511 (#497 executable-discharge fix) merged 2026-08-09; #497
@@ -96,17 +129,21 @@ confusing.
       permanently demote every export on a high-consumption house
       (learned from live E2E, would otherwise be rediscovered the hard
       way).
-- [ ] Post the #466 status comment: ridax67's principle ("IDLE = WANTS,
+- [x] Post the #466 status comment — posted 2026-08-09 (plain language, no
+      shadow-price/lattice jargon, as required). #466 stays open for the
+      Phase 2 evening near-ties answer. Original requirement: ridax67's
+      principle ("IDLE = WANTS,
       not EXPECTS") is now P2 of the target architecture, and the
       sunrise/sunset crossover shipped in #517 — written in plain
       language (no shadow price / backward induction / lattice jargon;
       the reporter has said explicitly that vocabulary is not useful to
       him).
 
-## Phase 1: One selector (P1)
+## Phase 1: One selector (P1) — ✅ MERGED (PR #521, `19305476`)
 
 **One PR. Pure mechanical extraction — zero behavior change, enforced by
-bit-parity.**
+bit-parity.** Shipped as specified; the as-built interface corrections are
+recorded in the Interfaces block below.
 
 **Files:**
 - Create: `core/bess/action_selector.py` — the single candidate
@@ -194,7 +231,7 @@ Phase 2 does not re-derive them:
 
 **Steps:**
 
-- [ ] Write `test_action_selector_parity.py`: for every fixture in
+- [x] Write `test_action_selector_parity.py`: for every fixture in
       `core/bess/tests/unit/data/`, run `optimize_battery_schedule` on
       current `main` (captured golden outputs: actions + soe_trajectory +
       battery_solar_cost, stored as a generated JSON under
@@ -205,22 +242,22 @@ Phase 2 does not re-derive them:
       part of its measured-delta step, stating the regeneration in the PR
       body. The parity test itself is never deleted or skipped — a phase
       that can't regenerate goldens hasn't measured its delta.
-- [ ] Run it against unrefactored code to prove the golden capture is
+- [x] Run it against unrefactored code to prove the golden capture is
       self-consistent (trivially passes).
-- [ ] Extract `Candidate`/`select_action`; port the grid replay call site;
+- [x] Extract `Candidate`/`select_action`; port the grid replay call site;
       parity test must pass.
-- [ ] Port the grid backward-induction hot loop's selection to the same
+- [x] Port the grid backward-induction hot loop's selection to the same
       enumeration (keep the vectorized fast path if bit-parity holds;
       if the vectorized path can't route through `select_action` without
       slowdown, it must at least share the same candidate-enumeration
       functions and a parity test pins vectorized-vs-selector agreement —
       this is the #236 lesson).
-- [ ] Port both PWL call sites; delete the mirrored candidate/tie code in
+- [x] Port both PWL call sites; delete the mirrored candidate/tie code in
       `pwl_window_dp.py`; parity test must pass.
-- [ ] Confirm the four former call sites contain no candidate logic —
+- [x] Confirm the four former call sites contain no candidate logic —
       `grep -n "_prefer_\|_discharge_candidates\|_charge_candidate"` hits
       only `action_selector.py` (plus imports).
-- [ ] Full suite + slow suite + quality-check; commit; draft PR;
+- [x] Full suite + slow suite + quality-check; commit; draft PR;
       `/code-review`.
 
 **Exit gate:** bit-parity across all fixtures; diff shows net deletion in
@@ -347,10 +384,18 @@ measured against `candidates[argmax_index].value` — never chained):
 
 **Steps:**
 
-- [ ] Port the existing unit tests for both `_prefer_*` functions onto
+- [x] Port the existing unit tests for both `_prefer_*` functions onto
       `apply_tie_policy` (same cases, same expected indices) — run RED
       against an empty table, GREEN against the ported rows.
-- [ ] **P6 splice cost-gate rider:** accept a re-solved tie window only if
+- [ ] **P6 splice cost-gate rider — NOT shipped in #525; moved to the
+      deferred track (2026-08-10).** Measured before deferring: splicing
+      toggled on/off across all 36 fixtures moves **every** delta ≤ 0, so
+      the gate would not fire on anything in the corpus today. It is
+      insurance against a shape #513 describes, not recovered money, and it
+      costs a `_replay_accounting_pass` per tie window. Do it last, or take
+      its uncosted alternative (disable splicing and fix #513). Original
+      specification, unchanged, for whoever picks it up: accept a re-solved
+      tie window only if
       its replayed cost (via `_replay_accounting_pass` over the spliced
       segment) is ≤ the grid segment it replaces; a worse window is
       discarded with a WARNING log naming the window and both costs (an
@@ -358,26 +403,56 @@ measured against `candidates[argmax_index].value` — never chained):
       the incumbent, the splice is the challenger). RED test: a synthetic
       window reproducing the #513 mis-ranking shape must NOT be spliced.
       This makes `optimizer-architecture.md` P6 true in code.
-- [ ] Add the two new acceptance tests above (RED first: today's code
+- [x] Add the two new acceptance tests above (RED first: today's code
       picks IDLE at the crossover with epsilon 0).
-- [ ] Implement; measure the corpus deltas
+- [x] Implement; measure the corpus deltas
       (`test_plan_faithfulness.py` pins + per-fixture planned cost); any
       pin that moves is stated with its measured value in the PR body and
       must stay within the 0.05 SEK budget per fixture.
-- [ ] Full + slow suite; mock-HA replay of the ridax67 bundle
+- [x] Full + slow suite; mock-HA replay of the ridax67 bundle
       (`mock-run.sh 2026-08-07-232503`) to observe the crossover command;
       quality-check; draft PR; `/code-review`.
-- [ ] Answer #466 with the shipped rule, quoting ridax67's WANTS/EXPECTS
+- [x] Answer #466 with the shipped rule, quoting ridax67's WANTS/EXPECTS
       principle as the implemented semantics.
 
 **Exit gate:** all tie resolution flows through `tie_policy.py`; repo-wide
 `grep` for `_prefer_` returns nothing; corpus pins within budget.
 
-## Phase 3: One flow record (P4)
+## Phase 3: One flow record (P4) — RE-SCOPED 2026-08-10
+
+> **This phase changed character. Read this before planning it.** As
+> written, Phase 3 was a *behavior fix* whose acceptance was driving
+> flow-coherence violations to zero. **That acceptance is already
+> satisfied on `origin/main` and cannot discriminate anything.** Measured
+> independently 2026-08-10: **0 incoherent periods across 2168**. The
+> original 182/1875 pin is dead, and the invariant that replaced it —
+> `assert_flow_coherence`, `helpers.py:288` — is a strict superset of the
+> retired pin (6 invariants: the four source/destination balances, the
+> home-consumption balance, and non-negativity across all 7 named flows,
+> against the old pin's 2). It runs over the whole scenario corpus via
+> `test_scenarios.py:254`.
+>
+> What remains is real but different: the **six flow derivations are still
+> six**, and collapsing them into one per-candidate record is a
+> consolidation refactor, not a behavior change. Plan and gate it as such.
+> `assert_flow_coherence` stays in place as the standing regression net —
+> it is no longer the goal, it is the floor.
+>
+> **Phase 3 no longer closes #497.** #497 was closed by PR #511 on
+> 2026-08-09. A session that plans Phase 3 around closing it will be
+> re-fixing shipped work.
 
 **Scope to acceptance level — first step is its own detailed plan.**
-Depends on Phase 0's fold-scoping outcome (it may already have moved the
-#350 fold; this phase finishes the job from the reward side).
+Phase 0's fold-scoping premise check already moved the substance to #511;
+what is left of the #350 fold here is non-urgent data hygiene, explicitly
+demoted in Phase 0. Do not re-litigate it.
+
+**Acceptance is now golden bit-parity, exactly as in Phase 1** — the
+strongest oracle available and, unlike coherence or corpus-cost pins,
+independent of every open behavioral question (#520/#524/#526). A
+consolidation that changes no bit has demonstrably not changed behavior;
+one that does has a delta to state and defend against the 0.05
+SEK/fixture budget.
 
 - [ ] Write the detailed plan (superpowers:writing-plans) covering:
       per-candidate flow record computed once in
@@ -389,16 +464,18 @@ Depends on Phase 0's fold-scoping outcome (it may already have moved the
       site: `sensor_collector`, `influxdb_helper`, `debug_data_exporter`,
       `simulation/inverter_simulator`, backend API paths — each gets an
       explicit exact-vs-ingested decision in the plan).
-- [ ] Acceptance (already written — landed on main via Phase 0's drain
-      item): the #497 pin in `test_flow_coherence.py` — 182/1875
-      incoherent periods — goes to
-      **0**, and the plan-execution gap pins that the fold caused
-      (+0.73/+0.56/+0.45 family) collapse, each re-pinned at its measured
-      value.
+- [ ] **Acceptance — golden bit-parity across every fixture in
+      `core/bess/tests/unit/data/`**, reusing Phase 1's
+      `golden_capture.py` machinery and its regeneration discipline. Any
+      non-zero delta means the consolidation changed behavior: state the
+      measured value in the PR body and justify it against the 0.05
+      SEK/fixture budget, or fix it. `assert_flow_coherence` must stay
+      green throughout (floor, not goal — it is already at 0/2168).
 - [ ] Full + slow + E2E per the detailed plan; draft PR; `/code-review`.
 
-**Exit gate:** zero flow-coherence violations; no reward-only or
-flows-only code path survives (`P4` compliance grep in the PR body).
+**Exit gate:** bit-parity holds; no reward-only or flows-only code path
+survives (`P4` compliance grep in the PR body); the six flow derivations
+are one.
 
 ## Phase 4: Executable-command candidates (P3)
 
@@ -406,6 +483,58 @@ flows-only code path survives (`P4` compliance grep in the PR body).
 first step is its own design doc + detailed plan (this is a
 `brainstorming` → `writing-plans` sequence, and rules.md's new-class
 approval applies).**
+
+### Is Phase 4 subsumed by #511/#517? No — measured 2026-08-10
+
+One session argued Phase 4 had been overtaken by the #511/#517 fixes. It
+had not, and the counter-evidence is static and re-checkable rather than
+inferential — re-run these two greps before reopening the question:
+
+- **The plan charges at nominal power in seven hardcoded places.**
+  `rate_throughput = battery_settings.max_charge_power_kw * dt` appears at
+  `dp_battery_algorithm.py:306,339,377,475,589,728` and
+  `pwl_window_dp.py:537`.
+- **None of them reads the configured charge rate.** `charging_power_rate`
+  has **zero** occurrences in `dp_battery_algorithm.py`,
+  `pwl_window_dp.py`, and `action_selector.py` — while
+  `battery_system_manager.py:3372` writes exactly that value to the
+  inverter (`set_charging_power_rate`), and `bsm:3525` displays the
+  resulting power as `(charging_power_rate / 100) * max_charge_power_kw`.
+
+So on the charge side the planner assumes a throughput the executor is
+configured not to deliver. That is a structural R≠P divergence on the
+*charge* path, untouched by #511 and #517 (both of which addressed
+discharge executability), and it is precisely what "candidates are
+executable commands" fixes. Phase 4 stands.
+
+**Phase 4's live driver is #352, not #320.** #320 is closed (see the issue
+map). Measured for #352: 22 sub-load `grid_first` periods live, **16 of
+them in the 0.1–0.5 kWh band #511 does not reach**, 5 clearly
+spike-exposed.
+
+### Gating
+
+Phase 4's central claim is that R==P becomes structural. Two open issues
+decide what R==P even means at the boundary, so **settle them first** —
+`#526` → `#520` → `#524` (`#524` is already labelled `[BLOCKED]` on
+`#520`, and `#520`'s discharge gate opens unconditionally where
+`shadow_price == 0.0` is ambiguous between "worth nothing" and "never
+computed", which is #526). Building Phase 4 on an unsettled gate means
+encoding the ambiguity into the candidate space.
+
+### Split into four shippable PRs
+
+The design doc's first job is to confirm this split, but the default is:
+
+- **4a — capability model.** Per-platform lattice/mode/minimum-gear into
+  `BatterySettings`/platform config; no candidate changes yet.
+- **4b — discharge commands.** Candidates become executable discharge
+  commands; folds in #511/#517's tests as regression cover.
+- **4c — charge commands.** The seven hardcoded `rate_throughput` sites
+  above collapse to the configured rate; this is where the measured R≠P
+  divergence closes.
+- **4d — intent as input.** `classify_strategic_intent` on planned flows
+  is deleted or reduced to observed-data use.
 
 - [ ] Design doc first: candidate = executable command (mode + rate on the
       platform lattice + reactive semantics), evaluated by simulating the
@@ -442,10 +571,22 @@ floor; #320/#352 reproductions pass.
 
 ## Parallel / deferred tracks
 
-- [ ] **#487 (any time, independent):** consumption statistics must
-      account for inverter self-consumption while the battery sleeps.
-      Route through `implement-issue`. Improves every forecast-sensitive
-      decision; requires none of the phases.
+- [ ] **#487 — premise check FIRST, then decide (next up).** Consumption
+      statistics must account for inverter self-consumption while the
+      battery sleeps. **Its own body calls the mechanism unverified**, so
+      the first step is verification, not implementation, and it is the
+      cheapest high-expected-value move on the board: *does measured
+      overnight load actually drop when the inverter sleeps?* Measure that
+      against real bundles before writing any fix. If the premise fails,
+      the fix is wrong regardless of how well it is built — this is the
+      same discipline that turned Phase 0's fold-scoping item from a
+      −5.51 SEK/day "win" into PR #511. Only if the premise holds does
+      this route through `implement-issue`. Independent of every phase.
+- [ ] **#526 — live latent defect, and the gate on Phase 4 (next up).**
+      `shadow_price == 0.0` is ambiguous between "worth nothing" and
+      "never computed", and the discharge gate opens unconditionally
+      there. Fix before #520, which is before #524 (already `[BLOCKED]`
+      on it), which is before Phase 4 can claim R==P is structural.
 - [ ] **#485 hysteresis (after Phase 2):** "keep the applied schedule
       unless the new plan beats it by more than epsilon" — consumes
       `epsilon_for_period` (P5), implemented at the apply layer
@@ -470,17 +611,43 @@ floor; #320/#352 reproductions pass.
 
 ## Execution order summary
 
+**Revised 2026-08-10.** Phases 0–2 are done; the remainder was reordered
+on the measurements recorded above, not on a re-reading of this plan.
+
 ```
-Phase 0 (drain WIP)
-   ├── #487 (parallel, independent)
+Phase 0 (drain WIP)           — ✅ DONE
    ▼
-Phase 1 (one selector)        — mechanical, bit-parity
+Phase 1 (one selector)        — ✅ MERGED #521, bit-parity held
    ▼
-Phase 2 (preference table)    — closes #466 residual; then #485
+Phase 2 (preference table)    — ✅ MERGED #525 (P6 rider deferred)
    ▼
-Phase 3 (one flow record)     — closes #497; absorbs fold-scoping
+#487 premise check            — verification, not implementation;
+   │                            cheapest high-EV move. Parallel-safe.
    ▼
-Phase 4 (command candidates)  — closes #320/#352; subsumes #354's band
-   
+#526                          — live latent defect; gates #520 → #524
+   ▼
+Phase 3 (one flow record)     — RE-SCOPED: consolidation refactor,
+   │                            acceptance = golden bit-parity
+   ▼
+#520 → #524                   — settle before Phase 4 encodes the
+   │                            ambiguity into the candidate space
+   ▼
+Phase 4 (command candidates)  — 4a capability → 4b discharge cmds →
+   │                            4c charge cmds → 4d intent-as-input.
+   │                            Driver is #352 (+#354's band); #320 is
+   ▼                            closed and only regression cover.
+P6 splice cost-gate           — LAST. Measured: every delta ≤ 0 across
+                                36 fixtures, so it would never fire
+                                today. Insurance, not recovered money —
+                                or take the alternative: disable
+                                splicing and fix #513.
+
 #513 fix when touched; #512 sweep-gated; both may run between phases.
 ```
+
+**Why this differs from the original order.** Phase 3 moved earlier than
+its dependencies would suggest because its re-scoped acceptance
+(bit-parity) is independent of every open behavioral question, so it can
+land while #520/#524 are still being settled. #487 and #526 jumped the
+queue because one is a cheap premise check and the other is a live defect
+blocking the Phase 4 gate. P6 fell to last on measurement alone.

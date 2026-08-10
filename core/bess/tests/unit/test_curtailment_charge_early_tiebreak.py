@@ -17,62 +17,13 @@ export block if later solar underdelivers). These tests pin that the DP
 absorbs below-floor surplus at the earliest physical opportunity.
 """
 
-from core.bess.action_selector import Candidate, _prefer_curtailed_charge_absorb
 from core.bess.tests.helpers import run_scenario_realized
 from core.bess.tests.unit.test_scenarios import load_test_scenario
 
-
-def _candidate(value, power, next_soe, new_cost_basis, reward, grid_imported):
-    """Build a `Candidate` from the positional layout these fixtures were
-    written against, so the cases below stay literally what they were when
-    the tie-breaks lived on 6-tuples (P1 gave them a dataclass)."""
-    return Candidate(
-        power=power,
-        next_soe=next_soe,
-        reward=reward,
-        new_cost_basis=new_cost_basis,
-        grid_imported=grid_imported,
-        value=value,
-    )
-
-
-# Candidate fields: (value, power, next_soe, new_cost_basis, reward, grid_imported)
-HOLD = _candidate(10.0, 0.0, 12.0, 0.035, 0.0, 0.0)  # SOLAR_EXPORT bypass: SOE flat
-ABSORB = _candidate(10.0, 0.0, 12.6, 0.035, 0.0, 0.0)  # IDLE: absorbs surplus
-CHARGE_IMPORT = _candidate(9.999, 5.0, 13.25, 0.05, -0.1, 0.65)  # pulls grid
-DISCHARGE = _candidate(9.99, -1.0, 11.7, 0.035, 0.2, 0.0)
-
-
-def test_exact_tie_swaps_hold_to_highest_soe_absorb():
-    candidates = [ABSORB, HOLD, CHARGE_IMPORT, DISCHARGE]
-    # HOLD won the argmax on float noise; ABSORB is exactly tied -> swap.
-    assert _prefer_curtailed_charge_absorb(candidates, 1, epsilon=0.01) == 0
-
-
-def test_never_swaps_into_grid_importing_charge():
-    # CHARGE_IMPORT stores the most but pays the buy price for it -- the
-    # morning failure mode (#269 comment: Meter 1 + charge 100% pulling
-    # ~0.9 kW grid import during Storage). Never preferred over surplus-only.
-    candidates = [HOLD, CHARGE_IMPORT]
-    assert _prefer_curtailed_charge_absorb(candidates, 0, epsilon=0.01) == 0
-
-
-def test_decisive_hold_margin_is_never_swapped():
-    low_absorb = _candidate(9.98, 0.0, 12.6, 0.035, 0.0, 0.0)
-    candidates = [HOLD, low_absorb]
-    # 0.02 behind with epsilon 0.01: the hold is deliberate arbitrage.
-    assert _prefer_curtailed_charge_absorb(candidates, 0, epsilon=0.01) == 0
-
-
-def test_discharge_winner_is_untouched():
-    # A #466 load-covering swap (or genuine discharge argmax) must survive.
-    candidates = [ABSORB, DISCHARGE]
-    assert _prefer_curtailed_charge_absorb(candidates, 1, epsilon=0.01) == 1
-
-
-def test_zero_epsilon_is_a_no_op():
-    candidates = [ABSORB, HOLD]
-    assert _prefer_curtailed_charge_absorb(candidates, 1, epsilon=0.0) == 1
+# The candidate-level cases for this tie-break now live in
+# `test_tie_policy.py` as rows 1 and 4 of the P2 preference table -- they
+# moved with the rule itself, unchanged. What stays here is the
+# end-to-end evidence against the reporter's own captured plan.
 
 
 # Fixture generated from the reporter's real debug bundle

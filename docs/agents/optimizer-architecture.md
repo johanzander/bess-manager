@@ -1,7 +1,7 @@
 # Optimizer Target Architecture — Normative
 
 **Status: normative.** Every change to `core/bess/action_selector.py`,
-`core/bess/dp_battery_algorithm.py`,
+`core/bess/tie_policy.py`, `core/bess/dp_battery_algorithm.py`,
 `core/bess/pwl_window_dp.py`, `core/bess/tie_detection.py`,
 `core/bess/models.py` (flow derivation), `core/bess/strategic_intent.py`,
 or `core/bess/simulation/` must either uphold the principles below or amend
@@ -105,6 +105,34 @@ Reward shaping that flattens the objective (price floors, export-credit
 zeroing) MUST land together with the table row that resolves the
 indifference region it creates (generalizes the #269/#510 invariant in
 `bess-knowledge.md`).
+
+**Status: satisfied as of Phase 2.** The table lives in
+`core/bess/tie_policy.py` and is applied once, from
+`action_selector.select_action`. The two bespoke tie-break helpers this
+principle was written against are gone; a repo-wide grep for `_prefer_`
+over the source tree returns nothing, which is the standing exit gate.
+(The migration plan under `docs/superpowers/plans/` still names them,
+describing the code it retired.)
+
+Three things the baseline order above states loosely, as built:
+
+- Row 2 is **per-preference, not shared**. The load-cover row stands down
+  on a charge winner and on a discharge already past the cover, but keeps
+  a *partial*-cover winner eligible (#512). The curtailment row stands
+  down on a discharge winner and may still improve a charge winner. A
+  single shared non-idle guard cannot express that asymmetry and would
+  re-open the hole #512 closed.
+- "Within epsilon" is measured against the argmax winner for every row,
+  and the band is **inclusive**, so the table is live at `epsilon == 0`
+  where both retired helpers returned early. At epsilon 0 that admits only
+  bit-exact ties. **No epsilon floor exists**, and one may only be
+  introduced with a per-period forfeiture bound in the row docstring,
+  counted against the 0.05 SEK/fixture budget: measured across the whole
+  fixture corpus, the smallest gap the table declines to cross at
+  epsilon 0 is 0.0080 SEK — a real ranking, not value noise.
+- The sunrise/sunset crossover is **not** covered by this principle. #517
+  established the action set there was empty, not tied, and fixed it with
+  a candidate (P3). Crossover regression cover belongs in Phase 4.
 
 ### P3. Candidates are executable commands
 

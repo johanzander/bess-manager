@@ -43,6 +43,7 @@ from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.settings import BatterySettings
 from core.bess.strategic_intent import FLOW_NOISE_FLOOR_KWH
 from core.bess.tie_detection import epsilon_for_period
+from core.bess.tie_policy import TieContext, apply_tie_policy
 
 
 def _discharge_rate_step_kw(
@@ -367,7 +368,7 @@ class Candidate:
     `grid_imported` is carried because two consumers need it without
     recomputing the flows: the import-cap feasibility filter (#429) and the
     "never prefer a candidate that imports more grid energy than the argmax
-    winner" guard inside `_prefer_curtailed_charge_absorb`.
+    winner" eligibility row in `tie_policy`.
     """
 
     power: float  # kW, signed (+charge / -discharge / 0 idle)
@@ -418,141 +419,6 @@ def _tie_margin(candidates: list[Candidate], best_index: int) -> float:
     if runner_up == float("-inf"):
         return float("inf")
     return best.value - runner_up
-
-
-def _prefer_load_covering_discharge(
-    candidates: list[Candidate],
-    best_index: int,
-    epsilon: float,
-    home_consumption: float,
-    solar_production: float,
-    dt: float,
-) -> int:
-    """Risk-aware tie-break (#466): if the argmax landed on an idle-like
-    action (|power| <= POWER_TOLERANCE_KW) or a partial load-cover (#512 --
-    which tied candidate argmax returns is an enumeration-order accident, so
-    ties can surface at a partial cover just as well as at IDLE) while the
-    house has forecast net grid import this period, and a discharge
-    candidate that covers no more
-    than that net load sits within `epsilon` of the best value, return that
-    candidate's index instead.
-
-    Rationale (spec 2026-08-07-idle-tie-break-design.md): within `epsilon`
-    -- the value noise the DP's own SOE grid-snapping injects
-    (tie_detection.epsilon_for_period) -- the DP cannot rank the two
-    options, but they are not symmetric in risk. Load-covering discharge
-    fails safe: the inverter tracks *actual* load, absorbing a consumption
-    forecast miss for free. IDLE fails unsafe: discharge is hard-disabled,
-    so the entire miss is imported at the buy price. Deliberate arbitrage
-    holds are untouched by construction -- their margin over discharging
-    exceeds `epsilon`.
-
-    Eligibility is exact cover or under-cover only. No round-up allowance
-    is needed (#497): every candidate overshooting the deficit by less than
-    the export resolution was already excluded as unexecutable
-    (`_discharge_is_unexecutable`), and anything overshooting by more is a
-    genuine export, never a load-cover swap target. Among eligible
-    candidates the largest coverage wins -- fuller coverage means less
-    residual import exposed to a miss.
-
-    Economic bound: each swap forfeits at most `epsilon` (empirically
-    ~0.003-0.015 SEK per period), but a single horizon can contain many
-    swapped periods, and the aggregate is bounded only empirically, not
-    per-horizon -- fixture evidence puts the worst observed full-horizon
-    cost at +0.032 SEK, inside the #450 budget of 0.05 SEK. Separately, for
-    small net loads the eligibility band above is wide in SEK/kWh terms, so
-    swaps fire more often than #467's tie detector flags near-ties; this is
-    deliberate, since every swapped candidate is within `epsilon` --
-    value noise, not a real gap -- of the argmax winner.
-    """
-    if epsilon <= 0.0:
-        return best_index
-    best_value = candidates[best_index].value
-    best_power = candidates[best_index].power
-    balance_zero_p = (home_consumption - solar_production) / dt
-    if balance_zero_p <= POWER_TOLERANCE_KW:
-        return best_index
-    max_cover_p = balance_zero_p + 1e-9
-    # Fire only when the argmax landed on IDLE or a *partial* load-cover.
-    # The original guard assumed exact ties always surface at IDLE (argmax
-    # returns the first maximum), but which tied candidate the argmax lands
-    # on is an enumeration-order accident -- at the #512 grid resolution it
-    # started landing on partial covers, silently bypassing the swap and
-    # leaving residual import exposed. Charges and genuine exports
-    # (discharge beyond the deficit) stay untouched, as before.
-    is_idle = abs(best_power) <= POWER_TOLERANCE_KW
-    is_partial_cover = -best_power > POWER_TOLERANCE_KW and -best_power <= max_cover_p
-    if not (is_idle or is_partial_cover):
-        return best_index
-    swap_index = best_index
-    swap_power = 0.0
-    for index, candidate in enumerate(candidates):
-        discharge_p = -candidate.power
-        if discharge_p <= POWER_TOLERANCE_KW or discharge_p > max_cover_p:
-            continue
-        if best_value - candidate.value >= epsilon:
-            continue
-        if discharge_p > swap_power:
-            swap_index = index
-            swap_power = discharge_p
-    return swap_index
-
-
-def _prefer_curtailed_charge_absorb(
-    candidates: list[Candidate],
-    best_index: int,
-    epsilon: float,
-) -> int:
-    """Charge-early tie-break under the #269 curtailment sell-price floor:
-    if this period's sell price was floored to 0 for the reward calculation,
-    prefer the candidate that stores the most energy among those within
-    `epsilon` of the best value, provided it imports no more grid energy
-    than the argmax winner.
-
-    Rationale: flooring the sell price makes every below-floor export worth
-    exactly 0, so whenever the remaining below-floor surplus exceeds the
-    battery's headroom, "charge now, curtail later" and "curtail now,
-    charge later" earn identical reward and the argmax picks between them
-    on float noise. The options are not symmetric in reality: deferring
-    actuates as charge-rate 0% + export-limit 0 (PV physically clipped to
-    house load, above-forecast production wasted) and spends the plan's
-    slack against a later solar shortfall before the next positive-price
-    block. Charging earliest is stochastically dominant -- equal model
-    reward, strictly better under forecast error in either direction.
-
-    The import guard keeps the swap free: a candidate that stores more by
-    importing from the grid (the full-rate charge candidate during a
-    below-floor window) is never preferred over one that only absorbs
-    surplus. Discharge winners -- including a #466 load-covering swap --
-    are left untouched: this tie-break only reorders hold-vs-store picks.
-
-    `epsilon <= 0.0` disables the tie-break entirely -- deliberately
-    mirroring #466 and tie_detection's documented blind spot: a flat value
-    function (dV/dSoE == 0) gives epsilon no scale, so there is no
-    principled band in which candidates count as "tied" rather than
-    genuinely ranked, and swapping on an arbitrary absolute threshold
-    would trade real value. In practice below-floor periods with a live
-    evening export block have dV/dSoE ~= cycle_cost > 0, so the disabled
-    case is the degenerate no-future-value horizon, not the reported bug.
-    """
-    if epsilon <= 0.0:
-        return best_index
-    best = candidates[best_index]
-    if best.power < -POWER_TOLERANCE_KW:
-        return best_index
-    swap_index = best_index
-    swap_next_soe = best.next_soe
-    for index, candidate in enumerate(candidates):
-        if candidate.power < -POWER_TOLERANCE_KW:
-            continue
-        if best.value - candidate.value >= epsilon:
-            continue
-        if candidate.grid_imported > best.grid_imported + 1e-9:
-            continue
-        if candidate.next_soe > swap_next_soe + 1e-9:
-            swap_index = index
-            swap_next_soe = candidate.next_soe
-    return swap_index
 
 
 @dataclass(frozen=True)
@@ -759,33 +625,26 @@ def select_action(
             best_value = candidate.value
             argmax_index = index
 
-    # Risk-aware tie-break (#466): within the value noise the continuation
-    # value carries at this state, prefer the load-covering discharge over an
-    # idle-like winner. Epsilon uses the slope at the argmax winner's
-    # next_soe -- the same state the margin itself is measured at.
+    # The one ordered preference table (P2, tie_policy.py) -- the single
+    # place near-tie resolution happens. Epsilon uses the slope at the
+    # argmax winner's next_soe, the same state the margin itself is
+    # measured at, and every table row is measured against that winner.
     value_slope = eval_value_slope(candidates[argmax_index].next_soe)
     epsilon = epsilon_for_period(value_slope, SOE_STEP_KWH)
-    chosen_index = _prefer_load_covering_discharge(
+    chosen_index = apply_tie_policy(
         candidates,
         argmax_index,
-        epsilon=epsilon,
-        home_consumption=home,
-        solar_production=solar,
-        dt=dt,
-    )
-
-    # Charge-early tie-break under the #269 curtailment floor -- see
-    # _prefer_curtailed_charge_absorb. Runs after the #466 swap and never
-    # overrides a discharge winner, so the two preferences cannot fight.
-    if (
-        period_inputs.sell_price_floored is not None
-        and period_inputs.sell_price_floored[t]
-    ):
-        chosen_index = _prefer_curtailed_charge_absorb(
-            candidates,
-            chosen_index,
+        TieContext(
             epsilon=epsilon,
-        )
+            home_consumption=home,
+            solar_production=solar,
+            dt=dt,
+            sell_price_floored=(
+                period_inputs.sell_price_floored is not None
+                and period_inputs.sell_price_floored[t]
+            ),
+        ),
+    )
 
     return SelectionResult(
         chosen=candidates[chosen_index],

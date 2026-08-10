@@ -1660,9 +1660,8 @@ def optimize_battery_schedule(
     if export_curtailment_active:
         floor = battery_settings.export_curtailment_price_floor
         reward_sell_price = [0.0 if p < floor else p for p in sell_price]
-        # Which periods the floor actually rewrote -- the replay's
-        # charge-early tie-break (_prefer_curtailed_charge_absorb) only
-        # fires in these.
+        # Which periods the floor actually rewrote -- the tie policy's
+        # charge-early row (tie_policy.py, row 4) only fires in these.
         sell_price_floored = [p < floor for p in sell_price]
     else:
         reward_sell_price = sell_price

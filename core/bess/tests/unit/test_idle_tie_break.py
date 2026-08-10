@@ -5,7 +5,6 @@ are within the DP's own value noise, prefer the discharge -- it fails safe
 import numpy as np
 import pytest
 
-from core.bess.action_selector import Candidate, _prefer_load_covering_discharge
 from core.bess.dp_battery_algorithm import (
     SOE_STEP_KWH,
     _best_action_at_continuous_state,
@@ -20,98 +19,11 @@ from core.bess.settings import BatterySettings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
 from core.bess.tie_detection import TIE_NOISE_FACTOR
 
-
-def _candidate(value, power, next_soe, new_cost_basis, reward, grid_imported):
-    """Build a `Candidate` from the positional layout these fixtures were
-    written against, so the cases below stay literally what they were when
-    the tie-breaks lived on 6-tuples (P1 gave them a dataclass)."""
-    return Candidate(
-        power=power,
-        next_soe=next_soe,
-        reward=reward,
-        new_cost_basis=new_cost_basis,
-        grid_imported=grid_imported,
-        value=value,
-    )
-
-
-# Candidate fields: (value, power, next_soe, new_cost_basis, reward, grid_imported)
-IDLE = _candidate(10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
-COVER = _candidate(9.995, -1.0, 5.74, 0.0, 0.25, 0.0)  # covers 1 kW net load
-OVER = _candidate(9.999, -3.0, 5.21, 0.0, 0.30, 0.0)  # past load -> would export
-CHARGE = _candidate(9.99, 2.0, 6.5, 0.0, -0.5, 0.75)
-
-
-def _pick(candidates, best_index, epsilon=0.01, home=0.25, solar=0.0):
-    return _prefer_load_covering_discharge(
-        candidates,
-        best_index,
-        epsilon=epsilon,
-        home_consumption=home,
-        solar_production=solar,
-        dt=0.25,
-    )
-
-
-def test_near_tied_idle_swaps_to_load_covering_discharge():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    # IDLE wins argmax; COVER is 0.005 behind, inside epsilon=0.01 -> swap.
-    assert _pick(candidates, best_index=0) == 1
-
-
-def test_decisive_idle_margin_is_never_swapped():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    # COVER is 0.005 behind; with epsilon below that the hold is deliberate.
-    assert _pick(candidates, best_index=0, epsilon=0.004) == 0
-
-
-def test_never_swaps_into_exporting_discharge():
-    # Only the over-load discharge is within epsilon -> no eligible swap.
-    candidates = [IDLE, _candidate(9.90, -1.0, 5.74, 0.0, 0.25, 0.0), OVER, CHARGE]
-    assert _pick(candidates, best_index=0) == 0
-
-
-def test_only_exact_or_under_cover_is_eligible():
-    # Eligibility ends exactly at the load-cover breakpoint (#497): any
-    # overshooting candidate is either unexecutable (already excluded from
-    # the action set before this tie-break runs) or a genuine export --
-    # never a load-cover swap target, so there is no round-up allowance.
-    # balance_zero_p is 1.0 kW (home=0.25 kWh, dt=0.25h).
-    idle = _candidate(10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
-    barely_over = _candidate(9.999, -1.001, 5.74, 0.0, 0.30, 0.0)
-    exact_cover = _candidate(9.995, -1.0, 5.76, 0.0, 0.28, 0.0)
-
-    assert (
-        _pick([idle, barely_over], best_index=0) == 0
-    ), "any overshoot at all must not swap"
-    assert (
-        _pick([idle, barely_over, exact_cover], best_index=0) == 2
-    ), "exact cover may swap"
-
-
-def test_non_idle_winner_is_untouched():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=3) == 3
-
-
-def test_no_net_load_means_no_swap():
-    # Solar covers the house: balance_zero_p <= 0, nothing to fail-safe.
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=0, home=0.10, solar=0.50) == 0
-
-
-def test_zero_epsilon_is_a_no_op():
-    # Flat value function (dV/dSoE == 0) -> epsilon 0 -> tie-break disabled,
-    # mirroring tie_detection's documented blind spot.
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=0, epsilon=0.0) == 0
-
-
-def test_picks_largest_eligible_coverage_among_ties():
-    partial = _candidate(9.997, -0.5, 5.87, 0.0, 0.12, 0.12)  # covers half the load
-    candidates = [IDLE, partial, COVER]
-    # Both discharges are inside epsilon; the fuller cover (1.0 kW) wins.
-    assert _pick(candidates, best_index=0) == 2
+# The candidate-level cases for this tie-break now live in
+# `test_tie_policy.py`, alongside the rest of the P2 preference table --
+# they moved with the rule itself, unchanged. What stays here is the
+# end-to-end evidence: the same preference observed through the real grid
+# and PWL replays, and through #466's own regression fixture.
 
 
 def _lossless_battery() -> BatterySettings:

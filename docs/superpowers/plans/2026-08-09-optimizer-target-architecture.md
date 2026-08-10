@@ -630,6 +630,57 @@ floor; #320/#352 reproductions pass.
 
 ## Parallel / deferred tracks
 
+### Phase 3 follow-ups (recorded 2026-08-10, PR #534)
+
+Five things Phase 3 found or left behind. Recorded here because until now
+they existed only in code comments and commit messages, which nobody greps.
+
+- [ ] **#536 — regime-aware charge-source split (the one with money in it).**
+      `EnergyData` allocates solar to the home first. That is right for
+      `load_first` surplus charging and wrong during deliberate
+      `GRID_CHARGING` (`battery_first`), where PV is DC-coupled straight to
+      the battery and the house runs off the grid — so solar that really did
+      charge the battery is booked to the home and the charge is booked
+      entirely to the grid. Reproduced: `solar=2.0, home=2.0, charged=3.0,
+      imported=3.0` → `s2b=0.0, g2b=3.0`, basis 1.40 where the truth is 0.73.
+      Measured across the 30 bundles in `docs/`: **264 load_first charging
+      periods / 191.1 kWh where Phase 3's fix adds 55.15 SEK of correctly
+      attributed cost, against 26 GRID_CHARGING periods / 30.3 kWh where it
+      overstates by 3.85 SEK** — a factor of 14, and the overstatement
+      forfeits margin rather than losing money. Deliberately not fixed in
+      Phase 3: keying the split off `decision.strategic_intent` decides which
+      of two physically different topologies the accounting assumes, which is
+      a modelling decision on a money path and wants its own evidence.
+      **Caveat on that measurement:** recorded `strategic_intent` is the
+      *planned* intent, so the split is only as good as plan-vs-execution
+      fidelity. Site: `battery_system_manager._calculate_initial_cost_basis`.
+- [ ] **P4's noise-model half is still open** — see the Phase 3 section. The
+      one-flow-record half landed; gating the ingest heuristics did not.
+      Needs an AC-aware candidate filter (`_discharge_is_unexecutable`
+      computes its deficit pre-clipping), i.e. Phase 4 territory. Pinned by
+      `test_planned_flows_still_pass_through_the_ingest_fold`, which should
+      **flip** when the gate lands rather than be deleted.
+- [ ] **`_state_transition`'s `ac_cap_kwh` is ambiguous.** `None` means both
+      "no AC cap configured" and "caller forgot", so it cannot be asserted
+      away (tried; four tests caught the attempt). A caller passing
+      `import_cap_kwh` without it would compute `next_soe` under a different
+      inverter limit than `_period_flows` derives for the same action.
+      Nothing is presently wrong — `select_action` is the only caller passing
+      an import cap and it passes the derived value. Remedy: derive the cap
+      inside the function, as `_period_flows`/`_price_flows` now do. Deferred
+      because this is the bit-parity-pinned physics core this plan says to
+      refactor *around*; bit-parity would gate the change.
+- [ ] **`_build_period_data` takes a `currency` argument it never reads.**
+      Trivial, but removing it pulls `inverter_simulator.simulate`'s public
+      signature into the diff, which is why Phase 3 left it and threaded the
+      dead argument into `_create_idle_schedule` instead.
+- [ ] **The simulator never applies `import_cap_kwh`.** Pre-existing, not a
+      Phase 3 regression. A flows-only fix would be half a fix: its
+      `_state_transition` call omits the cap too, so `next_soe` and the flows
+      would disagree. Both call sites move together or neither does.
+
+### Older tracks
+
 - [x] **#487 — premise check DONE 2026-08-10; PARKED, not implemented.**
       The predicted signature is absent from the only bundle with enough
       history (`2026-08-04-203125`, 168 hourly entries = 7×24h). Overnight
@@ -703,10 +754,13 @@ Phase 2 (preference table)    — ✅ MERGED #525 (P6 rider deferred)
    │                            cost-identical; register 100→0 at floor.
    │                            #520 unblocked.
    ▼
-Phase 3 (one flow record)     — ✅ IMPLEMENTED 2026-08-10. Bit-parity held
-   │                            on all 36 fixtures through every task.
-   │                            Live fix: BSM booked 36.16 kWh of grid
-   │                            charging as free solar (10/36 fixtures).
+Phase 3 (one flow record)     — ✅ MERGED #534. Bit-parity held on all 36
+   │                            fixtures through every task. Live fix: BSM
+   │                            booked 48.9 kWh of grid charging as free
+   │                            solar across 15 of 30 REAL bundles, 66%
+   │                            basis understatement on the pinned day.
+   │                            Task 5 (noise-model gate) withdrawn — see
+   │                            Phase 3 follow-ups.
    ▼
 #520 → #524                   — settle before Phase 4 encodes the
    │                            ambiguity into the candidate space

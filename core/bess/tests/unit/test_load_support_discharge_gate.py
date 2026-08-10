@@ -1,24 +1,29 @@
-"""LOAD_SUPPORT discharge-rate cap stays plan-scaled, unconditionally (#393).
+"""LOAD_SUPPORT consults the intra-period discharge gate (#520).
 
-#384/#385 extended intra_period_discharge_gate (the shadow-price economic gate
-already used for SOLAR_EXPORT/SOLAR_STORAGE) to LOAD_SUPPORT, opening the
-discharge-rate ceiling above the DP's plan-scaled rate whenever
-`buy_price * eff_d >= shadow_price`. Two problems surfaced after shipping:
+    discharge_rate = max(plan_scaled, intra_period_discharge_gate(...))
 
-- #385's own validation against the reporting user's real captured data found
-  the gate does NOT open during the sustained overnight near-tie regime it was
-  built to fix -- shadow_price sits within a cent or two of buy_price for the
-  whole stretch there, so the strict inequality rarely trips.
-- A second, independent real-world report (different day, different price
-  shape) showed the same gate condition evaluating true for the large
-  majority of LOAD_SUPPORT periods -- a broad, mostly-untested override of the
-  #147 reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
-  later, pricier period rather than dumping at full rate), not the narrow
-  safety valve it was meant to be.
+DIRECTION CHANGE -- these assertions were inverted by #520. Between #393 and
+#520 this file pinned the opposite property ("LOAD_SUPPORT's discharge_rate
+never exceeds the plan-scaled baseline regardless of the gate"). Read this
+before re-reverting on #393's reasoning:
 
-LOAD_SUPPORT no longer consults this gate at all -- back to the plan-scaled
-cap alone, matching pre-#384 (and current v9.9.0b23) behavior. SOLAR_EXPORT/
-SOLAR_STORAGE are unaffected (older, unrelated, pre-date #384) -- see
+#393 removed LOAD_SUPPORT from the gate as "a broad override of the #147
+reservation pacing". That double-counts the reservation. The gate's input is
+`decision.intra_period_discharge_allowed`, which the DP decides from dV/dSoE --
+its own marginal value of stored energy (#526) -- so the future value the
+pacing protects is already inside the comparison the DP made. Gate closed ->
+import, reservation protected. Gate open -> the energy is worth more used now
+than saved, so there is nothing being reserved. The gate does not override
+reservation pacing; it evaluates it.
+
+#393's headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT
+periods" measured gate-OPENNESS, not pacing-override: it means that in 76% of
+those periods battery-now genuinely beat grid-now. The breadth is real --
+corpus-wide, re-measured post-#526, the gate is open in 431 of 603
+LOAD_SUPPORT periods (71.5%) and raises the ceiling in 427 of them -- and is
+correct by the argument above, not despite it.
+
+SOLAR_EXPORT/SOLAR_STORAGE are unaffected and predate all of this -- see
 test_solar_export_discharge_gate.py / test_solar_storage_discharge_gate.py.
 """
 
@@ -97,27 +102,30 @@ def _store_authorization(bsm: BatterySystemManager, period: int, allowed: bool) 
 
 
 class TestLoadSupportDischargeCap:
-    """BSM-integration coverage: proves LOAD_SUPPORT's discharge_rate stays at
-    the DP's plan-scaled baseline regardless of the DP's authorization, i.e.
-    the gate is never consulted for this intent. Mirrors
-    TestSolarExportDischargeGate's structure, inverted expectations."""
+    """BSM-integration coverage: proves the gate fires for LOAD_SUPPORT in the
+    real hardware-write path (_apply_period_schedule) -- raising the ceiling
+    when the DP authorized sub-period discharge, leaving the plan-scaled
+    baseline alone when it did not. Mirrors TestSolarExportDischargeGate's
+    structure."""
 
-    def test_baseline_preserved_even_when_gate_condition_would_be_favorable(self):
-        """The DP authorized sub-period discharge -- exactly the condition that
-        used to open the gate to 100% -- and that now leaves the plan-scaled
-        baseline untouched."""
+    def test_ceiling_raised_when_dp_authorizes(self):
+        """DP authorized sub-period discharge -> gate open: the stored energy
+        is worth less than buying now, so nothing is being reserved and the
+        ceiling opens above the plan-scaled baseline to cover the deficit from
+        the battery (#520)."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
         _store_authorization(bsm, PERIOD, allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 
-        assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
+        assert controller.calls["discharge_rate"][-1] == 100
 
     def test_baseline_preserved_when_dp_withholds_authorization(self):
-        """DP withheld authorization -- the DP's own planned discharge
-        (the baseline) is NOT zeroed out -- LOAD_SUPPORT already has a nonzero
-        plan to protect, and nothing may lower it (that would regress #147)."""
+        """DP withheld authorization -> gate closed: the reserve is genuinely
+        worth more later, so the deficit is bought from grid and the DP's own
+        planned discharge (the baseline) is left exactly as planned -- neither
+        raised nor lowered (lowering would regress #147)."""
         bsm, controller = _make_bsm(buy_prices=[0.2] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
         _store_authorization(bsm, PERIOD, allowed=False)
@@ -127,8 +135,8 @@ class TestLoadSupportDischargeCap:
         assert controller.calls["discharge_rate"][-1] == BASELINE_DISCHARGE_RATE
 
     def test_no_stored_schedule_keeps_baseline(self):
-        """No schedule stored yet -- baseline (plan-scaled rate) is used as-is,
-        matching pre-gate LOAD_SUPPORT behavior."""
+        """No schedule stored yet -> no DP decision to read, so the gate cannot
+        evaluate: baseline (plan-scaled rate) is used as-is (safe default)."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent_with_action(bsm, PERIOD, "LOAD_SUPPORT", BASELINE_ACTION_KWH)
 

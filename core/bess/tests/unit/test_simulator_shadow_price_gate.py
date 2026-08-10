@@ -5,11 +5,14 @@ so `run_scenario_realized`/`verify_plan_faithfulness` cannot exercise the
 shadow-price intra-period discharge gate (SOLAR_EXPORT/SOLAR_STORAGE since
 #187/#319) at all.
 
-#385 briefly extended this gate to LOAD_SUPPORT too; #393 reverted that
-extension (see test_load_support_discharge_gate.py) after real-world data
-showed the gate opens for the large majority of LOAD_SUPPORT periods rather
-than the narrow "reserve genuinely not needed elsewhere" case it was meant
-for. LOAD_SUPPORT is back to its plan-scaled cap only, unconditionally.
+Production applies the gate to LOAD_SUPPORT as well (#384/#385, reverted by
+#393, re-landed by #520 -- see test_load_support_discharge_gate.py). This
+simulator deliberately does NOT mirror that, and these tests pin the
+divergence rather than the production behaviour: the gate is a sub-period
+ceiling, and a 15-min point-forecast simulator has no sub-period excess load
+to cover, so mirroring it here would model only the gate's cost and never its
+benefit. See `inverter_simulator._map_rates` for the measured size of that
+one-sided cost.
 
 These tests use a real DP-optimized schedule (`optimize_battery_schedule`),
 not a hand-built period/decision, so the gate branch is genuinely reachable
@@ -66,12 +69,12 @@ def _optimize():
 
 
 def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
-    """A real DP-optimized LOAD_SUPPORT period whose shadow price would have
-    made the (now-reverted) gate condition favorable
-    (buy_price * eff_d >= shadow_price) must NOT raise the discharge ceiling
-    above the DP's plan-scaled baseline (#393) -- LOAD_SUPPORT no longer
-    consults `intra_period_discharge_gate` at all, matching
-    `battery_system_manager.py`'s `_apply_period_schedule`."""
+    """A real DP-optimized LOAD_SUPPORT period whose shadow price makes the
+    gate condition favorable (buy_price * eff_d >= shadow_price) must NOT
+    raise the discharge ceiling above the DP's plan-scaled baseline *in the
+    simulator* -- deliberately unlike production, which does raise it (#520).
+    The simulator stays plan-faithful so the corpus keeps measuring the plan,
+    not the sub-period behaviour it cannot represent."""
     inp, result = _optimize()
     dt = inp["period_duration_hours"]
     settings = inp["battery_settings"]
@@ -119,8 +122,8 @@ def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
     assert cmd.discharge_rate_pct == baseline, (
         f"LOAD_SUPPORT must stay at its plan-scaled baseline ({baseline}%) "
         f"regardless of shadow_price, got discharge_rate_pct="
-        f"{cmd.discharge_rate_pct} -- the gate should not fire for "
-        "LOAD_SUPPORT (#393)"
+        f"{cmd.discharge_rate_pct} -- the gate is deliberately not mirrored "
+        "into the simulator for LOAD_SUPPORT (#520)"
     )
 
 
@@ -128,9 +131,9 @@ def test_run_scenario_realized_stays_plan_faithful_for_load_support():
     """`run_scenario_realized` (the helper every plan-faithfulness scenario
     test uses) must pass shadow_price/buy_price through by default -- not
     just when a test opts in by calling derive_control_command directly --
-    but for LOAD_SUPPORT that must be a no-op (#393): the gate is not
-    consulted, so realized cost tracks the plan within the usual
-    grid-resolution tolerance, not below it."""
+    but for LOAD_SUPPORT that must be a no-op in the simulator (#520): the
+    gate is not consulted here, so realized cost tracks the plan within the
+    usual grid-resolution tolerance, not below it."""
     scenario = {
         "base_prices": BUY_PRICE,
         "home_consumption": HOME_CONSUMPTION,
@@ -141,8 +144,8 @@ def test_run_scenario_realized_stays_plan_faithful_for_load_support():
     planned_cost = result.economic_summary.battery_solar_cost
     assert abs(realized_cost - planned_cost) < 0.05, (
         f"R={realized_cost:.4f} vs P={planned_cost:.4f} diverged beyond the "
-        "usual grid-resolution tolerance -- LOAD_SUPPORT should be plan-"
-        "faithful now that the shadow-price gate is reverted (#393)"
+        "usual grid-resolution tolerance -- LOAD_SUPPORT stays plan-faithful "
+        "in the simulator, which does not mirror the gate (#520)"
     )
 
 

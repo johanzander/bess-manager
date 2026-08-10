@@ -68,9 +68,11 @@ scenarios.
   leaves it closed — deliberately distinct from `False`, which is the DP
   deciding against opening it. Do not reintroduce a scalar here: a
   `shadow_price` of `0.0` cannot be told apart from one that was never
-  computed, which is the defect #526 removed. #384 briefly extended this gate
-  to LOAD_SUPPORT too; #393 reverted that extension after real captured data
-  showed it firing far more broadly than intended — see
+  computed, which is the defect #526 removed. Production also applies this gate
+  to LOAD_SUPPORT on TOU/register platforms (#384, reverted by #393, re-landed
+  by #520) — the simulator deliberately does **not** mirror that, because a
+  15-min point-forecast simulator has no sub-period excess load to cover and so
+  can only model the gate's cost, never its benefit. See
   `docs/agents/bess-knowledge.md`'s SOLAR_EXPORT discharge gate section.
 
 ## Known gaps and `xfail`

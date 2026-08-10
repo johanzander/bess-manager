@@ -1568,6 +1568,15 @@ def _create_idle_schedule(
     `_price_flows` discounts the share that would have been AC-clipped anyway
     and therefore cost nothing to absorb. Collapsing the copy adopts the
     correct basis -- see the note at the `_price_flows` call below.
+
+    That correction is not purely internal, and the distinction is worth
+    keeping straight: the guardrail *decision* cannot see it, because the
+    comparison reads `economic_summary.battery_solar_cost` (summed from each
+    period's `hourly_cost`) and `cost_basis` feeds none of it. But when the
+    guardrail does fire, this schedule is what gets returned -- so on an
+    AC-capped system every period's reported `decision.cost_basis` shifts,
+    measured at up to 0.049977 SEK/kWh. No comparison moves; a reported field
+    does.
     """
     period_data_list = []
     current_soe = initial_soe

@@ -3025,7 +3025,27 @@ class BatterySystemManager:
                 # free. Caught in review on this repo's own evidence bundle,
                 # `historical_2026_07_18_charge_attribution.json` period 39.
                 #
-                # Known asymmetry, deliberate: this can only push the basis UP.
+                # Known limitation, measured rather than assumed: during
+                # DELIBERATE grid charging (`battery_first`) this split is the
+                # wrong way round. `EnergyData` allocates solar to the home
+                # first, which is right for load_first surplus charging, but in
+                # battery_first the PV is DC-coupled straight to the battery and
+                # the house runs off the grid -- so solar that really did charge
+                # the battery gets booked to the home, and the battery's charge
+                # gets booked entirely to the grid. The retired formula happened
+                # to be the accurate one in that regime.
+                #
+                # Not fixed here because the trade is measured and lopsided.
+                # Across the 30 debug bundles in `docs/`: load_first charging is
+                # 264 periods / 191.1 kWh where this correction ADDS 55.15 SEK
+                # of correctly-attributed cost, against 26 GRID_CHARGING periods
+                # / 30.3 kWh where it overstates by 3.85 SEK -- and overstating
+                # makes the DP more reluctant to discharge, which forfeits
+                # margin rather than losing money. Making the split regime-aware
+                # (keying off `decision.strategic_intent`) is the real fix and a
+                # modelling decision in its own right, not a Phase 3 consolidation.
+                #
+                # Second known asymmetry: this can only push the basis UP.
                 # A grid counter that under-reads leaves a positive remainder
                 # priced here at buy price, while one that over-reads is
                 # absorbed into `grid_to_home` upstream and leaves nothing, so

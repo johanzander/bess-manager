@@ -315,10 +315,18 @@ def _period_flows(
     ac_cap_kwh: float | None,
     import_cap_kwh: float | None = None,
 ) -> PeriodFlows:
-    """Derive one candidate action's complete flow set -- the only place the
-    charge split and AC-stage flows are computed for a planned period.
+    """Derive one candidate action's complete flow set -- the only place a
+    planned period's *reported and priced* flows are computed.
 
-    Before Phase 3 this arithmetic existed three times over
+    Not the only place the charge split appears, and the difference matters
+    if you are about to edit it: `_state_transition` carries its own copy to
+    produce `next_soe`, and the two numpy mirrors (`_state_transition_grid`,
+    `_compute_reward_grid`) carry vectorized copies that P1(a) permits the
+    backward passes. A change to the split here must be made there too, or
+    reported `battery_soe_end` will stop agreeing with reported
+    `battery_charged`.
+
+    Before Phase 3 this arithmetic existed three MORE times over
     (`_compute_reward`, `_build_period_data`, `_create_idle_schedule`), which
     is the reward-vs-flows divergence class P4 forbids: an edit to the reward
     side that did not reach the reporting side produced periods whose priced
@@ -2046,7 +2054,7 @@ def optimize_battery_schedule(
             len(windows),
             [(w.start, w.end) for w in windows],
         )
-        window_resolutions: dict[int, list[tuple[float, float]]] = {}
+        window_resolutions: dict[int, list[tuple[float, float, PeriodFlows]]] = {}
         for window in windows:
             window_horizon = window.end - window.start
             sl = slice(window.start, window.end)
@@ -2108,6 +2116,36 @@ def optimize_battery_schedule(
         actions, soe_trajectory, flows_trajectory = splice_schedule(
             actions, soe_trajectory, flows_trajectory, windows, window_resolutions
         )
+
+        # A window owns periods [start, end), but writes the SOE at `end` --
+        # that is the pinned exit state. The period AT `end` is not re-solved,
+        # so it keeps the flow record the selection loop derived from its
+        # PRE-splice start SOE, while now reporting the post-splice one. The
+        # pin only guarantees the exit lands within `_end_soe_pin_tolerance`,
+        # not exactly, so those two can differ -- and a STORE or IDLE period's
+        # charge depends on its start SOE (through `room_throughput` and
+        # `next_soe - soe`). Left alone, that period would report a
+        # `battery_soe_start` its own `battery_charged` cannot produce.
+        #
+        # Re-derive exactly that one period per window, which is what the
+        # pre-Phase-3 replay did for every period. Its action and its
+        # `next_soe` are untouched by the splice; only the state it starts
+        # from moved.
+        boundary_ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+        for window in windows:
+            if window.end >= horizon:
+                continue
+            flows_trajectory[window.end] = _period_flows(
+                power=actions[window.end],
+                soe=soe_trajectory[window.end],
+                next_soe=soe_trajectory[window.end + 1],
+                home_consumption=home_consumption[window.end],
+                solar_production=solar_production[window.end],
+                battery_settings=battery_settings,
+                dt=dt,
+                ac_cap_kwh=boundary_ac_cap_kwh,
+                import_cap_kwh=import_cap_kwh,
+            )
         hourly_results, reward_objective_cost = _replay_accounting_pass(
             horizon=horizon,
             actions=actions,

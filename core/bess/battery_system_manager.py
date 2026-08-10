@@ -3002,15 +3002,31 @@ class BatterySystemManager:
                     event.economic.buy_price + self.battery_settings.cycle_cost_per_kwh
                 )
 
-                new_energy_cost = solar_cost + grid_cost
-                running_total_cost += new_energy_cost
                 # On exact (planned/simulated) data the two attributed flows
                 # sum to battery_charged exactly. On measured data
                 # `grid_to_battery` is capped by the grid counter's own
-                # reading, so a sub-resolution remainder can stay
-                # unattributed and therefore uncosted -- deliberately, per
-                # `EnergyData`'s non-invention rule: a flow that cannot be
-                # traced to a source is not conjured into one here either.
+                # reading (`EnergyData`'s non-invention rule), so the two can
+                # sum to LESS than what the battery recorded taking in.
+                #
+                # That remainder still has to carry a cost. Every kWh added to
+                # `running_energy` divides into `running_total_cost` below, so
+                # adding energy without a cost silently dilutes the basis
+                # downward -- the same direction as the defect this method was
+                # just fixed for, and it would grow with counter drift rather
+                # than being bounded by it. Nothing here can say where that
+                # energy came from, so it is priced the way this method
+                # already prices energy of unknown provenance: at cycle cost,
+                # exactly as the pre-existing charge at `initial_soe` above.
+                unattributed = max(
+                    0.0,
+                    event.energy.battery_charged - solar_to_battery - grid_to_battery,
+                )
+                unattributed_cost = (
+                    unattributed * self.battery_settings.cycle_cost_per_kwh
+                )
+
+                new_energy_cost = solar_cost + grid_cost + unattributed_cost
+                running_total_cost += new_energy_cost
                 running_energy += event.energy.battery_charged
 
             # Handle discharging

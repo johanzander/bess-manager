@@ -306,3 +306,66 @@ class TestChargeSourceAttribution:
         # split produced -- otherwise this test would pass on the bug.
         all_solar_basis = (2.0 * cycle_cost) / 2.0
         assert cost_basis != pytest.approx(all_solar_basis)
+
+    def test_charge_the_split_cannot_explain_is_still_costed(self, base_system):
+        """Every kWh added to the running energy must carry a cost.
+
+        On measured data `EnergyData.grid_to_battery` is capped by the grid
+        counter's own reading, so the attributed flows can sum to less than
+        the battery recorded taking in. That remainder still divides into the
+        running total, so leaving it uncosted dilutes the basis downward --
+        the same direction as the defect this method was fixed for, and
+        unbounded by counter drift rather than limited by it. Energy of
+        unknown provenance is priced at cycle cost, as the pre-existing
+        charge already is.
+        """
+        cycle_cost = base_system.battery_settings.cycle_cost_per_kwh
+        buy_price = 2.0
+
+        base_system.historical_store.record_period(
+            0,
+            make_period_data(period=0, battery_soe_start=0.0, battery_soe_end=0.0),
+        )
+        # solar 4.0, home 1.0 -> 3.0 kWh surplus reaches the battery; the grid
+        # counter only corroborates 0.4 kWh of the remaining 0.5, so 0.1 kWh
+        # is unattributable.
+        base_system.historical_store.record_period(
+            4,
+            make_period_data(
+                period=4,
+                battery_soe_start=0.0,
+                battery_soe_end=3.5,
+                battery_charged=3.5,
+                solar_production=4.0,
+                home_consumption=1.0,
+                grid_imported=0.4,
+                buy_price=buy_price,
+            ),
+        )
+
+        event = base_system.historical_store.get_period(4)
+        unattributed = (
+            event.energy.battery_charged
+            - event.energy.solar_to_battery
+            - event.energy.grid_to_battery
+        )
+        assert unattributed == pytest.approx(0.1), (
+            "fixture must actually exercise the unattributed band, otherwise "
+            "this test passes for the wrong reason"
+        )
+
+        cost_basis = base_system._calculate_initial_cost_basis(current_period=8)
+
+        expected = (
+            event.energy.solar_to_battery * cycle_cost
+            + event.energy.grid_to_battery * (buy_price + cycle_cost)
+            + unattributed * cycle_cost
+        ) / 3.5
+        assert cost_basis == pytest.approx(expected)
+
+        # Leaving the remainder uncosted would land strictly lower.
+        uncosted = (
+            event.energy.solar_to_battery * cycle_cost
+            + event.energy.grid_to_battery * (buy_price + cycle_cost)
+        ) / 3.5
+        assert cost_basis > uncosted

@@ -434,10 +434,18 @@ only `> 0` releases the house to grid/solar. Same mapping and same reasoning
 as VPP-mode IDLE (#466). See `docs/INVERTER_PLATFORMS.md`'s "LOAD_SUPPORT is
 now gated" section.
 
-Not real-hardware-validated: SolaX VPP is an experimental platform, and both
-the `battery_first`-hold (#466) and `grid_first`-hold (#355) branches this
-builds on ship pending confirmation. The corpus cannot cover it either — the
-simulator is Growatt MIN/cloud only and has no VPP mode.
+Scope: this is **Growatt VPP** control mode (`solax_modbus_growatt_min` /
+`_sph` — Growatt GEN3/GEN4 hardware driven through the solax_modbus
+integration), not the separate SolaX VPP platform. The control mode is marked
+experimental, but it is not untested hardware: #118's LOAD_SUPPORT behaviour
+was reported by two real-hardware testers running Growatt MIN with
+`control_mode=vpp`.
+
+What is unvalidated is narrower — the two *hold* branches this builds on
+(`battery_first` #466, `grid_first` #355) ship pending confirmation, so the
+gate-closed command specifically wants a real-hardware check. The corpus
+cannot supply one: the simulator is Growatt MIN/cloud **TOU** only and has no
+VPP mode at all.
 
 The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
 inherited (an uncomputed bottom-grid-level value opening the ceiling

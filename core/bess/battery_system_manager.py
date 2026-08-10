@@ -2980,13 +2980,21 @@ class BatterySystemManager:
 
             # Handle charging using stored facts
             if event.energy.battery_charged > 0:
-                # Simple calculation using stored energy flows
-                solar_to_battery = min(
-                    event.energy.battery_charged, event.energy.solar_production
-                )
-                grid_to_battery = max(
-                    0, event.energy.battery_charged - solar_to_battery
-                )
+                # Read the split `EnergyData` already derived; never re-derive
+                # it. This site used to compute its own
+                # `min(battery_charged, solar_production)`, which ignores the
+                # house load and so counts solar the home already consumed as
+                # having charged the battery -- booking grid energy as free.
+                # Measured over the fixture corpus before the fix: 31 of 419
+                # charging periods disagreed, 36.16 kWh of grid charging
+                # booked as solar across 10 of 36 fixtures, worst single
+                # period 5.2 kWh (solar 5.8, home 5.2, charged 6.0 -- the
+                # whole 5.8 kWh of solar counted to the battery while the home
+                # was consuming 5.2 of it). The understated basis then fed
+                # `optimize_battery_schedule(initial_cost_basis=...)`, making
+                # stored energy look cheaper to discharge than it was.
+                solar_to_battery = event.energy.solar_to_battery
+                grid_to_battery = event.energy.grid_to_battery
 
                 # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
@@ -2996,6 +3004,13 @@ class BatterySystemManager:
 
                 new_energy_cost = solar_cost + grid_cost
                 running_total_cost += new_energy_cost
+                # On exact (planned/simulated) data the two attributed flows
+                # sum to battery_charged exactly. On measured data
+                # `grid_to_battery` is capped by the grid counter's own
+                # reading, so a sub-resolution remainder can stay
+                # unattributed and therefore uncosted -- deliberately, per
+                # `EnergyData`'s non-invention rule: a flow that cannot be
+                # traced to a source is not conjured into one here either.
                 running_energy += event.energy.battery_charged
 
             # Handle discharging
@@ -3569,6 +3584,8 @@ class BatterySystemManager:
                     "grid_export": period_info.energy.grid_exported,
                     "battery_charged": period_info.energy.battery_charged,
                     "battery_discharged": period_info.energy.battery_discharged,
+                    "solar_to_battery": period_info.energy.solar_to_battery,
+                    "grid_to_battery": period_info.energy.grid_to_battery,
                     "battery_soe_end": period_info.energy.battery_soe_end,
                     "battery_net_change": (
                         period_info.energy.battery_charged
@@ -3627,9 +3644,13 @@ class BatterySystemManager:
         for data in period_data:
             energy_in = data["grid_import"] + data["solar_production"]
 
-            # Estimate solar to battery (simplified)
-            solar_to_battery = min(data["battery_charged"], data["solar_production"])
-            grid_to_battery = max(0, data["battery_charged"] - solar_to_battery)
+            # The split `EnergyData` derived, not a second estimate of it.
+            # This column used to re-derive `min(battery_charged,
+            # solar_production)`, which ignores the house load and so showed
+            # grid charging as solar -- the same defect the cost basis
+            # carried, displayed to the user.
+            solar_to_battery = data["solar_to_battery"]
+            grid_to_battery = data["grid_to_battery"]
 
             # Mark predictions with ★ (periods >= current_period)
             indicator = "★" if data["period"] >= current_period else " "

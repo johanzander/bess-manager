@@ -23,16 +23,22 @@ def make_period_data(
     battery_discharged: float = 0.0,
     solar_production: float = 0.0,
     buy_price: float = 1.0,
+    home_consumption: float = 0.5,
+    grid_imported: float | None = None,
 ) -> PeriodData:
     """Create PeriodData for testing."""
     return PeriodData(
         period=period,
         energy=EnergyData(
             solar_production=solar_production,
-            home_consumption=0.5,
+            home_consumption=home_consumption,
             battery_charged=battery_charged,
             battery_discharged=battery_discharged,
-            grid_imported=battery_charged if battery_charged > 0 else 0.0,
+            grid_imported=(
+                grid_imported
+                if grid_imported is not None
+                else (battery_charged if battery_charged > 0 else 0.0)
+            ),
             grid_exported=0.0,
             battery_soe_start=battery_soe_start,
             battery_soe_end=battery_soe_end,
@@ -249,3 +255,54 @@ class TestCostBasisCalculation:
 
         # When running_energy <= 0.1, it resets to 0, so cycle_cost is returned
         assert cost_basis == cycle_cost
+
+
+class TestChargeSourceAttribution:
+    """The cost basis must attribute charging to the source that actually
+    supplied it, using the split `EnergyData` already derived."""
+
+    def test_solar_consumed_at_home_is_not_counted_as_charging_the_battery(
+        self, base_system
+    ):
+        """Solar the house consumed cannot also have charged the battery.
+
+        This site used to derive its own `min(battery_charged,
+        solar_production)`, which ignores the load entirely. With solar 3.0,
+        home 2.0 and 2.0 kWh charged, only 1.0 kWh of solar was actually
+        surplus -- the other 1.0 kWh came from the grid and was paid for.
+        The old split called all 2.0 kWh solar and booked that grid energy as
+        free, understating the basis and making stored energy look cheaper to
+        discharge than it was.
+        """
+        cycle_cost = base_system.battery_settings.cycle_cost_per_kwh
+        buy_price = 3.0
+
+        base_system.historical_store.record_period(
+            0,
+            make_period_data(period=0, battery_soe_start=0.0, battery_soe_end=0.0),
+        )
+        base_system.historical_store.record_period(
+            4,
+            make_period_data(
+                period=4,
+                battery_soe_start=0.0,
+                battery_soe_end=2.0,
+                battery_charged=2.0,
+                solar_production=3.0,
+                home_consumption=2.0,
+                grid_imported=1.0,
+                buy_price=buy_price,
+            ),
+        )
+
+        cost_basis = base_system._calculate_initial_cost_basis(current_period=8)
+
+        # 1.0 kWh solar at cycle cost + 1.0 kWh grid at (buy + cycle), over
+        # the 2.0 kWh now stored.
+        expected = (1.0 * cycle_cost + 1.0 * (buy_price + cycle_cost)) / 2.0
+        assert cost_basis == pytest.approx(expected)
+
+        # And it must not have collapsed to the all-solar answer the old
+        # split produced -- otherwise this test would pass on the bug.
+        all_solar_basis = (2.0 * cycle_cost) / 2.0
+        assert cost_basis != pytest.approx(all_solar_basis)

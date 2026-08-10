@@ -16,6 +16,7 @@ See docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md.
 
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 from core.bess import time_utils
@@ -23,7 +24,11 @@ from core.bess.battery_system_manager import (
     BatterySystemManager,
     intra_period_discharge_gate,
 )
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.dp_battery_algorithm import (
+    _record_marginal_value,
+    optimize_battery_schedule,
+)
+from core.bess.dp_constants import SOE_STEP_KWH
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -38,21 +43,73 @@ from core.bess.tests.helpers import make_battery_settings
 PERIOD = 20  # Arbitrary test period (quarter-hour slot)
 
 
-def test_intra_period_discharge_gate_gate_boundary():
-    """Gate is 100 iff buy*eff_d >= shadow; equality discharges (>=)."""
+def _authorize(shadow_price: float, buy_price: float, eff_d: float):
+    """Run `_record_marginal_value` against a value function engineered to make
+    dV/dSoE equal `shadow_price` at the sampled state, and return the decision.
+
+    The buy-vs-hold comparison moved into the DP (#526), so the boundary test
+    below drives it where it now lives rather than through a standalone gate
+    function that could no longer tell a computed zero from an absent one.
+    """
+    settings = make_battery_settings(efficiency_discharge=eff_d)
+    decision = DecisionData(strategic_intent="SOLAR_EXPORT")
+    # A SoE one grid step above the floor lands on index 1, so the backward
+    # difference V[t,1] - V[t,0] exists and equals shadow_price * SOE_STEP_KWH.
+    soe = settings.min_soe_kwh + SOE_STEP_KWH
+    V = np.array([[0.0, shadow_price * SOE_STEP_KWH]])
+    _record_marginal_value(
+        decision,
+        V=V,
+        t=0,
+        soe=soe,
+        soe_levels=[0.0, 1.0],
+        battery_settings=settings,
+        buy_price_t=buy_price,
+    )
+    return decision
+
+
+def test_intra_period_discharge_authorization_boundary():
+    """The DP authorizes iff buy*eff_d >= shadow; equality discharges (>=)."""
     eff_d = 0.95
     # stored energy worth less than buying now -> cover from battery
-    assert (
-        intra_period_discharge_gate(buy_price=2.0, shadow_price=1.0, eff_d=eff_d) == 100
-    )
+    decision = _authorize(shadow_price=1.0, buy_price=2.0, eff_d=eff_d)
+    assert decision.shadow_price == pytest.approx(1.0)
+    assert decision.intra_period_discharge_allowed is True
+    assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 100
+
     # stored energy worth more (reserved for a peak) -> hold, buy from grid
-    assert (
-        intra_period_discharge_gate(buy_price=0.5, shadow_price=4.0, eff_d=eff_d) == 0
-    )
+    decision = _authorize(shadow_price=4.0, buy_price=0.5, eff_d=eff_d)
+    assert decision.shadow_price == pytest.approx(4.0)
+    assert decision.intra_period_discharge_allowed is False
+    assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 0
+
     # exact equality -> discharge (>=)
-    assert (
-        intra_period_discharge_gate(buy_price=1.0, shadow_price=0.95, eff_d=0.95) == 100
+    decision = _authorize(shadow_price=0.95, buy_price=1.0, eff_d=0.95)
+    assert decision.intra_period_discharge_allowed is True
+    assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 100
+
+
+def test_no_computable_shadow_price_does_not_authorize():
+    """#526: at the bottom grid level the backward difference does not exist,
+    so there is nothing to authorize -- absence must not read as permission,
+    even at a buy price that would clear any computed shadow price."""
+    settings = make_battery_settings(efficiency_discharge=0.95)
+    decision = DecisionData(strategic_intent="SOLAR_EXPORT")
+
+    _record_marginal_value(
+        decision,
+        V=np.array([[0.0, 10.0]]),
+        t=0,
+        soe=settings.min_soe_kwh,  # snaps to grid index 0
+        soe_levels=[0.0, 1.0],
+        battery_settings=settings,
+        buy_price_t=99.0,
     )
+
+    assert decision.shadow_price == 0.0  # never computed, still the default
+    assert decision.intra_period_discharge_allowed is False
+    assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 0
 
 
 def _make_bsm(
@@ -74,10 +131,10 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
     bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
 
 
-def _store_shadow_price(
-    bsm: BatterySystemManager, period: int, shadow_price: float
-) -> None:
-    """Populate the schedule store with a SOLAR_EXPORT period at the given shadow price."""
+def _store_authorization(bsm: BatterySystemManager, period: int, allowed: bool) -> None:
+    """Populate the schedule store with a SOLAR_EXPORT period carrying the DP's
+    sub-period discharge authorization (#526 -- the BSM reads the decision, not
+    the shadow price it was derived from)."""
     energy = EnergyData(
         solar_production=0.0,
         home_consumption=0.0,
@@ -88,7 +145,9 @@ def _store_shadow_price(
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    decision = DecisionData(strategic_intent="SOLAR_EXPORT", shadow_price=shadow_price)
+    decision = DecisionData(
+        strategic_intent="SOLAR_EXPORT", intra_period_discharge_allowed=allowed
+    )
     period_data = PeriodData(
         period=period,
         energy=energy,
@@ -106,20 +165,22 @@ class TestSolarExportDischargeGate:
     gate function. Mirrors TestSolarStorageDischargeGate."""
 
     def test_dip_covered_when_battery_worth_less_than_grid(self):
-        """High buy price, low shadow price -> gate opens, dip covered from battery."""
+        """DP authorized (stored energy worth less than buying now) -> gate
+        opens, dip covered from battery."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
         _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
-        _store_shadow_price(bsm, PERIOD, shadow_price=0.5)
+        _store_authorization(bsm, PERIOD, allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 
         assert controller.calls["discharge_rate"][-1] == 100
 
-    def test_reserve_protected_when_shadow_price_high(self):
-        """Low buy price, high shadow price -> gate stays closed, reserve protected."""
+    def test_reserve_protected_when_dp_withholds_authorization(self):
+        """DP withheld authorization (reserve worth more than the dip) ->
+        gate stays closed, reserve protected."""
         bsm, controller = _make_bsm(buy_prices=[0.2] * 96)
         _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
-        _store_shadow_price(bsm, PERIOD, shadow_price=4.0)
+        _store_authorization(bsm, PERIOD, allowed=False)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -207,7 +268,7 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
                 sell[t], abs=0.01
             ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
         assert shadow < buy[t] * eff_d
-        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 100
+        assert result.period_data[t].decision.intra_period_discharge_allowed is True
 
 
 @pytest.mark.slow
@@ -265,4 +326,4 @@ def test_solar_export_holds_when_export_more_valuable():
             f"period {t}: shadow {shadow:.3f} should exceed buy*eff_d "
             f"{buy[t] * eff_d:.3f} (export worth more than grid import)"
         )
-        assert intra_period_discharge_gate(buy[t], shadow, eff_d) == 0
+        assert result.period_data[t].decision.intra_period_discharge_allowed is False

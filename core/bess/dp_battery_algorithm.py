@@ -680,6 +680,44 @@ def _compute_reward(
     return -total_cost, new_cost_basis, grid_imported
 
 
+def _record_marginal_value(
+    decision,
+    *,
+    V,
+    t: int,
+    soe: float,
+    soe_levels,
+    battery_settings: BatterySettings,
+    buy_price_t: float,
+) -> None:
+    """Record dV/dSoE for this period and the discharge authorization it implies.
+
+    The shadow price is a backward difference between adjacent SoE grid levels,
+    so it does not exist at the bottom level -- and a SoE at or below the
+    reserve floor clamps there. Previously the assignment was simply skipped,
+    leaving `shadow_price` at its 0.0 default, which every consumer read as
+    "stored energy is worthless" and used to open the sub-period discharge
+    ceiling on a value that had never been computed (#526).
+
+    The authorization is decided here instead, where the value function is
+    owned. At the bottom level there is no removable kWh below this state, so
+    there is nothing to authorize and the decision stays False -- absence is
+    not permission. Both call sites route through this function so the grid
+    forward pass and the PWL-splice replay cannot drift onto different rules,
+    which is the mirrored-implementation bug class P1 exists to prevent.
+    """
+    i = round((soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
+    i = min(max(0, i), len(soe_levels) - 1)
+    if i == 0:
+        return
+
+    shadow_price = float((V[t, i] - V[t, i - 1]) / SOE_STEP_KWH)
+    decision.shadow_price = shadow_price
+    decision.intra_period_discharge_allowed = bool(
+        buy_price_t * battery_settings.efficiency_discharge >= shadow_price
+    )
+
+
 def _build_period_data(
     power: float,
     soe: float,
@@ -1406,6 +1444,16 @@ def _create_idle_schedule(
             strategic_intent=classify_strategic_intent(0.0, energy_data),
             battery_action=0.0,
             cost_basis=current_cost_basis,
+            # No value function exists on this path -- it is the numerical
+            # safety net returned when the optimized plan scores worse than
+            # doing nothing, so there is no dV/dSoE to authorize against.
+            # Stated explicitly rather than inherited from the field default
+            # (#526): absence of an economic basis is not permission, and on a
+            # sunny all-IDLE day classify_strategic_intent can return
+            # SOLAR_EXPORT here, which IS a gate-consulting intent. Before
+            # #526 that period's shadow_price defaulted to 0.0 and opened the
+            # ceiling to 100 on a value nothing had computed; it is now 0.
+            intra_period_discharge_allowed=False,
         )
 
         period_data = PeriodData(
@@ -1536,12 +1584,15 @@ def _replay_accounting_pass(
             export_curtailment_active=export_curtailment_active,
         )
 
-        i = round((soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-        i = min(max(0, i), len(soe_levels) - 1)
-        if i > 0:
-            period_data.decision.shadow_price = float(
-                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
-            )
+        _record_marginal_value(
+            period_data.decision,
+            V=V,
+            t=t,
+            soe=soe,
+            soe_levels=soe_levels,
+            battery_settings=battery_settings,
+            buy_price_t=buy_price[t],
+        )
 
         hourly_results.append(period_data)
         cost_basis = new_cost_basis
@@ -1769,17 +1820,15 @@ def optimize_battery_schedule(
             export_curtailment_active=export_curtailment_active,
         )
 
-        # Shadow price = marginal opportunity value of stored energy (dV/dSoE),
-        # by backward difference at the nearest grid level i (the kWh we
-        # would remove by discharging). Unchanged from the previous
-        # implementation -- this task only changes action selection, not
-        # shadow_price reporting.
-        i = round((current_soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-        i = min(max(0, i), len(soe_levels) - 1)
-        if i > 0:
-            period_data.decision.shadow_price = float(
-                (V[t, i] - V[t, i - 1]) / SOE_STEP_KWH
-            )
+        _record_marginal_value(
+            period_data.decision,
+            V=V,
+            t=t,
+            soe=current_soe,
+            soe_levels=soe_levels,
+            battery_settings=battery_settings,
+            buy_price_t=buy_price[t],
+        )
 
         hourly_results.append(period_data)
         current_soe = next_soe

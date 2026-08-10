@@ -762,9 +762,17 @@ Phase 3 (one flow record)     — ✅ MERGED #534. Bit-parity held on all 36
    │                            Task 5 (noise-model gate) withdrawn — see
    │                            Phase 3 follow-ups.
    ▼
-#520 → #524                   — settle before Phase 4 encodes the
-   │                            ambiguity into the candidate space
+#520 → #524                   — TOU half MERGED (#524). VPP half (#537)
+   │                            BLOCKED on #539: it changes Growatt VPP
+   │                            behaviour on 172/603 LOAD_SUPPORT periods
+   │                            (28.5%) with no way to measure the effect.
    ▼
+#539 VPP simulation + v10.0.2 — NEW GATE, before Phase 4. No VPP simulation
+   │  baseline                   exists, so "no regression from beta" is
+   │                            unenforceable for Growatt VPP. Pin the
+   │                            released tag, then compare per phase.
+   │                            Folds in #538. Phase 4 changes VPP command
+   ▼                            generation, so the baseline must precede it.
 Phase 4 (command candidates)  — 4a capability → 4b discharge cmds →
    │                            4c charge cmds → 4d intent-as-input.
    │                            Driver is #352 (+#354's band); #320 is

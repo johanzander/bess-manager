@@ -67,8 +67,9 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
 | 3 | #459-class; collapses the six flow derivations into one record. **No longer closes #497** — #511 already did | 2 | re-scoped 2026-08-10 |
 | 4 | #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | gated on #520/#524 |
-| prerequisite | #526 (live latent defect; blocks #520 → #524 → Phase 4's R==P claim) | 2 | next |
-| parallel | #487 (input quality — premise check first, independent) | 1 input | next |
+| prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
+| parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
+| found en route | #528 (derived `lifetime_load_consumption` omits the battery terms, so it reports actual load **plus net battery charge**; the `max(derived, 0.0)` clamp hides the largest errors). Does *not* reach the `ha_statistics` forecast — that path resolves the entity directly and raises when absent | 1 input | filed 2026-08-10, unscheduled |
 | deferred | #513 (fix when touched; until then P6 treats PWL as heuristic), #512 (SOE-step sweep, gated on its own premise test), **P6 splice cost-gate** (measured non-firing — see Phase 2) | 3 | last |
 
 **#320 is CLOSED (2026-08-09)** and is no longer a live driver for any
@@ -586,22 +587,38 @@ floor; #320/#352 reproductions pass.
 
 ## Parallel / deferred tracks
 
-- [ ] **#487 — premise check FIRST, then decide (next up).** Consumption
-      statistics must account for inverter self-consumption while the
-      battery sleeps. **Its own body calls the mechanism unverified**, so
-      the first step is verification, not implementation, and it is the
-      cheapest high-expected-value move on the board: *does measured
-      overnight load actually drop when the inverter sleeps?* Measure that
-      against real bundles before writing any fix. If the premise fails,
-      the fix is wrong regardless of how well it is built — this is the
-      same discipline that turned Phase 0's fold-scoping item from a
-      −5.51 SEK/day "win" into PR #511. Only if the premise holds does
-      this route through `implement-issue`. Independent of every phase.
-- [ ] **#526 — live latent defect, and the gate on Phase 4 (next up).**
-      `shadow_price == 0.0` is ambiguous between "worth nothing" and
-      "never computed", and the discharge gate opens unconditionally
-      there. Fix before #520, which is before #524 (already `[BLOCKED]`
-      on it), which is before Phase 4 can claim R==P is structural.
+- [x] **#487 — premise check DONE 2026-08-10; PARKED, not implemented.**
+      The predicted signature is absent from the only bundle with enough
+      history (`2026-08-04-203125`, 168 hourly entries = 7×24h). Overnight
+      totals 00:00–05:59, night by night: 11.50 / 9.00 / 11.10 / 12.40 /
+      9.60 / 10.80 / 10.70 kWh — non-monotonic noise around ~10.7, not the
+      ratchet a self-reinforcing loop predicts (lowest night is the
+      second, highest the fourth). The magnitude does not fit either: the
+      issue puts inverter self-consumption at ~50% of night load "at low
+      overnight power levels", but that house averages 1.8 kW overnight,
+      so standby draw is 1–3%. **Not a refutation** — the reporting
+      system's own bundle carries only 14 hourly entries and logs `No
+      statistics data returned ... in the past 7 days`, so the premise is
+      untested on the low-consumption house where it was observed and
+      cannot be tested from anything available. Needs a bundle with ≥7
+      days of `lifetime_load_consumption` statistics *and* battery state
+      over the same window. Measurement posted on the issue. **This is the
+      premise check paying for itself: no fix was built.**
+- [x] **#526 — DONE, merged as PR #530 (2026-08-10).** The gate decision
+      moved into the DP (`_record_marginal_value`), recorded as
+      `DecisionData.intra_period_discharge_allowed`; `shadow_price` is
+      reporting-only and no consumer derives a decision from it. Measured:
+      353/2168 periods (16.3%) no longer authorize, of which only **115**
+      are on gate-consulting intents (SOLAR_EXPORT 105, SOLAR_STORAGE 10);
+      **cost bit-identical on 36/36 fixtures** (`dR = +0.000000`) because
+      those periods sit at the reserve floor with nothing to discharge.
+      Observed end-to-end on mock-HA: at floor SoE the written
+      `discharging_power_rate` goes **100 → 0**, schedule payload
+      byte-identical, and at 60% SOC both branches still write 100.
+      Beyond the reported bug it also closed `_create_idle_schedule` (the
+      numerical safety net has no value function at all, yet
+      `classify_strategic_intent` can label its periods SOLAR_EXPORT) —
+      found in code review, not in the issue. **#520 is now unblocked.**
 - [ ] **#485 hysteresis (after Phase 2):** "keep the applied schedule
       unless the new plan beats it by more than epsilon" — consumes
       `epsilon_for_period` (P5), implemented at the apply layer
@@ -636,12 +653,14 @@ Phase 1 (one selector)        — ✅ MERGED #521, bit-parity held
    ▼
 Phase 2 (preference table)    — ✅ MERGED #525 (P6 rider deferred)
    ▼
-#487 premise check            — verification, not implementation;
-   │                            cheapest high-EV move. Parallel-safe.
+#487 premise check            — ✅ DONE 2026-08-10. Premise NOT confirmed
+   │                            on available data; PARKED, no fix built.
    ▼
-#526                          — live latent defect; gates #520 → #524
+#526                          — ✅ MERGED PR #530. 36/36 fixtures
+   │                            cost-identical; register 100→0 at floor.
+   │                            #520 unblocked.
    ▼
-Phase 3 (one flow record)     — RE-SCOPED: consolidation refactor,
+Phase 3 (one flow record)     — ◀ NEXT. RE-SCOPED: consolidation refactor,
    │                            acceptance = golden bit-parity
    ▼
 #520 → #524                   — settle before Phase 4 encodes the

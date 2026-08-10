@@ -263,7 +263,7 @@ has since diverged — see "LOAD_SUPPORT semantics" below — plus a
 semantics" below):
 - `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
 - `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
-- `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
+- `LOAD_SUPPORT`, gate open or no decision → `vpp_power=0`, remote control **disabled**,
   regardless of `discharge_rate` (releases to `load_first` self-use — see
   "LOAD_SUPPORT semantics" below)
 - `SOLAR_STORAGE` (rate=0, `block_passive_charging=False`) → remote
@@ -286,6 +286,27 @@ outright, falling back to the inverter's native `load_first` self-consumption
 — the VPP-mode equivalent of TOU's `load_first` mapping. Reported
 independently by two real-hardware testers (Growatt MIN, control_mode=vpp)
 on issue [#118](https://github.com/johanzander/bess-manager/issues/118).
+
+**LOAD_SUPPORT is now gated (issue [#520](https://github.com/johanzander/bess-manager/issues/520)):**
+That release is no longer unconditional. TOU spends the DP's intra-period
+discharge decision as a rate ceiling; VPP has no ceiling to raise, so it
+spends the same decision as a *mode*:
+
+| DP decision | VPP command | Effect |
+|---|---|---|
+| gate **open** (or no decision for the period) | `vpp_power=0`, remote control **disabled** | `load_first` self-use — the inverter covers a within-period load spike from the battery (#413, unchanged) |
+| gate **closed** | `vpp_power=+1`, remote control **enabled** | `battery_first` hold — self-consumption comes from grid/solar, the spike is imported |
+
+Closed maps to `+1` rather than `0` deliberately. Per the sign rule below,
+`vpp_power <= 0` with remote control enabled selects `grid_first`, which
+still draws self-consumption from the battery (#118) — only `> 0`
+(`battery_first`) releases the house to grid/solar. Writing `0` here would
+read as a hold and quietly keep discharging. This is the same mapping and
+the same reasoning as `IDLE` (#466).
+
+"No decision for the period" is distinct from a closed gate: retries and the
+discharge-inhibit path carry no DP decision, and keep #413's unconditional
+release rather than inventing one.
 
 **SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
 The Growatt VPP protocol

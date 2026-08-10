@@ -2675,23 +2675,41 @@ class BatterySystemManager:
         # periods and raises the ceiling above the plan-scaled rate in 427 of
         # them -- this is a broad behaviour by design, and the argument above
         # is why that breadth is correct rather than alarming.)
+        # The DP's authorization is read once, for every platform. TOU spends
+        # it as a rate ceiling below; VPP has no ceiling to raise, so it is
+        # handed to the controller and spent as a *mode* instead (#520). Both
+        # are the same economic decision -- which is the asymmetry #520
+        # exists to remove -- so they must read the same value, not each
+        # re-derive one.
+        #
+        # `None` means "no decision available for this period" and is
+        # deliberately distinct from `False` ("the DP decided against it"),
+        # the same three-state convention #526 established for
+        # `intra_period_discharge_allowed` elsewhere: with no schedule data
+        # there is nothing to authorize *or* to refuse, so each platform
+        # keeps its pre-gate behaviour rather than inventing a decision.
+        intra_period_discharge_allowed: bool | None = None
+        if strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT"):
+            gate_period_data = self.schedule_store.get_period_data_at(
+                time_utils.period_index_to_timestamp(period)
+            )
+            if gate_period_data is not None:
+                intra_period_discharge_allowed = (
+                    gate_period_data.decision.intra_period_discharge_allowed
+                )
+
         if (
-            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT")
+            intra_period_discharge_allowed is not None
             and self._inverter_controller.discharge_rate_is_load_following
         ):
-            # Resolved by exact timestamp (not positional index -
-            # optimization_period) so the standalone next-day schedule
-            # (period_data[0] anchored to tomorrow 00:00 despite
+            # The lookup above resolves by exact timestamp (not positional
+            # index - optimization_period) so the standalone next-day
+            # schedule (period_data[0] anchored to tomorrow 00:00 despite
             # optimization_period=0) is never misread as today's period.
-            target_timestamp = time_utils.period_index_to_timestamp(period)
-            period_data = self.schedule_store.get_period_data_at(target_timestamp)
-            if period_data is not None:
-                discharge_rate = max(
-                    discharge_rate,
-                    intra_period_discharge_gate(
-                        period_data.decision.intra_period_discharge_allowed
-                    ),
-                )
+            discharge_rate = max(
+                discharge_rate,
+                intra_period_discharge_gate(intra_period_discharge_allowed),
+            )
 
         # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
         # decision — curtail whenever this period is exporting at a sell
@@ -2791,6 +2809,7 @@ class BatterySystemManager:
             discharge_rate,
             block_passive_charging,
             strategic_intent,
+            intra_period_discharge_allowed,
         )
 
         if not success:

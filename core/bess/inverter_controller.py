@@ -524,6 +524,7 @@ class InverterController(ABC):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        intra_period_discharge_allowed: bool | None = None,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -545,6 +546,15 @@ class InverterController(ABC):
                 BATTERY_EXPORT to the same values, so platforms that need to
                 treat them differently (VPP-style -- see #413) require the
                 intent itself. Register-based platforms ignore this.
+            intra_period_discharge_allowed: The DP's sub-period discharge
+                decision for this period (#520). Register-based platforms
+                ignore it -- the caller has already spent it by raising
+                `discharge_rate`, which acts as a load-following ceiling
+                there. Forced-power (VPP-style) platforms have no ceiling to
+                raise, so they receive the decision itself and spend it as a
+                *mode* instead. `None` means no decision was available for
+                this period, which is distinct from `False` ("the DP decided
+                against it") and leaves pre-gate behaviour untouched.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

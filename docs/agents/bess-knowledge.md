@@ -415,12 +415,29 @@ Two limits to keep in mind when analysing this:
   SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
   is why the simulator does mirror the gate for those.
 
-**VPP platforms are still excluded** (`discharge_rate_is_load_following` is
-False there): their `discharge_rate` is an immediate forced power command, not
-a load-following ceiling (#324), so opening the gate would command a full-power
-discharge rather than permit a gentle cover. The VPP half of #520 maps the
-gate's *decision* (release control / hold) rather than its rate, and is
-deferred to candidate-scoring work.
+**VPP platforms consult the same gate, but spend it as a mode rather than a
+rate** (#520's VPP half). Their `discharge_rate` is an immediate forced power
+command, not a load-following ceiling (#324), so the *rate* path stays
+excluded (`discharge_rate_is_load_following` is False) — raising it would
+command a full-power discharge rather than permit a gentle cover. The
+*decision* is applied instead:
+
+- gate open, or no decision for the period → release control
+  (`vpp_power=0`, remote control disabled), the inverter's own `load_first`
+  self-use covers the spike (#413, unchanged)
+- gate closed → hold (`vpp_power=+1`, remote control **enabled**),
+  `battery_first`, so self-consumption comes from grid/solar
+
+Closed is `+1`, not `0`: with remote control enabled `vpp_power <= 0` selects
+`grid_first`, which still draws self-consumption from the battery (#118) —
+only `> 0` releases the house to grid/solar. Same mapping and same reasoning
+as VPP-mode IDLE (#466). See `docs/INVERTER_PLATFORMS.md`'s "LOAD_SUPPORT is
+now gated" section.
+
+Not real-hardware-validated: SolaX VPP is an experimental platform, and both
+the `battery_first`-hold (#466) and `grid_first`-hold (#355) branches this
+builds on ship pending confirmation. The corpus cannot cover it either — the
+simulator is Growatt MIN/cloud only and has no VPP mode.
 
 The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
 inherited (an uncomputed bottom-grid-level value opening the ceiling

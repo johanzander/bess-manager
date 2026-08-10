@@ -226,6 +226,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        intra_period_discharge_allowed: bool | None = None,
     ) -> tuple[bool, str]:
         """Write period control settings for the current control mode.
 
@@ -260,6 +261,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 discharge_rate,
                 block_passive_charging,
                 strategic_intent,
+                intra_period_discharge_allowed,
             )
         return self._apply_period_tou(controller, grid_charge, discharge_rate)
 
@@ -327,9 +329,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        intra_period_discharge_allowed: bool | None = None,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate, block_passive_charging,
-        strategic_intent) to (power_pct, remote_control_enabled).
+        strategic_intent, intra_period_discharge_allowed) to
+        (power_pct, remote_control_enabled).
 
         - grid_charge=True                       -> +100% (charge at max rate)
         - grid_charge=False, intent=LOAD_SUPPORT  -> 0%, remote control
@@ -371,6 +375,24 @@ class SolaxModbusGrowattController(GrowattMinController):
         if grid_charge:
             return 100, True
         if strategic_intent == "LOAD_SUPPORT":
+            # #520: the DP's sub-period discharge decision, spent as a mode
+            # rather than a rate. TOU raises a load-following ceiling; VPP
+            # has no ceiling, so the same economic call becomes release
+            # (cover the spike from the battery) or hold (import it).
+            #
+            # Gate closed maps to battery_first (+1), NOT grid_first (0),
+            # and that is the whole subtlety. With remote control enabled the
+            # sign of vpp_power selects firmware priority, and <= 0 is
+            # grid_first -- which per #118 still draws self-consumption from
+            # the battery. Only > 0 releases the house to grid/solar. Writing
+            # 0 here would look like a hold and quietly keep discharging;
+            # #466 established the same mapping for IDLE, for the same reason.
+            #
+            # `None` (no decision for this period) keeps #413's unconditional
+            # release, so retries and the discharge-inhibit path -- neither of
+            # which carries a decision -- behave exactly as before.
+            if intra_period_discharge_allowed is False:
+                return 1, True
             return 0, False
         if discharge_rate == 0:
             if strategic_intent == "IDLE":
@@ -435,6 +457,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        intra_period_discharge_allowed: bool | None = None,
     ) -> tuple[bool, str]:
         """Write one period's VPP power command.
 
@@ -445,7 +468,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         timer to protect.
         """
         power_pct, remote_control_enabled = self._intent_to_vpp(
-            grid_charge, discharge_rate, block_passive_charging, strategic_intent
+            grid_charge,
+            discharge_rate,
+            block_passive_charging,
+            strategic_intent,
+            intra_period_discharge_allowed,
         )
 
         needs_write = remote_control_enabled or (

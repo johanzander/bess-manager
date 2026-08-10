@@ -98,12 +98,49 @@ implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 
-`git fetch origin main` first — `using-git-worktrees`' git fallback branches
+**Prune merged worktrees FIRST — this is the cleanup step, and it lives here
+on purpose.** The "After Merge" section at the bottom also removes a
+worktree, but it is defined as a separate later invocation, so it depends on
+someone choosing to come back — and nobody does. That postcondition ran zero
+times in ~40 issues and left 39 worktrees on disk, 24 of them long merged.
+Running the prune as a *precondition* of the next issue needs no memory: the
+next person to do issue work cleans up the last one's mess automatically.
+
+```bash
+# Worktrees whose PR has merged. NOTE: `git branch --merged` / `rev-list
+# origin/main..branch` DO NOT WORK here -- this repo squash-merges, so a
+# merged branch's commits are never reachable from main and every worktree
+# looks unmerged forever. PR state is the only authoritative signal.
+merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName')
+git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
+  b=$(git -C "$wt" branch --show-current 2>/dev/null)
+  [ -n "$b" ] || continue                                   # detached: leave alone
+  echo "$merged" | grep -qx "$b" || continue                # not merged: leave alone
+  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then # tracked edits: never auto-delete
+    echo "KEEP (uncommitted changes): $wt"; continue
+  fi
+  git worktree remove "$wt" && git branch -D "$b"
+done
+git fetch origin --prune
+```
+
+Two guards that matter: never remove a worktree with **uncommitted tracked
+changes** — report it and let a human decide (one such worktree held a
+375-line module that existed nowhere else) — and never touch a **detached or
+locked** worktree, which is usually another agent's live session.
+
+Then `git fetch origin main` — `using-git-worktrees`' git fallback branches
 from the current local `HEAD`, not `origin/main`, so a stale local checkout
 silently cuts the branch behind main (missed release cuts, changelog
 rewrites, other merged fixes), surfacing later as an avoidable merge
 conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
 branch on `origin/main`.
+
+**Do not change the session's worktree while a background agent spawned from
+it is still running.** The agent's isolation follows the session, so
+switching drags it into the new worktree mid-run — observed in practice: a
+`code-review` invocation resolved against the wrong worktree and reviewed an
+unrelated docs file instead of the diff. Finish or await the agent first.
 
 ### 5. TDD implementation
 
@@ -297,6 +334,11 @@ A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
 flow above, which stops at draft-PR-open per the Step 10 constraints.
 
+**Treat this as best-effort, not the cleanup mechanism.** Because it depends
+on someone returning after the merge, it reliably does not happen; Step 4's
+prune is the one that actually runs. If you are here, do it — but the safety
+net is upstream, not this section.
+
 1. Confirm the merge:
 
    ```bash
@@ -334,6 +376,9 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
+| "I'll clean up the worktree after it merges" | You won't — that's the postcondition that already failed 24 times. Prune at Step 4, before creating the next one. |
+| "`git branch --merged` will tell me what's safe to delete" | Not in this repo. Squash-merge means a merged branch is never an ancestor of main, so that check reports *everything* as unmerged and the cleanup silently never fires. Use `gh pr list --state merged`. |
+| "I'll just hop into the other worktree for a second" | Not while a background agent spawned from this session is running — its isolation follows you and its tooling starts resolving against the wrong checkout. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
 | "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
 | "a unit test on the changed function is enough" | Not for DP/intent/control-mapping changes — a synthetic-input unit test can pass while the new branch is unreachable by any real optimizer-derived scenario. `docs/agents/simulator.md` requires `R == P` for exactly this class of change. |

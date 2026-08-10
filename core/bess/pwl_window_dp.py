@@ -23,6 +23,7 @@ from core.bess.action_selector import (
 from core.bess.dp_battery_algorithm import (
     POWER_TOLERANCE_KW,
     BatterySettings,
+    PeriodFlows,
     _compute_reward_grid,
     _effective_ac_cap_kwh,
     _state_transition_grid,
@@ -327,7 +328,7 @@ def _pwl_best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> tuple[float, float, float, float]:
+) -> tuple[float, float, float, float, PeriodFlows]:
     """The PWL window's forward replay: `action_selector.select_action` with
     the continuation value read off the resolved PWL row `V[t+1]`, evaluated
     exactly at each candidate's true continuous next_soe -- no grid snapping
@@ -344,7 +345,11 @@ def _pwl_best_action_at_continuous_state(
     `import_cap_kwh` is the house fuse's per-period grid-import ceiling
     (#429) and must be the same value the backward induction ran with.
 
-    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
+    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
+    best_flows). `best_flows` is the winning candidate's own `PeriodFlows`,
+    carried out of the window so the accounting replay can price the record
+    this solve actually chose rather than re-deriving it from the spliced
+    trajectory (P4).
     """
     result = select_action(
         soe=soe,
@@ -370,6 +375,7 @@ def _pwl_best_action_at_continuous_state(
         result.chosen.next_soe,
         result.chosen.new_cost_basis,
         result.chosen.reward,
+        result.chosen.flows,
     )
 
 
@@ -815,7 +821,7 @@ def resolve_pwl_window(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> list[tuple[float, float]]:
+) -> list[tuple[float, float, PeriodFlows]]:
     """Forward-replay the window's resolved value table `V` (from
     `run_pwl_window_backward_induction`) into a concrete action sequence,
     greedily applying `_pwl_best_action_at_continuous_state` at each period
@@ -847,9 +853,9 @@ def resolve_pwl_window(
 
     soe = start_soe
     basis = cost_basis
-    actions: list[tuple[float, float]] = []
+    actions: list[tuple[float, float, PeriodFlows]] = []
     for t in range(window_horizon):
-        action, next_soe, basis, _reward = _pwl_best_action_at_continuous_state(
+        action, next_soe, basis, _reward, flows = _pwl_best_action_at_continuous_state(
             soe=soe,
             t=t,
             V_next=V[t + 1],
@@ -866,6 +872,6 @@ def resolve_pwl_window(
             import_cap_kwh=import_cap_kwh,
             sell_price_floored=sell_price_floored,
         )
-        actions.append((action, next_soe))
+        actions.append((action, next_soe, flows))
         soe = next_soe
     return actions

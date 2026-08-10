@@ -710,10 +710,6 @@ def _compute_reward(
         recomputing them -- the import-cap feasibility constraint (#429) and
         the reported `PeriodData` both read it rather than re-deriving (P4).
     """
-    current_buy_price = buy_price[period]
-    current_sell_price = sell_price[period]
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
-
     flows = _period_flows(
         power=power,
         soe=soe,
@@ -722,9 +718,59 @@ def _compute_reward(
         solar_production=solar_production,
         battery_settings=battery_settings,
         dt=dt,
-        ac_cap_kwh=ac_cap_kwh,
+        ac_cap_kwh=_effective_ac_cap_kwh(battery_settings, dt),
         import_cap_kwh=import_cap_kwh,
     )
+    reward, new_cost_basis = _price_flows(
+        flows=flows,
+        power=power,
+        soe=soe,
+        next_soe=next_soe,
+        period=period,
+        home_consumption=home_consumption,
+        battery_settings=battery_settings,
+        dt=dt,
+        buy_price=buy_price,
+        sell_price=sell_price,
+        solar_production=solar_production,
+        cost_basis=cost_basis,
+    )
+    return reward, new_cost_basis, flows
+
+
+def _price_flows(
+    flows: PeriodFlows,
+    power: float,
+    soe: float,
+    next_soe: float,
+    period: int,
+    home_consumption: float,
+    battery_settings: BatterySettings,
+    dt: float,
+    buy_price: list[float],
+    sell_price: list[float],
+    solar_production: float,
+    cost_basis: float,
+) -> tuple[float, float]:
+    """Price an already-derived `PeriodFlows` record: returns
+    `(reward, new_cost_basis)`.
+
+    Split from `_compute_reward` so the objective is demonstrably a function
+    *of the record* rather than of a second derivation of the physics (P4).
+    That is what lets `_replay_accounting_pass` price the stored records a
+    PWL splice produced instead of re-deriving flows from the spliced
+    trajectory -- where a caller passing a different `import_cap_kwh` than
+    the selection loop used would otherwise silently price a period the plan
+    never contained.
+
+    Takes no `import_cap_kwh`: the cap is a constraint on *flows*, already
+    applied inside `_period_flows`. Re-applying it here could only
+    disagree.
+    """
+    current_buy_price = buy_price[period]
+    current_sell_price = sell_price[period]
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+
     grid_imported = flows.grid_imported
     grid_exported = flows.grid_exported
 
@@ -765,7 +811,7 @@ def _compute_reward(
             - grid_exported * current_sell_price
             + battery_wear_cost
         )
-        return -total_cost, new_cost_basis, flows
+        return -total_cost, new_cost_basis
 
     elif power < -POWER_TOLERANCE_KW:  # Discharging
         battery_wear_cost = 0.0
@@ -799,7 +845,7 @@ def _compute_reward(
         - grid_exported * current_sell_price
         + battery_wear_cost
     )
-    return -total_cost, new_cost_basis, flows
+    return -total_cost, new_cost_basis
 
 
 def _record_marginal_value(
@@ -1608,6 +1654,7 @@ def _replay_accounting_pass(
     horizon: int,
     actions: list[float],
     soe_trajectory: list[float],
+    flows_trajectory: list[PeriodFlows],
     initial_cost_basis: float,
     V: np.ndarray,
     soe_levels: np.ndarray,
@@ -1619,11 +1666,10 @@ def _replay_accounting_pass(
     battery_settings: BatterySettings,
     dt: float,
     currency: str,
-    import_cap_kwh: float | None = None,
     export_curtailment_active: bool = False,
 ) -> tuple[list[PeriodData], float]:
     """Rebuild PeriodData (and the reward-objective cost) for a given
-    (action, SOE) trajectory.
+    (action, SOE, flows) trajectory.
 
     Only used by the hybrid PWL path (#450): once a tied window's actions have
     been re-solved exactly and spliced in, the accounting produced inline by
@@ -1631,15 +1677,22 @@ def _replay_accounting_pass(
     trajectory and must be recomputed. The no-tie path never calls this, so its
     output is bit-for-bit whatever the selection loop produced.
 
-    Rewards are recomputed with the same `_compute_reward` call the selection
-    loop's `_best_action_at_continuous_state` makes internally (same explicit
-    next_soe, so the SOLAR_EXPORT-below-max bypass replays exactly), against
-    `reward_sell_price` -- the DP's own objective -- while the reported
-    PeriodData still carries the real `sell_price`.
+    Only the *prices* are re-applied here. The flows are the records the
+    selection loop and the PWL window solve already produced, spliced
+    together by `splice_schedule` and priced through `_price_flows` -- this
+    pass never re-derives physics (P4). Re-deriving would be a second
+    derivation of a trajectory whose actions were chosen elsewhere, and it is
+    why this function no longer takes `import_cap_kwh`: the cap shaped
+    `grid_to_battery` when the flows were produced, and a replay handed a
+    different cap than the solve ran under would otherwise have silently
+    priced a period the plan never contained.
 
-    `import_cap_kwh` is the same fuse-derived grid-import cap (#429) the
-    selection loop optimized against, so the replayed flows describe the same
-    throttled grid charging the schedule actually plans.
+    Costs are chained rather than stored: `cost_basis` depends on the
+    preceding period's outcome, which splicing changes, so it is the one
+    quantity that genuinely must be recomputed here.
+
+    Rewards are priced against `reward_sell_price` -- the DP's own objective
+    -- while the reported PeriodData carries the real `sell_price`.
     """
     hourly_results: list[PeriodData] = []
     reward_objective_cost = 0.0
@@ -1648,7 +1701,9 @@ def _replay_accounting_pass(
     for t in range(horizon):
         soe = soe_trajectory[t]
         next_soe = soe_trajectory[t + 1]
-        action_reward, new_cost_basis, action_flows = _compute_reward(
+        action_flows = flows_trajectory[t]
+        action_reward, new_cost_basis = _price_flows(
+            flows=action_flows,
             power=actions[t],
             soe=soe,
             next_soe=next_soe,
@@ -1660,13 +1715,12 @@ def _replay_accounting_pass(
             sell_price=reward_sell_price,
             solar_production=solar_production[t],
             cost_basis=cost_basis,
-            import_cap_kwh=import_cap_kwh,
         )
 
         period_data = _build_period_data(
-            # The flows the reward above was priced from -- prices differ
-            # between the objective (`reward_sell_price`) and the report
-            # (`sell_price`), the physics does not.
+            # The same stored record the reward above was priced from --
+            # prices differ between the objective (`reward_sell_price`) and
+            # the report (`sell_price`), the physics does not.
             flows=action_flows,
             power=actions[t],
             soe=soe,
@@ -1866,6 +1920,10 @@ def optimize_battery_schedule(
     # tie is actually detected.
     actions: list[float] = []
     soe_trajectory: list[float] = [initial_soe]
+    # The chosen candidate's flow record per period, recorded alongside the
+    # action so a splice can carry physics and action together (P4) and the
+    # accounting replay never re-derives either.
+    flows_trajectory: list[PeriodFlows] = []
     cost_basis_trajectory: list[float] = []
     for t in range(horizon):
         # Recompute the action directly at the true continuous SoE using the
@@ -1902,6 +1960,7 @@ def optimize_battery_schedule(
         cost_basis_trajectory.append(current_cost_basis)
         actions.append(action)
         soe_trajectory.append(next_soe)
+        flows_trajectory.append(action_flows)
 
         period_data = _build_period_data(
             flows=action_flows,
@@ -2045,13 +2104,14 @@ def optimize_battery_schedule(
                 sell_price_floored=window_floored,
             )
 
-        actions, soe_trajectory = splice_schedule(
-            actions, soe_trajectory, windows, window_resolutions
+        actions, soe_trajectory, flows_trajectory = splice_schedule(
+            actions, soe_trajectory, flows_trajectory, windows, window_resolutions
         )
         hourly_results, reward_objective_cost = _replay_accounting_pass(
             horizon=horizon,
             actions=actions,
             soe_trajectory=soe_trajectory,
+            flows_trajectory=flows_trajectory,
             initial_cost_basis=initial_cost_basis,
             V=V,
             soe_levels=soe_levels,
@@ -2063,7 +2123,6 @@ def optimize_battery_schedule(
             battery_settings=battery_settings,
             dt=dt,
             currency=currency,
-            import_cap_kwh=import_cap_kwh,
             export_curtailment_active=export_curtailment_active,
         )
 

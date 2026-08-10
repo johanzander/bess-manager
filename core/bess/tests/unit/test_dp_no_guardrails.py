@@ -201,6 +201,7 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
         initial_soe=battery["initial_soe"],
         battery_settings=battery_settings,
         dt=dt,
+        currency="SEK",
     )
     assert result.economic_summary.battery_solar_cost <= (
         idle_result.economic_summary.battery_solar_cost + 1e-6

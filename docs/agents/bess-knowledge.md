@@ -317,6 +317,24 @@ decided per period from the **shadow price** (above):
 > (The efficiency factor applies only to the buy side — the shadow price is
 > already per-kWh-of-stored-energy.)
 
+**Where that comparison happens (#526).** It is made *inside the DP*, in
+`_record_marginal_value`, at the point where the value function `V` is still in
+hand — not downstream in `battery_system_manager.py`. The result is recorded as
+`DecisionData.intra_period_discharge_allowed`, a plain boolean, and every
+consumer (the BSM apply path and the inverter simulator) reads that boolean
+rather than re-deriving the comparison.
+
+The reason is that `shadow_price` is a *backward difference* between adjacent
+SoE grid levels, so it does not exist at the bottom level — and a SoE at or
+below the reserve floor clamps there. The DP used to skip the assignment in
+that case, leaving the field at its `0.0` default, which is also what a
+genuinely worthless kWh produces. Any consumer comparing against the scalar
+therefore read "never computed" as "worth nothing", and `0.0` satisfies the
+inequality for any positive buy price — so the ceiling opened on data nothing
+had computed. **`shadow_price` is now reporting-only; do not derive a decision
+from it.** Where no shadow price is computable there is no removable kWh below
+that state, so the authorization is `False`: absence is not permission.
+
 What this works out to in practice — important for analysis:
 - During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal
   kWh is only worth the **export (sell) price** — the surplus refills it for
@@ -337,11 +355,14 @@ only affects *sub-15-minute* hardware behaviour.
 
 **LOAD_SUPPORT uses this gate too, on TOU/register platforms (#520).** House
 load exceeding the period forecast is the normal condition, not an edge case,
-and there is nothing platform-specific in `buy × eff_d ≥ shadow` — so the same
+and there is nothing platform-specific in the DP's authorization — so the same
 economic test applies:
 
 ```
-discharge_rate = max(plan_scaled, intra_period_discharge_gate(buy, shadow, eff_d))
+discharge_rate = max(
+    plan_scaled,
+    intra_period_discharge_gate(decision.intra_period_discharge_allowed),
+)
 ```
 
 Raising, never lowering, the plan-scaled ceiling: gate closed → plan-scaled cap
@@ -351,9 +372,9 @@ covered from the battery.
 This settles a change that flipped twice (#384/#385 shipped it, #393 reverted
 it, #520 re-landed it). **Do not re-revert on #393's reasoning**, which was:
 "a broad override of the #147 reservation pacing." That double-counts the
-reservation. `shadow_price` **is** dV/dSoE, the DP's own marginal value of
-stored energy — the future value the pacing protects is already inside the
-gate's own comparison:
+reservation. The authorization the gate reads **is** a dV/dSoE comparison, made
+by the DP against its own marginal value of stored energy — the future value the
+pacing protects is already inside it:
 
 - Energy genuinely needed for a later peak → high `shadow_price` → gate
   **closed** → import. Reservation protected, by construction.
@@ -363,17 +384,13 @@ gate's own comparison:
 The gate does not override reservation pacing; it *evaluates* it. #393's
 headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT periods"
 measured **gate-openness**, not pacing-override: it means that in 76% of those
-periods battery-now genuinely beat grid-now.
-
-The breadth is real and corpus-wide — measured over the 36-fixture corpus
-(603 LOAD_SUPPORT periods) the gate is open in **431 (71.5%)** and raises the
-ceiling above the DP's plan-scaled rate in **427** of them. That is expected
-under the argument above, and it is what makes the gate's correctness an
-argument about `shadow_price`'s meaning rather than a claim that it rarely
-fires. (#520 also quotes an overlap of "9 periods — 1.5%" between gate-open
-and "a genuine reservation the plan is holding"; that figure could not be
-reproduced from the corpus under any definition tried when the TOU half
-landed — treat the 71.5%/427 numbers above as the measured ones.)
+periods battery-now genuinely beat grid-now. The breadth is real and
+corpus-wide, and that is expected under the argument above — the gate's
+correctness is an argument about what the DP's authorization *means*, not a
+claim that it rarely fires. (#520 quotes an overlap of "9 periods — 1.5%"
+between gate-open and "a genuine reservation the plan is holding"; that figure
+could not be reproduced from the corpus under any definition tried when the TOU
+half landed, so do not rely on it.)
 
 Two limits to keep in mind when analysing this:
 
@@ -387,10 +404,10 @@ Two limits to keep in mind when analysing this:
   invisible; only the *cost* (covering more of a planned partial cover from
   battery) is representable. The simulator therefore deliberately does **not**
   mirror the gate for LOAD_SUPPORT (`inverter_simulator._map_rates`) — doing so
-  moves 27 of 36 fixtures by +25.67 SEK of realized cost in total, which is the
-  unmeasurable trade-off's cost half alone, not a real result. For
-  SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
-  is why the simulator does mirror the gate for those.
+  moves most of the corpus by realized cost alone, which is the unmeasurable
+  trade-off's cost half, not a real result. For SOLAR_EXPORT/SOLAR_STORAGE that
+  cost is zero (planned deficit is zero), which is why the simulator does mirror
+  the gate for those.
 
 **VPP platforms are still excluded** (`discharge_rate_is_load_following` is
 False there): their `discharge_rate` is an immediate forced power command, not
@@ -399,22 +416,18 @@ discharge rather than permit a gentle cover. The VPP half of #520 maps the
 gate's *decision* (release control / hold) rather than its rate, and is
 deferred to candidate-scoring work.
 
-A third limit, inherited rather than introduced: `DecisionData.shadow_price`
-defaults to `0.0` and the DP does not assign it when start-of-period SoE lands
-on the lowest grid level, so "worth zero" and "never computed" are the same
-value. `buy × eff_d ≥ 0` is always true, so the gate opens unconditionally
-there — 31 of the corpus's 603 LOAD_SUPPORT periods (5.1%) sit at exactly
-`0.0`. This predates #520 (SOLAR_EXPORT/SOLAR_STORAGE always had it);
-LOAD_SUPPORT now inherits it. Making the field `float | None` so an
-uncomputed value closes the gate is the fix, and is not part of #520.
+The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
+inherited (an uncomputed bottom-grid-level value opening the ceiling
+unconditionally) no longer exists: #526 moved the decision into the DP and
+withholds authorization where no shadow price is computable. See the "Where
+that comparison happens" note above.
 
 See `core/bess/tests/unit/test_load_support_discharge_gate.py` and
 `test_load_support_gate_regression_393.py` (real captured data,
 `regression_2026_07_26_203726.json`) — both assert the ceiling follows the
 gate. Their assertions were deliberately inverted by #520. That fixture is
-still in the majority-gate-open regime #393 identified, though the exact
-figure has drifted with the DP: 41/68 (60.3%) on the current grid versus
-#393's 51/67 (76%).
+still in the majority-gate-open regime #393 identified, though the exact figure
+has drifted with the DP since #393's 51/67 (76%).
 
 ### The inverter AC output cap (solar clipping avoidance)
 
@@ -536,9 +549,9 @@ Flooring the sell price creates *exact reward ties by construction*:
 whenever the remaining below-floor solar surplus exceeds battery headroom,
 "charge now, curtail later" and "curtail now, charge later" earn identical
 reward (signature in a bundle: `shadow_price == cycle_cost_per_kwh` in
-those periods). The replay therefore applies a charge-early tie-break
-(`_prefer_curtailed_charge_absorb`, mirrored in the PWL tie-window
-replay): among candidates within the #466 epsilon, prefer the highest
+those periods). The replay therefore applies a charge-early tie-break -- the tie
+policy's charge-early row (`tie_policy.py`, row 4), applied once for both
+the grid and PWL replays: among candidates within the #466 epsilon, prefer the highest
 `next_soe`, but never one that imports more grid energy than the argmax
 winner, and never overriding a discharge winner. Charge-early is
 stochastically dominant — equal model reward, strictly better under

@@ -13,26 +13,27 @@ horizon.
 
 import numpy as np
 
+from core.bess.action_selector import (
+    PeriodInputs,
+    _discharge_is_unexecutable,
+    _discharge_rate_step_kw,
+    _residual_cover_p,
+    select_action,
+)
 from core.bess.dp_battery_algorithm import (
-    POWER_CLASSIFICATION_THRESHOLD_KW,
     POWER_TOLERANCE_KW,
     BatterySettings,
-    _charge_candidate,
-    _compute_reward,
+    PeriodFlows,
     _compute_reward_grid,
-    _discharge_candidates,
-    _discharge_is_unexecutable,
     _effective_ac_cap_kwh,
-    _prefer_curtailed_charge_absorb,
-    _prefer_load_covering_discharge,
-    _residual_cover_p,
-    _soe_floor,
-    _state_transition,
     _state_transition_grid,
 )
-from core.bess.dp_constants import POWER_STEP_KW, SOE_STEP_KWH
+from core.bess.dp_constants import (
+    POWER_CLASSIFICATION_THRESHOLD_KW,
+    POWER_STEP_KW,
+    SOE_STEP_KWH,
+)
 from core.bess.exceptions import PWLEndSoeOutOfRangeError, PWLWindowUnderRefinedError
-from core.bess.tie_detection import epsilon_for_period
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -87,11 +88,7 @@ def _backward_discharge_levels(
     set in both passes is what makes the replayed schedule achieve exactly
     the value the backward pass promised (no snap/interpolation residual for
     replay to fall short of)."""
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
     max_pct = int(np.floor(battery_settings.max_discharge_power_kw / rate_step + 1e-9))
     min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
     return np.array([pct * rate_step for pct in range(min_pct, max_pct + 1)])
@@ -124,11 +121,7 @@ def _pwl_candidate_values_at(
     max_soe = battery_settings.max_soe_kwh
     soe_col = X.reshape(-1, 1)
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
 
     # Residual load-cover candidate (#466 follow-up): the replay's
     # `_discharge_candidates` offers it per period, so this pass must value
@@ -335,164 +328,55 @@ def _pwl_best_action_at_continuous_state(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> tuple[float, float, float, float]:
-    """One-step Bellman recompute at a true continuous SoE, using the
-    already-known V[t+1, :] (linearly interpolated) as the continuation
-    value -- the same reward+max(V) logic as the PWL backward pass, applied
-    at the true replay state instead of one snapped to the nearest grid
-    index. See
+) -> tuple[float, float, float, float, PeriodFlows]:
+    """The PWL window's forward replay: `action_selector.select_action` with
+    the continuation value read off the resolved PWL row `V[t+1]`, evaluated
+    exactly at each candidate's true continuous next_soe -- no grid snapping
+    anywhere in this path. See
     docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md.
 
-    Candidate actions are the exact breakpoints of the piecewise-linear
-    reward+continuation objective (see
-    docs/superpowers/specs/2026-07-12-dp-continuous-action-reformulation-design.md)
-    rather than a fixed power grid -- `power_levels` is unused for the
-    search itself, kept only for call-site compatibility with
+    The mirror image of `dp_battery_algorithm._best_action_at_continuous_state`
+    in the only sense that still exists after P1: same selector, different
+    `eval_V`. Candidate enumeration and tie policy are not restated here --
+    that hand-maintained duplicate is what Phase 1 removed. `power_levels` is
+    unused, kept for call-site compatibility with
     `_discretize_state_action_space`.
 
     `import_cap_kwh` is the house fuse's per-period grid-import ceiling
-    (#429), applied exactly as `_best_action_at_continuous_state` applies it
-    on the grid-DP replay: candidates are gathered first, then filtered
-    against the cap (floored at the minimum import any candidate achieves) so
-    the "constrain, don't raise" floor is computable before anything is
-    discarded.
+    (#429) and must be the same value the backward induction ran with.
 
-    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward).
+    Returns (best_action, best_next_soe, best_new_cost_basis, best_reward,
+    best_flows). `best_flows` is the winning candidate's own `PeriodFlows`,
+    carried out of the window so the accounting replay can price the record
+    this solve actually chose rather than re-deriving it from the spliced
+    trajectory (P4).
     """
-    period_max_charge = (
-        max_charge_power_per_period[t]
-        if max_charge_power_per_period is not None
-        else None
-    )
-    home = home_consumption[t]
-    solar = solar_production[t]
-    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
-
-    # (value, power, next_soe, new_cost_basis, reward, grid_imported) per
-    # feasible candidate, in consideration order -- gathered first so the
-    # import cap's floor (#429) can be measured before any candidate is
-    # discarded.
-    candidates: list[tuple[float, float, float, float, float, float]] = []
-
-    def consider(power: float, forced_next_soe: float | None = None) -> None:
-        next_soe = (
-            forced_next_soe
-            if forced_next_soe is not None
-            else _state_transition(
-                soe,
-                power,
-                battery_settings,
-                dt,
-                solar_production=solar,
-                home_consumption=home,
-                ac_cap_kwh=ac_cap_kwh,
-                import_cap_kwh=import_cap_kwh,
-            )
-        )
-        # See _soe_floor's docstring (#233): the feasible floor for this
-        # candidate is soe itself until real charging crosses back above
-        # min_soe_kwh.
-        if (
-            next_soe < _soe_floor(soe, battery_settings)
-            or next_soe > battery_settings.max_soe_kwh
-        ):
-            return
-        reward, new_cost_basis, grid_imported = _compute_reward(
-            power=power,
-            soe=soe,
-            next_soe=next_soe,
-            period=t,
-            home_consumption=home,
-            battery_settings=battery_settings,
-            dt=dt,
-            solar_production=solar,
+    result = select_action(
+        soe=soe,
+        t=t,
+        cost_basis=cost_basis,
+        eval_V=lambda next_soe: float(_pwl_eval_array(V_next, np.asarray(next_soe))),
+        eval_value_slope=lambda next_soe: _pwl_local_value_slope(V_next, next_soe),
+        period_inputs=PeriodInputs(
             buy_price=buy_price,
             sell_price=sell_price,
-            cost_basis=cost_basis,
+            home_consumption=home_consumption,
+            solar_production=solar_production,
+            dt=dt,
+            max_charge_power_per_period=max_charge_power_per_period,
             import_cap_kwh=import_cap_kwh,
-        )
-        value = reward + float(_pwl_eval_array(V_next, np.asarray(next_soe)))
-        candidates.append(
-            (value, power, next_soe, new_cost_basis, reward, grid_imported)
-        )
-
-    # IDLE -- always a feasible candidate.
-    consider(0.0)
-
-    # SOLAR_EXPORT-below-max (#313): soe held exactly unchanged, this
-    # period's own solar surplus exports directly instead of passively
-    # charging -- see the PWL backward pass's matching candidate for the
-    # full rationale. Bypasses _state_transition (whose power=0 branch
-    # always charges as much as room/rate permit) to force next_soe == soe
-    # directly, then reuses the same _compute_reward call every other
-    # candidate uses.
-    consider(0.0, forced_next_soe=soe)
-
-    # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
-    for p in _discharge_candidates(
-        soe,
-        battery_settings,
-        dt,
-        home,
-        solar,
-        discharge_resolution_kw=discharge_resolution_kw,
-        ac_cap_kwh=ac_cap_kwh,
-    ):
-        consider(-p)
-
-    # Charge (STORE) -- Finding 4: no grid search needed on this side at
-    # all, a single representative candidate fully covers it.
-    charge_candidate = _charge_candidate(soe, battery_settings, dt, period_max_charge)
-    if charge_candidate is not None:
-        consider(charge_candidate)
-
-    # Import-cap filter (#429), same arithmetic as the grid-DP replay's. The
-    # threshold is floored at the minimum import any candidate achieves, so a
-    # non-empty candidate list can never be emptied here.
-    if import_cap_kwh is not None and candidates:
-        floor_grid_imported = min(c[5] for c in candidates)
-        effective_import_cap = max(import_cap_kwh, floor_grid_imported)
-        candidates = [c for c in candidates if c[5] <= effective_import_cap + 1e-9]
-
-    # The SOLAR_EXPORT-below-max candidate holds soe exactly unchanged, so it
-    # is feasible at every state -- `candidates` is never empty and an
-    # IndexError below would be a real bug, not a case to defend against.
-    best_index = 0
-    best_value = float("-inf")
-    for index, candidate in enumerate(candidates):
-        if candidate[0] > best_value:
-            best_value = candidate[0]
-            best_index = index
-
-    # Risk-aware tie-break (#466), mirroring the grid replay so a re-solved
-    # tie window cannot silently reinstate the fail-unsafe IDLE pick. The PWL
-    # row has no grid snap; the slope for the shared epsilon definition comes
-    # from `_pwl_local_value_slope` at the winner's next_soe.
-    slope = _pwl_local_value_slope(V_next, candidates[best_index][2])
-    epsilon = epsilon_for_period(slope, SOE_STEP_KWH)
-    best_index = _prefer_load_covering_discharge(
-        candidates,
-        best_index,
-        epsilon=epsilon,
-        home_consumption=home,
-        solar_production=solar,
-        dt=dt,
+            discharge_resolution_kw=discharge_resolution_kw,
+            sell_price_floored=sell_price_floored,
+        ),
+        battery_settings=battery_settings,
     )
-
-    # Charge-early tie-break under the #269 curtailment floor, mirroring the
-    # grid replay so a re-solved tie window cannot silently reinstate the
-    # deferred-charge pick the grid replay just swapped away.
-    if sell_price_floored is not None and sell_price_floored[t]:
-        best_index = _prefer_curtailed_charge_absorb(
-            candidates,
-            best_index,
-            epsilon=epsilon,
-        )
-
-    _, best_action, best_next_soe, best_new_cost_basis, best_reward, _ = candidates[
-        best_index
-    ]
-    return best_action, best_next_soe, best_new_cost_basis, best_reward
+    return (
+        result.chosen.power,
+        result.chosen.next_soe,
+        result.chosen.new_cost_basis,
+        result.chosen.reward,
+        result.chosen.flows,
+    )
 
 
 # Penalty gradient (SEK/kWh) applied outside the pinned terminal band. Chosen
@@ -684,11 +568,7 @@ def _pwl_window_seed_points(
     # The residual load-cover candidate (#466 follow-up) is one more
     # translation-like discharge this period may offer -- seed its preimage
     # kinks too, for the same speed reason as the lattice levels below.
-    seed_rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    seed_rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
     cover_p = _residual_cover_p(
         home_consumption[t], solar_production[t], dt, seed_rate_step
     )
@@ -941,7 +821,7 @@ def resolve_pwl_window(
     discharge_resolution_kw: float | None = None,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
-) -> list[tuple[float, float]]:
+) -> list[tuple[float, float, PeriodFlows]]:
     """Forward-replay the window's resolved value table `V` (from
     `run_pwl_window_backward_induction`) into a concrete action sequence,
     greedily applying `_pwl_best_action_at_continuous_state` at each period
@@ -973,9 +853,9 @@ def resolve_pwl_window(
 
     soe = start_soe
     basis = cost_basis
-    actions: list[tuple[float, float]] = []
+    actions: list[tuple[float, float, PeriodFlows]] = []
     for t in range(window_horizon):
-        action, next_soe, basis, _reward = _pwl_best_action_at_continuous_state(
+        action, next_soe, basis, _reward, flows = _pwl_best_action_at_continuous_state(
             soe=soe,
             t=t,
             V_next=V[t + 1],
@@ -992,6 +872,6 @@ def resolve_pwl_window(
             import_cap_kwh=import_cap_kwh,
             sell_price_floored=sell_price_floored,
         )
-        actions.append((action, next_soe))
+        actions.append((action, next_soe, flows))
         soe = next_soe
     return actions

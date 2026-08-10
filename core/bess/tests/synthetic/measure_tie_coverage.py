@@ -306,7 +306,7 @@ def replay_schedule(
             power = 0.0
         next_soe = period.energy.battery_soe_end
         cost_bases.append(cost_basis)
-        reward, cost_basis, _grid_imported = _compute_reward(
+        reward, cost_basis, _flows = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
@@ -461,8 +461,8 @@ def segment_reference_cost(
     soe = start_soe
     basis = cost_basis
     reference_cost = 0.0
-    for t, (power, next_soe) in enumerate(actions):
-        reward, basis, _grid_imported = _compute_reward(
+    for t, (power, next_soe, _flows) in enumerate(actions):
+        reward, basis, _flows_out = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,

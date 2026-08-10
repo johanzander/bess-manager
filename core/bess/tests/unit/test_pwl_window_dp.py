@@ -2,9 +2,7 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
-from core.bess.dp_battery_algorithm import (
-    _discharge_candidates,
-)
+from core.bess.action_selector import _discharge_candidates
 from core.bess.dp_constants import POWER_STEP_KW
 from core.bess.exceptions import PWLWindowUnderRefinedError
 from core.bess.pwl_window_dp import (
@@ -77,19 +75,21 @@ def test_pwl_best_action_at_continuous_state_prefers_idle_when_flat_continuation
     vs = np.array([0.0, 0.0])
     soe = (battery_settings.min_soe_kwh + battery_settings.max_soe_kwh) / 2
 
-    action, next_soe, _new_cost_basis, _reward = _pwl_best_action_at_continuous_state(
-        soe=soe,
-        t=0,
-        V_next=(xs, vs),
-        power_levels=np.array([]),
-        home_consumption=[0.0],
-        battery_settings=battery_settings,
-        dt=1.0,
-        solar_production=[0.0],
-        buy_price=[0.0],
-        sell_price=[0.0],
-        cost_basis=0.0,
-        max_charge_power_per_period=None,
+    action, next_soe, _new_cost_basis, _reward, _flows = (
+        _pwl_best_action_at_continuous_state(
+            soe=soe,
+            t=0,
+            V_next=(xs, vs),
+            power_levels=np.array([]),
+            home_consumption=[0.0],
+            battery_settings=battery_settings,
+            dt=1.0,
+            solar_production=[0.0],
+            buy_price=[0.0],
+            sell_price=[0.0],
+            cost_basis=0.0,
+            max_charge_power_per_period=None,
+        )
     )
 
     assert action == pytest.approx(0.0)
@@ -189,19 +189,21 @@ def test_pinned_window_forward_replay_lands_on_target():
     soe = start_soe
     cost_basis = 0.0
     for t in range(horizon):
-        _action, next_soe, cost_basis, _reward = _pwl_best_action_at_continuous_state(
-            soe=soe,
-            t=t,
-            V_next=V[t + 1],
-            power_levels=np.array([]),
-            home_consumption=home_consumption,
-            battery_settings=battery,
-            dt=dt,
-            solar_production=solar_production,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            cost_basis=cost_basis,
-            max_charge_power_per_period=None,
+        _action, next_soe, cost_basis, _reward, _flows = (
+            _pwl_best_action_at_continuous_state(
+                soe=soe,
+                t=t,
+                V_next=V[t + 1],
+                power_levels=np.array([]),
+                home_consumption=home_consumption,
+                battery_settings=battery,
+                dt=dt,
+                solar_production=solar_production,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                cost_basis=cost_basis,
+                max_charge_power_per_period=None,
+            )
         )
         soe = next_soe
 
@@ -460,7 +462,7 @@ def test_pwl_replay_respects_the_grid_import_cap():
     home = 1.0  # kWh per period of household load
     cap = 1.2  # leaves only 0.2 kWh of headroom for grid charging
 
-    _, uncapped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+    _, uncapped_next_soe, _, _, _ = _pwl_best_action_at_continuous_state(
         soe=2.0,
         t=0,
         V_next=v_next,
@@ -474,7 +476,7 @@ def test_pwl_replay_respects_the_grid_import_cap():
         cost_basis=0.0,
         max_charge_power_per_period=None,
     )
-    _, capped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+    _, capped_next_soe, _, _, _ = _pwl_best_action_at_continuous_state(
         soe=2.0,
         t=0,
         V_next=v_next,
@@ -548,7 +550,7 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
     actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
 
     soe = start_soe
-    for t, (_power, next_soe) in enumerate(actions):
+    for t, (_power, next_soe, _flows) in enumerate(actions):
         planned_import = _planned_import_kwh(soe, next_soe, home, battery)
         assert planned_import <= cap + 1e-9, (
             f"period {t} plans {planned_import} kWh of grid import, above the "
@@ -652,7 +654,7 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
     )
 
     # ...so the replay's one-step Bellman value is the value to match.
-    _action, next_soe, _basis, reward = _pwl_best_action_at_continuous_state(
+    _action, next_soe, _basis, reward, _flows = _pwl_best_action_at_continuous_state(
         soe=soe,
         t=0,
         V_next=continuation,

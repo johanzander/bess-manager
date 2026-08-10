@@ -597,7 +597,7 @@ def test_load_support_self_throttles_discretization_overshoot():
     regardless of what a coarser discretized plan might have assumed. This
     locks in the physical behavior the DP now accounts for by excluding
     such discharges from its action set outright (#497,
-    core/bess/dp_battery_algorithm.py's _discharge_is_unexecutable; the
+    core/bess/action_selector.py's _discharge_is_unexecutable; the
     earlier #240 fix instead zeroed the export credit in _compute_reward):
     before that, the plan credited export revenue for energy that was
     never actually exported, breaking R == P for these periods -- a case

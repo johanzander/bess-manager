@@ -1,6 +1,7 @@
 # Optimizer Target Architecture — Normative
 
-**Status: normative.** Every change to `core/bess/dp_battery_algorithm.py`,
+**Status: normative.** Every change to `core/bess/action_selector.py`,
+`core/bess/tie_policy.py`, `core/bess/dp_battery_algorithm.py`,
 `core/bess/pwl_window_dp.py`, `core/bess/tie_detection.py`,
 `core/bess/models.py` (flow derivation), `core/bess/strategic_intent.py`,
 or `core/bess/simulation/` must either uphold the principles below or amend
@@ -49,17 +50,33 @@ vectorized evaluator that drifts from the selector is the #236 bug
 reproduced.
 
 Forbidden: adding a candidate type, guard, cap, or preference to one call
-site and mirroring it by hand into the others. The concrete targets are
-the two hand-cloned enumerate/select functions —
-`_best_action_at_continuous_state` (~213 lines) vs
-`_pwl_best_action_at_continuous_state` (~221 lines), whose parity is
-maintained only by "mirror" comments (`pwl_window_dp.py:164,442,458,912`).
-The shared helpers (`_discharge_candidates`, `_charge_candidate`,
-`_prefer_*`, `_tie_margin`) are already imported by PWL rather than
-cloned; the clone problem is precisely the enumerate/select pair. (The
-`_compute_reward`/`_compute_reward_grid` "branch for branch" pair at
-`dp_battery_algorithm.py:447` is the physics core — protected below, not
-a P1 target.)
+site and mirroring it by hand into the others.
+
+**Status: satisfied for the forward replays as of Phase 1.** Candidate
+enumeration and tie policy now live once, in
+`core/bess/action_selector.py`; both forward replays call
+`select_action`. The two hand-cloned enumerate/select functions this
+principle was written against —
+`_best_action_at_continuous_state` and
+`_pwl_best_action_at_continuous_state`, whose parity used to be
+maintained only by "mirror" comments — are gone. What P1 now guards is
+re-divergence: adding a candidate type, guard, cap, or preference
+anywhere other than `action_selector.py`.
+
+Standing exemption: the two vectorized backward passes
+(`_run_dynamic_programming`, `_pwl_candidate_values_at`) keep their own
+numpy evaluators — routing them through `select_action` measured ~256x
+slower AND would change behavior (the backward pass deliberately
+estimates V over the coarse power lattice and deliberately does not apply
+`_discharge_is_unexecutable`). They import the candidate-space
+definitions rather than holding them, and
+`core/bess/tests/unit/test_vectorized_backward_parity.py` pins the two
+ways they can silently drift: scalar-vs-grid transition/reward bit-parity,
+and that the backward pass values every off-lattice candidate type the
+selector can choose. Removing that test re-opens the #236 bug class.
+
+(The `_compute_reward`/`_compute_reward_grid` "branch for branch" pair is
+the physics core — protected below, not a P1 target.)
 
 ### P2. Ties resolve through one lexicographic preference table
 
@@ -88,6 +105,34 @@ Reward shaping that flattens the objective (price floors, export-credit
 zeroing) MUST land together with the table row that resolves the
 indifference region it creates (generalizes the #269/#510 invariant in
 `bess-knowledge.md`).
+
+**Status: satisfied as of Phase 2.** The table lives in
+`core/bess/tie_policy.py` and is applied once, from
+`action_selector.select_action`. The two bespoke tie-break helpers this
+principle was written against are gone; a repo-wide grep for `_prefer_`
+over the source tree returns nothing, which is the standing exit gate.
+(The migration plan under `docs/superpowers/plans/` still names them,
+describing the code it retired.)
+
+Three things the baseline order above states loosely, as built:
+
+- Row 2 is **per-preference, not shared**. The load-cover row stands down
+  on a charge winner and on a discharge already past the cover, but keeps
+  a *partial*-cover winner eligible (#512). The curtailment row stands
+  down on a discharge winner and may still improve a charge winner. A
+  single shared non-idle guard cannot express that asymmetry and would
+  re-open the hole #512 closed.
+- "Within epsilon" is measured against the argmax winner for every row,
+  and the band is **inclusive**, so the table is live at `epsilon == 0`
+  where both retired helpers returned early. At epsilon 0 that admits only
+  bit-exact ties. **No epsilon floor exists**, and one may only be
+  introduced with a per-period forfeiture bound in the row docstring,
+  counted against the 0.05 SEK/fixture budget: measured across the whole
+  fixture corpus, the smallest gap the table declines to cross at
+  epsilon 0 is 0.0080 SEK — a real ranking, not value noise.
+- The sunrise/sunset crossover is **not** covered by this principle. #517
+  established the action set there was empty, not tied, and fixed it with
+  a candidate (P3). Crossover regression cover belongs in Phase 4.
 
 ### P3. Candidates are executable commands
 

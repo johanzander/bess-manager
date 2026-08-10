@@ -147,6 +147,7 @@ def test_idle_guardrail_schedule_does_not_authorize_discharge():
         initial_soe=settings.max_soe_kwh,  # full: solar cannot be absorbed, it exports
         battery_settings=settings,
         dt=1.0,
+        currency="SEK",
     )
 
     gate_consulting = [

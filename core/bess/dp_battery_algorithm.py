@@ -66,7 +66,6 @@ from core.bess.dp_constants import (
     SOE_STEP_KWH,
 )
 from core.bess.models import (
-    DecisionData,
     EconomicData,
     EconomicSummary,
     EnergyData,
@@ -76,7 +75,6 @@ from core.bess.models import (
 )
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
-    classify_strategic_intent,
     create_decision_data,
 )
 
@@ -1521,6 +1519,7 @@ def _create_idle_schedule(
     initial_soe: float,
     battery_settings: BatterySettings,
     dt: float,
+    currency: str,
 ) -> OptimizationResult:
     """
     Create an all-IDLE schedule where battery passively charges from excess solar.
@@ -1528,10 +1527,19 @@ def _create_idle_schedule(
     Used by the all-IDLE safety net, which swaps this in only when it is
     strictly cheaper than the DP's own schedule (there is no profit gate).
     Excess solar charges the battery up to capacity; only overflow exports to grid.
+
+    Built from the same `_period_flows` / `_price_flows` / `_build_period_data`
+    chain as every other path (P4). It used to carry a fourth independent copy
+    of the IDLE physics, which had already drifted: it charged the full
+    `battery_charged * sell_price` as solar opportunity cost, where
+    `_price_flows` discounts the share that would have been AC-clipped anyway
+    and therefore cost nothing to absorb. Collapsing the copy adopts the
+    correct basis -- see the note at the `_price_flows` call below.
     """
     period_data_list = []
     current_soe = initial_soe
     current_cost_basis = battery_settings.cycle_cost_per_kwh
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
 
     for t in range(horizon):
         # Passive solar charging: excess solar goes to battery, overflow to grid
@@ -1543,70 +1551,59 @@ def _create_idle_schedule(
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
         )
-        passive_stored = next_soe - current_soe
-        battery_charged, _ = _idle_battery_flows(
-            current_soe, next_soe, battery_settings
-        )
-        battery_wear_cost = passive_stored * battery_settings.cycle_cost_per_kwh
-        solar_opportunity_cost = battery_charged * sell_price[t]
-
-        # Update cost basis for passively stored solar
-        if passive_stored > 0 and next_soe > battery_settings.min_soe_kwh:
-            existing_cost = current_soe * current_cost_basis
-            current_cost_basis = (
-                existing_cost + solar_opportunity_cost + battery_wear_cost
-            ) / next_soe
-
-        grid_imported, grid_exported, clipped_solar = _ac_flows(
-            solar_production[t],
-            home_consumption[t],
-            battery_charged,
-            0.0,
-            _effective_ac_cap_kwh(battery_settings, dt),
-        )
-        energy_data = EnergyData(
-            solar_production=solar_production[t],
+        flows = _period_flows(
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
             home_consumption=home_consumption[t],
-            battery_charged=battery_charged,
-            battery_discharged=0.0,
-            grid_imported=grid_imported,
-            grid_exported=grid_exported,
-            battery_soe_start=current_soe,
-            battery_soe_end=next_soe,
-            clipped_solar=clipped_solar,
+            solar_production=solar_production[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            ac_cap_kwh=ac_cap_kwh,
         )
-
-        economic_data = EconomicData.from_energy_data(
-            energy_data=energy_data,
-            buy_price=buy_price[t],
-            sell_price=sell_price[t],
-            battery_cycle_cost=battery_wear_cost,
-        )
-
-        decision_data = DecisionData(
-            strategic_intent=classify_strategic_intent(0.0, energy_data),
-            battery_action=0.0,
-            cost_basis=current_cost_basis,
-            # No value function exists on this path -- it is the numerical
-            # safety net returned when the optimized plan scores worse than
-            # doing nothing, so there is no dV/dSoE to authorize against.
-            # Stated explicitly rather than inherited from the field default
-            # (#526): absence of an economic basis is not permission, and on a
-            # sunny all-IDLE day classify_strategic_intent can return
-            # SOLAR_EXPORT here, which IS a gate-consulting intent. Before
-            # #526 that period's shadow_price defaulted to 0.0 and opened the
-            # ceiling to 100 on a value nothing had computed; it is now 0.
-            intra_period_discharge_allowed=False,
-        )
-
-        period_data = PeriodData(
+        # Cost basis only. The reward is discarded: this schedule's cost is
+        # summed from the reported PeriodData below, exactly as before, and
+        # the guardrail comparison reads that sum -- not this term.
+        _reward, current_cost_basis = _price_flows(
+            flows=flows,
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
             period=t,
-            energy=energy_data,
-            timestamp=None,
-            data_source="predicted",
-            economic=economic_data,
-            decision=decision_data,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            cost_basis=current_cost_basis,
         )
+
+        period_data = _build_period_data(
+            flows=flows,
+            power=0.0,
+            soe=current_soe,
+            next_soe=next_soe,
+            period=t,
+            home_consumption=home_consumption[t],
+            battery_settings=battery_settings,
+            dt=dt,
+            buy_price=buy_price,
+            sell_price=sell_price,
+            solar_production=solar_production[t],
+            new_cost_basis=current_cost_basis,
+            currency=currency,
+        )
+        # `_record_marginal_value` is deliberately NOT called here, so
+        # `intra_period_discharge_allowed` keeps its `False` default (#526).
+        # No value function exists on this path -- it is the numerical safety
+        # net returned when the optimized plan scores worse than doing
+        # nothing, so there is no dV/dSoE to authorize against. That matters
+        # concretely: on a sunny all-IDLE day `classify_strategic_intent` can
+        # return SOLAR_EXPORT here, which IS a gate-consulting intent. Before
+        # #526 the period's shadow_price defaulted to 0.0 and opened the
+        # ceiling to 100 on a value nothing had computed. Absence of an
+        # economic basis is not permission.
 
         period_data_list.append(period_data)
         current_soe = next_soe
@@ -2207,6 +2204,7 @@ def optimize_battery_schedule(
         initial_soe=initial_soe,
         battery_settings=battery_settings,
         dt=dt,
+        currency=currency,
     )
 
     # When export_curtailment_active, the DP's action selection optimized
@@ -2239,6 +2237,7 @@ def optimize_battery_schedule(
             initial_soe=initial_soe,
             battery_settings=battery_settings,
             dt=dt,
+            currency=currency,
         ).economic_summary.battery_solar_cost
 
     if guardrail_idle_cost < guardrail_optimized_cost:

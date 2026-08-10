@@ -99,7 +99,7 @@ def test_replay_tie_margin_is_non_negative_when_swap_fires():
     )
     V_next = 1.0 * (soe_levels - settings.min_soe_kwh)  # slope == buy -> exact tie
     _, power_levels = _discretize_state_action_space(settings)
-    action, _next_soe, _cost_basis, _reward, tie_margin, _value_slope = (
+    action, _next_soe, _cost_basis, _reward, _flows, tie_margin, _value_slope = (
         _best_action_at_continuous_state(
             soe=6.0,
             t=0,

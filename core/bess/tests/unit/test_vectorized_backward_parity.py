@@ -96,7 +96,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
                 f"next_soe drift at soe={soe}, power={power}: "
                 f"{grid_next_soe[i, j]} != {scalar_next_soe}"
             )
-            scalar_reward, _basis, scalar_imported = _compute_reward(
+            scalar_reward, _basis, scalar_flows = _compute_reward(
                 power=float(power),
                 soe=float(soe),
                 next_soe=scalar_next_soe,
@@ -114,7 +114,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
                 f"reward drift at soe={soe}, power={power}: "
                 f"{grid_reward[i, j]} != {scalar_reward}"
             )
-            assert grid_imported[i, j] == scalar_imported
+            assert grid_imported[i, j] == scalar_flows.grid_imported
 
 
 def _single_period_value(

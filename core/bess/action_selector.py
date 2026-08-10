@@ -29,6 +29,7 @@ import numpy as np
 
 from core.bess.dp_battery_algorithm import (
     POWER_TOLERANCE_KW,
+    PeriodFlows,
     _compute_reward,
     _effective_ac_cap_kwh,
     _soe_floor,
@@ -365,18 +366,27 @@ class Candidate:
     """One evaluated action at a state: what it does, where it lands, what it
     earns this period, and its total value including the continuation term.
 
-    `grid_imported` is carried because two consumers need it without
-    recomputing the flows: the import-cap feasibility filter (#429) and the
-    "never prefer a candidate that imports more grid energy than the argmax
-    winner" eligibility row in `tie_policy`.
+    `flows` is this candidate's complete `PeriodFlows` record, produced once
+    by the `_compute_reward` call that priced it (P4). Carrying the whole
+    record rather than the single `grid_imported` scalar is what lets the
+    reported `PeriodData` be built from the same physics the objective
+    scored: the import-cap feasibility filter (#429), the "never prefer a
+    candidate that imports more grid energy than the argmax winner"
+    eligibility row in `tie_policy`, and the winning period's reporting all
+    read this one record.
     """
 
     power: float  # kW, signed (+charge / -discharge / 0 idle)
     next_soe: float  # kWh
     reward: float  # this period's reward (currency)
     new_cost_basis: float
-    grid_imported: float  # kWh
+    flows: PeriodFlows
     value: float  # reward + eval_V(next_soe)
+
+    @property
+    def grid_imported(self) -> float:
+        """kWh imported from the grid under this candidate."""
+        return self.flows.grid_imported
 
 
 def _tie_margin(candidates: list[Candidate], best_index: int) -> float:
@@ -546,7 +556,7 @@ def select_action(
             or next_soe > battery_settings.max_soe_kwh
         ):
             return
-        reward, new_cost_basis, grid_imported = _compute_reward(
+        reward, new_cost_basis, flows = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
@@ -566,7 +576,7 @@ def select_action(
                 next_soe=next_soe,
                 reward=reward,
                 new_cost_basis=new_cost_basis,
-                grid_imported=grid_imported,
+                flows=flows,
                 value=reward + eval_V(next_soe),
             )
         )

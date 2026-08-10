@@ -1,7 +1,7 @@
 """Tests for issue #353: future_value always 0.0 for every period."""
 
 from core.bess.dp_battery_algorithm import _build_period_data
-from core.bess.tests.helpers import make_battery_settings
+from core.bess.tests.helpers import flows_for, make_battery_settings
 
 
 class TestBuildPeriodDataFutureValue:
@@ -16,6 +16,7 @@ class TestBuildPeriodDataFutureValue:
             cycle_cost_per_kwh=0.40,
         )
         period_data = _build_period_data(
+            flows=flows_for(-1.0, 5.0, 4.0, 0.2, 0.0, bs, 0.25),
             power=-1.0,
             soe=5.0,
             next_soe=4.0,
@@ -42,6 +43,7 @@ class TestBuildPeriodDataFutureValue:
             cycle_cost_per_kwh=0.40,
         )
         period_data = _build_period_data(
+            flows=flows_for(-1.0, 5.0, 4.0, 0.2, 0.0, bs, 0.25),
             power=-1.0,
             soe=5.0,
             next_soe=4.0,

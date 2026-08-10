@@ -65,7 +65,7 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 | 0 | in-flight WIP: #510, #511 (#497), #506, #507 (#502), #508 (#501), #515, #516 (#512), #517 (#466 crossover) | 2, 3 | **DONE** |
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
-| 3 | #459-class; collapses the six flow derivations into one record. **No longer closes #497** — #511 already did | 2 | re-scoped 2026-08-10 |
+| 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | re-scoped 2026-08-10 |
 | 4 | #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | gated on #520/#524 |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
@@ -448,9 +448,24 @@ measured against `candidates[argmax_index].value` — never chained):
 > against the old pin's 2). It runs over the whole scenario corpus via
 > `test_scenarios.py:254`.
 >
-> What remains is real but different: the **six flow derivations are still
-> six**, and collapsing them into one per-candidate record is a
-> consolidation refactor, not a behavior change. Plan and gate it as such.
+> What remains is real but different: the planning-side flow derivations
+> are still duplicated, and collapsing them into one per-candidate record is
+> a consolidation refactor, not a behavior change. Plan and gate it as such.
+>
+> **"Six" was never measured — corrected 2026-08-10 by census.** The
+> planning/reporting charge-split derivations at the time Phase 3 started
+> were **eight**: `_compute_reward`, `_build_period_data`,
+> `_create_idle_schedule`, `_state_transition`, the two numpy mirrors
+> (`_compute_reward_grid`, `_state_transition_grid`, both explicitly out of
+> scope under P1(a)), `pwl_window_dp`'s store/idle gain, and
+> `EnergyData._calculate_detailed_flows` (a legitimately different
+> derivation — it works from aggregate totals, not from a chosen action).
+> Two more lived in `battery_system_manager` (`_calculate_initial_cost_basis`
+> and the energy-balance log table), for **ten** sites overall. Phase 3
+> removes five of them: the first three collapse into `_period_flows`, and
+> both BSM sites now read the split `EnergyData` already derived.
+> `_state_transition`, the two numpy mirrors and the PWL gain remain
+> deliberately.
 > `assert_flow_coherence` stays in place as the standing regression net —
 > it is no longer the goal, it is the floor.
 >
@@ -475,11 +490,27 @@ SEK/fixture budget.
       `action_selector.select_action` (extending `_compute_reward`'s
       existing flow math, not duplicating it); reward derived from that
       record; `_replay_accounting_pass` consuming the stored records
-      instead of recomputing; sensor-noise heuristics verified to exist
-      only in `sensor_collector.py` (grep every `EnergyData` construction
-      site: `sensor_collector`, `influxdb_helper`, `debug_data_exporter`,
-      `simulation/inverter_simulator`, backend API paths — each gets an
-      explicit exact-vs-ingested decision in the plan).
+      instead of recomputing; each `EnergyData` construction site gets an
+      explicit exact-vs-ingested decision.
+
+      **Both halves of this item were wrong — corrected 2026-08-10 by
+      grep.** The sensor-noise heuristics did *not* live only in
+      `sensor_collector.py`: three are in `models.py`
+      (`EnergyData._calculate_detailed_flows` — the #350 fold and two
+      non-invention clamps, which ran on planned data too, a literal P4
+      violation), and `energy_flow_calculator.py` carries its own
+      gap-filling fallbacks for `system_production`/`self_consumption`.
+      `sensor_collector.py` itself constructs `EnergyData` but applies no
+      heuristic of its own.
+
+      The construction-site list was also stale. `influxdb_helper` and
+      `debug_data_exporter` construct **none**, and
+      `simulation/inverter_simulator` constructs none directly (it goes
+      through `_build_period_data`). The five real production sites are
+      `sensor_collector.py`, `dp_battery_algorithm.py`
+      (`_build_period_data`), `daily_view_builder.py`, `models.py`
+      (`apply_export_curtailment_to_period_data`) and
+      `prediction_snapshot.py`.
 - [ ] **Acceptance — golden bit-parity across every fixture in
       `core/bess/tests/unit/data/`**, reusing Phase 1's
       `golden_capture.py` machinery and its regeneration discipline. Any
@@ -490,8 +521,10 @@ SEK/fixture budget.
 - [ ] Full + slow + E2E per the detailed plan; draft PR; `/code-review`.
 
 **Exit gate:** bit-parity holds; no reward-only or flows-only code path
-survives (`P4` compliance grep in the PR body); the six flow derivations
-are one.
+survives (`P4` compliance grep in the PR body); the duplicated
+planning-side flow derivations are one (`_period_flows`), with
+`_state_transition`, the two numpy mirrors and the PWL gain remaining
+deliberately — see the census note above.
 
 ## Phase 4: Executable-command candidates (P3)
 
@@ -660,8 +693,10 @@ Phase 2 (preference table)    — ✅ MERGED #525 (P6 rider deferred)
    │                            cost-identical; register 100→0 at floor.
    │                            #520 unblocked.
    ▼
-Phase 3 (one flow record)     — ◀ NEXT. RE-SCOPED: consolidation refactor,
-   │                            acceptance = golden bit-parity
+Phase 3 (one flow record)     — ✅ IMPLEMENTED 2026-08-10. Bit-parity held
+   │                            on all 36 fixtures through every task.
+   │                            Live fix: BSM booked 36.16 kWh of grid
+   │                            charging as free solar (10/36 fixtures).
    ▼
 #520 → #524                   — settle before Phase 4 encodes the
    │                            ambiguity into the candidate space

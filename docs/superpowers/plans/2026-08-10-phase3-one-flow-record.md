@@ -46,6 +46,34 @@ Re-measure and record in the PR body:
 If any re-measurement contradicts the stale figure materially, **stop and
 re-scope** rather than proceeding on this plan's assumptions.
 
+### Task 0 results — measured 2026-08-10 on `a81ac613`
+
+| Measurement | Stale claim | Re-measured | Verdict |
+|---|---|---|---|
+| Fixtures / planned periods | 32 fixtures | **36 / 2168** | as expected |
+| `_compute_reward` vs `_build_period_data`, `grid_imported` | 0.0 | **0.0** (0 of 2461 rows differ) | confirmed |
+| Same, wear cost | ≤6.7e-16 | **≤6.661e-16** (42 of 2461 rows) | confirmed |
+| Knife-edge selections | 46 / 2194 | **56 / 2194** (29 bit-exact + 27 <1e-12) | see below |
+| Fixtures firing the idle guardrail | 0 of 32 | **0 of 36** | confirmed |
+| `EnergyData` heuristic firings on planned data | 0 | **0** | confirmed |
+
+No re-measurement contradicted the plan materially, so the scope stands.
+Two notes on the details:
+
+- **`grid_imported` agrees exactly, so the consolidation is hygiene, not a
+  bugfix** — stated plainly as this task requires. The only deviation
+  between the two sites is the wear term's two algebraically-identical
+  formulations, at float-noise magnitude.
+- **The knife-edge count is higher than the stale figure, not lower**, and
+  the stale definition was not reproducible anyway (Phase 2 replaced tie
+  resolution). Measured here against the question that actually matters for
+  bit-parity: how often is the strict-`>` argmax decided by a gap under
+  1e-12 against a candidate the goldens would record *differently* (in
+  `power` or `next_soe`). 56 is a risk figure, and it argues *harder* for
+  the plan's "do not re-associate the reward arithmetic" instruction. For
+  contrast, ties by the codebase's own ambiguity criterion
+  (`TIE_DEDUP_SOE_KWH`, 1.0 kWh) number only 4.
+
 ---
 
 ## Acceptance gate (whole phase)

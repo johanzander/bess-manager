@@ -19,9 +19,9 @@ reservation pacing; it evaluates it.
 #393's headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT
 periods" measured gate-OPENNESS, not pacing-override: it means that in 76% of
 those periods battery-now genuinely beat grid-now. The breadth is real --
-corpus-wide the gate is open in 431 of 603 LOAD_SUPPORT periods (71.5%) and
-raises the ceiling in 427 of them -- and is correct by the argument above,
-not despite it.
+corpus-wide, re-measured post-#526, the gate is open in 431 of 603
+LOAD_SUPPORT periods (71.5%) and raises the ceiling in 427 of them -- and is
+correct by the argument above, not despite it.
 
 SOLAR_EXPORT/SOLAR_STORAGE are unaffected and predate all of this -- see
 test_solar_export_discharge_gate.py / test_solar_storage_discharge_gate.py.

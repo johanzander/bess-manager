@@ -19,11 +19,14 @@ reserved. The gate does not override reservation pacing; it evaluates it.
 
 #393's headline figure from this very fixture -- "the gate evaluates true for
 51 of 67 LOAD_SUPPORT periods (~76%)" -- measured gate-OPENNESS, not
-pacing-override. That exact figure no longer reproduces: the DP has changed
-underneath it since #393 (notably #512's finer state/action grid, and #526
-moving the decision into the DP so the bottom SoE grid level now withholds
-authorization instead of defaulting open). The majority-open regime it
+pacing-override. That exact figure no longer reproduces: on this branch the
+same fixture yields 41 of 68 (60.3%), the DP having changed underneath it since
+#393 (notably #512's finer state/action grid). The majority-open regime it
 identified does still hold, which is all the sanity check below asserts.
+
+The breadth is real and corpus-wide, re-measured post-#526: the gate is open in
+431 of 603 LOAD_SUPPORT periods (71.5%) and raises the ceiling in 427 of them.
+It is correct by the argument above, not despite it.
 
 `core/bess/tests/unit/data/regression_2026_07_26_203726.json` is a real
 optimizer input (buy/sell price, home consumption, solar production, battery
@@ -158,9 +161,10 @@ def _load_support_periods() -> tuple[list[tuple[int, float, bool, float]], dict]
 def test_gate_condition_is_favorable_for_most_load_support_periods():
     """Sanity check on the fixture itself: it is still in the majority-open
     regime #393 identified. The exact figure has drifted with the DP (#393
-    measured 51/67 = 76%), so only the majority property is asserted. If even
-    that stops being true, the test below is no longer exercising the regime it
-    guards -- investigate before touching the assertions."""
+    measured 51/67 = 76%; this branch measures 41/68 = 60.3%), so only the
+    majority property is asserted. If even that stops being true, the test
+    below is no longer exercising the regime it guards -- investigate before
+    touching the assertions."""
     periods, _inp = _load_support_periods()
 
     gate_open_count = sum(

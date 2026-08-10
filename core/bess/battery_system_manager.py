@@ -2670,9 +2670,11 @@ class BatterySystemManager:
         # reservation pacing; it evaluates it. #393's headline "the gate
         # evaluates true for 76% of LOAD_SUPPORT periods" measured
         # gate-OPENNESS, not pacing-override: it means that in 76% of those
-        # periods battery-now genuinely beat grid-now. This is a broad
-        # behaviour by design, and the argument above is why that breadth is
-        # correct rather than alarming.
+        # periods battery-now genuinely beat grid-now. (Corpus-wide, measured
+        # post-#526: the gate is open in 431/603 = 71.5% of LOAD_SUPPORT
+        # periods and raises the ceiling above the plan-scaled rate in 427 of
+        # them -- this is a broad behaviour by design, and the argument above
+        # is why that breadth is correct rather than alarming.)
         if (
             strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT")
             and self._inverter_controller.discharge_rate_is_load_following

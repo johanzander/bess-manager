@@ -384,13 +384,17 @@ pacing protects is already inside it:
 The gate does not override reservation pacing; it *evaluates* it. #393's
 headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT periods"
 measured **gate-openness**, not pacing-override: it means that in 76% of those
-periods battery-now genuinely beat grid-now. The breadth is real and
-corpus-wide, and that is expected under the argument above — the gate's
-correctness is an argument about what the DP's authorization *means*, not a
-claim that it rarely fires. (#520 quotes an overlap of "9 periods — 1.5%"
-between gate-open and "a genuine reservation the plan is holding"; that figure
-could not be reproduced from the corpus under any definition tried when the TOU
-half landed, so do not rely on it.)
+periods battery-now genuinely beat grid-now.
+
+The breadth is real and corpus-wide — re-measured post-#526 over the 36-fixture
+corpus (603 LOAD_SUPPORT periods) the gate is open in **431 (71.5%)** and raises
+the ceiling above the DP's plan-scaled rate in **427** of them. That is expected
+under the argument above, and it is what makes the gate's correctness an
+argument about what the DP's authorization *means* rather than a claim that it
+rarely fires. (#520 also quotes an overlap of "9 periods — 1.5%" between
+gate-open and "a genuine reservation the plan is holding"; that figure could not
+be reproduced from the corpus under any definition tried when the TOU half
+landed — treat the 71.5%/427 numbers above as the measured ones.)
 
 Two limits to keep in mind when analysing this:
 
@@ -404,10 +408,12 @@ Two limits to keep in mind when analysing this:
   invisible; only the *cost* (covering more of a planned partial cover from
   battery) is representable. The simulator therefore deliberately does **not**
   mirror the gate for LOAD_SUPPORT (`inverter_simulator._map_rates`) — doing so
-  moves most of the corpus by realized cost alone, which is the unmeasurable
-  trade-off's cost half, not a real result. For SOLAR_EXPORT/SOLAR_STORAGE that
-  cost is zero (planned deficit is zero), which is why the simulator does mirror
-  the gate for those.
+  moves 27 of 36 fixtures by +25.67 SEK of realized cost in total (largest
+  single fixture `historical_2025_01_12_evening_peak_no_solar` at +8.420 SEK;
+  range −0.340 .. +8.420; re-measured post-#526), which is the unmeasurable
+  trade-off's cost half alone, not a real result. For
+  SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
+  is why the simulator does mirror the gate for those.
 
 **VPP platforms are still excluded** (`discharge_rate_is_load_following` is
 False there): their `discharge_rate` is an immediate forced power command, not
@@ -427,7 +433,8 @@ See `core/bess/tests/unit/test_load_support_discharge_gate.py` and
 `regression_2026_07_26_203726.json`) — both assert the ceiling follows the
 gate. Their assertions were deliberately inverted by #520. That fixture is
 still in the majority-gate-open regime #393 identified, though the exact figure
-has drifted with the DP since #393's 51/67 (76%).
+has drifted with the DP: 41/68 (60.3%) on the current grid versus #393's 51/67
+(76%).
 
 ### The inverter AC output cap (solar clipping avoidance)
 

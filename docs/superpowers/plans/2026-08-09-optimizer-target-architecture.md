@@ -497,9 +497,19 @@ SEK/fixture budget.
       grep.** The sensor-noise heuristics did *not* live only in
       `sensor_collector.py`: three are in `models.py`
       (`EnergyData._calculate_detailed_flows` — the #350 fold and two
-      non-invention clamps, which ran on planned data too, a literal P4
+      non-invention clamps, which run on planned data too, a literal P4
       violation), and `energy_flow_calculator.py` carries its own
       gap-filling fallbacks for `system_production`/`self_consumption`.
+
+      **That P4 violation is still open.** Phase 3 tried to gate them and
+      backed out: the two clamps are physical bounds rather than noise
+      models, and gating the #350 fold flips planned intent to
+      BATTERY_EXPORT (hence `grid_first`) in the reachable regime
+      `ac_cap < home < solar`, where #497's pre-clipping deficit leaves the
+      candidate admitted. Fixing it means an AC-aware candidate filter —
+      Phase 4's business, not the model layer's. See the Phase 3 detailed
+      plan's Task 5 and
+      `test_planned_flows_still_pass_through_the_ingest_fold`.
       `sensor_collector.py` itself constructs `EnergyData` but applies no
       heuristic of its own.
 

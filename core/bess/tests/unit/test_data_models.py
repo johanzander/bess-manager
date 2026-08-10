@@ -197,39 +197,72 @@ class TestEnergyData:
         power = energy.battery_charged - energy.battery_discharged
         assert infer_intent_from_flows(power, energy) == "LOAD_SUPPORT"
 
-    def test_exact_flows_bypass_the_ingest_noise_model(self):
-        """P4: planned and simulated flows must never pass through a noise
-        model (`docs/agents/optimizer-architecture.md`).
+    def test_planned_flows_still_pass_through_the_ingest_fold(self):
+        """Known P4 violation, pinned so it cannot be lost (see
+        `docs/agents/optimizer-architecture.md`: "planned and simulated flows
+        are exact by definition and must never pass through a noise model").
 
-        Same period as the #350 fold test above, but declared exact rather
-        than measured. On measured data the sub-resolution export is counter
-        noise and folds into battery_to_home; on exact data there are no
-        independent counters to disagree, so a planned 0.0177 kWh export is a
-        real export the DP priced, and rewriting it would make the reported
-        flows contradict the objective.
+        `EnergyData` applies the #350 sub-resolution export fold to every
+        record, including planned ones. This test documents the current,
+        non-compliant behaviour rather than the desired one -- **when the fold
+        is finally gated to ingest, this test should flip, not be deleted.**
+
+        Phase 3 attempted the gate and backed it out. The band is reachable:
+        whenever `ac_cap < home_consumption < solar_production`, the #497
+        predicate `_discharge_is_unexecutable` stands down (it computes its
+        deficit as `home - solar`, i.e. from RAW solar, blind to AC clipping)
+        while the AC stage still leaves the battery covering a deficit it can
+        overshoot by less than `GRID_FLOW_RESOLUTION_KWH`. Ungating the fold
+        there flips planned intent LOAD_SUPPORT -> BATTERY_EXPORT, and
+        `inverter_controller` maps BATTERY_EXPORT to `grid_first` -- the
+        export feedback loop `battery_system_manager` documents. Closing this
+        properly means making the candidate filter AC-aware, which is a
+        candidate-space change (Phase 4), not a model-layer one.
         """
-        kwargs = {
-            "solar_production": 0.0,
-            "home_consumption": 0.14528749999999999,
-            "grid_imported": 0.0,
-            "grid_exported": 0.0177,
-            "battery_charged": 0.0,
-            "battery_discharged": 0.14584375,
-            "battery_soe_start": 5.0,
-            "battery_soe_end": 4.8,
-        }
+        # solar 3.0 > home 2.0, but only 1.0 kWh gets through the AC stage,
+        # so the battery covers 1.0 and overshoots by 0.05.
+        energy = EnergyData(
+            solar_production=3.0,
+            home_consumption=2.0,
+            battery_charged=0.0,
+            battery_discharged=1.05,
+            grid_imported=0.0,
+            grid_exported=0.05,
+            battery_soe_start=5.0,
+            battery_soe_end=4.0,
+            clipped_solar=2.0,
+        )
 
-        measured = EnergyData(**kwargs, measured=True)
-        exact = EnergyData(**kwargs, measured=False)
+        # Folded today, though nothing about this record is measured.
+        assert energy.battery_to_grid == 0.0
+        assert energy.battery_to_home == pytest.approx(1.05)
+        assert infer_intent_from_flows(-1.05, energy) == "LOAD_SUPPORT"
 
-        assert measured.battery_to_grid == 0.0
-        assert exact.battery_to_grid == pytest.approx(0.0177)
+    def test_detailed_flows_never_exceed_the_battery_that_supplied_them(self):
+        """`battery_to_home + battery_to_grid` can never exceed
+        `battery_discharged`, on measured and exact data alike.
 
-        # And the intent follows the flows, which is the consequence that
-        # actually reaches hardware.
-        power = -kwargs["battery_discharged"]
-        assert infer_intent_from_flows(power, measured) == "LOAD_SUPPORT"
-        assert infer_intent_from_flows(power, exact) == "BATTERY_EXPORT"
+        The clamp that guarantees this is a physical bound, not a noise
+        heuristic. An earlier revision of Phase 3 made it conditional and this
+        exact record then attributed 0.0177 kWh of export to a battery with
+        only 0.00055625 kWh left undelivered -- inventing energy, which is the
+        opposite of what the non-invention rule exists for.
+        """
+        energy = EnergyData(
+            solar_production=0.0,
+            home_consumption=0.14528749999999999,
+            grid_imported=0.0,
+            grid_exported=0.0177,
+            battery_charged=0.0,
+            battery_discharged=0.14584375,
+            battery_soe_start=5.0,
+            battery_soe_end=4.8,
+        )
+
+        assert (
+            energy.battery_to_home + energy.battery_to_grid
+            <= energy.battery_discharged + 1e-12
+        )
 
     def test_real_export_above_resolution_floor_is_not_folded(self):
         """A genuine, well-above-resolution battery export must survive the

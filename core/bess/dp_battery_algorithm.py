@@ -956,10 +956,6 @@ def _build_period_data(
         battery_soe_start=soe,
         battery_soe_end=next_soe,
         clipped_solar=flows.clipped_solar,
-        # Planned and simulated flows come from `_period_flows`, not from
-        # sensors, so they must not pass through the ingest reconciliation
-        # heuristics (P4).
-        measured=False,
     )
 
     # Charging wear on the SoE-delta basis, not `flows.energy_stored`'s

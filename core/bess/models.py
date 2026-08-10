@@ -101,26 +101,6 @@ class EnergyData:
     # -- see apply_export_curtailment_to_period_data).
     clipped_solar: float = 0.0
 
-    # Did these numbers come off sensors, or out of the optimizer?
-    #
-    # Measured records are read from independent lifetime counters that do not
-    # reconcile exactly, so `_calculate_detailed_flows` applies three
-    # reconciliation heuristics to them (the #350 sub-resolution export fold
-    # and two "don't invent a flow to reconcile independent counters" clamps).
-    # Planned and simulated flows are exact by construction and must never
-    # pass through a noise model -- principle P4,
-    # `docs/agents/optimizer-architecture.md`. Setting this False is what makes
-    # that bypass provable rather than incidental.
-    #
-    # The default is True (apply the heuristics) because it is the
-    # conservative choice, not because most records are measured -- most are
-    # not. A record whose provenance nobody declared keeps the behaviour it
-    # has always had; the exact producers opt out explicitly. Measured on the
-    # fixture corpus, all three heuristics fire 0 times across 2168 planned
-    # periods, so the opt-out changes no number today -- it removes the
-    # possibility of one.
-    measured: bool = True
-
     # Detailed flows (calculated automatically in __post_init__)
     solar_to_home: float = field(default=0.0, init=False)
     solar_to_battery: float = field(default=0.0, init=False)
@@ -181,29 +161,16 @@ class EnergyData:
         # independent lifetime counters (see validate_energy_balance's
         # tolerance) - it must not be invented as a flow to an entity that
         # consumed nothing.
-        #
-        # Ingest only (P4): exact flows have no independent counters to
-        # disagree, so all remaining import went to the home by construction.
-        # The clamp provably never binds there (0 firings over the corpus), and
-        # `min` returns an operand unchanged, so this is bit-identical.
-        unreconciled_import = max(0, self.grid_imported - grid_to_battery)
-        grid_to_home = (
-            min(remaining_consumption, unreconciled_import)
-            if self.measured
-            else unreconciled_import
+        grid_to_home = min(
+            remaining_consumption, max(0, self.grid_imported - grid_to_battery)
         )
 
         # Step 4: Export flow reconciliation, capped by what the battery
         # actually discharged - never invented to force-match grid_exported,
         # for the same cross-sensor-noise reason as grid_to_home above.
-        #
-        # Ingest only (P4), on the same reasoning and with the same measured
-        # 0 firings on exact data.
-        unreconciled_export = max(0, self.grid_exported - solar_to_grid)
-        battery_to_grid = (
-            min(unreconciled_export, self.battery_discharged - battery_to_home)
-            if self.measured
-            else unreconciled_export
+        battery_to_grid = min(
+            max(0, self.grid_exported - solar_to_grid),
+            self.battery_discharged - battery_to_home,
         )
 
         # A battery_to_grid below the lifetime counter's own resolution
@@ -223,19 +190,7 @@ class EnergyData:
         # battery_to_home == 0 (home's need was already fully met by solar),
         # there's no deficit to fold into - any nonzero export, however small,
         # has nowhere else to have gone and must stay a real export.
-        #
-        # Ingest only (P4). This one is a genuine noise *model* -- it moves
-        # energy between two flows rather than bounding one -- so applying it
-        # to a planned period would rewrite the very export the DP priced.
-        # `_discharge_is_unexecutable` already keeps the optimizer out of this
-        # band (#497), which is why it measures 0 firings on exact data; the
-        # gate makes that a property of the code rather than a coincidence of
-        # the candidate filter.
-        if (
-            self.measured
-            and battery_to_home > 0
-            and 0 < battery_to_grid < GRID_FLOW_RESOLUTION_KWH
-        ):
+        if battery_to_home > 0 and 0 < battery_to_grid < GRID_FLOW_RESOLUTION_KWH:
             battery_to_home += battery_to_grid
             battery_to_grid = 0.0
 
@@ -591,10 +546,6 @@ def apply_export_curtailment_to_period_data(
         battery_soe_start=energy.battery_soe_start,
         battery_soe_end=energy.battery_soe_end,
         clipped_solar=energy.clipped_solar + curtailed_solar_export,
-        # Re-deriving the same period, so provenance carries over: adjusting
-        # a planned record's export must not turn it into a measured one and
-        # push it through the ingest heuristics (P4).
-        measured=energy.measured,
     )
     adjusted_economic = EconomicData.from_energy_data(
         adjusted_energy,

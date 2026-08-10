@@ -200,12 +200,38 @@ reconcile independent counters" clamps. They currently run on **planned and
 simulated** flows too, which is a literal P4 violation ("planned and
 simulated flows must never pass through a noise model").
 
-- [ ] Gate them on a construction-time flag (or a separate exact
-      constructor) so exact data provably bypasses them.
-- [ ] Confirm via Task 0 that they fire 0 times on exact data, making this a
-      zero-behaviour-change compliance move.
-- [ ] Do **not** touch their ingest semantics — they are required by real
-      measured data and pinned by `tests/helpers.py`.
+- [x] **ATTEMPTED AND BACKED OUT 2026-08-10 — the premise failed.** Its own
+      gating condition was "a zero-behaviour-change compliance move", and it
+      is not one.
+
+      Two of the three are not noise heuristics at all: the `grid_to_home`
+      and `battery_to_grid` clamps are **physical bounds** (a flow cannot
+      exceed its source). Gating them let an exact record attribute more
+      export to the battery than the battery discharged — inventing energy,
+      the opposite of the non-invention rule. They stay unconditional.
+
+      The third, the #350 fold, genuinely is a noise model, but bypassing it
+      **is** a behaviour change and it reaches hardware. Whenever
+      `ac_cap < home_consumption < solar_production`, `_discharge_is_unexecutable`
+      (#497) stands down — it computes its deficit as `home - solar`, from
+      RAW solar, blind to AC clipping — while the AC stage still leaves the
+      battery covering a deficit it can overshoot by less than
+      `GRID_FLOW_RESOLUTION_KWH`. Ungating the fold there flips planned intent
+      LOAD_SUPPORT → BATTERY_EXPORT, which `inverter_controller` maps to
+      `grid_first`: the export feedback loop `battery_system_manager`
+      documents. Constructed and confirmed, not hypothesised.
+
+      Task 0's "0 firings on 2168 planned periods" was weak cover: only 4 of
+      36 fixtures have an AC cap at all, and a 2170-run sweep over caps
+      2–10 kW found 0 hits **but never entered the `ac_cap < home` regime**,
+      which is the only regime where the band is reachable.
+
+      **The P4 violation therefore still stands on `main`**, documented by
+      `test_planned_flows_still_pass_through_the_ingest_fold`. Closing it
+      needs an AC-aware candidate filter — a candidate-space change, i.e.
+      Phase 4 — not a model-layer flag. That test should flip when the gate
+      finally lands, not be deleted.
+- [x] Ingest semantics untouched, as required.
 
 ## Task 6 — correct the parent plan's own claims
 

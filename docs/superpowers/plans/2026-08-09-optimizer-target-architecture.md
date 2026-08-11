@@ -798,9 +798,20 @@ Phase 3 (one flow record)     — ✅ MERGED #534. Bit-parity held on all 36
    │                            Phase 3 follow-ups.
    ▼
 #520 → #524                   — TOU half MERGED (#524). VPP half (#537)
-   │                            BLOCKED on #539: it changes Growatt VPP
-   │                            behaviour on 172/603 LOAD_SUPPORT periods
-   │                            (28.5%) with no way to measure the effect.
+   │                            WITHDRAWN 2026-08-11, design defect: it
+   │                            mapped gate-closed to a battery_first hold,
+   │                            which delivers NOTHING, where TOU's
+   │                            gate-closed still delivers the plan and only
+   │                            declines to raise the ceiling. All 172
+   │                            gate-closed LOAD_SUPPORT periods carry a
+   │                            planned discharge — 118.11 kWh abandoned.
+   │                            Root cause: VPP carries BATTERY_EXPORT's
+   │                            planned magnitude faithfully but collapses
+   │                            LOAD_SUPPORT's 101 rates to 1 command, so
+   │                            "deliver the plan, no more" is inexpressible
+   │                            there. Redesign needs the load-tracking
+   │                            power adjustment (ridax67, #520) — which is
+   │                            also #352's fix, i.e. Phase 4b work.
    ▼
 #539 VPP simulation + v10.0.2 — NEW GATE, before Phase 4. No VPP simulation
    │  baseline                   exists, so "no regression from beta" is

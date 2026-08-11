@@ -89,8 +89,22 @@ Confirmed on `main`: the function carries 6 assertions and has 3 call sites.
 
 **The 5 with no test** are #278 (numpy vectorization — covered by
 `test_vectorized_backward_parity`), #283, #343 (logging), #361, #498 (docs).
-Only #278 is a behavioural change; ⬜ confirm its parity test still
-discriminates.
+Only #278 is a behavioural change.
+
+✅ **Confirmed 2026-08-11 — it discriminates, and strongly.** Four drifts were
+introduced into the vectorized twin only, leaving the scalar evaluator the
+selector uses untouched — which is #278's exact risk shape, since V is never
+compared against anything downstream and drift is therefore silent:
+
+| Drift injected into the vectorized pass | Tests failing (of 14) |
+|---|---|
+| STORE branch stops honouring the #429 import cap | 3 |
+| load branch stops honouring the same cap | 3 |
+| STORE wear term off by 0.1% | 12 |
+| IDLE wear term off by 0.1% | 12 |
+
+The cap mutations fail only the parametrizations that set `import_cap_kwh`,
+which is the correct blast radius rather than a weakness.
 
 ---
 
@@ -313,7 +327,7 @@ All five were put to the maintainer and approved. What changed:
 
 | | Decision | Implementation | Seen to fail? |
 |---|---|---|---|
-| **F1** | Tolerance, not numpy pin — the cheap option | `battery_solar_cost` compared at `abs=1e-9`; `actions`, `intents`, `soe_trajectory` stay `==` | n/a — this *removes* a false red. Validated in the other direction instead: green on py3.12.13/numpy 2.5.2 and py3.13, red on 27 of 36 at py3.11.15/numpy 2.4.6, same commit, plan bit-identical in all three |
+| **F1** | Both halves: tolerance *and* the numpy pin | `battery_solar_cost` compared at `abs=1e-9` (`actions`, `intents`, `soe_trajectory` stay `==`), and `numpy==2.5.2` in `backend/requirements.txt` | n/a — this *removes* a false red. Validated in the other direction instead: green on py3.12.13/numpy 2.5.2 and py3.13, red on 27 of 36 at py3.11.15/numpy 2.4.6, same commit, plan bit-identical in all three |
 | **F2** | Add the missing pin | `intra_period_discharge_allowed` pinned per period in the goldens (2168 periods, 1203 open / 965 closed, 31 of 36 fixtures mixed), plus `test_intra_period_gate_outcome.py` asserting the gate's effect on realized cost and SoE | ✅ both, and they are complementary — see below |
 | **F3** | Wire it up | `total_charged` / `total_discharged` asserted at 0.001 kWh for the 27 fixtures that carry them | Pins what was already measured true; the 6 `regression_*` fixtures without the keys are skipped explicitly, not defaulted to 0.0 |
 | **F4** | Understand it | Root cause established above; no code or fixture changed | n/a |
@@ -335,6 +349,15 @@ from the real `_gated_discharge_rate` path.
 Goldens were regenerated to add the two new fields, verified additive:
 `actions` and `soe_trajectory` bit-identical to the pre-audit goldens on all
 36, max cost delta 0. Full suite green afterwards — 1721 fast, 534 slow.
+
+**On pinning numpy as well as loosening the pin.** These fix different
+failures and neither subsumes the other. The tolerance stops a numpy bump
+reddening the goldens over noise; the pin stops a numpy bump moving *reported
+costs* — the savings figures users read — silently and without any test
+objecting, which no tolerance can catch because the tolerance is precisely
+what lets it through. `numpy==2.5.2` has manylinux, musllinux (the Alpine
+add-on image) and macOS wheels for cp312/313/314, and resolves cleanly
+alongside `pandas`.
 
 ### Pass 2 re-verified against current `main`
 

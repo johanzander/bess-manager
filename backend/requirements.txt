@@ -12,6 +12,14 @@ watchdog==3.0.0
 loguru==0.7.3
 pyyaml
 watchdog
-numpy
+# Pinned (audit Pass 3, F1). The optimizer's cost is a numpy reduction, and
+# its last bits depend on the build: on one commit, numpy 2.5.2 under both
+# py3.12.13 and py3.13 reproduced every action-selector golden exactly, while
+# numpy 2.4.6 under py3.11.15 differed on 27 of 36 fixtures by up to 5.7e-14
+# SEK with the plan bit-identical. The goldens now carry a 1e-9 tolerance so
+# that can no longer redden CI on its own; this pin is the other half, so a
+# silent numpy bump cannot move reported costs at all. Wheels exist for
+# cp312/313/314 on manylinux, musllinux (the Alpine add-on image) and macOS.
+numpy==2.5.2
 pandas
 anthropic>=0.40.0

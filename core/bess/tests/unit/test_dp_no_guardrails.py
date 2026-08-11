@@ -11,7 +11,7 @@ from core.bess.dp_battery_algorithm import (
 )
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import (
-    build_scenario_inputs,
+    build_scenario_optimizer_inputs,
     get_all_scenario_files,
 )
 
@@ -174,24 +174,31 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
     optimizer's returned cost must never exceed the all-IDLE baseline,
     across every pinned fixture. This is the property the whole redesign
     rests on (docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
+
+    Skipped where export curtailment is active: there, production deliberately
+    judges the guardrail at the floored `reward_sell_price` -- the objective
+    the DP was actually asked to optimize -- and the returned schedule carries
+    #507's curtailed-period reporting adjustment, which `_create_idle_schedule`
+    (real prices, no such adjustment) does not. Comparing the two at real
+    prices is not the invariant the guardrail enforces, so a pass or a failure
+    here would say nothing about it either way.
     """
-    scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
-        scenario_name
-    )
+    scenario, inputs = build_scenario_optimizer_inputs(scenario_name)
+    if inputs.get("export_curtailment_active"):
+        pytest.skip(
+            "curtailment-active fixture: production compares the guardrail at "
+            "reward_sell_price, not at the real sell_price this test uses"
+        )
+    battery_settings = inputs["battery_settings"]
+    buy_prices = inputs["buy_price"]
+    sell_prices = inputs["sell_price"]
+    dt = inputs["period_duration_hours"]
     home_consumption = scenario["home_consumption"]
     solar_production = scenario["solar_production"]
     battery = scenario["battery"]
     horizon = len(buy_prices)
 
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=dt,
-    )
+    result = optimize_battery_schedule(**inputs)
     idle_result = _create_idle_schedule(
         horizon=horizon,
         buy_price=buy_prices,

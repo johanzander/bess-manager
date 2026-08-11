@@ -449,6 +449,35 @@ class TestOperationalEfficiency:
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
 
+    def test_dst_fall_back_never_writes_an_invalid_end_time(self, scheduler):
+        """#302 (Frank-Leysen): a runtime 500 from HA's select_option while
+        setting `tou_time_1_end`, on the DST fall-back day.
+
+        That day has 25 hours, so the schedule carries 100 quarterly periods
+        instead of 96 and the final period converts to hour 24 — a time no
+        TOU register can hold. `_groups_to_tou_intervals` caps it at 23:59;
+        without the cap the interval is written as `24:59` and the inverter
+        entity rejects it.
+
+        Found unguarded during the 2026-08-11 pre-release audit: deleting the
+        cap left all 1714 fast tests green, so this crash could return in a
+        release without any signal. Asserted on the emitted interval — the
+        value that reaches hardware — rather than on the capping branch.
+        """
+        scheduler.current_hour = 0
+        scheduler.strategic_intents = ["BATTERY_EXPORT"] * 100  # 25-hour day
+        scheduler._consolidate_and_convert_with_strategic_intents()
+
+        assert scheduler.tou_intervals, "no interval produced to check"
+        for interval in scheduler.tou_intervals:
+            for field in ("start_time", "end_time"):
+                hour, minute = (int(part) for part in interval[field].split(":"))
+                assert 0 <= hour <= 23, (
+                    f"{field}={interval[field]} is not a valid wall-clock time; "
+                    "HA's select_option rejects it (#302)"
+                )
+                assert 0 <= minute <= 59, f"{field}={interval[field]} is invalid"
+
     def test_all_idle_schedule(self, scheduler):
         """Test schedule with only IDLE strategic intents."""
         strategic_intents = ["IDLE"] * 96

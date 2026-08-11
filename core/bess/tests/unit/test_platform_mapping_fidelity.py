@@ -116,9 +116,7 @@ def test_load_support_is_the_only_lossy_intent():
     only visible when the two are compared side by side.
     """
     lossy = {
-        intent
-        for intent in INTENTS
-        if len(_sweep(intent)[1]) < len(_sweep(intent)[0])
+        intent for intent in INTENTS if len(_sweep(intent)[1]) < len(_sweep(intent)[0])
     }
     assert lossy == VPP_LOSSY_INTENTS, (
         f"the set of VPP-lossy intents changed: {lossy} vs declared "
@@ -142,6 +140,7 @@ def test_battery_export_carries_the_plan_exactly():
         power_pct, enabled = controller._intent_to_vpp(
             grid_charge, rate, block_passive, "BATTERY_EXPORT"
         )
-        assert (power_pct, enabled) == (expected_pct, True), (
-            f"BATTERY_EXPORT at {action_kw} kW should command {expected_pct}%"
-        )
+        assert (power_pct, enabled) == (
+            expected_pct,
+            True,
+        ), f"BATTERY_EXPORT at {action_kw} kW should command {expected_pct}%"

@@ -219,10 +219,34 @@ trusting it. Reserve a standalone test file for what that harness genuinely
 can't express: a private method's internal formula, or plan-faithfulness
 (`R == P`) — `test_all_scenarios` never runs the inverter simulator.
 
+**Adding a fixture also means regenerating two artefacts (since #544).** Two
+meta-tests will fail the moment a new `*.json` lands in
+`core/bess/tests/unit/data/`, by design — they exist so a fixture cannot
+silently escape the pins:
+
+```bash
+.venv/bin/python scripts/capture_selector_goldens.py       # test_every_fixture_has_a_golden
+.venv/bin/python scripts/capture_vpp_baseline.py --add-new # test_every_fixture_has_a_vpp_baseline
+```
+
+`--add-new` records only the new fixture's plan. **Never run a full VPP
+re-baseline to make that test go green** — the script warns about this
+because a full re-baseline regenerates both halves of every entry, collapsing
+the recorded v10.0.2 drift to zero and destroying the signal
+`test_drift_from_the_released_version_is_recorded` exists to hold.
+
+Note what the goldens now pin per period, because it changes what counts as a
+behaviour change: `actions`, `strategic_intent`, `intra_period_discharge_allowed`
+and the SoE trajectory, all bit-exact, plus cost at 1e-9. So a fix that
+reclassifies an intent or flips the discharge gate — without moving a single
+kWh — is a golden diff and must be re-pinned deliberately, with the measured
+delta stated in the PR. That is the intended behaviour, not a broken test.
+
 ### 6. Quality gate + code review (background)
 
 Every PR must pass both the fast and slow suites, plus code review. This is
-the long-wait step (slow suite is ~30min) — per `CLAUDE.md`'s Cost
+the long-wait step (slow suite ~4 min, measured 2026-08-11; the "~30 min"
+this used to claim predates the vectorized backward pass) — per `CLAUDE.md`'s Cost
 Discipline, do NOT hold the session open watching it run. Always a
 background `Agent` — this is not a choice to put to the user; asking
 "subagent or inline?" is itself the thing to stop doing (no `isolation` —
@@ -331,8 +355,33 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - [ ] `./scripts/quality-check.sh` passes locally (already done)
 - [ ] <what you actually observed in Step 8 — be concrete>
 
+## Evidence the test discriminates
+<REQUIRED. Not "the suite passes". The mutation you ran and what broke:>
+- Reverted: <the exact line/behaviour you undid>
+- Result: `<test name>` FAILED, <N> test(s) total
+- Restored: tree clean
+
+## Outcome-level coverage
+<REQUIRED. Which outcome pin now covers this behaviour:>
+- <expected_results on fixture X | intents/gate in the goldens | R == P via
+  run_scenario_realized | none, because …>
+
 Closes #<n>
 ```
+
+**These two sections are the point of the PR, not paperwork.** A reviewer
+cannot tell a real guard from a vacuous one by reading it — three times in
+this codebase a test has passed while proving nothing (#399 asserted an
+internal flag instead of a write count; #302 asserted nothing at all; a
+gate-outcome test written during the 2026-08-11 audit went green on its first
+run while catching neither of the two mutations it claimed to catch). Every
+one of those looked fine in review. The mutation result is the only cheap
+thing that separates them, so it is stated where the reviewer reads, not left
+in a terminal scrollback.
+
+If you cannot produce a mutation that reddens your test, you have not
+demonstrated the bug — say so in the PR and stop, rather than filling the
+section in with the suite result.
 
 ### 10. Hard constraints
 

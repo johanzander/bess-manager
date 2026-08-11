@@ -45,7 +45,7 @@ interface for managing battery schedules and monitoring energy flows.
 
 ```bash
 .venv/bin/pytest -m "not slow"           # fast tests (~3s, recommended)
-.venv/bin/pytest -m slow                 # algorithm/integration tests (~30min)
+.venv/bin/pytest -m slow                 # algorithm/integration tests (~4min)
 .venv/bin/pytest                         # run all tests
 .venv/bin/black . && .venv/bin/ruff check --fix .  # format and lint
 ./scripts/quality-check.sh               # full quality gate

@@ -760,6 +760,18 @@ goldens.
 Depends on 4b and 4c: the command has to exist and be the thing chosen before
 it can replace the classification.
 
+**Phase 5's user-visible driver is #330** (identified 2026-08-11), which
+otherwise reads as a display bug with no owner. A *recorded* period's
+`strategic_intent` is the **planned** intent, not the observed one — the same
+caveat #536 records for cost attribution ("only as good as plan-vs-execution
+fidelity"). So whenever actual diverges from forecast, the label describes what
+was intended rather than what happened: #330's "schedule says selling to grid,
+energy flow does not", and the matching evidence from @Frank-Leysen on #126
+("Solar Exporting" while grid-balanced and charging; IDLE while charging
+3.3–3.5 kW after a solar-forecast undershoot). Reducing planned-flow
+classification to observed-data use is what fixes that class; a labelling patch
+in the UI would only move the disagreement.
+
 ## Parallel / deferred tracks
 
 ### Phase 3 follow-ups (recorded 2026-08-10, PR #534)

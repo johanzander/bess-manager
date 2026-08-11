@@ -78,8 +78,9 @@ def test_selector_refactor_is_bit_identical(name):
     # 2.4.6 differs on 27 of 36 fixtures by 1e-16 to 5.7e-14 SEK -- with
     # `actions` and `soe_trajectory` bit-identical on all 36 in every
     # environment. That is summation order in a numpy reduction, not
-    # behaviour, and `backend/requirements.txt` pins no numpy version, so a
-    # bump reproduces it in CI.
+    # behaviour. `backend/requirements.txt` now pins `numpy==2.5.2` so a bump
+    # cannot move reported costs silently; this tolerance is the other half,
+    # covering the interpreter and platform the pin does not fix.
     #
     # 1e-9 is ~17,000x the largest observed noise and ~1e7 times finer than
     # the smallest genuine cost movement this corpus has ever recorded

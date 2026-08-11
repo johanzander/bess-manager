@@ -9,6 +9,18 @@
 #
 # Defaults to port 8081 to avoid conflicting with the dev environment (8080).
 # Override with BESS_PORT=XXXX if needed.
+#
+# On podman, do NOT trust podman-compose's exit code: 1.6.0 exits 0 when the
+# FROM image cannot be resolved, so a failed build reads as a pass (it does
+# propagate RUN failures). Check the log for "Successfully tagged".
+#
+# `docker compose` over podman's socket reports failures correctly and is the
+# implementation CI runs, so prefer it where it works:
+#   export DOCKER_HOST="unix://$(podman machine inspect \
+#     --format '{{.ConnectionInfo.PodmanSocket.Path}}')"
+# On an arm64 host it cannot build this file, though: the frontend stage is
+# pinned to linux/amd64 and buildkit's QEMU emulation fails on `npm run build`
+# where buildah tolerates it.
 
 services:
   bess:
@@ -16,8 +28,25 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        BUILD_FROM: python:3.13-alpine
-    command: ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8080"]
+        # Must stay a base image from build.json, so this really does test what
+        # ships. Building on the generic python:*-alpine instead is what let
+        # numpy==2.5.2 (needs py>=3.12) pass CI and then fail in the supervisor,
+        # whose base was py3.11. The HA bases are single-arch, so on an arm64
+        # host (Apple Silicon) use the aarch64 one — it is equally a shipped
+        # base, and avoids emulating the whole build:
+        #   BESS_BUILD_FROM=ghcr.io/home-assistant/aarch64-base-python:3.13-alpine3.22
+        BUILD_FROM: ${BESS_BUILD_FROM:-ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22}
+    # with-contenv is required, not decoration: the HA base image's entrypoint
+    # is s6, and s6 does not pass the container environment to its services.
+    # Without it every variable below is invisible to the app, HA_URL falls
+    # back to http://supervisor/core, and startup blocks on retries to a host
+    # that does not exist here.
+    #
+    # The image's own CMD (run.sh) cannot be used instead: bashio is present on
+    # this base, so run.sh would force HA_URL=http://supervisor/core too.
+    command:
+      ["/usr/bin/with-contenv", "python", "-m", "uvicorn", "app:app",
+       "--host", "0.0.0.0", "--port", "8080"]
     environment:
       - HA_URL=http://mock-ha:8123
       - HA_TOKEN=mock_token

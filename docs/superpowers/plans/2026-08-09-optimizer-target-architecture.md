@@ -41,6 +41,24 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 (`core/bess/tests/integration/test_plan_faithfulness.py`), mock-HA E2E
 (`verify` skill / `mock-run.sh`).
 
+**"The corpus", used throughout this document and the code comments**, means
+the 36 scenario fixtures in `core/bess/tests/unit/data/` — 2168 periods across
+five `historical_*` (real price days), ten `realworld_*` and eight
+`regression_*` (built from real user debug bundles), and thirteen `synthetic_*`
+(constructed edge cases). Every pin iterates that same set: `test_scenarios.py`
+auto-discovers it, and the action-selector goldens, the VPP baseline and the
+R==P check all run over it — which is why adding a fixture deliberately trips
+two meta-tests.
+
+Worth stating because it bounds what "measured on the corpus" can ever mean.
+These are Swedish and Belgian systems at 15-minute **point** forecasts, so a
+sub-period effect (load exceeding the period average within the slot) is
+arithmetically zero here by construction, and no fixture represents a
+configuration nobody has sent a bundle for. Two 2026-08-11 findings turn on
+exactly that — #393's overnight residual and #352's Shape B both measure 0 on
+the corpus while remaining live on real hardware. A zero here means the
+instrument cannot see it, not that it does not happen.
+
 ## Global constraints
 
 - `docs/agents/rules.md` applies in full (no new classes without approval —

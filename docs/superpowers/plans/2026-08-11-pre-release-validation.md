@@ -181,38 +181,32 @@ That holds for *behavioural* coverage — but the one completely unguarded fix
 (#302) is on the TOU side, and it is a crash rather than a behaviour. Crash
 paths are thin on both platforms, and no simulator would have caught it.
 
-**#241 — Pass 2 got this wrong, corrected 2026-08-11.** The claim below was
-that `leave_control_mode` on a deliberate switch, *plus the VPP fallback timer
-covering crash and stop*, together made a `shutdown_hardware` hook unnecessary
-— "the dead-man's-switch is a better guarantee than a shutdown hook, which
-cannot run on a crash."
+**#241 — right conclusion, wrong reason. Corrected 2026-08-11.** Pass 2
+recorded that a `shutdown_hardware` hook was unnecessary because
+`leave_control_mode` covers the deliberate switch *and the VPP fallback timer
+covers crash and stop* — "the dead-man's-switch is a better guarantee than a
+shutdown hook, which cannot run on a crash."
 
-**The second half is false.** Maintainer, on #241: *"leave_control_mode is the
+The second clause is false. Maintainer, on #241: *"leave_control_mode is the
 correct method, the VPP timer would not turn off VPP mode."* The timer stops
-the inverter obeying a stale power command — that is #404's mechanism — but it
-does not clear `vpp_status`. Verified in code:
+the inverter obeying a stale power command (#404's mechanism); it does not
+clear `vpp_status`. Nothing runs `leave_control_mode` on stop either — both
+call sites (`battery_system_manager.py:386`, `:439`) fire only on a deliberate
+platform or control-mode switch, and `backend/app.py`'s `lifespan` has no
+shutdown body.
 
-- Both `leave_control_mode` call sites (`battery_system_manager.py:386` and
-  `:439`) fire only on a deliberate platform or control-mode switch.
-- `backend/app.py`'s FastAPI `lifespan` has an empty shutdown branch
-  (`# Shutdown (if needed in the future)`), and there is no SIGTERM handler or
-  `atexit` hook anywhere.
+**But not disabling VPP on shutdown is correct, for a reason neither Pass 2 nor
+the first correction to it gave.** `leave_control_mode` clears VPP Status
+(`solax_modbus_growatt_controller.py:443`), and ridax confirmed on #520
+(2026-08-11, from Growatt's V2.01 protocol) that `vpp_status` is a **flash**
+register. Clearing it on shutdown would mean a flash write on every add-on
+stop — every config change, every HA restart, every update — which is the wear
+ridax opened #399 about. A shutdown hook here would be a regression, not a
+fix. Disabling VPP only on a deliberate switch is the design, and it is right.
 
-So on add-on stop, restart, crash or HA reboot, nothing runs
-`leave_control_mode` and VPP Status stays Enabled — which is exactly the
-scenario ridax opened #241 about ("the inverter will be locked into VPP mode
-unless you set it back to TOU mode manually"). It is **an open gap, not a
-closed one**, and the audit reached the opposite conclusion by assuming a
-property of the fallback timer nobody had checked against the hardware. Same
-failure mode as the guards in Pass 2: a mechanism credited with a job it does
-not do.
-
-Scope note: a clean stop is fixable (populate the `lifespan` shutdown branch);
-a hard crash or a pulled power cord is not reachable from the add-on at all, so
-"cover the crash case" needs the inverter-side story, not a Python hook. Sizing
-that is a decision for the maintainer, not this audit.
-
-The explanation ridax was owed has now been posted on #241.
+Recorded because the audit reached the correct verdict twice while reasoning
+from a hardware property nobody had checked, and the honest version of "this is
+fine" is a different sentence from the one that was written.
 
 ---
 

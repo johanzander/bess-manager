@@ -45,56 +45,54 @@ class VppCommand:
     remote_control_enabled: bool
 
 
-def derive_vpp_command(
-    strategic_intent: str,
-    battery_action_kw: float,
+def derive_vpp_commands(
+    intents: list[str],
+    actions_kw: list[float],
     settings: BatterySettings,
-) -> VppCommand:
-    """The VPP command production would write for this planned period.
+) -> list[VppCommand]:
+    """The VPP commands production would write for a planned schedule.
 
-    Routes through the real controller's `_intent_to_vpp` rather than
-    restating the mapping, so this cannot describe a command the hardware
-    path would not actually send.
+    Drives the production path end to end:
+    `compute_rates_for_period` -> `_intent_to_vpp`, the same two calls
+    `BatterySystemManager._apply_period_schedule` makes. Nothing about the
+    intent -> (grid_charge, discharge_rate, block_passive_charging) mapping
+    is restated here.
+
+    An earlier revision rebuilt those three values from `INTENT_TO_CONTROL`
+    by hand. It happened to agree on every intent, but it was a second copy
+    of a mapping that production owns -- the drift this harness exists to
+    catch, reintroduced inside the harness itself -- and it carried a
+    `.get(intent, IDLE)` fallback where `_map_intent_to_rates` raises on an
+    unknown intent, so a typo would have silently simulated IDLE.
 
     Deliberately does not pass the intra-period discharge decision: that
     parameter does not exist on `_intent_to_vpp` yet -- it arrives with #537,
     which is blocked on this harness. That ordering is the point. This
     baseline captures behaviour *without* the gate, so when #537 rebases onto
-    it and wires the argument through here, the pinned deltas show exactly
-    what the gate changes.
+    it and wires the argument through, the pinned deltas show exactly what
+    the gate changes.
     """
     controller = SolaxModbusGrowattController(settings, control_mode="vpp")
-    intent_control = controller.INTENT_TO_CONTROL.get(
-        strategic_intent, controller.INTENT_TO_CONTROL["IDLE"]
-    )
-    grid_charge = bool(intent_control["grid_charge"])
-    discharge_rate = int(intent_control["discharge_rate"])
-    if strategic_intent in ("LOAD_SUPPORT", "BATTERY_EXPORT"):
-        # Action-derived rate, matching InverterController's own mapping.
-        discharge_rate = (
-            min(
-                100,
-                max(
-                    0,
-                    round(
-                        abs(battery_action_kw) / settings.max_discharge_power_kw * 100
-                    ),
-                ),
-            )
-            if battery_action_kw < -0.01
-            else 0
-        )
-    block_passive_charging = int(intent_control["charge_rate"]) == 0
+    controller.strategic_intents = list(intents)
 
-    power_pct, remote_control_enabled = controller._intent_to_vpp(
-        grid_charge,
-        discharge_rate,
-        block_passive_charging,
-        strategic_intent,
-    )
-    return VppCommand(
-        power_pct=power_pct, remote_control_enabled=remote_control_enabled
-    )
+    commands = []
+    for period, action_kw in enumerate(actions_kw):
+        grid_charge, discharge_rate, block_passive_charging = (
+            controller.compute_rates_for_period(period, action_kw)
+        )
+        power_pct, remote_control_enabled = controller._intent_to_vpp(
+            grid_charge,
+            discharge_rate,
+            block_passive_charging,
+            intents[period],
+        )
+        commands.append(
+            VppCommand(
+                power_pct=power_pct,
+                remote_control_enabled=remote_control_enabled,
+            )
+        )
+    return commands
 
 
 def vpp_command_to_power(

@@ -14,8 +14,13 @@ RUN apt-get update \
     && ln -s "$(find /usr/lib -name libfaketime.so.1 | head -1)" /usr/local/lib/libfaketime.so.1
 
 # Copy requirements and install them (as root)
+# --root-user-action=ignore: pip's root warning is aimed at people installing
+# into a host OS; this is a throwaway dev container with nothing to conflict
+# with, so a venv would buy nothing. --disable-pip-version-check drops the
+# "a new release of pip is available" notice, which is never actionable here.
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --root-user-action=ignore --disable-pip-version-check \
+    -r requirements.txt
 
 # Copy rest of the code
 COPY backend/ /app/

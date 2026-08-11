@@ -16,7 +16,9 @@ from core.bess.pwl_window_dp import (
     _pwl_local_value_slope,
 )
 from core.bess.settings import BatterySettings
-from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.tests.unit.test_scenarios import (
+    build_scenario_optimizer_inputs,
+)
 from core.bess.tie_detection import TIE_NOISE_FACTOR
 
 # The candidate-level cases for this tie-break now live in
@@ -213,19 +215,8 @@ def test_466_tie_break_does_not_trip_idle_guardrail():
     observed margin 0.119 SEK vs worst forfeiture 0.032 SEK), but the
     fixture that exercises the tie-break most directly is #466's own
     regression scenario -- pin that it still doesn't trip here."""
-    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("regression_2026_08_06_466")
-    )
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=scenario["home_consumption"],
-        solar_production=scenario["solar_production"],
-        initial_soe=scenario["battery"]["initial_soe"],
-        initial_cost_basis=scenario["battery"]["initial_cost_basis"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
-    )
+    _, inputs = build_scenario_optimizer_inputs("regression_2026_08_06_466")
+    result = optimize_battery_schedule(**inputs)
 
     actions = [pd.decision.battery_action for pd in result.period_data]
     assert any(

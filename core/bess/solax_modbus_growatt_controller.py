@@ -537,14 +537,26 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         if self.control_mode == "vpp":
             status = controller.get_growatt_vpp_status()
-            self._vpp_status_confirmed = status == "Enabled"
+            allow_ac_charging = controller.get_growatt_vpp_allow_ac_charging()
+            # Both registers, because _ensure_vpp_status_enabled writes both
+            # and is gated on this one flag. Seeding it from VPP Status alone
+            # made Status a proxy for a register that was never read: an
+            # inverter with Status Enabled but AC charging Disabled was
+            # treated as fully configured on every restart, so the AC-charging
+            # write never happened again and GRID_CHARGING periods silently
+            # drew nothing from the grid.
+            self._vpp_status_confirmed = (
+                status == "Enabled" and allow_ac_charging == "Enabled"
+            )
             remote_control = controller.get_growatt_vpp_remote_control()
             self._last_written_vpp_remote_control = (
                 remote_control == "Enabled" if remote_control is not None else None
             )
             logger.info(
-                "Growatt VPP: initialised from hardware — status=%s remote_control=%s",
+                "Growatt VPP: initialised from hardware — status=%s "
+                "allow_ac_charging=%s remote_control=%s",
                 status,
+                allow_ac_charging,
                 remote_control,
             )
             return

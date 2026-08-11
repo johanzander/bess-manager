@@ -14,6 +14,11 @@ count how many distinct commands come out the other side. An intent whose 101
 distinct TOU rates collapse to 1 VPP command cannot execute a partial plan on
 that platform, whatever the calling code believes.
 
+The measurement only works if the sweep looks at the *whole* TOU rate triple.
+GRID_CHARGING carries its magnitude in `charge_rate`, LOAD_SUPPORT and
+BATTERY_EXPORT in `discharge_rate`; a sweep of the discharge half alone scores
+GRID_CHARGING as a one-rate intent with nothing to lose and never measures it.
+
 `test_scenarios` and the golden corpus cannot see this. They pin what the DP
 *plans*; this pins what a platform can *execute*. A change that makes a
 platform less able to follow the plan is invisible to every other test in the
@@ -41,7 +46,13 @@ INTENTS = [
 # magnitude collapses to a single command. Adding an intent here is a
 # deliberate statement that the plan's magnitude is discarded on VPP -- it
 # must not happen by accident.
-VPP_LOSSY_INTENTS = {"LOAD_SUPPORT"}
+#
+# GRID_CHARGING is lossy for the mirror-image reason to LOAD_SUPPORT: TOU
+# carries its plan-scaled magnitude in `charge_rate`, and `_intent_to_vpp`
+# is not given `charge_rate` at all, so it answers (100, True) for every
+# planned magnitude. The plan's charge rate is discarded on VPP exactly as
+# LOAD_SUPPORT's discharge rate is.
+VPP_LOSSY_INTENTS = {"LOAD_SUPPORT", "GRID_CHARGING"}
 
 
 def _settings():
@@ -56,7 +67,17 @@ def _settings():
 
 def _sweep(intent):
     """Every (TOU rate, VPP command) the production path emits for `intent`
-    across the full planned-action range."""
+    across the full planned-action range.
+
+    The TOU side is the **full** `(grid_charge, charge_rate, discharge_rate)`
+    triple, not just `compute_rates_for_period`'s return. That method does not
+    report `charge_rate`, which is the half GRID_CHARGING's magnitude travels
+    in: `get_period_settings` derives it separately via `_compute_charge_rate`
+    (`inverter_controller.py:601`, and again at `:762`), and this mirrors those
+    two call sites. Sweeping the discharge rate alone made GRID_CHARGING look
+    like a one-rate intent, so it took the "not rate-bearing, nothing to lose"
+    early return and its loss on VPP was never measured at all.
+    """
     settings = _settings()
     controller = SolaxModbusGrowattController(settings, control_mode="vpp")
     controller.strategic_intents = [intent]
@@ -67,7 +88,10 @@ def _sweep(intent):
         grid_charge, rate, block_passive = controller.compute_rates_for_period(
             0, action_kw
         )
-        rates.add(rate)
+        charge_rate = controller._compute_charge_rate(
+            intent, controller.INTENT_TO_CONTROL[intent], action_kw
+        )
+        rates.add((grid_charge, charge_rate, rate))
         commands.add(
             controller._intent_to_vpp(grid_charge, rate, block_passive, intent)
         )
@@ -108,12 +132,18 @@ def test_vpp_rate_fidelity_matches_declared_expectation(intent):
         )
 
 
-def test_load_support_is_the_only_lossy_intent():
+def test_battery_export_is_the_only_intent_that_carries_its_plan_on_vpp():
     """Pins the asymmetry that caused #537's defect.
 
-    BATTERY_EXPORT keeps its magnitude, LOAD_SUPPORT does not. Generalising
-    from the first to the second is exactly the wrong inference, and it is
-    only visible when the two are compared side by side.
+    BATTERY_EXPORT keeps its magnitude; LOAD_SUPPORT and GRID_CHARGING do not.
+    Generalising from the first to the others is exactly the wrong inference,
+    and it is only visible when they are compared side by side.
+
+    An earlier revision asserted the narrower "LOAD_SUPPORT is the only lossy
+    intent", which was false: GRID_CHARGING was misclassified as not
+    rate-bearing because the sweep never looked at `charge_rate`. Read as
+    licence to send a partial GRID_CHARGING rate over VPP, that pin repeats
+    #537's error class in the other direction.
     """
     lossy = {
         intent for intent in INTENTS if len(_sweep(intent)[1]) < len(_sweep(intent)[0])

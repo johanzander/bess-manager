@@ -55,7 +55,7 @@ from core.bess.price_manager import MockSource
 from core.bess.settings import BatterySettings
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 from core.bess.tests.conftest import MockHomeAssistantController
-from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.tests.unit.test_scenarios import build_scenario_optimizer_inputs
 
 PERIOD = 20
 
@@ -491,20 +491,14 @@ class TestDPCurtailmentDisplayFlagOnRealFieldReport:
     display was wrong."""
 
     def test_flags_the_reported_periods_as_curtailed(self):
-        scenario, battery_settings, buy_price, sell_price, dt = build_scenario_inputs(
-            "regression_frank_debug_2026_08_08"
-        )
-        battery = scenario["battery"]
+        _, inputs = build_scenario_optimizer_inputs("regression_frank_debug_2026_08_08")
+        # `export_curtailment_active` is the one input this test sets rather
+        # than replays: the fixture does not record it, and curtailment being
+        # active is the whole premise of Frank's report. Everything else comes
+        # from the fixture -- hand-listing the arguments here previously
+        # dropped its `initial_cost_basis` (0.035).
         result = optimize_battery_schedule(
-            buy_price=buy_price,
-            sell_price=sell_price,
-            home_consumption=scenario["home_consumption"],
-            solar_production=scenario["solar_production"],
-            initial_soe=battery["initial_soe"],
-            battery_settings=battery_settings,
-            period_duration_hours=dt,
-            terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
-            export_curtailment_active=True,
+            **{**inputs, "export_curtailment_active": True}
         )
 
         # Fixture horizon starts at absolute period 36 (09:00); Frank's

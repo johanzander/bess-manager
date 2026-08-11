@@ -27,23 +27,11 @@ from unittest.mock import patch
 import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
-from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.tests.unit.test_scenarios import build_scenario_optimizer_inputs
 
 
 def _optimize(scenario_name):
-    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs(scenario_name)
-    )
-    kwargs = {
-        "buy_price": buy_prices,
-        "sell_price": sell_prices,
-        "home_consumption": scenario["home_consumption"],
-        "solar_production": scenario["solar_production"],
-        "initial_soe": scenario["battery"]["initial_soe"],
-        "battery_settings": battery_settings,
-        "period_duration_hours": period_duration_hours,
-        "terminal_value_per_kwh": scenario.get("terminal_value_per_kwh", 0.0),
-    }
+    _, kwargs = build_scenario_optimizer_inputs(scenario_name)
     result = optimize_battery_schedule(**kwargs)
 
     # Grid DP alone, tie detection suppressed: the behaviour #450 fixed.

@@ -130,6 +130,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         }
         self._growatt_export_limit_curtailed: bool = False
         self._growatt_vpp_status_state: str = "Disabled"
+        self._growatt_vpp_allow_ac_charging_state: str = "Disabled"
         self._growatt_vpp_remote_control_state: str | None = None
 
     # Required methods for Home Assistant Controller interface
@@ -361,6 +362,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
 
     def set_growatt_vpp_allow_ac_charging(self, enabled: bool) -> None:
         """Record Growatt VPP AC-charging write."""
+        self._growatt_vpp_allow_ac_charging_state = "Enabled" if enabled else "Disabled"
         self.calls["growatt_vpp_allow_ac_charging"].append(enabled)
 
     def set_growatt_vpp_period(
@@ -390,6 +392,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_growatt_vpp_remote_control(self) -> str | None:
         """Return mock Growatt VPP Remote Control state."""
         return self._growatt_vpp_remote_control_state
+
+    def get_growatt_vpp_allow_ac_charging(self) -> str | None:
+        """Return mock Growatt VPP allow-AC-charging state."""
+        return self._growatt_vpp_allow_ac_charging_state
 
     def get_statistics_during_period(
         self, statistic_ids, start_time, end_time=None, period="hour", types=None

@@ -118,15 +118,17 @@ def test_current_plan_is_pinned(name):
 
 
 def test_drift_from_the_released_version_is_recorded():
-    """How far today's plans have moved from v10.0.2 -- recomputed from the
-    DP, not read back out of the artefact.
+    """How far today's plans have moved from v10.0.2.
 
-    An earlier revision compared two fields of the same JSON file, so `moved`
-    was a constant of the checked-in baseline and the assertion could only
-    fail if someone hand-edited it. It was documentation shaped like a test.
-    Recomputing makes it a real check on a sloppy re-baseline: if the plan
-    half is regenerated against the wrong tag or the wrong fixtures, the count
-    moves.
+    Compares the artefact's two plan halves. That is not the same weak check
+    an earlier revision made -- it caught a sloppy re-baseline only if someone
+    hand-edited the file -- because `test_current_plan_is_pinned` now
+    recomputes `capture_plan` per fixture and asserts it equals
+    `current_plan`. With that in place, `capture_plan(name) != plan` and
+    `current_plan != plan` are the same predicate whenever the suite is green,
+    so recomputing here bought nothing but 36 more DP solves per run. The
+    re-baseline it is meant to catch (both halves regenerated together, which
+    would collapse `moved` to 0) still fails this assertion.
 
     Deliberate changes since the tag (Phase 2's preference table, #512's finer
     grid, #524's TOU gate, #526's authorization) already moved most of the
@@ -140,7 +142,9 @@ def test_drift_from_the_released_version_is_recorded():
     )
 
     moved = [
-        name for name in fixture_names() if capture_plan(name) != baseline[name]["plan"]
+        name
+        for name in fixture_names()
+        if baseline[name]["current_plan"] != baseline[name]["plan"]
     ]
     assert len(moved) == 35, (
         f"{len(moved)} of {len(fixture_names())} fixtures now plan differently "

@@ -1,7 +1,10 @@
 ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
 
-# Build frontend on native amd64 to avoid QEMU npm timeouts on ARM
-FROM --platform=linux/amd64 node:20-alpine AS frontend-builder
+# Build the frontend natively to avoid QEMU npm timeouts: $BUILDPLATFORM is
+# the host doing the build (amd64 on CI runners, arm64 on an Apple Silicon
+# dev machine), never the emulated target. The stage emits plain JS, so its
+# arch does not matter to the image.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 ARG BUILD_VERSION
 WORKDIR /tmp/frontend
 RUN echo "Building frontend for version ${BUILD_VERSION}"

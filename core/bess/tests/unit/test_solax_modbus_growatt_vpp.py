@@ -424,6 +424,53 @@ class TestReadAndInitializeVpp:
         assert mock_ha.calls["growatt_vpp_status"] == []
         assert mock_ha.calls["growatt_vpp_periods"] == []
 
+    def test_restart_with_status_already_enabled_writes_no_flash_registers(
+        self, controller, mock_ha
+    ):
+        """#399 (ridax67), the symptom as reported: *"at startup allow ac grid
+        charging and vpp_status are always set. In most cases these writes are
+        not needed as they don't reset between runs, so if you test if they
+        need to be set first, you will avoid a lot of flash writes for frequent
+        restarters."*
+
+        `test_seeds_state_from_hardware` above asserts the read-back sets
+        `_vpp_status_confirmed`. That is the mechanism, not the symptom — it
+        stays green if the flag is seeded correctly and then ignored. This
+        asserts the outcome ridax measured: a **fresh controller** (what a
+        restart produces) that reads back an already-enabled inverter performs
+        **zero** writes to either flash register while going on to command a
+        normal period.
+
+        #329's `TestNoRedundantWritesAcrossCycles` covers the adjacent case —
+        the same instance applying twice — which never exercises the read-back
+        path at all, because that instance already has the flag set from its
+        own first write.
+        """
+        mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_remote_control_state = "Enabled"
+
+        # A restart: a brand-new controller, as BESS constructs each cycle.
+        restarted = type(controller)(controller.battery_settings, control_mode="vpp")
+        restarted.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+
+        restarted.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+        _apply_at_period(restarted, mock_ha, 8, grid_charge=True, discharge_rate=0)
+
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "restart re-wrote VPP Status although the inverter already "
+            "reported Enabled — this is #399's flash wear"
+        )
+        assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [], (
+            "restart re-wrote allow-AC-charging although VPP was already "
+            "enabled — this is #399's flash wear"
+        )
+        assert mock_ha.calls["growatt_vpp_periods"], (
+            "the period command itself must still be written, or this test "
+            "passes by the controller doing nothing at all"
+        )
+
 
 class TestNoRedundantWritesAcrossCycles:
     """#329: applying the same intents twice in a row on the SAME controller

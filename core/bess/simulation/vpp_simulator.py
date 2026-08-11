@@ -143,16 +143,41 @@ def vpp_command_to_power(
         )
         return -delivered / dt
 
+    if command.power_pct >= 100:
+        # battery_first at full rate: deliberate grid charging. Returning any
+        # power above POWER_TOLERANCE_KW is enough -- see the note below.
+        return settings.max_charge_power_kw
+
     if command.power_pct > 0:
-        # battery_first. At +100 this is deliberate grid charging; at +1 it
-        # is the hold used by IDLE (#466) and by #520's closed gate, where
-        # the point is that self-consumption comes from grid/solar rather
-        # than the battery -- so no discharge, and only the rate-limited
-        # charge the command asks for.
-        room = settings.max_soe_kwh - soe
-        rate_kw = settings.max_charge_power_kw * command.power_pct / 100.0
-        max_charge_kwh = min(rate_kw * dt, room / settings.efficiency_charge)
-        return max(0.0, max_charge_kwh) / dt
+        # battery_first at a *trickle* rate: the hold used by IDLE (#466), and
+        # by #520's closed gate once that lands. The point is that
+        # self-consumption comes from grid/solar rather than the battery.
+        #
+        # Returning 0.0 (not the commanded rate) is deliberate and load
+        # bearing. STORE physics in `_state_transition` / `_period_flows` are
+        # **binary**: any power above `POWER_TOLERANCE_KW` (0.001) charges at
+        # the full `max_charge_power_kw * dt`, and the commanded magnitude is
+        # never read -- see `_charge_candidate`'s "binary store physics" note.
+        # So returning the honest 1% rate (e.g. 0.06 kW) would simulate a
+        # full-rate grid charge: measured, `_state_transition(soe=3.0,
+        # power=0.06)` and `power=6.0` both return 9.0. An earlier revision of
+        # this file did exactly that, and every IDLE period in the baseline
+        # encoded ~6 kWh of fictional grid import on a no-solar fixture.
+        #
+        # 0.0 routes to `_state_transition`'s IDLE branch: passive solar
+        # absorption only, never a grid draw -- which is what a hold is, and
+        # what `inverter_simulator.mode_to_power` already does for IDLE.
+        #
+        # The intermediate rates this cannot express are not reachable:
+        # `_intent_to_vpp` only ever writes +1 (hold) or +100 (charge) on the
+        # positive side. The raise below keeps that an enforced property.
+        if command.power_pct != 1:
+            raise ValueError(
+                f"unmodellable VPP charge rate {command.power_pct}%: the "
+                "physics core's STORE branch is binary, so only a full-rate "
+                "charge (>=100) or a hold (1) can be simulated faithfully"
+            )
+        return 0.0
 
     if command.power_pct < 0:
         # Forced discharge/export at the commanded rate, regardless of load

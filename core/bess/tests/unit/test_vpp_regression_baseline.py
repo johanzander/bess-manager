@@ -59,13 +59,18 @@ def test_vpp_execution_of_the_baseline_plan_is_unchanged(name):
     """Re-executing v10.0.2's recorded plan must produce the same commands
     and the same realized cost.
 
-    This is the half that pins the *execution model* -- the command mapping
-    and the VPP power model. It fails if `_intent_to_vpp` changes, if the
-    simulator's firmware-priority model changes, or if the accounting
-    underneath moves. It cannot fail because the DP planned something new,
-    since the plan is read from the baseline rather than recomputed.
+    Pins the *execution model* -- the command mapping and the VPP power
+    model. Fails if `_intent_to_vpp` changes, if the firmware-priority model
+    changes, or if the accounting underneath moves. It cannot fail because
+    the DP planned something new, since the plan is read from the baseline
+    rather than recomputed -- that is `test_current_plan_is_pinned`'s job.
     """
-    entry = _baseline()[name]
+    baseline = _baseline()
+    assert name in baseline, (
+        f"{name} has no VPP baseline entry. Regenerate per "
+        "`scripts/capture_vpp_baseline.py`."
+    )
+    entry = baseline[name]
     replayed = simulate_plan(name, entry["plan"])
 
     assert replayed["commands"] == entry["commands"]
@@ -75,29 +80,53 @@ def test_vpp_execution_of_the_baseline_plan_is_unchanged(name):
     )
 
 
-def test_the_set_of_fixtures_whose_plan_moved_since_v10_0_2_is_pinned():
-    """Which fixtures the optimizer now plans differently from the released
-    version is itself the regression signal.
+@pytest.mark.parametrize("name", fixture_names())
+def test_current_plan_is_pinned(name):
+    """Today's plan, and its VPP execution, must match what was recorded.
 
-    Deliberate changes since v10.0.2 (Phase 2, #512, #524, #526) already moved
-    35 of 36, so the useful assertion is not "nothing changed" but "the same
-    ones changed". A fixture appearing or disappearing from this set means a
-    change reached VPP planning that nobody recorded -- which is exactly what
-    "no regression from beta for Growatt VPP" needs to catch.
+    This is the half that actually enforces "no regression from beta for
+    Growatt VPP" on every fixture. An earlier revision asserted only *which*
+    fixtures had already diverged from v10.0.2 -- since 35 of 36 had, any
+    further regression on those 35 kept them in the same set and passed
+    silently. Pinning the plan itself closes that.
 
-    When a phase deliberately changes more, re-pin this list in that phase's
-    PR **with the measured delta stated**, the same discipline the golden
-    parity gate uses.
+    Re-pin in the PR that changes behaviour deliberately, quoting the
+    measured delta, exactly as the golden parity gate requires.
     """
     baseline = _baseline()
-    moved = sorted(
-        name for name in fixture_names() if capture_plan(name) != baseline[name]["plan"]
+    assert name in baseline, (
+        f"{name} has no VPP baseline entry. Regenerate per "
+        "`scripts/capture_vpp_baseline.py`."
     )
-    unchanged = sorted(set(fixture_names()) - set(moved))
+    entry = baseline[name]
 
-    assert unchanged == ["historical_2025_01_05_no_spread_no_solar"], (
-        "the set of fixtures still planning exactly as v10.0.2 changed. "
-        f"Now unchanged: {unchanged}. If a phase did this deliberately, "
-        "re-pin here and state the measured delta in the PR."
+    assert capture_plan(name) == entry["current_plan"], (
+        "the DP now plans this fixture differently. If deliberate, re-pin "
+        "and state the measured VPP delta in the PR."
     )
-    assert len(moved) == 35
+    replayed = simulate_plan(name, entry["current_plan"])
+    assert replayed["commands"] == entry["current"]["commands"]
+    assert replayed["realized_cost"] == pytest.approx(
+        entry["current"]["realized_cost"], abs=1e-9
+    )
+
+
+def test_drift_from_the_released_version_is_recorded():
+    """How far today's plans have moved from v10.0.2, as a single visible
+    number rather than something to rediscover.
+
+    Deliberate changes since the tag (Phase 2's preference table, #512's
+    finer grid, #524's TOU gate, #526's authorization) already moved most of
+    the corpus, so this is a recorded fact, not a pass/fail on equality.
+    """
+    baseline = _baseline()
+    moved = [
+        name
+        for name in fixture_names()
+        if baseline[name]["current_plan"] != baseline[name]["plan"]
+    ]
+    assert len(moved) == 35, (
+        f"{len(moved)} of {len(fixture_names())} fixtures now plan differently "
+        "from v10.0.2. If a phase did this deliberately, re-pin with the "
+        "measured delta."
+    )

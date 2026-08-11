@@ -1,11 +1,13 @@
 # Phase 4: Executable-command candidates (P3) — design
 
-**Status: STARTING POINT, not an approved design.** Phase 4's own plan entry
-says the first step is a design doc and that `rules.md`'s new-class approval
-applies. This is that document at the point where the evidence has been
-gathered and the decisions have been *identified* — four of them need the
-maintainer's call before any code, and one of them was not visible from the
-plan text.
+**Status: D1, D2 and D4 approved 2026-08-11. D3 remains open by choice.**
+Phase 4's plan entry requires a design doc before code and says `rules.md`'s
+new-class approval applies — the modules named in D1 and D2 below carry that
+approval.
+
+**4a is startable.** 4b additionally needs D3 and the #352 reproduction
+fixture; 4b and 4c both wait for the beta to ship (§7). 4d has been removed
+from Phase 4 entirely and is now Phase 5 in the parent plan.
 
 Parent: `docs/superpowers/plans/2026-08-09-optimizer-target-architecture.md`
 → Phase 4. Normative: `docs/agents/optimizer-architecture.md` (P1–P7).
@@ -116,47 +118,65 @@ a public function, and touches the simulator's import surface.**
 
 ## 4. Proposed split (the plan's default, confirmed)
 
-| PR | Scope | Depends on |
-|---|---|---|
-| **4a** | Capability model: per-platform lattice, modes, minimum gear, load-following semantics, into settings/platform config. No candidate changes. | D1, D2 |
-| **4b** | Discharge candidates become executable commands. Closes #352 Shape B. Folds #511/#517 tests in as regression cover. | 4a, the #352 fixture |
-| **4c** | Charge candidates become executable commands — the 6 `rate_throughput` sites collapse to the configured rate. This is where the measured R≠P divergence closes. | 4a |
-| **4d** | Intent as input: `classify_strategic_intent` on planned flows deleted or reduced to observed-data use. | 4b, 4c |
+| PR | Scope | Depends on | Status |
+|---|---|---|---|
+| **4a** | `PlatformCapabilities` + the `execution_model` leaf: per-platform lattice, modes, minimum gear, load-following semantics; gate relocated. No candidate changes. | D1, D2 | **startable** |
+| **4b** | Discharge candidates become executable commands. Closes #352 Shape B. Folds #511/#517 tests in as regression cover. | 4a, D3, the #352 fixture, the beta | blocked |
+| **4c** | Charge candidates become executable commands — the 6 `rate_throughput` sites collapse to the configured rate. This is where the measured R≠P divergence closes. | 4a, the beta | blocked on 4a |
 
 4b and 4c are independent of each other and can run in parallel after 4a.
+**4d is no longer part of Phase 4** — it is Phase 5 in the parent plan (D4).
 
 ---
 
-## 5. Decisions needing the maintainer's call
+## 5. Decisions
 
-**D1 — Where does the execution model live?** (blocking 4a)
-Options: (a) new leaf module `core/bess/execution_model.py` holding command
-derivation, the lattice mapping and the gate, imported by both selector and
-simulator; (b) move that logic into `inverter_controller` and have the
-simulator import it there; (c) keep the simulator as-is and let the selector
-call a narrow, dependency-free subset. (a) is cleanest against P1 and the
-layering, and is the most invasive. Creating a module needs explicit approval.
+**D1 — Where does the execution model live? ✅ APPROVED 2026-08-11: option (a).**
+A **new leaf module `core/bess/execution_model.py`** holds command derivation,
+the platform lattice mapping, and the intra-period discharge gate. Both
+`action_selector` and `simulation/inverter_simulator` depend on it; it imports
+nothing above itself. This **relocates `intra_period_discharge_gate` out of
+`battery_system_manager`** — that relocation is the substance of the decision,
+not a side effect, because it is what lets the selector score a real command
+without the optimizer core importing the orchestrator and without a third
+inverter model (P1).
 
-**D2 — Does the capability model belong in `BatterySettings`?** (blocking 4a)
-The plan says "into `BatterySettings`/platform config". `BatterySettings` is
-currently physical-battery facts; a percent lattice and mode vocabulary are
-platform facts. Folding them in overloads a widely-passed object; a separate
-`PlatformCapabilities` is a new class and needs approval.
+Rejected: (b) putting the logic in `inverter_controller` — the DP importing a
+controller still inverts the layering, just less visibly; (c) letting the
+selector call a narrow dependency-free subset — that is the third
+implementation P1 forbids, arriving by the back door.
 
-**D3 — What is "dominance OR forfeited headroom", concretely?** (blocking 4b)
-This is #354's two-sided materiality test, kept as candidate scoring. It needs
-a precise predicate before it can be coded, and P7 constrains the shape: risk
-handling must be **structural, not stochastic**, so no probability distribution
-over load. Likely reading: a low-rate `grid_first` export is admissible only if
-the planned export dominates the plausible in-period load excursion, or if
-declining it forfeits headroom that has real value. The threshold's source —
-configured, derived from the lattice, or derived from forecast granularity —
-is undecided.
+**D2 — Does the capability model belong in `BatterySettings`? ✅ APPROVED
+2026-08-11: no, a separate `PlatformCapabilities`.** `BatterySettings` is 17
+fields of physical-battery facts sourced from user config; a percent lattice,
+mode vocabulary, minimum gear and load-following semantics are platform facts
+with a different lifetime and source. `discharge_rate_is_load_following`
+already living on the controller is evidence the split is real rather than
+tidy-minded. Folding them in would also overload an object passed through
+almost every function in the optimizer.
 
-**D4 — What happens to `strategic_intent` consumers in 4d?** (blocking 4d)
-Intent is read by reporting, the UI, the controllers and the goldens (which now
-pin it per period). "Deleted or reduced to observed-data use" is a large blast
-radius; it may deserve to be its own phase rather than a rider on Phase 4.
+**D3 — What is "dominance OR forfeited headroom", concretely? ⬜ OPEN, and
+deliberately so.** #354's two-sided materiality test kept as candidate scoring.
+P7 constrains the shape: risk handling must be **structural, not stochastic**,
+so no probability distribution over load. Likely reading: a low-rate
+`grid_first` export is admissible only if the planned export dominates the
+plausible in-period load excursion, or if declining it forfeits headroom that
+has real value. Undecided: whether the threshold is configured, derived from
+the lattice, or derived from forecast granularity.
+
+**Do not settle this before the #352 reproduction fixture exists.** The bug
+does not currently reproduce on any fixture (§2), so a predicate chosen now
+would be fitted to no observable failure. This is the one decision where
+waiting is the correct action rather than a delay.
+
+**D4 — What happens to `strategic_intent` consumers? ✅ APPROVED 2026-08-11:
+removed from Phase 4, becomes Phase 5.** Measured blast radius: 25 non-test
+Python modules reference `strategic_intent` — every inverter controller,
+`schedule_store`, `daily_view_builder`, the three debug exporters,
+`backend/api.py`, `backend/ai_chat.py`, `api_dataclasses` — plus 10 frontend
+files, and since #544 it is pinned per period in the goldens. That is a
+vocabulary migration across the application, not candidate-space work, and
+bundling it would make 4b's and 4c's measured deltas unreadable.
 
 ---
 
@@ -203,4 +223,4 @@ between "the audited refactor regressed something" and "the new candidate space
 chose differently".
 
 Work that can proceed now, all non-behavioural: the #352 reproduction fixture,
-the 22/16 reconciliation, D1–D4, and this document.
+the 22/16 reconciliation, D3, and 4a (whose two decisions are approved).

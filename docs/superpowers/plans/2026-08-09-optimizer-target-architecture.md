@@ -84,7 +84,8 @@ instrument cannot see it, not that it does not happen.
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
 | 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | **MERGED — PR #534** (re-scoped 2026-08-10). Closeable: all five follow-ups below are non-blocking, and #536 is explicitly "does not block a release" |
-| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED**; now gated on D1–D4 in the design doc and on the beta shipping first |
+| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; 4a startable. 4b gated on D3 + the #352 reproduction; 4b/4c behind the beta |
+| 5 | intent-as-input (was Phase 4d — split out 2026-08-11; 25 backend modules + 10 frontend files + the goldens) | 2, 3 | after 4b/4c |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
 | found en route | #528 (derived `lifetime_load_consumption` omits the battery terms, so it reports actual load **plus net battery charge**; the `max(derived, 0.0)` clamp hides the largest errors). Does *not* reach the `ha_statistics` forecast — that path resolves the entity directly and raises when absent | 1 input | filed 2026-08-10, unscheduled |
@@ -645,8 +646,9 @@ Two things gate it now, neither a code dependency:
 
 1. **The design doc exists; its decisions are open.**
    `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`
-   — four decisions need the maintainer (D1–D4 there). One is a blocker the
-   split below did not anticipate: **the selector cannot simply import
+   — **D1, D2 and D4 approved 2026-08-11; D3 open by choice** (see the split
+   below). D1 resolved a blocker the split did not anticipate: **the selector
+   cannot simply import
    `inverter_simulator`.** That module imports `intra_period_discharge_gate`
    from `battery_system_manager` and `InverterController`, so reusing it in the
    selector would make the optimizer core depend on the top-level orchestrator.
@@ -662,30 +664,56 @@ Two things gate it now, neither a code dependency:
    candidate-space change that moves most plans would make any report from
    those reporters ambiguous between a regression and an intended new choice.
 
-### Split into four shippable PRs
+### Split into three shippable PRs (was four — see D4)
 
-The design doc's first job is to confirm this split, but the default is:
+Confirmed by the design doc and approved 2026-08-11. **4d has been removed
+from Phase 4** and becomes its own phase; see below.
 
-- **4a — capability model.** Per-platform lattice/mode/minimum-gear into
-  `BatterySettings`/platform config; no candidate changes yet.
+- **4a — capability model.** Per-platform lattice / mode vocabulary /
+  minimum gear / load-following semantics, in a **new `PlatformCapabilities`**
+  rather than folded into `BatterySettings` (D2). No candidate changes yet.
 - **4b — discharge commands.** Candidates become executable discharge
-  commands; folds in #511/#517's tests as regression cover.
-- **4c — charge commands.** The seven hardcoded `rate_throughput` sites
-  above collapse to the configured rate; this is where the measured R≠P
-  divergence closes.
-- **4d — intent as input.** `classify_strategic_intent` on planned flows
-  is deleted or reduced to observed-data use.
+  commands; folds in #511/#517's tests as regression cover. Closes #352
+  **Shape B**. Gated on the #352 reproduction fixture and on D3.
+- **4c — charge commands.** The six hardcoded `rate_throughput` sites above
+  collapse to the configured rate; this is where the measured R≠P divergence
+  closes.
 
-- [ ] Design doc first: candidate = executable command (mode + rate on the
-      platform lattice + reactive semantics), evaluated by simulating the
-      command against the forecast — reusing
-      `simulation/inverter_simulator.derive_control_command`/`simulate`
-      logic in the selector rather than a third implementation of inverter
-      behavior. Strategic intent becomes the chosen command
-      (`classify_strategic_intent` on planned flows is deleted or reduced
-      to observed-data use). Per-platform capability differences (percent
-      lattice, VPP vs TOU, minimum gear) enter through
-      `BatterySettings`/platform config, not hardcoded (#320's complaint).
+4b and 4c are independent of each other and can run in parallel after 4a.
+
+**Approved decisions (2026-08-11).** These name the modules, which per Global
+constraints above *is* the `rules.md` new-class approval:
+
+- **D1 — a new leaf module `core/bess/execution_model.py`** holds command
+  derivation, the platform lattice mapping, and the intra-period discharge
+  gate. Both `action_selector` and `simulation/inverter_simulator` depend on
+  it; it imports nothing above itself. This **relocates
+  `intra_period_discharge_gate` out of `battery_system_manager`**, which is
+  the point — it is what lets the selector score a real command without the
+  optimizer core importing the orchestrator, and without a third inverter
+  model (P1). Rejected: putting it in `inverter_controller` (still inverts the
+  layering) and letting the selector call a narrow subset (the third
+  implementation, arriving by the back door).
+- **D2 — a separate `PlatformCapabilities`**, not extra fields on
+  `BatterySettings`. The latter is 17 fields of physical-battery facts with a
+  different lifetime and source; `discharge_rate_is_load_following` already
+  living on the controller is evidence the split is real.
+- **D3 — the materiality predicate is still OPEN**, deliberately. It is #354's
+  two-sided test (dominance OR forfeited headroom) as candidate scoring, and
+  P7 constrains it to be structural rather than stochastic — no probability
+  distribution over load. Undecided: whether the threshold is configured,
+  derived from the lattice, or derived from forecast granularity. **Do not pick
+  one before the #352 reproduction exists** — a predicate fitted to no
+  observable failure fits nothing.
+
+- [x] Design doc —
+      `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`.
+      Candidate = executable command (mode + rate on the platform lattice +
+      reactive semantics), evaluated by simulating that command against the
+      forecast, via the shared `execution_model` leaf (D1) rather than a third
+      implementation of inverter behaviour. Per-platform capability
+      differences (percent lattice, VPP vs TOU, minimum gear) enter through
+      `PlatformCapabilities` (D2), not hardcoded — #320's complaint.
 - [ ] Acceptance criteria (fixed now, design chooses the how):
       - #320: no Growatt MIN mode flip caused by plan/lattice rounding on
         the reproduction bundle.
@@ -704,10 +732,33 @@ The design doc's first job is to confirm this split, but the default is:
       - R==P corpus: `PLAN_EXECUTION_GAP_SEK` pins move toward 0 and none
         regress.
 - [ ] Close #354 once Phase 4 covers its band; fold PRs #511 and #517's
-      tests in as regression tests.
+      tests in as regression tests. Its author was told on 2026-08-11 that
+      the materiality test survives as candidate scoring and the PR will not
+      be rebased, so the trail from that work to the fix stays visible.
+- [ ] Build the #352 reproduction fixture from a real bundle
+      (`scripts/mock_ha/scenarios/from_debug_log.py`) and reconcile the 22/16
+      figure. **Both gate 4b**; requested from the reporter 2026-08-11.
 
-**Exit gate:** intent is an input; the corpus R==P gaps are at their
-floor; #320/#352 reproductions pass.
+**Exit gate:** the corpus R==P gaps are at their floor; #320/#352
+reproductions pass. *(Intent-as-input moved to Phase 5 — see below.)*
+
+## Phase 5: Intent as input (was Phase 4d)
+
+**Split out of Phase 4 on 2026-08-11.** `classify_strategic_intent` on planned
+flows is deleted or reduced to observed-data use, and the chosen command
+becomes the intent.
+
+Removed from Phase 4 because it is not candidate-space work — it is a
+vocabulary migration across the whole application, and bundling it would make
+4b's and 4c's measured deltas unreadable. Blast radius, measured 2026-08-11:
+**25 non-test Python modules** reference `strategic_intent` (every inverter
+controller, `schedule_store`, `daily_view_builder`, the three debug exporters,
+`backend/api.py`, `backend/ai_chat.py`, `api_dataclasses`) plus **10 frontend
+files**, and since #544 it is pinned per period in the action-selector
+goldens.
+
+Depends on 4b and 4c: the command has to exist and be the thing chosen before
+it can replace the classification.
 
 ## Parallel / deferred tracks
 

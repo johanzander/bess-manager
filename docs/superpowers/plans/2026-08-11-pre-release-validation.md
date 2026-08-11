@@ -181,13 +181,38 @@ That holds for *behavioural* coverage — but the one completely unguarded fix
 (#302) is on the TOU side, and it is a crash rather than a behaviour. Crash
 paths are thin on both platforms, and no simulator would have caught it.
 
-**One open item for the maintainer, not a defect:** #241 asked for a
-`shutdown_hardware` hook. What exists instead is `leave_control_mode` on a
-deliberate platform/control-mode switch, plus the VPP fallback timer covering
-crash and stop. That is sound engineering — the dead-man's-switch is a better
-guarantee than a shutdown hook, which cannot run on a crash — but ridax was
-never told, so from his side the request looks silently dropped. Worth a
-comment on #241.
+**#241 — Pass 2 got this wrong, corrected 2026-08-11.** The claim below was
+that `leave_control_mode` on a deliberate switch, *plus the VPP fallback timer
+covering crash and stop*, together made a `shutdown_hardware` hook unnecessary
+— "the dead-man's-switch is a better guarantee than a shutdown hook, which
+cannot run on a crash."
+
+**The second half is false.** Maintainer, on #241: *"leave_control_mode is the
+correct method, the VPP timer would not turn off VPP mode."* The timer stops
+the inverter obeying a stale power command — that is #404's mechanism — but it
+does not clear `vpp_status`. Verified in code:
+
+- Both `leave_control_mode` call sites (`battery_system_manager.py:386` and
+  `:439`) fire only on a deliberate platform or control-mode switch.
+- `backend/app.py`'s FastAPI `lifespan` has an empty shutdown branch
+  (`# Shutdown (if needed in the future)`), and there is no SIGTERM handler or
+  `atexit` hook anywhere.
+
+So on add-on stop, restart, crash or HA reboot, nothing runs
+`leave_control_mode` and VPP Status stays Enabled — which is exactly the
+scenario ridax opened #241 about ("the inverter will be locked into VPP mode
+unless you set it back to TOU mode manually"). It is **an open gap, not a
+closed one**, and the audit reached the opposite conclusion by assuming a
+property of the fallback timer nobody had checked against the hardware. Same
+failure mode as the guards in Pass 2: a mechanism credited with a job it does
+not do.
+
+Scope note: a clean stop is fixable (populate the `lifespan` shutdown branch);
+a hard crash or a pulled power cord is not reachable from the add-on at all, so
+"cover the crash case" needs the inverter-side story, not a Python hook. Sizing
+that is a decision for the maintainer, not this audit.
+
+The explanation ridax was owed has now been posted on #241.
 
 ---
 

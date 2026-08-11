@@ -21,9 +21,7 @@ from core.bess.models import EconomicSummary, PeriodData
 from core.bess.tests.helpers import (
     _scenario_inputs,
     assert_flow_coherence,
-    assert_intent_absent,
     assert_intent_at_hour,
-    assert_intent_present,
     assert_physical_constraints,
     assert_savings_positive,
     get_intent_distribution,
@@ -244,6 +242,37 @@ def test_all_scenarios(scenario_name):
             expected_results["base_to_battery_solar_savings_pct"], abs=PCT_TOLERANCE
         ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.4f}% != {expected_results['base_to_battery_solar_savings_pct']:.4f}%"
 
+        # Energy throughput, not just money (added 2026-08-11, audit Pass 3
+        # F3). 27 fixtures have carried these two values since they were
+        # written and no test ever read them -- measured at the time of
+        # wiring, all 27 were still accurate to <0.001 kWh, so this pins
+        # what was already true rather than re-pinning anything.
+        #
+        # Worth asserting because the four scalars above are all money, and
+        # money is lossy: two plans can cost the same to within a fraction of
+        # an öre while cycling the battery differently -- the same energy
+        # bought at a different hour, or a round trip added and another
+        # removed. Wear is charged per kWh stored, so throughput is a
+        # physical quantity the cost pins genuinely cannot express.
+        # 27 of the 33 fixtures carry these. The 6 that do not are all
+        # debug-log-derived regression fixtures (`regression_*`), whose
+        # generator records economics but not throughput -- so this is
+        # conditional on the key rather than on a default, which would
+        # silently pin 0.0 for them.
+        ENERGY_TOLERANCE_KWH = 0.001
+        if "total_charged" in expected_results:
+            total_charged = sum(pd.energy.battery_charged for pd in result.period_data)
+            assert total_charged == pytest.approx(
+                expected_results["total_charged"], abs=ENERGY_TOLERANCE_KWH
+            ), f"Total charged mismatch: {total_charged:.6f} != {expected_results['total_charged']:.6f} kWh"
+        if "total_discharged" in expected_results:
+            total_discharged = sum(
+                pd.energy.battery_discharged for pd in result.period_data
+            )
+            assert total_discharged == pytest.approx(
+                expected_results["total_discharged"], abs=ENERGY_TOLERANCE_KWH
+            ), f"Total discharged mismatch: {total_discharged:.6f} != {expected_results['total_discharged']:.6f} kWh"
+
     else:
         logger.info(
             f"No expected results for scenario {scenario_name}, skipping validation"
@@ -308,12 +337,20 @@ def test_all_scenarios(scenario_name):
         dist = get_intent_distribution(result)
         logger.info(f"Intent distribution: {dist}")
 
-        for intent in behavior.get("intents_present", []):
-            assert_intent_present(result, intent)
-
-        for intent in behavior.get("intents_absent", []):
-            assert_intent_absent(result, intent)
-
+        # `intents_present` / `intents_absent` are no longer asserted here
+        # (changed 2026-08-11, audit Pass 3 F5). They were existence checks:
+        # `intents_present` passed on a single period out of up to 134, so it
+        # could only detect an intent class disappearing outright, and several
+        # `intents_absent` entries could not fail at all -- SOLAR_STORAGE
+        # declared absent on a fixture with no solar is unfalsifiable by
+        # construction, not a guarantee.
+        #
+        # Every period's intent is now pinned exactly, for all 36 fixtures
+        # (2168 periods), by the `intents` field in the action-selector
+        # goldens. That is strictly stronger and it is deterministic: a
+        # reclassification fails by name and period instead of surviving
+        # because one other period still carries the intent. The keys remain
+        # in the fixtures as scenario documentation.
         if behavior.get("savings_positive"):
             assert_savings_positive(result)
 

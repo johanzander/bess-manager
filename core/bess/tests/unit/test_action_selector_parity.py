@@ -10,9 +10,21 @@ worth anything if it changed nothing, so every fixture's emitted actions,
 SOE trajectory and optimized cost are pinned bit-identically against
 outputs captured from `origin/main` before the refactor started.
 
-Bit-identical, not `approx`: an extraction that reorders a floating-point
-sum is a behavior change this phase is not allowed to make, and a
-tolerance would hide exactly that.
+**The plan is bit-identical; the cost carries 1e-9 (changed 2026-08-11).**
+The original rule here was bit-identical everywhere, on the argument that an
+extraction reordering a floating-point sum is a behavior change this phase
+was not allowed to make and a tolerance would hide it. That still holds for
+`actions`, `intents` and `soe_trajectory`, which remain `==`.
+
+It does not survive contact with `battery_solar_cost`, which turned out not
+to be reproducible across environments: on one commit, py3.12.13/numpy 2.5.2
+and py3.13 reproduce every golden exactly while py3.11.15/numpy 2.4.6
+differs on 27 of 36 by up to 5.7e-14 SEK, with the plan bit-identical in all
+three. A gate that goes red on a numpy bump with no behavior change does not
+become more honest by being strict -- it trains the reflex to re-capture,
+which is how a real change gets absorbed. The reordering the old rule
+existed to catch still fails this test, via the plan fields, because a sum
+reordering that changes a decision changes the decision.
 
 **Golden lifecycle.** These goldens pin *refactor* parity. Every later
 behavior-changing phase (Phase 2 onward) regenerates them
@@ -52,5 +64,29 @@ def test_selector_refactor_is_bit_identical(name):
     actual = capture_fixture(name)
 
     assert actual["actions"] == golden["actions"]
+    assert actual["intents"] == golden["intents"]
+    assert (
+        actual["intra_period_discharge_allowed"]
+        == golden["intra_period_discharge_allowed"]
+    )
     assert actual["soe_trajectory"] == golden["soe_trajectory"]
-    assert actual["battery_solar_cost"] == golden["battery_solar_cost"]
+
+    # Cost gets a tolerance where the plan does not, because it is the one
+    # field whose exact bits are not reproducible across environments.
+    # Measured 2026-08-11 on the same commit: py3.12.13/numpy 2.5.2 and
+    # py3.13 (CI) both reproduce every golden exactly, while py3.11.15/numpy
+    # 2.4.6 differs on 27 of 36 fixtures by 1e-16 to 5.7e-14 SEK -- with
+    # `actions` and `soe_trajectory` bit-identical on all 36 in every
+    # environment. That is summation order in a numpy reduction, not
+    # behaviour. `backend/requirements.txt` now pins `numpy==2.5.2` so a bump
+    # cannot move reported costs silently; this tolerance is the other half,
+    # covering the interpreter and platform the pin does not fix.
+    #
+    # 1e-9 is ~17,000x the largest observed noise and ~1e7 times finer than
+    # the smallest genuine cost movement this corpus has ever recorded
+    # (0.0181 SEK), so nothing real can hide under it. The plan itself stays
+    # bit-exact: a reordered float sum that actually changes a decision moves
+    # `actions` or `intents`, which are compared with `==`.
+    assert actual["battery_solar_cost"] == pytest.approx(
+        golden["battery_solar_cost"], abs=1e-9
+    )

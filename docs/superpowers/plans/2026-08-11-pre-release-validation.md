@@ -11,6 +11,13 @@ coverage: `inverter_simulator` is TOU-only, so until #539/#541 lands there is
 no VPP regression baseline at all. A VPP fix is guarded by unit tests or by
 nothing.
 
+**Every verification here means: the guard was made to FAIL by reverting the
+behaviour it protects.** A guard that passes both ways is not evidence, and
+several in this codebase have been exactly that. This rule is now in
+`rules.md` and the `implement-issue` skill so it applies to new work too,
+along with its companion — assert outcomes, not the commands written to
+hardware.
+
 **Status: IN PROGRESS.** Sections marked ⬜ are not yet done. Nothing here is
 approved until the maintainer signs it off.
 
@@ -88,8 +95,8 @@ must still hold. **Guard column is by behaviour, not by issue number.**
 |---|---|---|---|
 | #310 wrote tou while running vpp | VPP mode wrote TOU entities | `test_solax_modbus_growatt_vpp::test_no_tou_segments_written` | ✅ guard located |
 | #311 not staying in vpp | fell back to TOU mode | same as #310 | ✅ guard located |
-| #324 Vpp battery dump | gate forced full-power discharge | `test_vpp_discharge_gate_capability` (6 refs) | ⬜ |
-| #355 lost sense of battery wear cost | grid_first hold | 6 test refs, 8 code refs | ⬜ |
+| #324 Vpp battery dump | SOC 11% → `grid_first power -100`, immediate full dump | `test_vpp_discharge_gate_capability` | ✅ **verified discriminating** — removing the `discharge_rate_is_load_following` exclusion fails 2 of its 3 tests, so it pins the mechanism, not a proxy |
+| #355 lost sense of battery wear cost | SOLAR_EXPORT fell back to self-use, draining SOC | `test_solax_modbus_growatt_vpp` (hold keeps remote control enabled) | ✅ **verified discriminating** — regressing the hold to `0, False` fails 3 tests |
 | #398 Vpp power percentage is off | | 2 test refs | ⬜ |
 | #399 Vpp unnecessary flash writes | | 2 test refs | ⬜ |
 | #404 Vpp fall back to load first | 20-min timeout lapsed | 2 test refs, 4 code | ⬜ |
@@ -103,7 +110,7 @@ must still hold. **Guard column is by behaviour, not by issue number.**
 | #126 Belpex/ENTSO-e | | 10 test refs | ⬜ |
 | #316 charging → 100% discharge | battery dump | likely the #324 cluster — ⬜ confirm | ⬜ |
 | #192, #241, #248, #308, #376 | infra / flash / prices | ⬜ locate by behaviour | ⬜ |
-| #289, #300, #304, #328, #448 | **questions, not bugs** — confirm each was answered rather than fixed, so there is nothing to regress | ⬜ | ⬜ |
+| ~~#289, #300, #304, #328, #448~~ | **questions, not bugs — out of scope** (maintainer, 2026-08-11). Nothing to regress. | n/a | n/a |
 
 ---
 

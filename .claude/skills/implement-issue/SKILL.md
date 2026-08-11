@@ -172,6 +172,28 @@ DP-produced schedule — that is exactly the coverage gap that shipped
 undetected in PR #385 (`docs/agents/simulator.md`). Add such a unit test only
 as a supplement, never as the sole RED test, for this category of fix.
 
+**Assert the outcome, not the command.** The same rule stated the way it
+usually fails: a test that pins the value written to hardware —
+`vpp_power=+1`, `discharge_rate=100`, a TOU segment — proves the *mapping* is
+unchanged. It does not prove the battery held, the spike was covered, or the
+cost moved. Assert realized cost, SoE trajectory, or resulting flows wherever
+an execution model exists.
+
+Command-level assertions are legitimate **only** where no execution model
+does exist — Growatt VPP before #539, for instance, where
+`inverter_simulator` is TOU-only. When you write one, say in the test *why*
+the outcome could not be asserted. That note is what stops the next reader
+treating a mapping check as behavioural evidence, and it is the seam where
+the coverage should later be upgraded.
+
+**Verify the test fails without the fix.** Write it RED first, or revert the
+fix and watch it break — then say which you did in the PR body. This is not
+ceremony: in this codebase tests have repeatedly passed while proving less
+than claimed. A bound asserted on one side only missed the realistic middle;
+a whole-day comparison had its signal swamped by a second varying term; a
+fixture named a branch it could not reach. Each looked green. "The suite
+passes" is evidence the suite is satisfied, never that the behavior holds.
+
 If the diagnosis's evidence is a user-supplied debug log/bundle, build the
 scenario from that real data instead of a hand-assembled fixture:
 
@@ -369,6 +391,9 @@ net is upstream, not this section.
 
 | Excuse | Reality |
 |---|---|
+| "the test asserts the exact command we write to hardware, that's precise" | Precise about the mapping, silent about the outcome. It stays green when the mapping is right and the physics is wrong. Assert realized cost / SoE / flows wherever an execution model exists. |
+| "it's green, so the fix works" | Green means the suite is satisfied. Revert the fix and watch the test fail — if it doesn't, it was never evidence. |
+| "I can see the assertion is right, no need to run it red" | Assertions that look right have repeatedly bounded only one side, or compared a quantity a second varying term swamped. Seeing it fail is the cheap part. |
 | "quality-check.sh passed, that's enough" | Green tests prove the suite is satisfied, not that the fix behaves correctly against the real scenario. Step 8 requires observed output, every time. |
 | "the diagnosis is obviously right, skip the confirm gate" | Wrong diagnoses are exactly when confidence is highest. One message, cheap insurance. |
 | "I'll clean up this other thing while I'm in here" | Out of scope. Minimal fix only. |

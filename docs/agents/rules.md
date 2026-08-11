@@ -84,6 +84,20 @@ They are non-negotiable and override any other instruction.
 - Tests must verify **behavior** (what the system does), not **implementation** (how)
 - A test that breaks when an equivalent algorithm replaces another is a bad test
 - Never test: internal field names, algorithm-specific boundaries, exact interval counts
+- **Assert the outcome, not the command.** A test that pins the value written
+  to hardware (`vpp_power=+1`, `discharge_rate=100`, a TOU segment) proves the
+  *mapping* is unchanged. It does not prove the battery held, the spike was
+  covered, or the cost moved. Where the outcome is simulable, assert the
+  outcome — realized cost, SoE trajectory, resulting flows. Assert commands
+  only where no execution model exists, and say so in the test, because a
+  command-level test silently stops being evidence the moment the mapping is
+  right and the physics is wrong.
+- **A new test must be seen to fail without its fix.** Write it RED, or revert
+  the fix and watch it break. Repeatedly in this codebase a test has passed
+  while proving less than claimed — a bound asserted on one side only, a
+  comparison whose signal was swamped by a second varying term, a fixture that
+  could not reach the branch it named. "The suite is green" is evidence the
+  suite is satisfied, never that the behavior holds.
 
 ## Debugging Protocol
 

@@ -135,11 +135,16 @@ def vpp_command_to_power(
 
     if not command.remote_control_enabled:
         # load_first self-use: the inverter covers the home deficit itself,
-        # unconstrained by any planned rate.
+        # unconstrained by any *planned* rate. It is still bounded by the
+        # inverter's physical discharge rating -- dropping the plan's ceiling
+        # does not let a 6 kW inverter deliver a 20 kW deficit.
         if deficit <= 0:
             return 0.0  # passive solar charging via _state_transition's IDLE
         delivered = min(
-            deficit, available * settings.efficiency_discharge, ac_headroom_kwh
+            deficit,
+            settings.max_discharge_power_kw * dt,
+            available * settings.efficiency_discharge,
+            ac_headroom_kwh,
         )
         return -delivered / dt
 
@@ -216,7 +221,10 @@ def vpp_command_to_power(
     # change that test deliberately rather than discovering it silently.
     if deficit > 0:
         delivered = min(
-            deficit, available * settings.efficiency_discharge, ac_headroom_kwh
+            deficit,
+            settings.max_discharge_power_kw * dt,
+            available * settings.efficiency_discharge,
+            ac_headroom_kwh,
         )
         # Same zero-delivery trap as the forced-discharge branch above: a hold
         # must stay a hold, never fall through to IDLE's solar absorption.

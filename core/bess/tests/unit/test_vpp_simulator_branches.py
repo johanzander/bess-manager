@@ -151,6 +151,35 @@ class TestReleasedControl:
         )
         assert power == pytest.approx(-2.0)
 
+    def test_released_control_is_capped_by_the_inverter_rating(self):
+        """Releasing control drops the *planned* rate ceiling, not the
+        inverter's physical one.
+
+        An earlier revision capped this branch by deficit, available energy
+        and AC headroom only, so a 6 kW inverter delivered the whole deficit
+        however large: at `dt=0.25` a 5 kWh deficit came back as -20 kW. That
+        was reachable and was baked into the v10.0.2 baseline --
+        `synthetic_consumption_high_no_solar` commands `(0, False)` over
+        periods 16-20 against 7-10 kWh hourly deficits, and its recorded SoE
+        trajectory dropped 7.37 and 9.47 kWh in single hours.
+        """
+        s = _settings()
+        assert vpp_command_to_power(
+            VppCommand(0, False), solar=0.0, home=9.0, soe=9.0, settings=s, dt=DT
+        ) == pytest.approx(-6.0)
+        assert vpp_command_to_power(
+            VppCommand(0, False), solar=0.0, home=5.0, soe=9.0, settings=s, dt=0.25
+        ) == pytest.approx(-6.0)
+
+    def test_grid_first_load_serving_is_capped_by_the_inverter_rating(self):
+        """Same physical cap on the grid_first load-serving branch. The corpus
+        cannot reach it (no SOLAR_EXPORT period has `home > solar`), so this is
+        the only thing holding it."""
+        s = _settings()
+        assert vpp_command_to_power(
+            VppCommand(0, True), solar=0.0, home=9.0, soe=9.0, settings=s, dt=DT
+        ) == pytest.approx(-6.0)
+
     def test_released_control_absorbs_surplus(self):
         """Unlike the enabled-remote holds, load_first self-use genuinely does
         absorb surplus, so 0.0 (the IDLE branch) is correct here."""

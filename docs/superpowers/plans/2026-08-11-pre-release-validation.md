@@ -18,8 +18,8 @@ several in this codebase have been exactly that. This rule is now in
 along with its companion — assert outcomes, not the commands written to
 hardware.
 
-**Status: IN PROGRESS.** Sections marked ⬜ are not yet done. Nothing here is
-approved until the maintainer signs it off.
+**Status: Passes 1 and 2 done, Pass 3 not started.** Sections marked ⬜ are not
+yet done. Nothing here is approved until the maintainer signs it off.
 
 ---
 
@@ -86,31 +86,70 @@ discriminates.
 
 ---
 
-## Pass 2 — reporter issues, one by one ⬜ IN PROGRESS
+## Pass 2 — reporter issues, one by one ✅ DONE (2026-08-11)
 
-The 25 closed ridax67 / Frank-Leysen issues, each traced to the behaviour that
+The closed ridax67 / Frank-Leysen issues, each traced to the behaviour that
 must still hold. **Guard column is by behaviour, not by issue number.**
+
+**Result: 17 genuine, 2 defective, 1 out of scope.** Every ✅ below means the
+fix was reverted in the working tree and a named test was observed to fail.
+Both defects were closed in the same session, each with a new test verified to
+fail without its fix.
 
 | Issue | Reported | Guard on main | Verified |
 |---|---|---|---|
-| #310 wrote tou while running vpp | VPP mode wrote TOU entities | `test_solax_modbus_growatt_vpp::test_no_tou_segments_written` | ✅ guard located |
-| #311 not staying in vpp | fell back to TOU mode | same as #310 | ✅ guard located |
-| #324 Vpp battery dump | SOC 11% → `grid_first power -100`, immediate full dump | `test_vpp_discharge_gate_capability` | ✅ **verified discriminating** — removing the `discharge_rate_is_load_following` exclusion fails 2 of its 3 tests, so it pins the mechanism, not a proxy |
-| #355 lost sense of battery wear cost | SOLAR_EXPORT fell back to self-use, draining SOC | `test_solax_modbus_growatt_vpp` (hold keeps remote control enabled) | ✅ **verified discriminating** — regressing the hold to `0, False` fails 3 tests |
-| #398 Vpp power percentage is off | | 2 test refs | ⬜ |
-| #399 Vpp unnecessary flash writes | | 2 test refs | ⬜ |
-| #404 Vpp fall back to load first | 20-min timeout lapsed | 2 test refs, 4 code | ⬜ |
-| #421 Vpp power 0 before power -99 | spurious 0% command | 2 test refs | ⬜ |
-| #479 Disabling of Vpp status setting | | 2 test refs, 4 code | ⬜ |
-| #415 Confusing presentation | UI | 4 test refs | ⬜ |
-| #309 do not scramble tou table | | 2 test refs | ⬜ |
-| #302 TOU slot 1 end=00:00 | | 2 test refs | ⬜ |
-| #329 flash writes | | 2 test refs | ⬜ |
-| #201 critical system issues | | 2 test refs | ⬜ |
-| #126 Belpex/ENTSO-e | | 10 test refs | ⬜ |
-| #316 charging → 100% discharge | battery dump | likely the #324 cluster — ⬜ confirm | ⬜ |
-| #192, #241, #248, #308, #376 | infra / flash / prices | ⬜ locate by behaviour | ⬜ |
+| #310 wrote tou while running vpp | VPP mode wrote TOU entities | `test_solax_modbus_growatt_vpp::test_no_tou_segments_written` | ✅ routing `apply_period` through `_apply_period_tou` in VPP mode fails it |
+| #311 not staying in vpp | fell back to TOU mode | same as #310 | ✅ same revert |
+| #309 do not scramble tou table | TOU slot 1 rewritten while in VPP | same as #310 | ✅ same revert |
+| #324 Vpp battery dump | SOC 11% → `grid_first power -100`, immediate full dump | `test_vpp_discharge_gate_capability` | ✅ removing the `discharge_rate_is_load_following` exclusion fails 2 of its 3 tests |
+| #316 charging → 100% discharge | battery dump | same as #324 — confirmed same cluster | ✅ same revert, same 2 tests |
+| #355 lost sense of battery wear cost | SOLAR_EXPORT fell back to self-use, draining SOC | `test_solax_modbus_growatt_vpp` (hold keeps remote control enabled) | ✅ regressing the hold to `0, False` fails 3 tests |
+| #398 Vpp power percentage is off | stale power-cap snapshot after a settings change | `test_bsm_settings_and_lifecycle::TestUpdateSettings` | ✅ dropping the snapshot refresh fails 2 tests |
+| #404 Vpp fall back to load first | 20-min dead-man's-switch lapsed during a stable run | `TestApplyPeriodVpp::test_unchanged_active_command_refreshes_timer` | ✅ restoring write-on-change fails it |
+| #421 Vpp power 0 before power -99 | spurious 0% command from a hardcoded `battery_action_kw=0.0` stub | `TestWriteScheduleToHardwareVpp` | ✅ restoring the stub write fails 3 tests |
+| #479 Disabling of Vpp status setting | VPP stayed enabled after switching to TOU, overriding TOU writes | `TestSwitchControlMode`, `TestSwitchInverterPlatform` | ✅ making `leave_control_mode` a no-op fails 3 tests |
+| #241 shutdown method | inverter left locked in VPP | `leave_control_mode` (deliberate switch) + the 20-min fallback timer (crash/stop) | ✅ folds into #479 — **but this is not the `shutdown_hardware` hook ridax asked for, and the reasoning was never explained to him** |
+| #201 critical system issues | health banner stuck on ERROR after sensors recovered | `TestRefreshHealthCheck::test_updates_cached_results_from_a_fresh_run` | ✅ not clearing `_critical_sensor_failures` on a healthy run fails it |
+| #415 Confusing presentation | TOU mode labels fabricated for VPP/period-list platforms | `test_mode_display_fields` + `inverter-schedule-control-model.spec.ts` | ✅ returning `batt_mode` for every CONTROL_MODEL fails 10 tests |
+| #308 supports_charge_rate_control | VPP mode claimed EMS rate control it does not have | `test_platform_capabilities` | ✅ forcing it True fails 2 tests |
+| #376 ENTSO-e tomorrow prices stay zero | all-zero placeholder accepted as real prices until restart | `TestEntsoeSourceFailures::test_all_zero_prices_treated_as_not_yet_available` | ✅ removing the all-zero raise fails it |
+| #126 Belpex/ENTSO-e | hourly Belgian prices unsupported | 33 unit tests + e2e scenario `ci-wizard-entsoe-frank-126.json` | ✅ covered — and that filename is the per-reporter traceability Pass 1 found missing |
+| #248, #329 minimize flash wear | status/AC-charging rewritten repeatedly | `TestNoRedundantWritesAcrossCycles` (same instance, two applies) | ✅ — see #399 for the case it does *not* cover |
+| **#399 Vpp unnecessary flash writes** | status/AC-charging rewritten **on every restart** | was `test_seeds_state_from_hardware` | ⚠️ **PROXY GUARD.** It asserted `_vpp_status_confirmed` is seeded — the mechanism, not the write count. Stays green if the flag is seeded and then ignored. #329's write-count test never reaches the read-back path, because that instance already set the flag from its own first write. **Fixed:** `test_restart_with_status_already_enabled_writes_no_flash_registers` — fresh controller, already-Enabled inverter, zero flash writes, plus a positive assertion that the period command still goes out |
+| **#302 TOU slot 1 end=00:00** | HA `select_option` 500 while setting `tou_time_1_end`, on the DST fall-back day | **none** | ⚠️ **UNGUARDED.** Deleting the DST end-time cap in `_groups_to_tou_intervals` left all 1714 fast tests green; the interval is then emitted as `24:59`. The fall-back day comes once a year, so a refactor could drop the cap in September and the first signal would be a user's inverter failing on the changeover night. **Fixed:** `test_dst_fall_back_never_writes_an_invalid_end_time`, asserting the emitted interval's times are valid wall-clock values |
+| #192 Check grid charge state | HA 502 Bad Gateway on a sensor read | n/a | **out of scope** — transient supervisor error, closed 2026-06-27, before the audit window; not something this refactor can regress |
 | ~~#289, #300, #304, #328, #448~~ | **questions, not bugs — out of scope** (maintainer, 2026-08-11). Nothing to regress. | n/a | n/a |
+
+### What Pass 2 established beyond the individual results
+
+**Both defects were guards that asserted what the fix changed rather than what
+the reporter measured.** #399 asserted an internal flag instead of a write
+count; #302 asserted nothing at all. That is the same failure this audit found
+in `test_real_day_has_charge_neither_source_explains` earlier in the session.
+Three instances is a pattern, and it is now a rule in `rules.md` and the
+`implement-issue` skill rather than a habit.
+
+**#324's revert fails 2 of 3 tests, and the surviving one is the VPP mapping
+lossiness.** The LOAD_SUPPORT case does not fail because `_intent_to_vpp`
+returns `(0, False)` for LOAD_SUPPORT regardless of `discharge_rate`, so the
+gate raising the ceiling cannot change the VPP command at all. This is the same
+101-rates-to-1-command collapse that killed #537's design, surfacing
+independently in a test written months earlier. See
+`test_platform_mapping_fidelity.py`.
+
+**The thin coverage was not where it was predicted to be.** Going in, the
+assumption was that VPP was exposed because `inverter_simulator` is TOU-only.
+That holds for *behavioural* coverage — but the one completely unguarded fix
+(#302) is on the TOU side, and it is a crash rather than a behaviour. Crash
+paths are thin on both platforms, and no simulator would have caught it.
+
+**One open item for the maintainer, not a defect:** #241 asked for a
+`shutdown_hardware` hook. What exists instead is `leave_control_mode` on a
+deliberate platform/control-mode switch, plus the VPP fallback timer covering
+crash and stop. That is sound engineering — the dead-man's-switch is a better
+guarantee than a shutdown hook, which cannot run on a crash — but ridax was
+never told, so from his side the request looks silently dropped. Worth a
+comment on #241.
 
 ---
 
@@ -129,8 +168,29 @@ per-issue regression files.
 
 ## Standing risk, independent of this audit
 
-Growatt VPP has no execution simulation until #541 merges, and #537 changes
-VPP behaviour on 28.5% of LOAD_SUPPORT periods. Until both settle, ridax's
-VPP fixes are guarded by unit tests only — which pin *commands*, not
+Growatt VPP has no execution simulation until #541 merges. Until it does,
+ridax's VPP fixes are guarded by unit tests only — which pin *commands*, not
 *outcomes*. That is the thinnest coverage of any platform, on the platform
 with the most reported history.
+
+**#537 is no longer a standing risk — it is a withdrawn design (2026-08-11).**
+It mapped #520's closed discharge gate onto VPP as a `battery_first` hold. On
+TOU, gate-closed still delivers the planned discharge and merely declines to
+raise the ceiling; on VPP a hold delivers nothing. Measured on the corpus, all
+172 gate-closed LOAD_SUPPORT periods carry a real planned discharge totalling
+**118.11 kWh**, every one of which the PR would have abandoned. Converted to
+draft pending redesign.
+
+The cause was one inference: VPP carries BATTERY_EXPORT's planned magnitude
+faithfully (`power_pct` is the plan-scaled rate, negated), so it looked as if
+VPP could express "discharge, but only this much" generally. LOAD_SUPPORT is
+the single intent where it cannot — 101 distinct planned rates collapse to 1
+command. `test_platform_mapping_fidelity.py` now sweeps the full planned-action
+range per intent and pins which intents are lossy, so that asymmetry is stated
+rather than rediscovered.
+
+Note what caught it: not a test, and not the VPP simulator built for exactly
+this question — by its own docstring that harness scores a gate-closed change
+as a loss whether or not it is one. It was ridax's #520 comment, *"I feel it
+should do this in all modes except IDLE."* The instrument now exists, but the
+signal came from the person running the hardware.

@@ -408,6 +408,7 @@ class TestReadAndInitializeVpp:
         controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
 
         assert controller._vpp_status_confirmed is True
+        assert controller._vpp_ac_charging_confirmed is True
         assert controller._last_written_vpp_remote_control is True
 
     def test_seeds_disabled_state(self, controller, mock_ha):
@@ -418,6 +419,7 @@ class TestReadAndInitializeVpp:
         controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
 
         assert controller._vpp_status_confirmed is False
+        assert controller._vpp_ac_charging_confirmed is False
         assert controller._last_written_vpp_remote_control is False
 
     def test_no_hardware_writes_on_read(self, controller, mock_ha):
@@ -480,13 +482,17 @@ class TestReadAndInitializeVpp:
         """The other half of #399's skip: it must not skip a write the
         inverter still needs.
 
-        `_ensure_vpp_status_enabled` writes *both* flash registers behind one
-        flag, and the registers can drift apart -- a user toggle, a firmware
-        reset, or a write that failed after the first of the two. An earlier
-        revision seeded that flag from VPP Status alone, so an inverter
+        `_ensure_vpp_status_enabled` writes *both* flash registers, and they
+        can drift apart -- a user toggle, a firmware reset, or a write that
+        failed after the first of the two. An earlier revision gated both
+        writes on one flag seeded from VPP Status alone, so an inverter
         reporting Status Enabled + AC charging Disabled was treated as fully
         configured on every restart, the AC-charging write never happened
         again, and GRID_CHARGING periods silently drew nothing from the grid.
+
+        The repair is per register: the drifted one is rewritten and the
+        healthy one is left alone, or the repair path itself reintroduces
+        #399's wear on every restart of a half-drifted install.
 
         The flash-wear guard above and this one are the same mechanism read
         from both sides: skip when nothing is needed, repair when something
@@ -507,6 +513,40 @@ class TestReadAndInitializeVpp:
         assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [True], (
             "an inverter that cannot AC-charge was left that way: "
             "GRID_CHARGING would draw nothing from the grid"
+        )
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "the healthy VPP Status register was rewritten while repairing "
+            "AC charging — #399's flash wear, moved into the repair path"
+        )
+
+    def test_restart_repairs_only_the_register_it_could_not_read(
+        self, controller, mock_ha
+    ):
+        """An unreadable register is *unknown*, not "Disabled".
+
+        `_get_raw_state` returns None for a transient API error or a
+        momentarily `unavailable` entity just as it does for one that is not
+        configured. Unknown still has to be repaired -- assuming Enabled would
+        leave VPP unable to execute its plan with no further chance to fix it
+        -- but the repair must stay scoped to the register that could not be
+        read, or one flaky read at startup rewrites both flash registers.
+        """
+        mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = None
+        mock_ha._growatt_vpp_remote_control_state = "Enabled"
+
+        restarted = type(controller)(controller.battery_settings, control_mode="vpp")
+        restarted.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+
+        restarted.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+        _apply_at_period(restarted, mock_ha, 8, grid_charge=True, discharge_rate=0)
+
+        assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [True]
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "a failed read of one register rewrote the other, which was known "
+            "to be Enabled — #399's flash wear on a flaky read"
         )
 
 

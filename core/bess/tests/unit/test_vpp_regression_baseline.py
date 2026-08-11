@@ -49,8 +49,9 @@ def test_every_fixture_has_a_vpp_baseline():
     """A fixture added without a baseline entry silently escapes the pin."""
     missing = [name for name in fixture_names() if name not in _baseline()]
     assert missing == [], (
-        f"fixtures with no VPP baseline: {missing}. Regenerate per "
-        "`scripts/capture_vpp_baseline.py`."
+        f"fixtures with no VPP baseline: {missing}. Add them with "
+        "`scripts/capture_vpp_baseline.py --add-new` (records today's plan "
+        "only, `plan: null`); a full re-baseline is NOT the remedy here."
     )
 
 
@@ -67,10 +68,15 @@ def test_vpp_execution_of_the_baseline_plan_is_unchanged(name):
     """
     baseline = _baseline()
     assert name in baseline, (
-        f"{name} has no VPP baseline entry. Regenerate per "
-        "`scripts/capture_vpp_baseline.py`."
+        f"{name} has no VPP baseline entry. Add it with "
+        "`scripts/capture_vpp_baseline.py --add-new`."
     )
     entry = baseline[name]
+    if entry["plan"] is None:
+        pytest.skip(
+            "fixture added after v10.0.2 — there is no released plan to "
+            "replay; test_current_plan_is_pinned covers its execution"
+        )
     replayed = simulate_plan(name, entry["plan"])
 
     assert replayed["commands"] == entry["commands"]
@@ -95,8 +101,8 @@ def test_current_plan_is_pinned(name):
     """
     baseline = _baseline()
     assert name in baseline, (
-        f"{name} has no VPP baseline entry. Regenerate per "
-        "`scripts/capture_vpp_baseline.py`."
+        f"{name} has no VPP baseline entry. Add it with "
+        "`scripts/capture_vpp_baseline.py --add-new`."
     )
     entry = baseline[name]
 
@@ -133,21 +139,29 @@ def test_drift_from_the_released_version_is_recorded():
     Deliberate changes since the tag (Phase 2's preference table, #512's finer
     grid, #524's TOU gate, #526's authorization) already moved most of the
     corpus, so this is a recorded quantity rather than a pass/fail on equality.
+
+    Counted over the fixtures that *have* a v10.0.2 reference plan, not over
+    the whole corpus: a fixture added later has no such plan (`plan: null`)
+    and cannot have drifted from the tag, so it must not shift this count and
+    force a full re-baseline -- the one remedy `capture_vpp_baseline.py`
+    warns against, since it discards the drift signal this test exists to
+    hold.
     """
     baseline = _baseline()
     missing = [n for n in fixture_names() if n not in baseline]
     assert missing == [], (
-        f"fixtures with no VPP baseline: {missing}. Regenerate per "
-        "`scripts/capture_vpp_baseline.py`."
+        f"fixtures with no VPP baseline: {missing}. Add them with "
+        "`scripts/capture_vpp_baseline.py --add-new`."
     )
 
+    referenced = [n for n in fixture_names() if baseline[n]["plan"] is not None]
     moved = [
         name
-        for name in fixture_names()
+        for name in referenced
         if baseline[name]["current_plan"] != baseline[name]["plan"]
     ]
     assert len(moved) == 35, (
-        f"{len(moved)} of {len(fixture_names())} fixtures now plan differently "
-        "from v10.0.2. If a phase did this deliberately, re-pin with the "
-        "measured delta."
+        f"{len(moved)} of {len(referenced)} v10.0.2-referenced fixtures now "
+        "plan differently from the tag. If a phase did this deliberately, "
+        "re-pin with the measured delta."
     )

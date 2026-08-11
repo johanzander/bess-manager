@@ -72,6 +72,16 @@ def derive_vpp_commands(
     it and wires the argument through, the pinned deltas show exactly what
     the gate changes.
     """
+    if len(intents) != len(actions_kw):
+        # The loop below iterates `actions_kw` and indexes `intents`, so a
+        # short `actions_kw` would silently return a partial command list and
+        # `simulate_vpp` would report a realized cost for part of a day --
+        # which the baseline would present as a plan change, not a harness bug.
+        raise ValueError(
+            f"plan is inconsistent: {len(intents)} intents vs "
+            f"{len(actions_kw)} actions"
+        )
+
     controller = SolaxModbusGrowattController(settings, control_mode="vpp")
     controller.strategic_intents = list(intents)
 
@@ -146,6 +156,17 @@ def vpp_command_to_power(
             available * settings.efficiency_discharge,
             ac_headroom_kwh,
         )
+        # Same zero-delivery trap as the two enabled-remote branches below: at
+        # the SoE floor `delivered` is 0 and `-0.0` reads as "not a discharge"
+        # to `_state_transition`, dropping into its IDLE branch. Today that is
+        # harmless here -- this line is only reached with `deficit > 0`, i.e.
+        # `home > solar`, so there is no surplus for IDLE to absorb -- but the
+        # invariant is incidental, not designed, and #537 wiring a planned rate
+        # into this branch would make it reachable with a surplus. Handled the
+        # same way in all three branches so it cannot come back in whichever
+        # one was left inconsistent.
+        if delivered <= 0:
+            return None
         return -delivered / dt
 
     if command.power_pct >= 100:

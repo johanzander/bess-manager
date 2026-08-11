@@ -17,7 +17,11 @@ has to be deliberate.
 import pytest
 
 from core.bess.dp_battery_algorithm import _state_transition
-from core.bess.simulation.vpp_simulator import VppCommand, vpp_command_to_power
+from core.bess.simulation.vpp_simulator import (
+    VppCommand,
+    derive_vpp_commands,
+    vpp_command_to_power,
+)
 from core.bess.tests.helpers import make_battery_settings
 
 DT = 1.0
@@ -180,6 +184,32 @@ class TestReleasedControl:
             VppCommand(0, True), solar=0.0, home=9.0, soe=9.0, settings=s, dt=DT
         ) == pytest.approx(-6.0)
 
+    def test_released_control_at_the_floor_does_not_charge(self):
+        """The third zero-delivery path, held to the same rule as the two
+        enabled-remote ones.
+
+        At the SoE floor with a deficit, `delivered` is 0 and `-0.0` reads as
+        "not a discharge" to `_state_transition` (`power < -POWER_TOLERANCE_KW`
+        is False), dropping into its IDLE branch. Today that cannot misbehave
+        here -- this branch needs `home > solar`, so there is no surplus for
+        IDLE to absorb -- but the invariant is incidental rather than designed,
+        and #537 wiring a planned rate into the released path would make the
+        branch reachable with a surplus. Pinned so the fix cannot come apart in
+        the one branch that was left inconsistent.
+        """
+        s = _settings()
+        assert (
+            vpp_command_to_power(
+                VppCommand(0, False),
+                solar=0.0,
+                home=1.0,
+                soe=s.min_soe_kwh,
+                settings=s,
+                dt=DT,
+            )
+            is None
+        )
+
     def test_released_control_absorbs_surplus(self):
         """Unlike the enabled-remote holds, load_first self-use genuinely does
         absorb surplus, so 0.0 (the IDLE branch) is correct here."""
@@ -190,3 +220,17 @@ class TestReleasedControl:
             )
             == 0.0
         )
+
+
+class TestPlanShape:
+    def test_mismatched_plan_lengths_raise(self):
+        """`derive_vpp_commands` iterates `actions_kw` and indexes `intents`,
+        so a short `actions_kw` would silently produce a partial command list
+        and `simulate_vpp` would price part of a day. Against the baseline that
+        reads as a plan change rather than as a harness bug, so it is rejected
+        at the input instead."""
+        s = _settings()
+        with pytest.raises(ValueError, match="inconsistent"):
+            derive_vpp_commands(["IDLE", "IDLE"], [0.0], s)
+        with pytest.raises(ValueError, match="inconsistent"):
+            derive_vpp_commands(["IDLE"], [0.0, 0.0], s)

@@ -32,6 +32,14 @@ planner drift. An earlier revision of this file did that.
 Only regenerate the plan half when deliberately re-baselining against a newer
 release. Regenerating it to make a failing test pass discards the very signal
 the baseline exists to give.
+
+**Adding a fixture does not need any of that.** A scenario added after the tag
+has no v10.0.2 plan and never will, so:
+
+    PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --add-new
+
+appends an entry per missing fixture with `plan: null` and today's plan pinned
+as `current_plan`. It never touches existing entries.
 """
 
 import argparse
@@ -44,6 +52,13 @@ logging.disable(logging.CRITICAL)
 parser = argparse.ArgumentParser()
 parser.add_argument("--plans-only", metavar="PATH")
 parser.add_argument("--from-plans", metavar="PATH")
+parser.add_argument(
+    "--add-new",
+    action="store_true",
+    help="add an entry for each fixture missing from the baseline, pinning "
+    "today's plan only (plan: null). The incremental path -- a new fixture "
+    "has no v10.0.2 reference and must not trigger a full re-baseline.",
+)
 args = parser.parse_args()
 
 DATA = Path("core/bess/tests/unit/data")
@@ -66,14 +81,48 @@ if args.plans_only:
     print(f"captured {len(plans)} plans")
     raise SystemExit(0)
 
-if not args.from_plans:
-    parser.error("pass --plans-only or --from-plans")
+if not args.from_plans and not args.add_new:
+    parser.error("pass --plans-only, --from-plans or --add-new")
 
 from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     BASELINE_PATH,
     capture_plan,
+    fixture_names,
     simulate_plan,
 )
+
+if args.add_new:
+    # A fixture added today has no v10.0.2 plan and never will -- the tag
+    # cannot be asked what it would have done with a scenario that did not
+    # exist. Pin the half that is meaningful (today's plan and its VPP
+    # execution) and record `plan: null` for the half that is not. Without
+    # this, adding any fixture fails the baseline tests with a full
+    # re-baseline as the only apparent remedy -- which discards the drift
+    # signal, exactly what this file's docstring warns against.
+    baseline = json.loads(BASELINE_PATH.read_text())
+    added = []
+    for name in fixture_names():
+        if name in baseline["fixtures"]:
+            continue
+        current_plan = capture_plan(name)
+        baseline["fixtures"][name] = {
+            "plan": None,
+            "commands": None,
+            "realized_cost": None,
+            "soe_trajectory": None,
+            "current_plan": current_plan,
+            "current": simulate_plan(name, current_plan),
+        }
+        added.append(name)
+    if not added:
+        # Nothing to do -- and rewriting the file anyway would churn the diff
+        # of an artefact whose whole value is being hard to change casually.
+        print("no fixtures missing from the baseline; nothing written")
+        raise SystemExit(0)
+    baseline["fixtures"] = dict(sorted(baseline["fixtures"].items()))
+    BASELINE_PATH.write_text(json.dumps(baseline, indent=1))
+    print(f"added {len(added)} fixture(s) with no v10.0.2 reference: {added}")
+    raise SystemExit(0)
 
 released_plans = json.loads(Path(args.from_plans).read_text())
 baseline = {

@@ -75,10 +75,3 @@ def simulate_plan(name: str, plan: dict) -> dict:
         "soe_trajectory": [inputs["initial_soe"]]
         + [p.energy.battery_soe_end for p in sim.period_data],
     }
-
-
-def capture_fixture(name: str) -> dict:
-    plan = capture_plan(name)
-    out = {"plan": plan}
-    out.update(simulate_plan(name, plan))
-    return out

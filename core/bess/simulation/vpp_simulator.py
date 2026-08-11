@@ -187,15 +187,41 @@ def vpp_command_to_power(
         delivered = min(
             rate_kw * dt, available * settings.efficiency_discharge, ac_headroom_kwh
         )
+        if delivered <= 0:
+            # Nothing to export -- at the SoE floor, or the AC stage is full
+            # of PV. Returning -0.0 here would be read as "not a discharge" by
+            # `_state_transition` (`power < -POWER_TOLERANCE_KW` is False) and
+            # fall into its IDLE branch, which absorbs solar surplus into the
+            # battery -- a *charge* under a forced-export command, and a direct
+            # contradiction of BATTERY_EXPORT's `charge_rate = 0` and of the
+            # grid_first hold below.
+            #
+            # Reachable and previously baked into the baseline:
+            # `realworld_2026_04_29_220919` period 37 commands (-1, True) at
+            # SoE 2.5 (== min) with 1.1 kWh of surplus, and the battery charged
+            # to 3.567 kWh. Same defect class as the +1%-hold bug.
+            return None
         return -delivered / dt
 
     # power == 0, remote control enabled: grid_first. Battery is held against
     # charging from solar surplus (#355), but still serves load (#118).
+    #
+    # **This load-serving branch is not exercised by the fixture corpus** --
+    # no SOLAR_EXPORT period in any of the 36 fixtures has `home > solar`, so
+    # replacing the condition with `if False` leaves the whole baseline green.
+    # The #118/#466-vs-#355 modelling choice therefore has no corpus signal
+    # behind it and is pinned only by
+    # `test_vpp_simulator_branches::test_grid_first_serves_load_from_battery`.
+    # Anything revisiting grid_first (#537, or a hardware confirmation) must
+    # change that test deliberately rather than discovering it silently.
     if deficit > 0:
         delivered = min(
             deficit, available * settings.efficiency_discharge, ac_headroom_kwh
         )
-        return -delivered / dt
+        # Same zero-delivery trap as the forced-discharge branch above: a hold
+        # must stay a hold, never fall through to IDLE's solar absorption.
+        if delivered > 0:
+            return -delivered / dt
     return None
 
 

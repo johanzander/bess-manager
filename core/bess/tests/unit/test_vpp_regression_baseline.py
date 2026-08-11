@@ -109,21 +109,38 @@ def test_current_plan_is_pinned(name):
     assert replayed["realized_cost"] == pytest.approx(
         entry["current"]["realized_cost"], abs=1e-9
     )
+    # The SoE path too, not just commands and total cost: an execution-model
+    # change can shift the trajectory while netting out in both (an efficiency
+    # application moved, or the zero-delivery hold regressing into a charge).
+    assert replayed["soe_trajectory"] == pytest.approx(
+        entry["current"]["soe_trajectory"], abs=1e-9
+    )
 
 
 def test_drift_from_the_released_version_is_recorded():
-    """How far today's plans have moved from v10.0.2, as a single visible
-    number rather than something to rediscover.
+    """How far today's plans have moved from v10.0.2 -- recomputed from the
+    DP, not read back out of the artefact.
 
-    Deliberate changes since the tag (Phase 2's preference table, #512's
-    finer grid, #524's TOU gate, #526's authorization) already moved most of
-    the corpus, so this is a recorded fact, not a pass/fail on equality.
+    An earlier revision compared two fields of the same JSON file, so `moved`
+    was a constant of the checked-in baseline and the assertion could only
+    fail if someone hand-edited it. It was documentation shaped like a test.
+    Recomputing makes it a real check on a sloppy re-baseline: if the plan
+    half is regenerated against the wrong tag or the wrong fixtures, the count
+    moves.
+
+    Deliberate changes since the tag (Phase 2's preference table, #512's finer
+    grid, #524's TOU gate, #526's authorization) already moved most of the
+    corpus, so this is a recorded quantity rather than a pass/fail on equality.
     """
     baseline = _baseline()
+    missing = [n for n in fixture_names() if n not in baseline]
+    assert missing == [], (
+        f"fixtures with no VPP baseline: {missing}. Regenerate per "
+        "`scripts/capture_vpp_baseline.py`."
+    )
+
     moved = [
-        name
-        for name in fixture_names()
-        if baseline[name]["current_plan"] != baseline[name]["plan"]
+        name for name in fixture_names() if capture_plan(name) != baseline[name]["plan"]
     ]
     assert len(moved) == 35, (
         f"{len(moved)} of {len(fixture_names())} fixtures now plan differently "

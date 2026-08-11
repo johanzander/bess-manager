@@ -5,6 +5,18 @@
   -0.885,
   -1.5
  ],
+ "intents": [
+  "IDLE",
+  "LOAD_SUPPORT",
+  "LOAD_SUPPORT",
+  "BATTERY_EXPORT"
+ ],
+ "intra_period_discharge_allowed": [
+  true,
+  true,
+  false,
+  false
+ ],
  "soe_trajectory": [
   4.0,
   4.0,

@@ -24,9 +24,10 @@ several in this codebase have been exactly that. This rule is now in
 along with its companion — assert outcomes, not the commands written to
 hardware.
 
-**Status: Passes 1, 2 and 3 done.** Pass 3 raised 5 findings (F1-F5) awaiting
-individual sign-off; no test was changed and nothing was re-pinned. Nothing
-here is approved until the maintainer signs it off.
+**Status: Passes 1, 2 and 3 done; Pass 3's five findings approved and
+implemented (2026-08-11).** F1 and F5 changed how existing pins compare, F2 and
+F3 added coverage that was missing, F4 was a question and is answered. See
+Pass 3's Resolution table.
 
 ---
 
@@ -265,10 +266,38 @@ differently.
 3.0, `battery_solar_cost` == `grid_only_cost` == 282.789, savings 0.0, a single
 distinct VPP command for the whole horizon, and R == P by construction. Its
 golden, its `expected_results`, its R==P entry and its VPP baseline entry are
-all satisfied without the optimizer doing anything. It still earns its place —
-it detects spurious cycling on a flat-price day — but it is one-sided, and its
-own `expected_behavior` description ("mostly idle with some load support")
-describes a plan with zero LOAD_SUPPORT periods.
+all satisfied without the optimizer doing anything.
+
+*Root cause (`bess-analyst`, 2026-08-11): all-IDLE is economically correct, and
+the fixture sits on a knife-edge.* Three things stack up. The battery starts at
+`initial_soe == min_soe_kwh == 3.0`, so it has **zero usable energy** and must
+buy before it can deliver. The cheap hours (20-23, down to 0.40 raw) all fall
+*after* the expensive ones (08-12, up to 1.30), so the obvious arbitrage runs
+backwards in time — despite the name, the raw spread is 0.9 SEK, not flat. And
+of all 276 ordered charge→discharge pairs, exactly one is positive: h0→h11, at
+**+0.0015 SEK/kWh**. Breakeven cycle cost for that pair is 0.4014 against the
+configured 0.40 — the fixture is 0.4% on the dead side. Even that margin is
+unrealizable, because the STORE disposition is rate-quantized (`_period_flows`
+ignores the candidate's power magnitude), so a charge hour is all-or-nothing
+6.0 kWh against only 5.2 kWh of displaceable load at h11, making the executable
+version **0.018 SEK worse than idling**. Confirmed by construction: dropping
+`cycle_cost_per_kwh` to 0.35 immediately produces a trade (0.196 SEK saved).
+
+Two corrections this forced on the audit's own first arithmetic, both worth
+recording because they are easy to repeat: wear is charged per kWh **stored**,
+so per kWh *delivered* it is `cycle_cost / η_discharge` = 0.4211, not 0.40; and
+this fixture overrides `additional_costs` to 1.03 in its own `price_data`, not
+the 0.773 default — an additive grid fee is paid on `1/η²` kWh bought but
+recovered on only 1 kWh delivered. Together those turned a hand-computed
+"+0.0504 SEK/kWh, apparently profitable" into breakeven. This is exactly why
+profitability figures go to `bess-analyst` rather than being derived in the
+main session.
+
+The fixture still earns its place — it detects spurious cycling on a
+genuinely-breakeven day, and being 0.4% from the edge makes it *sensitive* in
+that direction — but it is one-sided, and its own `expected_behavior`
+description ("mostly idle with some load support") describes a plan with zero
+LOAD_SUPPORT periods.
 
 **F5 — `expected_behavior` intent assertions are existence-only.**
 `assert_intent_present` passes on a single period out of up to 134, so it
@@ -277,6 +306,35 @@ are satisfied by ≥80% of periods (`historical_2025_01_05` IDLE at 100%,
 `realworld_2026_03_24_225535` IDLE at 88%). Several `intents_absent` entries
 are unfalsifiable by construction — SOLAR_STORAGE declared absent on a
 fixture with no solar.
+
+### Resolution — approved and implemented (2026-08-11)
+
+All five were put to the maintainer and approved. What changed:
+
+| | Decision | Implementation | Seen to fail? |
+|---|---|---|---|
+| **F1** | Tolerance, not numpy pin — the cheap option | `battery_solar_cost` compared at `abs=1e-9`; `actions`, `intents`, `soe_trajectory` stay `==` | n/a — this *removes* a false red. Validated in the other direction instead: green on py3.12.13/numpy 2.5.2 and py3.13, red on 27 of 36 at py3.11.15/numpy 2.4.6, same commit, plan bit-identical in all three |
+| **F2** | Add the missing pin | `intra_period_discharge_allowed` pinned per period in the goldens (2168 periods, 1203 open / 965 closed, 31 of 36 fixtures mixed), plus `test_intra_period_gate_outcome.py` asserting the gate's effect on realized cost and SoE | ✅ both, and they are complementary — see below |
+| **F3** | Wire it up | `total_charged` / `total_discharged` asserted at 0.001 kWh for the 27 fixtures that carry them | Pins what was already measured true; the 6 `regression_*` fixtures without the keys are skipped explicitly, not defaulted to 0.0 |
+| **F4** | Understand it | Root cause established above; no code or fixture changed | n/a |
+| **F5** | Replace existence checks with per-period pinning | `intents` pinned per period in the goldens (2168 periods); the `intents_present`/`intents_absent` loops removed from `test_all_scenarios` | ✅ strictly stronger — the old check passed on 1 period out of up to 134 |
+
+**The two F2 guards catch different mutations, which is the point.** Measured:
+
+| Mutation | goldens | `test_intra_period_gate_outcome` |
+|---|---|---|
+| `intra_period_discharge_gate` returns 100 unconditionally | 37 passed | **2 of 3 fail** |
+| DP forces `intra_period_discharge_allowed = True` (Pass 3's M3) | **29 of 37 fail** | 3 passed |
+
+Neither covers the gate alone: the goldens pin *what the DP decided*, the
+outcome test pins *that the decision is worth deciding*. An earlier draft of
+the outcome test drove `simulate` with a rate directly and would have caught
+neither — it was rerouted through `derive_control_command` so the ceiling comes
+from the real `_gated_discharge_rate` path.
+
+Goldens were regenerated to add the two new fields, verified additive:
+`actions` and `soe_trajectory` bit-identical to the pre-audit goldens on all
+36, max cost delta 0. Full suite green afterwards — 1721 fast, 534 slow.
 
 ### Pass 2 re-verified against current `main`
 

@@ -51,6 +51,31 @@ def capture_fixture(name: str) -> dict:
 
     return {
         "actions": [p.decision.battery_action for p in result.period_data],
+        # Per-period intent, not an existence check. `expected_behavior`'s
+        # `intents_present` passed when a single period out of up to 134
+        # carried the intent, so it could only ever detect an intent class
+        # disappearing outright -- and several `intents_absent` entries were
+        # unfalsifiable by construction (SOLAR_STORAGE declared absent on a
+        # fixture with no solar). Pinning the whole sequence makes any
+        # reclassification visible, including one that leaves the magnitudes
+        # untouched: `actions` and `soe_trajectory` are blind to intent, so a
+        # period switching LOAD_SUPPORT -> IDLE at the same power moved
+        # nothing they pin.
+        "intents": [p.decision.strategic_intent for p in result.period_data],
+        # The intra-period discharge authorization (#526), pinned per period
+        # because nothing else pinned it at all: forcing it True on every
+        # period left the goldens, `test_scenarios`, the strict R == P check
+        # and the VPP baseline all green (audit Pass 3 F2). It is invisible to
+        # `actions` and `soe_trajectory` by construction -- it does not change
+        # the planned energy, only the ceiling the inverter may use when
+        # actual sub-period load exceeds the forecast, which a 15-minute point
+        # forecast never exhibits.
+        #
+        # Non-degenerate: 1203 periods open, 965 closed, and 31 of 36 fixtures
+        # carry both (measured 2026-08-11).
+        "intra_period_discharge_allowed": [
+            p.decision.intra_period_discharge_allowed for p in result.period_data
+        ],
         "soe_trajectory": [inputs["initial_soe"]]
         + [p.energy.battery_soe_end for p in result.period_data],
         "battery_solar_cost": result.economic_summary.battery_solar_cost,

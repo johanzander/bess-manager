@@ -24,8 +24,9 @@ several in this codebase have been exactly that. This rule is now in
 along with its companion — assert outcomes, not the commands written to
 hardware.
 
-**Status: Passes 1 and 2 done, Pass 3 not started.** Sections marked ⬜ are not
-yet done. Nothing here is approved until the maintainer signs it off.
+**Status: Passes 1, 2 and 3 done.** Pass 3 raised 5 findings (F1-F5) awaiting
+individual sign-off; no test was changed and nothing was re-pinned. Nothing
+here is approved until the maintainer signs it off.
 
 ---
 
@@ -175,16 +176,124 @@ comment on #241.
 
 ---
 
-## Pass 3 — every pinned test ⬜ NOT STARTED
+## Pass 3 — every pinned test ⚠️ DONE (2026-08-11), 7 items for sign-off
 
 For each pinned/golden test: what does it actually assert, can it pass
 vacuously, and was it verified to fail without its fix? **Maintainer approves
-each one individually.**
+each one individually — nothing below has been re-pinned or changed.**
 
-Known entries to cover: the action-selector goldens (36 fixtures), the VPP
-baseline (#541), `assert_flow_coherence`, the plan-faithfulness R==P corpus,
-`test_scenarios` expected_results, `KNOWN_PLAN_EXECUTION_GAP_SEK`, and the
-per-issue regression files.
+### Method: measured, not read
+
+Vacuity is not decidable by reading a test. Four reversions of real merged
+fixes were applied one at a time, each instrument re-run against each, and the
+failures counted. Every mutant was reverted in a `finally` block and the tree
+verified clean afterwards.
+
+| Mutant — fix reverted | goldens (actions+SoE) | `test_scenarios` | strict R==P | VPP baseline | fast suite |
+|---|---|---|---|---|---|
+| M1 — #466 off-lattice residual-cover candidate removed | 2 / 36 | 2 | 0 | 2 | — |
+| M2 — #497 executability filter removed | 25 / 36 | 26 | 1 | 25 | — |
+| M3 — #526 gate forced always-allowed | **0** | **0** | **0** | **0** | **4** |
+| M4 — battery discharge split broken (reporting only) | 0 | 29 | 2 | 11 | — |
+
+The goldens report a constant 27 raw failures under every mutant *including no
+mutant at all*; see the environment defect below. The column above counts only
+fixtures whose `actions`/`soe_trajectory` moved, which is the portable signal.
+
+### The instruments, one by one
+
+| # | Pin | What it actually asserts | Can it pass vacuously? | Ever seen to fail? |
+|---|---|---|---|---|
+| 1 | **Action-selector goldens** — 36 fixtures, `golden_capture.py` / `test_action_selector_parity.py` | Per fixture: `battery_action` per period, the SoE trajectory, and `battery_solar_cost`, bit-identical `==` | **Partly.** It pins the *plan's magnitudes only*. It does not pin `strategic_intent`, `intra_period_discharge_allowed`, or any flow — M3 rewrote the gate on every period and moved 0 of 36. One fixture (`historical_2025_01_05_no_spread_no_solar`) is all-IDLE with a flat SoE, so its golden can only ever detect *spurious* activity, never lost activity | Yes — M1 fails 2, M2 fails 25. Never regenerated since creation (`1930547`, #521); Phase 2 (#525), #526/#530, Phase 3 (#534) and #524 all landed after it and moved no fixture's actions or SoE |
+| 2 | **`test_scenarios` `expected_results`** — 33 of 36 fixtures | 4 economic scalars vs pinned, `abs=0.001` SEK (0.01 for pct) | **No, since the 2026-08-11 tightening.** Measured headroom across all 33: median 0.000002, max 0.000005 on every one of the four fields — a 200x margin to the gate. 3 fixtures carry no `expected_results` at all | Yes — M1 fails 2, M2 fails 26, M4 fails 29 |
+| 3 | **Plan-faithfulness R==P, strict** — `test_realized_matches_planned_across_all_fixtures` | R − P == the fixture's known gap, `abs=0.001` SEK, no per-fixture exemptions | **No.** Measured gaps: 0.00000 on 35 of 36, +0.02140 on the 36th | Yes — M2 fails 1, M4 fails 2 |
+| 4 | **Plan-faithfulness R==P, in-scenario copy** — inside `test_all_scenarios` | Same comparison, tolerance `max(0.5, 1% of P)` | **Yes — it is subsumed.** It carries 0.5 SEK of slack against a measured 0.0 SEK signal, 500x looser than instrument 3 over the same corpus. It also derives commands *without* `intra_period_discharge_allowed` where instrument 3 passes it — measured, the two produce identical realized cost on 36 of 36, so the difference is currently inert rather than a second opinion | Never independently — every mutant that moves it also moves instrument 3 first |
+| 5 | **`assert_flow_coherence`** — `helpers.py`, 3 call sites | 5 balance identities (export sources, home supply, discharge split, charge split, import destinations) at 1e-6, plus non-negativity over 7 named flows | **The 5 balances, no** — M4 breaks one and 29 scenarios fail. **The 7 non-negativity checks, yes:** every flow is produced in `models.py::_calculate_detailed_flows` as a `min`/`max` clamp of non-negative quantities (`solar_to_home = min(solar_production, home_consumption)` onward), so none can be negative on the only path that builds these records | Yes, for the balances (M4) |
+| 6 | **`KNOWN_PLAN_EXECUTION_GAP_SEK`** | One entry: `regression_2026_08_08_143843` = +0.0214, asserted from 2 places | **No, and it is tight.** Measured +0.021401 against the pin, `abs(Δ)` = 0.000001 against a 0.001 tolerance | It is a pin on a known simulator blindness (#502 curtailment), not on a fix. Its stated exit condition is deletion when the simulator learns curtailment |
+| 7 | **VPP baseline (#541)** — 3 tests × 36 fixtures, 74 total | Replay of v10.0.2's plan through today's VPP model (commands, realized cost, SoE); today's plan pinned per fixture; a drift count of 35 | **Mostly no.** All 36 have a real v10.0.2 plan, so `plan: null` skips 0 — the skip path is currently unreachable. 4 fixtures have ≤2 distinct VPP commands across the whole horizon and 1 (`historical_2025_01_05...`) has exactly one, `(1, True)` × 24 | Yes — M2 fails 25, M4 fails 11 |
+
+### Per-issue regression fixtures
+
+All 8 `regression_*.json` files in `core/bess/tests/unit/data/` are reachable
+from at least one named test; 7 of 8 from a test whose name or docstring cites
+the issue. `regression_bess_debug_2026_08_07` is referenced only from
+`test_scenarios.py`, but that reference is
+`test_466_sunrise_crossover_covers_residual_load_instead_of_idle`, a named
+symptom test — not the generic corpus sweep.
+
+### Findings for sign-off
+
+**F1 — the goldens' cost pin is not portable, and `numpy` is unpinned.**
+`battery_solar_cost` is compared with `==`. On Python 3.11.15 / numpy 2.4.6,
+27 of 36 fixtures differ from the recorded value by 1e-16 to 5.7e-14 — actions
+and SoE trajectories are bit-identical on all 36, and CI is green on `main` at
+`d09b394a` (py3.13, algorithm job included). So this is last-ulp summation
+order, not behaviour. `backend/requirements.txt` pins no numpy version, so a
+numpy bump reproduces this in CI. The hazard is not the red run, it is the
+trained response to it — "goldens are red again, re-capture" is how a real
+change gets absorbed. The smallest genuine cost movement recorded anywhere in
+this audit is 0.0181 SEK, twelve orders of magnitude above the noise.
+*Options, for the maintainer:* (a) pin `battery_solar_cost` at `abs=1e-9` and
+keep `actions`/`soe_trajectory` bit-exact — note this contradicts the test's
+own docstring, which argues bit-exactness deliberately for Phase 1's purpose;
+(b) pin numpy; (c) both. Phase 1 is merged, and the goldens' remaining job is
+ongoing regression detection, where cross-environment reproducibility is worth
+more than ULP-exactness — but that is a judgement call, not a defect.
+
+**F2 — no pinned instrument covers the intra-period discharge gate.**
+M3 forced `intra_period_discharge_allowed = True` on every period, destroying
+#526's shadow-price authorization — the mechanism #520 and #524 rest on — and
+all four pinned instruments stayed green. Coverage is real but rests entirely
+on 4 named unit tests
+(`test_discharge_gate_authorization_526.py` ×2,
+`test_load_support_gate_regression_393.py`,
+`test_solar_export_discharge_gate.py`), none of which is a pin or golden. This
+is the area carrying #537's withdrawn design and 118.11 kWh across 172
+gate-closed periods, and it is the one place where "the corpus pins are green"
+carries no information at all.
+
+**F3 — 27 fixtures record an energy-throughput pin that no test reads.**
+`expected_results.total_charged` / `total_discharged` exist in 27 fixtures and
+are asserted nowhere. Measured against today's plans, all 27 are still
+*accurate* to <0.001 kWh — so this is unused correct data, not rot. Wiring
+them up is a zero-cost strengthening that adds a physical quantity the cost
+scalars cannot express: two plans can cost the same and cycle the battery
+differently.
+
+**F4 — one fixture is degenerate across every instrument at once.**
+`historical_2025_01_05_no_spread_no_solar`: all 24 actions 0.0, SoE flat at
+3.0, `battery_solar_cost` == `grid_only_cost` == 282.789, savings 0.0, a single
+distinct VPP command for the whole horizon, and R == P by construction. Its
+golden, its `expected_results`, its R==P entry and its VPP baseline entry are
+all satisfied without the optimizer doing anything. It still earns its place —
+it detects spurious cycling on a flat-price day — but it is one-sided, and its
+own `expected_behavior` description ("mostly idle with some load support")
+describes a plan with zero LOAD_SUPPORT periods.
+
+**F5 — `expected_behavior` intent assertions are existence-only.**
+`assert_intent_present` passes on a single period out of up to 134, so it
+detects an intent class disappearing entirely and nothing short of that. Two
+are satisfied by ≥80% of periods (`historical_2025_01_05` IDLE at 100%,
+`realworld_2026_03_24_225535` IDLE at 88%). Several `intents_absent` entries
+are unfalsifiable by construction — SOLAR_STORAGE declared absent on a
+fixture with no solar.
+
+### Pass 2 re-verified against current `main`
+
+`solax_modbus_growatt_controller.py` changed in `9a05009` (#541) after Pass 2
+measured it, so its four checks in that file were re-run on `main`:
+
+| Reverted fix | Tests failing in `test_solax_modbus_growatt_vpp.py` | Named guard |
+|---|---|---|
+| #404 drop the timer refresh | 2 | `test_unchanged_active_command_refreshes_timer` fails ✅ |
+| #421 restore the power=0 stub write | 2 | `TestWriteScheduleToHardwareVpp`, 2 of 4 fail ✅ |
+| #355 regress the hold to `(0, False)` | 3 | matches Pass 2's recorded 3 ✅ |
+| #310/#311 route `apply_period` through TOU | 13 | `test_no_tou_segments_written` fails ✅ |
+
+All four still discriminate. Pass 2 recorded #421 as failing 3 tests where this
+run measures 2; the revert here was reconstructed from the docstring rather
+than replaying Pass 2's exact edit, so the difference is at least as likely to
+be the reconstruction as a weakening.
 
 ---
 

@@ -44,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Planned PV curtailment is now shown as "Curtailed"** across the dashboard's schedule, timeline, and status views, instead of looking like a profitable Solar Export. ([#501](https://github.com/johanzander/bess-manager/issues/501))
 - **"-0.00" no longer displays for values that round to zero** — e.g. a curtailed period's export revenue now shows as "0.00".
 - **Reported cost and savings no longer include a phantom charge for periods that will actually be curtailed at runtime by PV export-limit curtailment.** ([#502](https://github.com/johanzander/bess-manager/issues/502))
+- **Growatt VPP installs with AC charging disabled at the inverter now get it re-enabled on restart** — an inverter reporting VPP Status enabled but AC charging disabled was treated as fully configured, so planned grid-charging periods silently drew nothing from the grid. Each of the two registers is now checked and repaired on its own, so a drifted one is fixed without rewriting the healthy one. ([#539](https://github.com/johanzander/bess-manager/issues/539))
 ### Fixed
 
 - The consumption forecast now refreshes intraday like solar already does, instead of caching stale data until the 23:55 job. ([#395](https://github.com/johanzander/bess-manager/issues/395))

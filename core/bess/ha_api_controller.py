@@ -2273,6 +2273,17 @@ class HomeAssistantAPIController:
         """Read the current Growatt VPP Remote Control register state."""
         return self._get_raw_state("growatt_vpp_remote_control")
 
+    def get_growatt_vpp_allow_ac_charging(self) -> str | None:
+        """Read the current Growatt VPP allow-AC-charging register state.
+
+        Both flash registers the VPP path writes at startup need a read-back,
+        not just VPP Status: they are written together but can drift apart (a
+        user toggle, a firmware reset, or a write that failed after the first
+        of the two), and an install with Status Enabled but AC charging
+        Disabled cannot execute GRID_CHARGING at all.
+        """
+        return self._get_raw_state("growatt_vpp_allow_ac_charging")
+
     # ─────────────────────────────────────────────────────────────────────────
 
     def set_test_mode(self, enabled):

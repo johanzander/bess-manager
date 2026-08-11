@@ -6,10 +6,16 @@ behaviour on today's `main` — one PR at a time, one pinned test at a time.
 
 **The specific fear this addresses.** ridax67 and Frank-Leysen between them
 reported 29 issues, 25 of them closed. Those fixes must not resurface. Most of
-ridax's are Growatt VPP, which is the platform with the *least* automated
-coverage: `inverter_simulator` is TOU-only, so until #539/#541 lands there is
-no VPP regression baseline at all. A VPP fix is guarded by unit tests or by
-nothing.
+ridax's are Growatt VPP, which was the platform with the *least* automated
+coverage: `inverter_simulator` is TOU-only, so until #541 merged (2026-08-11)
+there was no VPP regression baseline at all, and a VPP fix was guarded by unit
+tests or by nothing.
+
+**That framing turned out to be half right, and the wrong half matters.** It is
+true for *behavioural* coverage. But the single completely unguarded fix Pass 2
+found (#302) is on the **TOU** side, and it is a crash — no simulator on either
+platform would have caught it. Coverage thinness and platform are less
+correlated than this document originally assumed; see the Pass 2 findings.
 
 **Every verification here means: the guard was made to FAIL by reverting the
 behaviour it protects.** A guard that passes both ways is not evidence, and
@@ -115,10 +121,26 @@ fail without its fix.
 | #376 ENTSO-e tomorrow prices stay zero | all-zero placeholder accepted as real prices until restart | `TestEntsoeSourceFailures::test_all_zero_prices_treated_as_not_yet_available` | ✅ removing the all-zero raise fails it |
 | #126 Belpex/ENTSO-e | hourly Belgian prices unsupported | 33 unit tests + e2e scenario `ci-wizard-entsoe-frank-126.json` | ✅ covered — and that filename is the per-reporter traceability Pass 1 found missing |
 | #248, #329 minimize flash wear | status/AC-charging rewritten repeatedly | `TestNoRedundantWritesAcrossCycles` (same instance, two applies) | ✅ — see #399 for the case it does *not* cover |
-| **#399 Vpp unnecessary flash writes** | status/AC-charging rewritten **on every restart** | was `test_seeds_state_from_hardware` | ⚠️ **PROXY GUARD.** It asserted `_vpp_status_confirmed` is seeded — the mechanism, not the write count. Stays green if the flag is seeded and then ignored. #329's write-count test never reaches the read-back path, because that instance already set the flag from its own first write. **Fixed:** `test_restart_with_status_already_enabled_writes_no_flash_registers` — fresh controller, already-Enabled inverter, zero flash writes, plus a positive assertion that the period command still goes out |
+| **#399 Vpp unnecessary flash writes** | status/AC-charging rewritten **on every restart** | was `test_seeds_state_from_hardware` | ⚠️ **PROXY GUARD.** It asserted `_vpp_status_confirmed` is seeded — the mechanism, not the write count. Stays green if the flag is seeded and then ignored. #329's write-count test never reaches the read-back path, because that instance already set the flag from its own first write. **Fixed:** `test_restart_with_status_already_enabled_writes_no_flash_registers` — fresh controller, already-Enabled inverter, zero flash writes, plus a positive assertion that the period command still goes out. **Then improved again in review** (`9b65b825`, merged with #541): the two flash registers are now confirmed *per register* and both are read back, because they can drift apart (a user toggle, a firmware reset, a write that failed between the two) and rewriting the healthy one is precisely the wear #399 asked to remove. Re-verified on merged `main` 2026-08-11: blanking both read-backs fails **4** tests, up from 1 |
 | **#302 TOU slot 1 end=00:00** | HA `select_option` 500 while setting `tou_time_1_end`, on the DST fall-back day | **none** | ⚠️ **UNGUARDED.** Deleting the DST end-time cap in `_groups_to_tou_intervals` left all 1714 fast tests green; the interval is then emitted as `24:59`. The fall-back day comes once a year, so a refactor could drop the cap in September and the first signal would be a user's inverter failing on the changeover night. **Fixed:** `test_dst_fall_back_never_writes_an_invalid_end_time`, asserting the emitted interval's times are valid wall-clock values |
 | #192 Check grid charge state | HA 502 Bad Gateway on a sensor read | n/a | **out of scope** — transient supervisor error, closed 2026-06-27, before the audit window; not something this refactor can regress |
 | ~~#289, #300, #304, #328, #448~~ | **questions, not bugs — out of scope** (maintainer, 2026-08-11). Nothing to regress. | n/a | n/a |
+
+### Re-verified against merged `main` (2026-08-11)
+
+Pass 2 ran on a branch. After #540 and #541 merged, both defect fixes were
+re-checked against `main` as a reader would find it — the fix reverted, the
+suite run, the named test observed to fail, the tree restored:
+
+| | on branch | on merged `main` |
+|---|---|---|
+| #302 — delete the DST end-time cap | 1 test fails | 1 test fails ✅ |
+| #399 — blank the hardware read-back | 1 test fails | **4** tests fail ✅ |
+
+The #399 improvement came from review, not from this audit
+(`9b65b825`). Worth recording because it is the counter-example to the
+pattern below: a guard that got *stronger* between being written and being
+merged, because someone asked what else could drift.
 
 ### What Pass 2 established beyond the individual results
 
@@ -168,10 +190,22 @@ per-issue regression files.
 
 ## Standing risk, independent of this audit
 
-Growatt VPP has no execution simulation until #541 merges. Until it does,
-ridax's VPP fixes are guarded by unit tests only — which pin *commands*, not
-*outcomes*. That is the thinnest coverage of any platform, on the platform
-with the most reported history.
+**Closed 2026-08-11: #541 merged**, so Growatt VPP now has an execution
+simulation and a v10.0.2 baseline. Before it, ridax's VPP fixes were guarded by
+unit tests only — which pin *commands*, not *outcomes* — the thinnest coverage
+of any platform, on the platform with the most reported history.
+
+Two limits on what that closure buys, both load-bearing for Pass 3:
+
+- **The harness reads "changed", never "worse".** At 15-minute point forecasts
+  there is no within-period load spike, so it models the intra-period gate's
+  cost but never its benefit, and will score any gate-closed change as a loss
+  whether or not it is one. Against a fixed baseline the bias cancels; quoting
+  a delta as an economic verdict is the misuse to guard against.
+- **It would not have caught #537.** The defect was in what a platform can
+  *execute*, not in what the plan costs. That gap is now covered separately by
+  `test_platform_mapping_fidelity.py`, which is a different instrument
+  answering a different question — see the #537 note below.
 
 **#537 is no longer a standing risk — it is a withdrawn design (2026-08-11).**
 It mapped #520's closed discharge gate onto VPP as a `battery_first` hold. On

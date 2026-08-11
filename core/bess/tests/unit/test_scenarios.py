@@ -120,17 +120,22 @@ def test_all_scenarios(scenario_name):
         len(solar_production) == horizon
     ), f"solar_production length {len(solar_production)} != base_prices length {horizon}"
 
-    # Run optimization
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
-        terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
-    )
+    # Run optimization.
+    #
+    # Pass `_scenario_inputs` through whole rather than re-listing keys
+    # (changed 2026-08-11). Re-listing dropped three inputs the fixtures
+    # actually set: `export_curtailment_active`, `initial_cost_basis` and
+    # `home_settings`. That is the same defect `golden_capture.py` was fixed
+    # for in Phase 1 -- its docstring even names the fixture -- and it was
+    # left standing here, so the corpus's own canonical suite kept replaying
+    # a different solve than the goldens did.
+    #
+    # It mattered most where it was least visible:
+    # `regression_2026_08_08_143843` exists to pin #510's charge-early
+    # tie-break *under the export-curtailment price floor*, sets
+    # `export_curtailment_active: True`, and was asserted here with
+    # curtailment OFF -- the one condition it was captured for.
+    result = optimize_battery_schedule(**_scenario_inputs(scenario))
 
     # Validate results using new data structures
     assert isinstance(result.period_data, list)
@@ -178,23 +183,40 @@ def test_all_scenarios(scenario_name):
         expected_results = scenario["expected_results"]
         economic_results = result.economic_summary
 
-        # Compare expected vs actual results with rounding to account for small numerical differences
-        # Map scenario field names to EconomicSummary field names
-        assert round(economic_results.grid_only_cost, 1) == round(
-            expected_results["base_cost"], 1
-        ), f"Grid-only cost mismatch: {economic_results.grid_only_cost:.2f} != {expected_results['base_cost']:.2f}"
+        # Tolerance, not rounding to 1 decimal (changed 2026-08-11).
+        #
+        # `round(x, 1)` compared costs at 0.1 SEK, which is far coarser than
+        # anything these fixtures actually vary by: measured across the 33
+        # pinned fixtures, the median |actual - pinned| is 0.000002 SEK and 32
+        # of 33 sit within 0.000005. The rounding was therefore not absorbing
+        # float noise -- it was hiding whole behaviour changes. It hid a real
+        # one: `regression_2026_08_08_143843` had drifted 0.0214 SEK from its
+        # recorded value (an improvement, from a later grid/tie change nobody
+        # re-pinned) and no test could see it.
+        #
+        # 0.001 SEK is ~500x the observed float spread and ~100x finer than
+        # the old gate, so it stays quiet on numerical noise while a genuine
+        # behavioural change has to be re-pinned deliberately -- which is the
+        # point of a pin.
+        COST_TOLERANCE_SEK = 0.001
+        PCT_TOLERANCE = 0.01
 
-        assert round(economic_results.battery_solar_cost, 1) == round(
-            expected_results["battery_solar_cost"], 1
-        ), f"Battery solar cost mismatch: {economic_results.battery_solar_cost:.2f} != {expected_results['battery_solar_cost']:.2f}"
+        assert economic_results.grid_only_cost == pytest.approx(
+            expected_results["base_cost"], abs=COST_TOLERANCE_SEK
+        ), f"Grid-only cost mismatch: {economic_results.grid_only_cost:.6f} != {expected_results['base_cost']:.6f}"
 
-        assert round(economic_results.grid_to_battery_solar_savings, 1) == round(
-            expected_results["base_to_battery_solar_savings"], 1
-        ), f"Savings mismatch: {economic_results.grid_to_battery_solar_savings:.2f} != {expected_results['base_to_battery_solar_savings']:.2f}"
+        assert economic_results.battery_solar_cost == pytest.approx(
+            expected_results["battery_solar_cost"], abs=COST_TOLERANCE_SEK
+        ), f"Battery solar cost mismatch: {economic_results.battery_solar_cost:.6f} != {expected_results['battery_solar_cost']:.6f}"
 
-        assert round(economic_results.grid_to_battery_solar_savings_pct, 1) == round(
-            expected_results["base_to_battery_solar_savings_pct"], 1
-        ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.2f}% != {expected_results['base_to_battery_solar_savings_pct']:.2f}%"
+        assert economic_results.grid_to_battery_solar_savings == pytest.approx(
+            expected_results["base_to_battery_solar_savings"], abs=COST_TOLERANCE_SEK
+        ), f"Savings mismatch: {economic_results.grid_to_battery_solar_savings:.6f} != {expected_results['base_to_battery_solar_savings']:.6f}"
+
+        assert economic_results.grid_to_battery_solar_savings_pct == pytest.approx(
+            expected_results["base_to_battery_solar_savings_pct"], abs=PCT_TOLERANCE
+        ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.4f}% != {expected_results['base_to_battery_solar_savings_pct']:.4f}%"
+
     else:
         logger.info(
             f"No expected results for scenario {scenario_name}, skipping validation"

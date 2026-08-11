@@ -65,8 +65,8 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 | 0 | in-flight WIP: #510, #511 (#497), #506, #507 (#502), #508 (#501), #515, #516 (#512), #517 (#466 crossover) | 2, 3 | **DONE** |
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
-| 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | re-scoped 2026-08-10 |
-| 4 | #352 residual, #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | gated on #520/#524 |
+| 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | **MERGED — PR #534** (re-scoped 2026-08-10). Closeable: all five follow-ups below are non-blocking, and #536 is explicitly "does not block a release" |
+| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED**; now gated on D1–D4 in the design doc and on the beta shipping first |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
 | found en route | #528 (derived `lifetime_load_consumption` omits the battery terms, so it reports actual load **plus net battery charge**; the `max(derived, 0.0)` clamp hides the largest errors). Does *not* reach the `ha_statistics` forecast — that path resolves the entity directly and raises when absent | 1 input | filed 2026-08-10, unscheduled |
@@ -573,10 +573,12 @@ One session argued Phase 4 had been overtaken by the #511/#517 fixes. It
 had not, and the counter-evidence is static and re-checkable rather than
 inferential — re-run these two greps before reopening the question:
 
-- **The plan charges at nominal power in seven hardcoded places.**
+- **The plan charges at nominal power in six hardcoded places.**
   `rate_throughput = battery_settings.max_charge_power_kw * dt` appears at
-  `dp_battery_algorithm.py:306,339,377,475,589,728` and
-  `pwl_window_dp.py:537`.
+  `dp_battery_algorithm.py:355,475,508,546,644` and `pwl_window_dp.py:543`.
+  (Re-measured 2026-08-11 on `2dcd540f`. This said *seven*, at now-stale line
+  numbers, until Phase 3 restructured the file. The count is incidental; the
+  next bullet is the load-bearing one.)
 - **None of them reads the configured charge rate.** `charging_power_rate`
   has **zero** occurrences in `dp_battery_algorithm.py`,
   `pwl_window_dp.py`, and `action_selector.py` — while
@@ -591,19 +593,56 @@ discharge executability), and it is precisely what "candidates are
 executable commands" fixes. Phase 4 stands.
 
 **Phase 4's live driver is #352, not #320.** #320 is closed (see the issue
-map). Measured for #352: 22 sub-load `grid_first` periods live, **16 of
-them in the 0.1–0.5 kWh band #511 does not reach**, 5 clearly
+map). Recorded for #352 on 2026-08-10: 22 sub-load `grid_first` periods live,
+16 of them in the 0.1–0.5 kWh band #511 does not reach, 5 clearly
 spike-exposed.
 
-### Gating
+⚠️ **That figure does not currently reproduce, and it gates 4b (2026-08-11).**
+Scanning all 36 scenario fixtures on `2dcd540f` for BATTERY_EXPORT periods
+planned below the house deficit gives **0**, none in the band. The fixtures'
+plans have not moved in between — the action-selector goldens predate
+2026-08-10 and still pass bit-identically — so the two measurements count
+different things. The likely explanation is that the fixture set is the wrong
+instrument: none of them comes from a configuration like the reporter's (5 kW
+inverter, UK/Octopus, evening load against a 0.6–0.95 kW `grid_first`
+commitment). Reconcile the figure, and build a reproduction fixture from a real
+bundle, before writing 4b — that number is the justification for the work.
 
-Phase 4's central claim is that R==P becomes structural. Two open issues
-decide what R==P even means at the boundary, so **settle them first** —
-`#526` → `#520` → `#524` (`#524` is already labelled `[BLOCKED]` on
-`#520`, and `#520`'s discharge gate opens unconditionally where
-`shadow_price == 0.0` is ambiguous between "worth nothing" and "never
-computed", which is #526). Building Phase 4 on an unsettled gate means
-encoding the ambiguity into the candidate space.
+**#352 is two bugs; only one is Phase 4's** (split recorded on the issue,
+2026-08-11). *Shape A* — LOAD_SUPPORT throttled below house load — is gatable
+and was addressed by #520/#524, pending hardware verification. *Shape B* —
+low-rate BATTERY_EXPORT on `grid_first` — cannot be gated at all, because
+`grid_first` does not load-follow and raising its ceiling means "export at full
+rate" (#324). Shape B is Phase 4's.
+
+### Gating — ✅ CLEARED 2026-08-11
+
+Phase 4's central claim is that R==P becomes structural, and two open issues
+decided what R==P meant at the boundary: `#526` → `#520` → `#524`. **All three
+are merged** (PRs #530 and #524), so the gate is settled and its ambiguity is
+no longer at risk of being encoded into the candidate space. #541 additionally
+supplied the VPP regression baseline that #540 gated Phase 4 on.
+
+Two things gate it now, neither a code dependency:
+
+1. **The design doc exists; its decisions are open.**
+   `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`
+   — four decisions need the maintainer (D1–D4 there). One is a blocker the
+   split below did not anticipate: **the selector cannot simply import
+   `inverter_simulator`.** That module imports `intra_period_discharge_gate`
+   from `battery_system_manager` and `InverterController`, so reusing it in the
+   selector would make the optimizer core depend on the top-level orchestrator.
+   `dp_battery_algorithm:1201` already defers an `action_selector` import
+   because `action_selector` imports it back, so one cycle is already being
+   worked around; adding a second is what `rules.md`'s workaround check
+   forbids. The remedy is a leaf execution module both sides depend on, which
+   means relocating the gate — hence approval.
+2. **Sequencing behind the beta.** Phases 1–3 were parity-preserving: the
+   goldens were captured at Phase 1 and every later change left all 36
+   fixtures' actions and SoE bit-identical. 4b/4c deliberately break that. The
+   beta exists to prove 25 closed reporter fixes on real hardware, and a
+   candidate-space change that moves most plans would make any report from
+   those reporters ambiguous between a regression and an intended new choice.
 
 ### Split into four shippable PRs
 

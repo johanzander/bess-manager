@@ -2572,10 +2572,6 @@ class BatterySystemManager:
         logger.info("Schedule update required: %s", reason)
         self._current_schedule = temp_schedule
 
-        # Read the currently-active TOU intervals BEFORE apply_intents
-        # rebuilds them, so write_to_hardware still sees what's on hardware
-        # right now (used for stale-segment cleanup on some platforms).
-        current_tou = self._inverter_controller.active_tou_intervals.copy()
         effective_period = 0 if prepare_next_day else period
         self._inverter_controller.apply_intents(temp_schedule, effective_period)
 
@@ -2583,8 +2579,11 @@ class BatterySystemManager:
             if self._controller is None:
                 logger.error("Cannot apply schedule: controller is not available")
             else:
-                self._inverter_controller.write_to_hardware(
-                    self._controller, effective_period, current_tou
+                # No snapshot of "what's on hardware" is passed in: platforms
+                # that need it read the inverter themselves. Passing our own
+                # pre-apply model let the two drift apart (issue #551).
+                self._inverter_controller.sync_to_hardware(
+                    self._controller, effective_period
                 )
 
             # Clear corruption flag after successful hardware write

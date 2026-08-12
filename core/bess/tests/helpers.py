@@ -401,3 +401,23 @@ def assert_savings_positive(result) -> None:
         f"Grid-only: {result.economic_summary.grid_only_cost:.2f}, "
         f"Optimized: {result.economic_summary.battery_solar_cost:.2f}"
     )
+
+
+def empty_slot_table() -> list[dict]:
+    """A Growatt MIN inverter with nothing programmed.
+
+    The hardware always reports all 9 slots; unused ones come back disabled.
+    An empty list means the read itself failed, which GrowattMinController
+    treats as fatal (issue #551) — so mocks representing an idle inverter must
+    return this, not [].
+    """
+    return [
+        {
+            "segment_id": slot_id,
+            "start_time": "00:00",
+            "end_time": "00:00",
+            "batt_mode": "load_first",
+            "enabled": False,
+        }
+        for slot_id in range(1, 10)
+    ]

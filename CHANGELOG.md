@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Growatt MIN TOU segments are now written against the inverter's real state**, ending repeated "500 Server Error" write failures and leaving no unplanned segments running on the battery. ([#551](https://github.com/johanzander/bess-manager/issues/551))
 - **House load spikes during a battery-supported period are now covered from the battery instead of the grid**, on TOU/register platforms, whenever the stored energy is worth less than importing at that moment (`buy_price × discharge_efficiency ≥ shadow_price`, decided by the optimizer). When the battery is genuinely being reserved for a pricier later period the reserve is still protected and the spike is imported. ([#520](https://github.com/johanzander/bess-manager/issues/520))
 - Near-tied battery decisions now prefer the fullest load-covering discharge even when the tie surfaces at a partial cover, closing a gap where residual import stayed exposed to consumption spikes. ([#512](https://github.com/johanzander/bess-manager/issues/512))
 - **Sub-period battery discharge is no longer permitted on an uncomputed value** — the ceiling opened whenever the battery sat at its reserve floor, where no marginal value exists. ([#526](https://github.com/johanzander/bess-manager/issues/526))

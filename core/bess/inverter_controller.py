@@ -868,13 +868,16 @@ class InverterController(ABC):
         """
 
     @abstractmethod
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write schedule to inverter hardware.
+
+        Implementations that need to know what the inverter currently holds
+        must read it from the inverter themselves — there is no caller-supplied
+        snapshot, because one that drifted out of sync caused issue #551.
 
         Returns:
             Tuple of (writes, disables)

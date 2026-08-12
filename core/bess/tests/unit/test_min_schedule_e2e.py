@@ -27,6 +27,7 @@ from core.bess.growatt_min_controller import (
 )
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import empty_slot_table
 
 pytestmark = pytest.mark.slow
 
@@ -362,6 +363,9 @@ class TestEndToEndHardwareWrite:
             def __init__(self):
                 self.failure_tracker = None
 
+            def read_inverter_time_segments(self):
+                return empty_slot_table()
+
             def set_inverter_time_segment(
                 self, segment_id, batt_mode, start_time, end_time, enabled
             ):
@@ -376,7 +380,7 @@ class TestEndToEndHardwareWrite:
                 )
 
         controller = CapturingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
 
         for call in calls:
             assert 1 <= call["segment_id"] <= 9, (
@@ -395,12 +399,15 @@ class TestEndToEndHardwareWrite:
             def __init__(self):
                 self.failure_tracker = None
 
+            def read_inverter_time_segments(self):
+                return empty_slot_table()
+
             def set_inverter_time_segment(self, **kwargs):
                 nonlocal write_count
                 write_count += 1
 
         controller = CountingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
 
         assert (
             write_count <= 9

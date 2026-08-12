@@ -13,10 +13,13 @@ Key Principles:
 - Do NOT test internal data structures, field names, or algorithm-specific details
 """
 
+import logging
+
 import pytest  # type: ignore
 
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import empty_slot_table
 
 
 def hourly_to_quarterly(
@@ -924,6 +927,9 @@ class _CapturingController:
         self.failure_tracker = None
         self.calls: list[dict] = []
 
+    def read_inverter_time_segments(self) -> list[dict]:
+        return empty_slot_table()
+
     def set_inverter_time_segment(
         self,
         segment_id: int,
@@ -947,7 +953,7 @@ class TestHardwareWriteRespectsSlotLimit:
     """Regression tests: the inverter only accepts segment_id 1-9.
 
     Writing a segment_id outside that range causes the Growatt HA service to
-    return 500. These tests verify that write_to_hardware never
+    return 500. These tests verify that sync_to_hardware never
     issues such a call regardless of how many TOU intervals were generated.
     """
 
@@ -957,7 +963,7 @@ class TestHardwareWriteRespectsSlotLimit:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _CapturingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
 
         assert controller.calls, "Expected at least one hardware write"
         for call in controller.calls:
@@ -966,12 +972,12 @@ class TestHardwareWriteRespectsSlotLimit:
             ), f"segment_id {call['segment_id']} exceeds hardware slot range 1-9"
 
     def test_write_count_never_exceeds_hardware_slot_count(self, scheduler):
-        """write_to_hardware must not push more than 9 segments."""
+        """sync_to_hardware must not push more than 9 segments."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _CapturingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
 
         assert (
             len(controller.calls) <= 9
@@ -988,7 +994,7 @@ class TestHardwareWriteRespectsSlotLimit:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
 
         controller = _CapturingController()
-        scheduler.write_to_hardware(controller, effective_period=12, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=12)
 
         for call in controller.calls:
             assert (
@@ -1006,7 +1012,7 @@ class _FailingController(_CapturingController):
 class TestHardwareWriteFailurePropagates:
     """Regression: a failed segment write must raise, not be swallowed.
 
-    Previously write_to_hardware caught per-segment write
+    Previously sync_to_hardware caught per-segment write
     exceptions and only logged them, returning normally. The caller
     (BatterySystemManager._apply_schedule) treated that as success and
     cleared _hardware_write_pending, so a failed write was never retried
@@ -1020,15 +1026,16 @@ class TestHardwareWriteFailurePropagates:
 
         controller = _FailingController()
         with pytest.raises(RuntimeError):
-            scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+            scheduler.sync_to_hardware(controller, effective_period=0)
 
 
 class _SimulatingController(_CapturingController):
     """Controller stub that also models the inverter's TOU slot table.
 
     Writes with enabled=True occupy the slot; enabled=False clears it.
-    `hardware_segments()` returns the currently programmed segments, suitable
-    for passing back as `current_tou` on the next cycle.
+    `hardware_segments()` returns the currently programmed segments, and
+    `read_inverter_time_segments()` reports the full 9-slot table the way the
+    real inverter does — occupied slots plus disabled entries for the rest.
     """
 
     def __init__(self):
@@ -1060,6 +1067,12 @@ class _SimulatingController(_CapturingController):
     def hardware_segments(self) -> list[dict]:
         return [dict(s) for s in self.slots.values()]
 
+    def read_inverter_time_segments(self) -> list[dict]:
+        return [
+            dict(self.slots.get(slot["segment_id"], slot))
+            for slot in empty_slot_table()
+        ]
+
 
 class TestSlotAssignmentPreservesActiveSegments:
     """When a previously-pending segment promotes to active across cycles, the
@@ -1078,7 +1091,7 @@ class TestSlotAssignmentPreservesActiveSegments:
         # Cycle 1 at start of day: 9 of the 10 strategic segments fit on hardware.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
         controller = _SimulatingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
 
         cycle1_hardware = self._content_set(controller.hardware_segments())
         assert (
@@ -1088,10 +1101,9 @@ class TestSlotAssignmentPreservesActiveSegments:
         # Cycle 2 at 03:00: the 01:00 segment has expired and the previously
         # pending 19:00 segment is now part of the active 9.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
-        scheduler.write_to_hardware(
+        scheduler.sync_to_hardware(
             controller,
             effective_period=12,
-            current_tou=controller.hardware_segments(),
         )
 
         hardware_after = self._content_set(controller.hardware_segments())
@@ -1116,17 +1128,313 @@ class TestSlotAssignmentPreservesActiveSegments:
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         controller = _SimulatingController()
-        scheduler.write_to_hardware(controller, effective_period=0, current_tou=[])
+        scheduler.sync_to_hardware(controller, effective_period=0)
         cycle1_call_count = len(controller.calls)
         assert cycle1_call_count > 0
 
         # Re-run the same conversion at the same period — no state has changed.
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
-        scheduler.write_to_hardware(
+        scheduler.sync_to_hardware(
             controller,
             effective_period=0,
-            current_tou=controller.hardware_segments(),
         )
         assert (
             len(controller.calls) == cycle1_call_count
         ), "Cycle 2 with identical state should not issue any new writes"
+
+
+# ── Regression: issue #551 — TOU diff must be computed against real hardware ──
+#
+# The data below is real, from the 2026-08-12 07:30 production failure:
+#   - _LIVE_HARDWARE_SLOTS: the growatt_server.read_time_segments response read
+#     off the inverter while the add-on was failing.
+#   - _intents_at_0730(): the strategic intent list rebuilt from that cycle's
+#     "Intent transition at period N" lines in the debug bundle.
+#
+# Replaying that cycle against the pre-fix code reproduces the production log
+# exactly: "Current=5 intervals, New=4", "Disabling TOU segment 2: 08:00-08:29",
+# then "Setting TOU segment 1: 08:00-08:14" — the write Growatt 500s on.
+
+
+def _seg(segment_id, start, end, mode, enabled=True):
+    return {
+        "segment_id": segment_id,
+        "start_time": start,
+        "end_time": end,
+        "batt_mode": mode,
+        "enabled": enabled,
+    }
+
+
+_LIVE_HARDWARE_SLOTS = [
+    _seg(1, "07:00", "07:14", "grid_first"),
+    _seg(2, "08:00", "08:29", "grid_first", enabled=False),
+    _seg(3, "08:00", "08:14", "grid_first"),
+    _seg(4, "09:00", "09:14", "grid_first"),
+    _seg(5, "19:30", "20:29", "grid_first"),
+    _seg(6, "11:45", "11:59", "battery_first"),
+    _seg(7, "13:45", "14:14", "battery_first"),
+    _seg(8, "16:00", "16:14", "battery_first"),
+    _seg(9, "23:45", "23:59", "battery_first", enabled=False),
+]
+
+# Ranges enabled on the inverter that the optimizer's plan does not contain.
+# The battery really did run these unplanned; they are leftovers from earlier
+# cycles whose disable calls returned 500.
+_ORPHAN_RANGES = {
+    ("09:00", "09:14"),
+    ("11:45", "11:59"),
+    ("13:45", "14:14"),
+    ("16:00", "16:14"),
+}
+
+
+def _intents_at_0730() -> list[str]:
+    """Rebuild the 07:30 cycle's 96-period intent list from the debug bundle."""
+    intents = ["LOAD_SUPPORT"] * 96
+    for start, end, intent in [
+        (30, 32, "SOLAR_EXPORT"),
+        (32, 33, "BATTERY_EXPORT"),
+        (33, 37, "SOLAR_EXPORT"),
+        (37, 52, "SOLAR_STORAGE"),
+        (52, 53, "GRID_CHARGING"),
+        (53, 55, "SOLAR_STORAGE"),
+        (55, 56, "GRID_CHARGING"),
+        (56, 63, "SOLAR_STORAGE"),
+        (63, 64, "SOLAR_EXPORT"),
+        (64, 66, "SOLAR_STORAGE"),
+        (66, 68, "SOLAR_EXPORT"),
+        (68, 70, "IDLE"),
+        (70, 78, "LOAD_SUPPORT"),
+        (78, 82, "BATTERY_EXPORT"),
+    ]:
+        for period in range(start, end):
+            intents[period] = intent
+    return intents
+
+
+class _PreloadedController(_CapturingController):
+    """Controller stub modelling an inverter whose 9 slots are already
+    populated, readable the way growatt_server.read_time_segments reads them."""
+
+    def __init__(self, segments):
+        super().__init__()
+        self.segments = [dict(s) for s in segments]
+
+    def read_inverter_time_segments(self):
+        return [dict(s) for s in self.segments]
+
+    def set_inverter_time_segment(
+        self, segment_id, batt_mode, start_time, end_time, enabled
+    ):
+        super().set_inverter_time_segment(
+            segment_id, batt_mode, start_time, end_time, enabled
+        )
+        for seg in self.segments:
+            if seg["segment_id"] == segment_id:
+                seg.update(
+                    start_time=start_time,
+                    end_time=end_time,
+                    batt_mode=batt_mode,
+                    enabled=enabled,
+                )
+                return
+        self.segments.append(_seg(segment_id, start_time, end_time, batt_mode, enabled))
+
+    def enabled_ranges(self) -> set[tuple[str, str]]:
+        return {
+            (seg["start_time"], seg["end_time"])
+            for seg in self.segments
+            if seg["enabled"]
+        }
+
+
+class _UnreadableController(_CapturingController):
+    """Controller whose segment read fails the way a transport error does."""
+
+    def read_inverter_time_segments(self):
+        raise RuntimeError("500 Server Error: Internal Server Error")
+
+
+class TestWriteDiffsAgainstRealHardware:
+    """Regression for issue #551.
+
+    The add-on read hardware TOU once at startup and diffed every later cycle
+    against its own in-memory model. Once those diverged it wrote segments that
+    duplicated live ones — which Growatt's cloud rejects with a 500 — and left
+    unplanned segments enabled on the inverter.
+    """
+
+    def _run_0730_cycle(self, scheduler, controller):
+        scheduler.strategic_intents = _intents_at_0730()
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+        scheduler.sync_to_hardware(controller, effective_period=30)
+
+    def test_does_not_rewrite_a_range_already_enabled_on_hardware(self, scheduler):
+        controller = _PreloadedController(_LIVE_HARDWARE_SLOTS)
+        self._run_0730_cycle(scheduler, controller)
+
+        duplicated = [
+            call
+            for call in controller.calls
+            if call["enabled"]
+            and (call["start_time"], call["end_time"]) == ("08:00", "08:14")
+        ]
+        assert not duplicated, (
+            "Wrote 08:00-08:14 grid_first, which slot 3 already holds enabled — "
+            f"Growatt rejects this with a 500. Calls: {duplicated}"
+        )
+
+    def test_unplanned_segments_left_on_hardware_are_disabled(self, scheduler):
+        controller = _PreloadedController(_LIVE_HARDWARE_SLOTS)
+        self._run_0730_cycle(scheduler, controller)
+
+        still_enabled = controller.enabled_ranges() & _ORPHAN_RANGES
+        assert not still_enabled, (
+            "Segments left enabled on the inverter that the plan does not "
+            f"contain: {sorted(still_enabled)}"
+        )
+
+    def test_slots_already_disabled_on_hardware_are_not_rewritten(self, scheduler):
+        """Real hardware reports its unused slots as disabled entries.
+
+        The in-memory model only ever held enabled intervals, so the diff never
+        saw a disabled one. Reading the inverter surfaces them, and re-issuing
+        a disable for a slot that is already disabled is a wasted write against
+        a cloud API that rejects them under load.
+        """
+        controller = _PreloadedController(_LIVE_HARDWARE_SLOTS)
+        self._run_0730_cycle(scheduler, controller)
+
+        already_disabled = {
+            seg["segment_id"] for seg in _LIVE_HARDWARE_SLOTS if not seg["enabled"]
+        }
+        redundant = [
+            call
+            for call in controller.calls
+            if not call["enabled"] and call["segment_id"] in already_disabled
+        ]
+        assert not redundant, f"Re-disabled already-disabled slots: {redundant}"
+
+    def test_read_failure_aborts_the_write(self, scheduler):
+        """An unreadable inverter must abort rather than write blind.
+
+        Diffing against nothing would rewrite every segment and reproduce the
+        very duplicate-write 500s this fix removes. The failure has to arrive
+        as an exception — emptiness cannot carry it, because an inverter with
+        no segments programmed is a legitimate, different state.
+        """
+        controller = _UnreadableController()
+        scheduler.strategic_intents = _intents_at_0730()
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+
+        with pytest.raises(Exception):  # noqa: B017 - transport error propagates
+            scheduler.sync_to_hardware(controller, effective_period=30)
+
+        assert not controller.calls, "No segment may be written after a failed read"
+
+    def test_inverter_with_no_segments_is_not_a_read_failure(self, scheduler):
+        """An empty segment list is a blank inverter, not a broken read.
+
+        The mock-HA scenarios ship `"time_segments": []` to mean "nothing
+        programmed". Treating that as a failure pinned _hardware_write_pending
+        forever and broke every MIN E2E run.
+        """
+        controller = _PreloadedController([])
+        scheduler.strategic_intents = _intents_at_0730()
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+
+        scheduler.sync_to_hardware(controller, effective_period=30)
+
+        written = {
+            (call["start_time"], call["end_time"])
+            for call in controller.calls
+            if call["enabled"]
+        }
+        assert written, "A blank inverter must receive the whole plan"
+
+    def test_hardware_segments_are_normalized_before_diffing(self, scheduler):
+        """The vendor payload is not already in our internal shape.
+
+        growatt_server can report batt_mode as an int. Unnormalized, no segment
+        ever matches (so everything is rewritten blind) and the int gets echoed
+        straight back to the inverter.
+        """
+        raw = [
+            # 08:00-08:14 grid_first, exactly what the plan wants — as the
+            # vendor API can report it, with an int mode.
+            {
+                "segment_id": 3,
+                "start_time": "08:00",
+                "end_time": "08:14",
+                "batt_mode": 2,
+                "enabled": True,
+            },
+            {
+                "segment_id": 5,
+                "start_time": "19:30",
+                "end_time": "20:29",
+                "batt_mode": 2,
+                "enabled": True,
+            },
+        ]
+        controller = _PreloadedController(raw)
+        self._run_0730_cycle(scheduler, controller)
+
+        rewritten = [
+            call
+            for call in controller.calls
+            if (call["start_time"], call["end_time"]) == ("08:00", "08:14")
+        ]
+        assert not rewritten, (
+            "Rewrote a segment the inverter already holds — the int batt_mode "
+            f"was not normalized before comparing. Calls: {rewritten}"
+        )
+
+        int_modes = [
+            call for call in controller.calls if isinstance(call["batt_mode"], int)
+        ]
+        assert not int_modes, f"Echoed a raw int batt_mode back: {int_modes}"
+
+    def test_segment_missing_the_enabled_flag_does_not_break_the_diff(self, scheduler):
+        """A payload without `enabled` must not blow up mid-diff.
+
+        The diff read it two ways — `.get("enabled", True)` on one line and
+        `current["enabled"]` on the next — so an absent key let the entry
+        through the first and raised KeyError on the second. Normalizing at the
+        read boundary settles it on one default (absent = not programmed, the
+        convention the startup path has always used).
+        """
+        raw = [
+            {
+                "segment_id": 1,
+                "start_time": "19:30",
+                "end_time": "20:29",
+                "batt_mode": "grid_first",
+            },
+        ]
+        controller = _PreloadedController(raw)
+
+        self._run_0730_cycle(scheduler, controller)  # must not raise
+
+        assert controller.calls, "Diff ran to completion and wrote the plan"
+
+    def test_no_clear_all_banner_when_nothing_is_enabled(self, scheduler, caplog):
+        """The clear-everything banner must mean something was cleared.
+
+        Its guard counted all segments read back, and a real read always
+        returns 9 slots — so an idle plan logged "CLEARING ALL 9 existing TOU
+        segments" immediately followed by "No TOU segment changes needed",
+        in the logs this subsystem is diagnosed from.
+        """
+        controller = _PreloadedController(empty_slot_table())
+        scheduler.strategic_intents = ["IDLE"] * 96
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+
+        with caplog.at_level(logging.WARNING):
+            scheduler.sync_to_hardware(controller, effective_period=30)
+
+        assert "CLEARING ALL" not in caplog.text, (
+            "Announced clearing segments while none were enabled:\n" f"{caplog.text}"
+        )
+        assert not controller.calls, "Nothing to clear means nothing to write"

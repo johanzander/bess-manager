@@ -542,6 +542,8 @@ The mapping uses two layers of filtering:
 
 The result maps each BESS sensor key (e.g. `battery_soc`) to the corresponding HA `entity_id` (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). This entity_id is what the REST API uses to read state values at runtime.
 
+**Disabled entities are never mapped.** An entity with `disabled_by` set exists in the registry but has no state, so any REST read of it returns 404. Enabled matches always win; when a sensor key's *only* match is disabled, the key is left unmapped and returned in a second dict (`platform_disabled`, surfaced by `/api/setup/discover` as `disabledSensors` / `platformDisabledSensors`). The wizard blocks on those and names the entity to enable, rather than persisting a mapping that is guaranteed to fail at runtime. This matters because integrations ship useful entities disabled by default — `solax_modbus` disables all of its `Total *` lifetime energy counters, which is what made issue #549 present as "Sensor not found (404) … SYSTEM DEGRADED" after a wizard run that appeared to succeed.
+
 Renaming entities in the HA UI (friendly name/label) does not affect discovery. However, if a user changes the actual entity_id and removes the original suffix, the `unique_id` still matches — so discovery still works. Only if the integration itself changes its `unique_id` scheme (across versions) would manual remapping via the wizard be needed.
 
 #### Derived Hints
@@ -573,13 +575,13 @@ The setup wizard is a 6-step flow for first-time configuration. It is triggered 
 | `GET /api/setup/status` | Returns `wizard_needed` flag based on whether sensors are configured |
 | `POST /api/setup/discover` | Runs full auto-discovery, returns sensors map, missing sensors, platform hints |
 | `POST /api/setup/confirm` | Persists discovered sensor config to `/data/bess_discovered_config.json` and applies to live controller |
-| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections |
+| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections. Rejects (400) an energy provider whose own required configuration is empty — `nordpool_official` needs `nordpoolConfigEntryId`, `nordpool_hacs`/`entsoe` need their entity, `octopus` needs `octopusImportTodayEntity` — since such a config can never fetch a price |
 
 #### Wizard Steps (Frontend: `SetupWizardPage.tsx`)
 
 1. **Scan** — Calls `/api/setup/discover` to auto-detect integrations and sensors
-2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform
-3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints)
+2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform. Blocked while a required sensor is unmapped, or while a required sensor's only entity is disabled in HA (the entities to enable are listed by name)
+3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints). Blocked until the selected provider's required configuration is filled in, mirroring the server-side check on `/api/setup/complete`
 4. **Battery** — Set capacity, SOC limits, power rating, cycle cost
 5. **Home** — Set consumption, fuse current, voltage, phase count (pre-filled from detected phase count)
 6. **Complete** — Calls `/api/setup/complete` for atomic save

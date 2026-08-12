@@ -13,6 +13,8 @@ Key Principles:
 - Do NOT test internal data structures, field names, or algorithm-specific details
 """
 
+import logging
+
 import pytest  # type: ignore
 
 from core.bess.growatt_min_controller import GrowattMinController
@@ -1247,6 +1249,13 @@ class _PreloadedController(_CapturingController):
         }
 
 
+class _UnreadableController(_CapturingController):
+    """Controller whose segment read fails the way a transport error does."""
+
+    def read_inverter_time_segments(self):
+        raise RuntimeError("500 Server Error: Internal Server Error")
+
+
 class TestWriteDiffsAgainstRealHardware:
     """Regression for issue #551.
 
@@ -1308,17 +1317,124 @@ class TestWriteDiffsAgainstRealHardware:
         assert not redundant, f"Re-disabled already-disabled slots: {redundant}"
 
     def test_read_failure_aborts_the_write(self, scheduler):
-        """An unreadable inverter must abort, not diff against an empty list.
+        """An unreadable inverter must abort rather than write blind.
 
-        read_inverter_time_segments swallows errors and returns []. Treating
-        that as "hardware is empty" would rewrite every segment blind and
-        reproduce the very 500s this fix removes.
+        Diffing against nothing would rewrite every segment and reproduce the
+        very duplicate-write 500s this fix removes. The failure has to arrive
+        as an exception — emptiness cannot carry it, because an inverter with
+        no segments programmed is a legitimate, different state.
+        """
+        controller = _UnreadableController()
+        scheduler.strategic_intents = _intents_at_0730()
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+
+        with pytest.raises(Exception):  # noqa: B017 - transport error propagates
+            scheduler.sync_to_hardware(controller, effective_period=30)
+
+        assert not controller.calls, "No segment may be written after a failed read"
+
+    def test_inverter_with_no_segments_is_not_a_read_failure(self, scheduler):
+        """An empty segment list is a blank inverter, not a broken read.
+
+        The mock-HA scenarios ship `"time_segments": []` to mean "nothing
+        programmed". Treating that as a failure pinned _hardware_write_pending
+        forever and broke every MIN E2E run.
         """
         controller = _PreloadedController([])
         scheduler.strategic_intents = _intents_at_0730()
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
 
-        with pytest.raises(RuntimeError, match="read"):
+        scheduler.sync_to_hardware(controller, effective_period=30)
+
+        written = {
+            (call["start_time"], call["end_time"])
+            for call in controller.calls
+            if call["enabled"]
+        }
+        assert written, "A blank inverter must receive the whole plan"
+
+    def test_hardware_segments_are_normalized_before_diffing(self, scheduler):
+        """The vendor payload is not already in our internal shape.
+
+        growatt_server can report batt_mode as an int. Unnormalized, no segment
+        ever matches (so everything is rewritten blind) and the int gets echoed
+        straight back to the inverter.
+        """
+        raw = [
+            # 08:00-08:14 grid_first, exactly what the plan wants — as the
+            # vendor API can report it, with an int mode.
+            {
+                "segment_id": 3,
+                "start_time": "08:00",
+                "end_time": "08:14",
+                "batt_mode": 2,
+                "enabled": True,
+            },
+            {
+                "segment_id": 5,
+                "start_time": "19:30",
+                "end_time": "20:29",
+                "batt_mode": 2,
+                "enabled": True,
+            },
+        ]
+        controller = _PreloadedController(raw)
+        self._run_0730_cycle(scheduler, controller)
+
+        rewritten = [
+            call
+            for call in controller.calls
+            if (call["start_time"], call["end_time"]) == ("08:00", "08:14")
+        ]
+        assert not rewritten, (
+            "Rewrote a segment the inverter already holds — the int batt_mode "
+            f"was not normalized before comparing. Calls: {rewritten}"
+        )
+
+        int_modes = [
+            call for call in controller.calls if isinstance(call["batt_mode"], int)
+        ]
+        assert not int_modes, f"Echoed a raw int batt_mode back: {int_modes}"
+
+    def test_segment_missing_the_enabled_flag_does_not_break_the_diff(self, scheduler):
+        """A payload without `enabled` must not blow up mid-diff.
+
+        The diff read it two ways — `.get("enabled", True)` on one line and
+        `current["enabled"]` on the next — so an absent key let the entry
+        through the first and raised KeyError on the second. Normalizing at the
+        read boundary settles it on one default (absent = not programmed, the
+        convention the startup path has always used).
+        """
+        raw = [
+            {
+                "segment_id": 1,
+                "start_time": "19:30",
+                "end_time": "20:29",
+                "batt_mode": "grid_first",
+            },
+        ]
+        controller = _PreloadedController(raw)
+
+        self._run_0730_cycle(scheduler, controller)  # must not raise
+
+        assert controller.calls, "Diff ran to completion and wrote the plan"
+
+    def test_no_clear_all_banner_when_nothing_is_enabled(self, scheduler, caplog):
+        """The clear-everything banner must mean something was cleared.
+
+        Its guard counted all segments read back, and a real read always
+        returns 9 slots — so an idle plan logged "CLEARING ALL 9 existing TOU
+        segments" immediately followed by "No TOU segment changes needed",
+        in the logs this subsystem is diagnosed from.
+        """
+        controller = _PreloadedController(empty_slot_table())
+        scheduler.strategic_intents = ["IDLE"] * 96
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=30)
+
+        with caplog.at_level(logging.WARNING):
             scheduler.sync_to_hardware(controller, effective_period=30)
 
-        assert not controller.calls, "No segment may be written after a failed read"
+        assert "CLEARING ALL" not in caplog.text, (
+            "Announced clearing segments while none were enabled:\n" f"{caplog.text}"
+        )
+        assert not controller.calls, "Nothing to clear means nothing to write"

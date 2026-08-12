@@ -66,6 +66,7 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 
 import io
 import logging
+from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -694,27 +695,11 @@ class GrowattMinController(InverterController):
         self.current_hour = current_hour
         self.tou_intervals = []
 
-        for segment in tou_segments:
-            segment_id = segment.get("segment_id")
-            is_enabled = segment.get("enabled", False)
-            raw_batt_mode = segment.get("batt_mode")
-
-            # Convert integer to string representation if needed
-            if isinstance(raw_batt_mode, int):
-                batt_mode_map = {0: "load_first", 1: "battery_first", 2: "grid_first"}
-                batt_mode = batt_mode_map.get(raw_batt_mode, "battery_first")
-            else:
-                batt_mode = raw_batt_mode if raw_batt_mode else "load_first"
-
+        # Normalization is shared with the differential-diff path so the two
+        # cannot disagree on field types or missing-key defaults (issue #551).
+        for segment in self._normalize_segments(tou_segments):
             self.tou_intervals.append(
-                {
-                    "segment_id": segment_id,
-                    "batt_mode": batt_mode,
-                    "start_time": segment.get("start_time", "00:00"),
-                    "end_time": segment.get("end_time", "23:59"),
-                    "enabled": is_enabled,
-                    "strategic_intent": "existing_schedule",
-                }
+                {**segment, "strategic_intent": "existing_schedule"}
             )
 
         # Validate intervals read from inverter (log only, no recovery here).
@@ -1098,13 +1083,51 @@ class GrowattMinController(InverterController):
             enabled=segment["enabled"],
         )
 
+    # Growatt reports batt_mode as an int on some firmware/API paths.
+    _BATT_MODE_BY_CODE: ClassVar[dict[int, str]] = {
+        0: "load_first",
+        1: "battery_first",
+        2: "grid_first",
+    }
+
+    @classmethod
+    def _normalize_segments(cls, segments) -> list[dict]:
+        """Put a vendor segment payload into this class's internal shape.
+
+        Applied once at the read boundary so every consumer — the startup
+        initializer and the differential diff — sees the same field types and
+        the same defaults. When only the initializer normalized, the diff
+        compared an int batt_mode against our strings, matched nothing, and
+        rewrote every segment blind while echoing the raw int back to the
+        inverter.
+        """
+        normalized = []
+        for segment in segments:
+            raw_mode = segment.get("batt_mode")
+            if isinstance(raw_mode, int):
+                batt_mode = cls._BATT_MODE_BY_CODE.get(raw_mode, "battery_first")
+            else:
+                batt_mode = raw_mode or "load_first"
+
+            normalized.append(
+                {
+                    "segment_id": segment.get("segment_id"),
+                    "batt_mode": batt_mode,
+                    "start_time": segment.get("start_time", "00:00"),
+                    "end_time": segment.get("end_time", "23:59"),
+                    "enabled": segment.get("enabled", False),
+                }
+            )
+        return normalized
+
     def _read_segments_from_hardware(self, controller) -> list[dict]:
         """Read current TOU segments from inverter hardware.
 
-        Subclasses can override to use different read mechanisms
-        (e.g. entity state reads for solax_modbus).
+        Raises if the read fails; an empty list means the inverter genuinely
+        holds no segments. Subclasses can override to use different read
+        mechanisms (e.g. entity state reads for solax_modbus).
         """
-        return controller.read_inverter_time_segments()
+        return self._normalize_segments(controller.read_inverter_time_segments())
 
     def sync_to_hardware(
         self,
@@ -1127,17 +1150,10 @@ class GrowattMinController(InverterController):
         # started duplicating live segments — which the Growatt cloud rejects
         # with a 500 — while segments the plan had dropped stayed enabled on
         # the inverter and kept running.
+        # A failed read raises out of here rather than arriving as an empty
+        # list, so it cannot be mistaken for "the inverter holds nothing" and
+        # trigger a blind rewrite. _hardware_write_pending then retries.
         current_tou = self._read_segments_from_hardware(controller)
-        if not current_tou:
-            # read_inverter_time_segments swallows errors and returns []. A MIN
-            # inverter always has its 9 slots, so an empty read means the read
-            # failed. Diffing against [] would rewrite everything blind and
-            # recreate the very duplicates this read exists to prevent; raising
-            # leaves _hardware_write_pending set so the caller retries.
-            raise RuntimeError(
-                "Cannot write TOU schedule: failed to read current segments "
-                "from the inverter"
-            )
 
         # Only the active (hardware-programmed) intervals are eligible to be
         # written. self.tou_intervals can hold more than the 9 slots the MIN
@@ -1182,30 +1198,32 @@ class GrowattMinController(InverterController):
             (effective_period % 4) * 15,
         )
 
-        # When new schedule is empty, disable ALL current TOU segments
-        if len(new_tou) == 0 and len(current_tou) > 0:
+        # When new schedule is empty, disable ALL currently-enabled segments.
+        # Counting every slot read back would fire this on an idle plan against
+        # any real inverter, which always reports all 9 (issue #551).
+        enabled_now = [seg for seg in current_tou if seg.get("enabled")]
+        if len(new_tou) == 0 and enabled_now:
             logger.warning("=" * 80)
             logger.warning(
-                "Empty TOU schedule detected - CLEARING ALL %d existing TOU segments from inverter",
-                len(current_tou),
+                "Empty TOU schedule detected - CLEARING ALL %d enabled TOU segments from inverter",
+                len(enabled_now),
             )
             logger.warning(
                 "This happens when optimization determines NO profitable charging/discharging"
             )
             logger.warning("=" * 80)
 
-            for current in current_tou:
-                if current.get("enabled", True):
-                    disabled_segment = current.copy()
-                    disabled_segment["enabled"] = False
-                    to_disable.append(disabled_segment)
-                    logger.info(
-                        "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
-                        current["start_time"],
-                        current["end_time"],
-                        current["batt_mode"],
-                        current.get("segment_id"),
-                    )
+            for current in enabled_now:
+                disabled_segment = current.copy()
+                disabled_segment["enabled"] = False
+                to_disable.append(disabled_segment)
+                logger.info(
+                    "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
+                    current["start_time"],
+                    current["end_time"],
+                    current["batt_mode"],
+                    current.get("segment_id"),
+                )
 
             logger.info("Total segments marked for clearing: %d", len(to_disable))
         else:
@@ -1402,14 +1420,6 @@ class GrowattMinController(InverterController):
             current_hour: Current hour (0-23)
         """
         inverter_segments = self._read_segments_from_hardware(controller)
-        if not inverter_segments:
-            # Same contract as sync_to_hardware: the MIN always reports its 9
-            # slots, so an empty read is a failed read. Initializing from it
-            # would record "the inverter holds nothing" as fact.
-            raise RuntimeError(
-                "Cannot initialize TOU schedule: failed to read current "
-                "segments from the inverter"
-            )
         self.initialize_from_tou_segments(inverter_segments, current_hour)
 
     def check_health(self, controller) -> list:

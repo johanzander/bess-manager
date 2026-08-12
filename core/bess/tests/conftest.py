@@ -21,6 +21,7 @@ from core.bess.models import (  # noqa: E402
     PeriodData,
 )
 from core.bess.settings_store import SettingsStore  # noqa: E402
+from core.bess.tests.helpers import empty_slot_table  # noqa: E402
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -255,8 +256,14 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         return None
 
     def read_inverter_time_segments(self):
-        """Read current TOU segments from inverter."""
-        return []
+        """Read current TOU segments from inverter.
+
+        A MIN inverter always reports all 9 slots; unused ones come back
+        disabled. Returning [] would mean "read failed" to the controller
+        (see growatt_min_controller.sync_to_hardware), which is not what
+        an idle mock inverter represents.
+        """
+        return empty_slot_table()
 
     # Growatt solax_modbus TOU entity methods (used by SolaxModbusGrowattController)
 

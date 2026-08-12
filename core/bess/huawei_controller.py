@@ -219,11 +219,10 @@ class HuaweiController(InverterController):
         ]
         return "\n".join(lines)
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write Huawei TOU periods to hardware.
 

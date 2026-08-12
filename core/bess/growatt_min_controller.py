@@ -1106,22 +1106,39 @@ class GrowattMinController(InverterController):
         """
         return controller.read_inverter_time_segments()
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Apply MIN inverter TOU schedule to hardware using differential update.
 
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Period (0-95) from which to start applying changes
-            current_tou: TOU intervals currently active on the inverter
 
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
+        # The differential update must be diffed against what the inverter
+        # actually holds, read fresh every cycle. Diffing against our own
+        # in-memory model instead let the two drift apart (issue #551): the
+        # model was seeded once at startup and never corrected, so writes
+        # started duplicating live segments — which the Growatt cloud rejects
+        # with a 500 — while segments the plan had dropped stayed enabled on
+        # the inverter and kept running.
+        current_tou = self._read_segments_from_hardware(controller)
+        if not current_tou:
+            # read_inverter_time_segments swallows errors and returns []. A MIN
+            # inverter always has its 9 slots, so an empty read means the read
+            # failed. Diffing against [] would rewrite everything blind and
+            # recreate the very duplicates this read exists to prevent; raising
+            # leaves _hardware_write_pending set so the caller retries.
+            raise RuntimeError(
+                "Cannot write TOU schedule: failed to read current segments "
+                "from the inverter"
+            )
+
         # Only the active (hardware-programmed) intervals are eligible to be
         # written. self.tou_intervals can hold more than the 9 slots the MIN
         # inverter supports; the overflow is pending_write and must not reach
@@ -1194,6 +1211,11 @@ class GrowattMinController(InverterController):
         else:
             # Normal case: differential update (only update future segments)
             for current in current_tou:
+                if not current.get("enabled", True):
+                    # The inverter reports its unused slots as disabled entries.
+                    # There is nothing to turn off, and re-disabling them would
+                    # spend a cloud API call per idle slot, every cycle.
+                    continue
                 if end_minute(current) >= effective_minute:
                     has_match = any(
                         segment["start_time"] == current["start_time"]
@@ -1380,6 +1402,14 @@ class GrowattMinController(InverterController):
             current_hour: Current hour (0-23)
         """
         inverter_segments = self._read_segments_from_hardware(controller)
+        if not inverter_segments:
+            # Same contract as sync_to_hardware: the MIN always reports its 9
+            # slots, so an empty read is a failed read. Initializing from it
+            # would record "the inverter holds nothing" as fact.
+            raise RuntimeError(
+                "Cannot initialize TOU schedule: failed to read current "
+                "segments from the inverter"
+            )
         self.initialize_from_tou_segments(inverter_segments, current_hour)
 
     def check_health(self, controller) -> list:

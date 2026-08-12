@@ -364,6 +364,7 @@ for the full VPP-mode design (issue #355).
 2. Only create TOU segments for strategic modes (battery_first, grid_first) — load_first is the inverter default and needs no segment
 3. Enforce hardware constraints: max 9 TOU segments, chronological order, no overlaps
 4. Preserve past intervals to minimize unnecessary inverter writes
+5. Diff against segments read fresh from the inverter on every write cycle, never against an in-memory model — a model seeded once at startup drifts from hardware, producing writes that duplicate live segments (rejected by the vendor API) and leaving dropped segments enabled on the battery ([#551](https://github.com/johanzander/bess-manager/issues/551))
 
 ## Configuration and Settings
 

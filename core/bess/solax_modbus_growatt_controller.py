@@ -81,7 +81,7 @@ class SolaxModbusGrowattController(GrowattMinController):
     mode each period when needed. ``control_mode="vpp"`` issues per-period VPP
     power commands instead, with no persistent TOU schedule — analogous to
     how ``SolaxController`` applies per-period VPP commands for real SolaX
-    hardware, with ``write_to_hardware`` doing only the one-time VPP
+    hardware, with ``sync_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
 
@@ -482,11 +482,10 @@ class SolaxModbusGrowattController(GrowattMinController):
             logger.error("FAILED: Growatt VPP period write: %s", e)
             return False, str(e)
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Initialise hardware for the current control mode.
 
@@ -506,7 +505,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Period (0-95) from which to start applying changes
-            current_tou: TOU intervals currently active on the inverter (unused)
 
         Returns:
             Tuple of (segments_updated, segments_disabled)

@@ -465,6 +465,40 @@ class TestSignedBatteryPowerSplit:
         assert ctrl.get_battery_discharge_power() == 42.0
 
 
+class TestSignedPowerInSensorHealthPanel:
+    """The health panel reports what BESS reads, not the raw entity state.
+
+    get_method_sensor_info resolves the sensor key to an entity and reads that
+    entity, so before the split was applied there it showed the *net* register
+    for both halves — Charging Power -4876 W while the battery discharges,
+    which is the symptom the reporter screenshotted (#120)."""
+
+    def test_charge_power_reports_zero_while_discharging(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["status"] == "ok"
+        assert float(info["current_value"]) == 0.0
+
+    def test_discharge_power_reports_the_magnitude(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_discharge_power")
+        assert info["status"] == "ok"
+        assert float(info["current_value"]) == 4876.0
+
+    def test_separate_entities_report_their_state_verbatim(self, ctrl):
+        """Platforms with two real entities must keep showing the raw state,
+        formatting included — the split applies to shared entities only."""
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2000"})
+        )
+        info = ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["current_value"] == "2000"
+
+
 # ── Phase current discovery (issue #120) ─────────────────────────────────────
 
 

@@ -554,18 +554,28 @@ class SensorCollector:
             )
             return False
 
-    def _build_power_entity_to_flow_map(self) -> dict[str, str]:
-        """Build mapping from power sensor entity IDs (with sensor. prefix) to flow names.
+    def _build_power_entity_to_flow_map(self) -> dict[str, list[tuple[str, str]]]:
+        """Build mapping from power sensor entity IDs (with sensor. prefix) to flows.
+
+        One entity can back two sensor keys: platforms that expose a single
+        signed register for battery power (Huawei) or grid power (Solis) have
+        both halves of the pair resolving to the same entity. The value read
+        back from InfluxDB is then the net figure, and the key it belongs to
+        decides which flow it is and what sign it carries — so the mapping is
+        entity -> list of (sensor_key, flow_name), not a single flow that the
+        second key would silently overwrite.
 
         Returns:
-            Dict mapping "sensor.entity_id" -> flow_name
+            Dict mapping "sensor.entity_id" -> [(sensor_key, flow_name), ...]
         """
-        entity_to_flow = {}
+        entity_to_flows: dict[str, list[tuple[str, str]]] = {}
         for sensor_key, flow_name in self.power_sensor_flow_map.items():
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
             if entity_id:
-                entity_to_flow[f"sensor.{entity_id}"] = flow_name
-        return entity_to_flow
+                entity_to_flows.setdefault(f"sensor.{entity_id}", []).append(
+                    (sensor_key, flow_name)
+                )
+        return entity_to_flows
 
     def _get_power_based_flows(
         self, period: int, target_date
@@ -581,13 +591,14 @@ class SensorCollector:
         if not period_data:
             return None
 
-        entity_to_flow = self._build_power_entity_to_flow_map()
+        entity_to_flows = self._build_power_entity_to_flow_map()
 
         flows = {}
         for entity_key, kwh_value in period_data.items():
-            flow_name = entity_to_flow.get(entity_key)
-            if flow_name:
-                flows[flow_name] = kwh_value
+            for sensor_key, flow_name in entity_to_flows.get(entity_key, []):
+                flows[flow_name] = self.ha_controller.split_signed_power(
+                    sensor_key, kwh_value
+                )
 
         if not flows:
             return None

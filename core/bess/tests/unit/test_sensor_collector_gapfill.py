@@ -13,8 +13,10 @@ test_sensor_collector_runtime_gapfill.py (#387).
 from datetime import date
 from unittest.mock import MagicMock, patch
 
+from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.sensor_collector import SensorCollector
 from core.bess.settings import BatterySettings
+from core.bess.settings_store import SettingsStore
 
 
 def _entity_map():
@@ -39,6 +41,9 @@ def _make_ha_controller():
     ha = MagicMock()
     ha.resolve_sensor_for_influxdb.side_effect = lambda key: entity_map.get(key)
     ha._resolve_entity_id.return_value = ("soc_entity", None)
+    # Every key here maps to its own entity, so the shared-signed-entity split
+    # is a pass-through (see TestSignedEntityGapFill for the other case).
+    ha.split_signed_power.side_effect = lambda sensor_key, value: value
     return ha
 
 
@@ -118,3 +123,85 @@ class TestHistoricalBackfillGapFill:
             collector.collect_energy_data(10)  # period=10, runtime branch
 
         mock_influxdb_power_batch.assert_not_called()
+
+
+# ── One signed entity backing two power sensor keys (issue #120) ─────────────
+#
+# Huawei's battery register and Solis' grid register each back both halves of
+# a pair, so InfluxDB returns one *net* series for two flows. Resolving the
+# keys without applying the same split the live getters use would file a
+# charging period's positive average under battery_discharged.
+
+
+def _signed_battery_controller():
+    """Real controller whose battery keys share one signed entity.
+
+    Real rather than a MagicMock so the gap-fill path exercises the actual
+    split rule (HomeAssistantAPIController.split_signed_power) instead of a
+    restatement of it. No HTTP is issued: the historical path's readings are
+    stubbed and resolution reads the settings store.
+    """
+    store = SettingsStore()
+    store.data["sensors"] = {
+        "battery_charge_power": "sensor.huawei_battery_power",
+        "battery_discharge_power": "sensor.huawei_battery_power",
+        "lifetime_battery_charged": "sensor.battery_charged_entity",
+        "lifetime_battery_discharged": "sensor.battery_discharged_entity",
+        "lifetime_solar_energy": "sensor.solar_entity",
+        "lifetime_import_from_grid": "sensor.import_entity",
+        "lifetime_export_to_grid": "sensor.export_entity",
+        "battery_soc": "sensor.soc_entity",
+    }
+    return HomeAssistantAPIController(
+        ha_url="http://ha.local:8123",
+        token="test-token",
+        settings_store=store,
+        battery_power_polarity="charge_positive",
+    )
+
+
+def _gap_filled_flows(raw_kwh: float):
+    """Run one historical backfill period whose counters all read zero."""
+    ha = _signed_battery_controller()
+    collector = SensorCollector(ha, BatterySettings(total_capacity=30.0))
+
+    identical_readings = {
+        "battery_charged_entity": 100.0,
+        "battery_discharged_entity": 50.0,
+        "solar_entity": 200.0,
+        "import_entity": 300.0,
+        "export_entity": 10.0,
+        "soc_entity": 45.0,
+    }
+    power_batch_result = {
+        "status": "success",
+        "data": {5: {"sensor.huawei_battery_power": raw_kwh}},
+    }
+
+    with (
+        patch("core.bess.sensor_collector.time_utils") as mock_time_utils,
+        patch(
+            "core.bess.sensor_collector.get_power_sensor_data_batch",
+            return_value=power_batch_result,
+        ),
+    ):
+        mock_time_utils.now.return_value.hour = 3
+        mock_time_utils.now.return_value.minute = 0  # current_period = 12
+        mock_time_utils.today.return_value = date(2026, 7, 25)
+
+        collector._get_period_readings = MagicMock(
+            return_value=dict(identical_readings)
+        )
+        return collector.collect_energy_data(5)
+
+
+class TestSignedEntityGapFill:
+    def test_positive_average_gap_fills_charging_not_discharging(self):
+        energy_data = _gap_filled_flows(0.35)
+        assert energy_data.battery_charged == 0.35
+        assert energy_data.battery_discharged == 0.0
+
+    def test_negative_average_gap_fills_discharging(self):
+        energy_data = _gap_filled_flows(-0.35)
+        assert energy_data.battery_discharged == 0.35
+        assert energy_data.battery_charged == 0.0

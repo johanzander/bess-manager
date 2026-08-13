@@ -1024,7 +1024,14 @@ class HomeAssistantAPIController:
                     }
                 )
             else:
-                result.update({"status": "ok", "current_value": response.get("state")})
+                result.update(
+                    {
+                        "status": "ok",
+                        "current_value": self._displayed_sensor_value(
+                            sensor_key, response.get("state")
+                        ),
+                    }
+                )
         except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
@@ -1033,6 +1040,32 @@ class HomeAssistantAPIController:
                 }
             )
         return result
+
+    def _displayed_sensor_value(self, sensor_key: str, state):
+        """Return the value BESS reads for ``sensor_key``, not the raw state.
+
+        Two sensor keys can share one signed entity (Huawei's battery
+        register, Solis' grid register), in which case the entity's own state
+        is the *net* value and belongs to neither key alone: the health panel
+        showed Charging Power as -4876 W while the battery discharged (#120).
+        Every other key reports its state through unchanged, formatting
+        included.
+        """
+        if not self._is_shared_signed_key(sensor_key):
+            return state
+        try:
+            raw = float(state)
+        except (TypeError, ValueError):
+            return state
+        return str(self.split_signed_power(sensor_key, raw))
+
+    def _is_shared_signed_key(self, sensor_key: str) -> bool:
+        """True when ``sensor_key`` is one half of a shared signed entity."""
+        if sensor_key in ("battery_charge_power", "battery_discharge_power"):
+            return self._is_shared_signed_battery_power()
+        if sensor_key in ("import_power", "export_power"):
+            return self._is_shared_signed_grid_power()
+        return False
 
     def validate_methods_sensors(self, method_list: list) -> list:
         """Validate sensors for multiple methods at once."""
@@ -1462,13 +1495,41 @@ class HomeAssistantAPIController:
             and charge_entity == discharge_entity
         )
 
+    def split_signed_power(self, sensor_key: str, raw: float) -> float:
+        """Return the half of a shared signed power reading ``sensor_key`` owns.
+
+        The live getters split at read time, but callers that resolve a sensor
+        key to an entity ID and read that entity themselves — the InfluxDB
+        gap-fill path in SensorCollector, the health panel's raw state read —
+        hold a value the split has never been applied to. Both signed
+        conventions live here so one place decides which key takes which sign.
+
+        Returns ``raw`` unchanged for keys that are not half of a shared
+        signed pair, and for installs where the pair resolves to two entities.
+        """
+        if not self._is_shared_signed_key(sensor_key):
+            return raw
+
+        if sensor_key in ("battery_charge_power", "battery_discharge_power"):
+            # charge_positive is the only battery convention — see
+            # _is_shared_signed_battery_power.
+            positive_key = "battery_charge_power"
+        else:
+            positive_key = (
+                "import_power"
+                if self.grid_power_polarity == "import_positive"
+                else "export_power"
+            )
+
+        return max(0.0, raw if sensor_key == positive_key else -raw)
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
         if self._is_shared_signed_battery_power():
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, raw)  # charge_positive
+            return self.split_signed_power("battery_charge_power", raw)
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
@@ -1477,7 +1538,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, -raw)  # charge_positive
+            return self.split_signed_power("battery_discharge_power", raw)
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -2517,9 +2578,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, raw)
-            return max(0.0, -raw)  # export_positive
+            return self.split_signed_power("import_power", raw)
         return self._get_sensor_value("import_power")
 
     def get_export_power(self):
@@ -2528,9 +2587,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, -raw)
-            return max(0.0, raw)  # export_positive
+            return self.split_signed_power("export_power", raw)
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):

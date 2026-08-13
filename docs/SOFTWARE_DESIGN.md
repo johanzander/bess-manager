@@ -421,6 +421,8 @@ A platform-fixed sibling of the service-domain pattern above: some platforms (So
 
 Battery power works the same way where a platform exposes one signed register rather than separate charge/discharge entities: `SettingsStore.get_battery_power_polarity()` resolves `PLATFORM_BATTERY_POWER_POLARITY` (`"charge_positive"` for `huawei_solar_luna2000`, `""` elsewhere), held on `HomeAssistantAPIController.battery_power_polarity`, and `get_battery_charge_power()`/`get_battery_discharge_power()` split the reading by sign when both keys resolve to the same entity_id. Registry discovery points the second key at the first for these platforms; without that, the required Battery Monitoring health check reports discharge power permanently "Not configured" (#120). `BESSController.refresh_power_polarity()` re-syncs both conventions after any settings mutation that can touch the inverter section.
 
+Anything that reads the shared entity *without* going through those getters must apply the same split, since the entity's own state is the net figure and belongs to neither key alone. `HomeAssistantAPIController.split_signed_power(sensor_key, raw)` is the one place the sign rule lives, and the getters, the sensor health panel (`get_method_sensor_info`) and the InfluxDB gap-fill path (`SensorCollector._get_power_based_flows`, which maps one entity to *both* its keys' flows) all route through it.
+
 ### Platform Capabilities
 
 Different inverter platforms support different hardware features. The class hierarchy handles **behavioral** differences (TOU scheduling vs. period lists vs. VPP commands — genuinely different algorithms). Capabilities handle the narrower question: what does code *outside* the controller need to know about the platform?

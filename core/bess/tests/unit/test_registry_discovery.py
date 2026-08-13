@@ -860,7 +860,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_standard_entities(self):
         """Standard Growatt entities match via unique_id suffix."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -892,7 +892,7 @@ class TestMapRegistryEntities:
             "growatt_server",
             "rkm0d7n04x_battery_discharge_soc_limit",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -901,7 +901,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_sph_entities(self):
         """SPH entities match via mix_* unique_id sensor keys."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_sph_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_SPH_SUFFIX_MAP,
@@ -940,7 +940,7 @@ class TestMapRegistryEntities:
 
     def test_min_map_does_not_match_sph_entities(self):
         """MIN suffix map should not match SPH mix_* unique_ids."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_sph_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -954,7 +954,7 @@ class TestMapRegistryEntities:
 
     def test_sph_map_does_not_match_min_entities(self):
         """SPH suffix map should not match MIN tlx_* unique_ids."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_SPH_SUFFIX_MAP,
@@ -966,7 +966,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_renamed_entities_still_match(self):
         """User-renamed entity IDs still match via unique_id."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_renamed_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -980,7 +980,7 @@ class TestMapRegistryEntities:
 
     def test_solax_native_entities(self):
         """Native SolaX entities match via SOLAX_NATIVE_SUFFIX_MAP."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _solax_native_registry(),
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
@@ -1008,7 +1008,7 @@ class TestMapRegistryEntities:
             "solax_modbus",
             "solax_battery_minimum_capacity",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
@@ -1017,7 +1017,7 @@ class TestMapRegistryEntities:
 
     def test_solax_growatt_entities(self):
         """Growatt GEN4 inverter via solax_modbus matches via SOLAX_GROWATT_MIN_SUFFIX_MAP."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _solax_growatt_registry(),
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1067,7 +1067,7 @@ class TestMapRegistryEntities:
             "solax_modbus",
             "solax_ems_discharging_stop_soc",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1076,7 +1076,7 @@ class TestMapRegistryEntities:
 
     def test_platform_filter_excludes_other_integrations(self):
         """Entities from non-matching platforms are excluded."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["solax_modbus"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1085,7 +1085,7 @@ class TestMapRegistryEntities:
 
     def test_nordpool_entity_not_matched(self):
         """Nordpool entities are excluded by platform filter."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1093,7 +1093,7 @@ class TestMapRegistryEntities:
         assert "nordpool_kwh_se4_sek" not in result.values()
 
     def test_empty_registry(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [],
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1127,7 +1127,7 @@ class TestMapRegistryEntities:
                 "solax_total_reverse_power",
             ),
         ]
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             entities,
             ["solax_modbus"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1152,7 +1152,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_growatt_min_only(self):
         """MIN registry → detected_platform is growatt_server_min, MIN has more sensors."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_registry()
         )
         assert platform == "growatt_server_min"
@@ -1166,7 +1166,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_growatt_sph_only(self):
         """SPH registry → detected_platform is growatt_server_sph, all 12 sensors mapped."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_sph_registry()
         )
         assert platform == "growatt_server_sph"
@@ -1182,7 +1182,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_native_only(self):
         """When only native SolaX entities exist, detected_platform is solax."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_native_registry()
         )
         assert platform == "solax_modbus_native"
@@ -1205,7 +1205,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_growatt_min(self):
         """Growatt GEN4 inverter via solax_modbus with TOU slots → solax_modbus_growatt_min."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_tou_registry()
         )
         assert platform == "solax_modbus_growatt_min"
@@ -1220,7 +1220,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_growatt_with_tou(self):
         """Growatt with TOU entities detected as solax_modbus_growatt_min platform."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_tou_registry()
         )
         assert platform == "solax_modbus_growatt_min"
@@ -1239,7 +1239,9 @@ class TestDiscoverSensorsFromRegistry:
     def test_both_growatt_and_solax_native_present(self):
         """When both integrations exist, both are mapped; growatt_server_min is primary."""
         combined = _growatt_registry() + _solax_native_registry()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(combined)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            combined
+        )
         assert platform == "growatt_server_min"
         assert "growatt_server_min" in sensors
         assert "solax_modbus_native" in sensors
@@ -1247,7 +1249,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_renamed_growatt_entities_discovered(self):
         """User-renamed entities still discovered via unique_id."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_renamed_registry()
         )
         assert platform == "growatt_server_min"
@@ -1256,7 +1258,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_growatt_gen3(self):
         """GEN3 Growatt (MIX/SPA/SPH) detected as solax_modbus_growatt_sph platform."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_gen3_registry()
         )
         assert platform == "solax_modbus_growatt_sph"
@@ -1282,7 +1284,9 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solis_modbus_only(self):
         """Solis hybrid via solis_modbus → detected_platform is solis_modbus."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(_solis_registry())
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solis_registry()
+        )
         assert platform == "solis_modbus"
         assert "solis_modbus" in sensors
         solis = sensors["solis_modbus"]
@@ -1356,7 +1360,9 @@ class TestDiscoverSensorsFromRegistry:
             ),
         ]
 
-        sensors, platform = self.ctrl.discover_sensors_from_registry(monitoring_only)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            monitoring_only
+        )
 
         assert "solis_modbus" in sensors
         assert sensors["solis_modbus"]["battery_soc"] == "sensor.solis_battery_soc"
@@ -1376,15 +1382,20 @@ class TestDiscoverSensorsFromRegistry:
             _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
         )
 
-        mapped = self.ctrl._match_solis_dict_embedded_entities(
+        mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
             [disabled_entity, enabled_entity]
         )
 
         assert mapped["battery_soc"] == "sensor.solis_battery_soc"
+        assert "battery_soc" not in disabled
 
-    def test_solis_dict_embedded_matcher_falls_back_to_disabled_if_only_match(self):
-        """A disabled-only match is still returned (with a warning), per the
-        same deferral behavior as _map_registry_entities."""
+    def test_solis_dict_embedded_matcher_reports_disabled_only_match(self):
+        """A disabled-only match is reported, never mapped (#549).
+
+        Mapping it would persist an entity that has no state, so every
+        later read 404s — the same failure this matcher's sibling
+        ``_map_registry_entities`` used to produce.
+        """
         disabled_entity = _entity(
             "sensor.solis_battery_soc_old",
             "solis_modbus",
@@ -1392,9 +1403,12 @@ class TestDiscoverSensorsFromRegistry:
         )
         disabled_entity["disabled_by"] = "user"
 
-        mapped = self.ctrl._match_solis_dict_embedded_entities([disabled_entity])
+        mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
+            [disabled_entity]
+        )
 
-        assert mapped["battery_soc"] == "sensor.solis_battery_soc_old"
+        assert "battery_soc" not in mapped
+        assert disabled["battery_soc"] == "sensor.solis_battery_soc_old"
 
     def test_solax_growatt_gen4_vpp_entities_discovered(self):
         """GEN4 VPP entities are mapped alongside TOU entities (issue #118).
@@ -1403,7 +1417,9 @@ class TestDiscoverSensorsFromRegistry:
         control_mode BESS uses — detection still keys off the TOU marker.
         """
         registry = _solax_growatt_tou_registry() + _solax_growatt_vpp_entities()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_min"
         growatt_min = sensors["solax_modbus_growatt_min"]
         assert (
@@ -1431,7 +1447,9 @@ class TestDiscoverSensorsFromRegistry:
     def test_solax_growatt_gen3_vpp_entities_discovered(self):
         """GEN3 VPP entities are mapped — GEN3's only working control path."""
         registry = _solax_growatt_gen3_registry() + _solax_growatt_vpp_entities()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_sph"
         growatt_sph = sensors["solax_modbus_growatt_sph"]
         assert (
@@ -1448,7 +1466,9 @@ class TestDiscoverSensorsFromRegistry:
         registry = (
             _solax_growatt_tou_registry() + _solax_growatt_export_limit_entities()
         )
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_min"
         growatt_min = sensors["solax_modbus_growatt_min"]
         assert (
@@ -1466,7 +1486,9 @@ class TestDiscoverSensorsFromRegistry:
         registry = (
             _solax_growatt_gen3_registry() + _solax_growatt_export_limit_entities()
         )
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_sph"
         growatt_sph = sensors["solax_modbus_growatt_sph"]
         assert (
@@ -1501,6 +1523,79 @@ class TestDiscoverSensorsFromRegistry:
             ),
         ]
         assert self.ctrl._has_growatt_tou_entities(entities) is False
+
+
+# ---------------------------------------------------------------------------
+# Tests: Disabled entities are reported, never mapped (issue #549)
+# ---------------------------------------------------------------------------
+
+
+class TestDisabledEntitiesAreNotMapped:
+    """A disabled entity has no state in HA, so mapping one guarantees a 404.
+
+    Issue #549: solax_modbus ships its ``Total *`` lifetime counters
+    disabled_by=integration.  The mapper used to map them anyway (warning
+    only), which sailed through the wizard's non-empty check and surfaced
+    at runtime as "Sensor not found (404)" plus SYSTEM DEGRADED.
+    """
+
+    SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "total_grid_import": "lifetime_import_from_grid",
+    }
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+
+    def _disabled(self, entity_id: str, unique_id: str) -> dict:
+        entity = _entity(entity_id, "solax_modbus", unique_id)
+        entity["disabled_by"] = "integration"
+        return entity
+
+    def test_disabled_only_match_is_reported_not_mapped(self):
+        entity = self._disabled(
+            "sensor.solaxgrowatt_inverter_total_grid_import",
+            "SolaxGrowatt_total_grid_import",
+        )
+
+        mapped, disabled = self.ctrl._map_registry_entities(
+            [entity], ["solax_modbus"], self.SUFFIX_MAP
+        )
+
+        assert "lifetime_import_from_grid" not in mapped
+        assert (
+            disabled["lifetime_import_from_grid"]
+            == "sensor.solaxgrowatt_inverter_total_grid_import"
+        )
+
+    def test_enabled_match_wins_and_is_not_reported_disabled(self):
+        entities = [
+            self._disabled("sensor.old_total_grid_import", "Old_total_grid_import"),
+            _entity(
+                "sensor.new_total_grid_import",
+                "solax_modbus",
+                "New_total_grid_import",
+            ),
+        ]
+
+        mapped, disabled = self.ctrl._map_registry_entities(
+            entities, ["solax_modbus"], self.SUFFIX_MAP
+        )
+
+        assert mapped["lifetime_import_from_grid"] == "sensor.new_total_grid_import"
+        assert "lifetime_import_from_grid" not in disabled
+
+    def test_discover_reports_disabled_sensors_per_platform(self):
+        """The wizard needs the disabled keys per platform, not just a log line."""
+        registry = _solax_growatt_tou_registry()
+        for entity in registry:
+            if entity["unique_id"].endswith("_total_grid_import"):
+                entity["disabled_by"] = "integration"
+
+        _sensors, _platform, disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
+
+        assert "lifetime_import_from_grid" in disabled["solax_modbus_growatt_min"]
 
 
 # ---------------------------------------------------------------------------
@@ -1820,6 +1915,21 @@ class TestDiscoverEntsoeEntity:
 # Frontend ↔ backend sensor key consistency
 # ---------------------------------------------------------------------------
 
+#: Frontend integration IDs in sensorDefinitions.ts that are inverter
+#: platforms — everything else there is an auxiliary integration
+#: (pricing, forecast, phase current, weather) with no suffix map.
+_INVERTER_PLATFORM_IDS: frozenset[str] = frozenset(
+    {
+        "growatt_server_min",
+        "growatt_server_sph",
+        "solax_modbus_native",
+        "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph",
+        "solis_modbus",
+        "huawei_solar_luna2000",
+    }
+)
+
 
 class TestFrontendSensorKeysMatchBackend:
     """Every sensor key shown in the frontend UI must exist in the backend suffix map.
@@ -1977,6 +2087,126 @@ class TestFrontendSensorKeysMatchBackend:
             )
 
 
+class TestEnergyFlowSensorsRequiredOnEveryPlatform:
+    """The sensors that energy-flow calculation reads must be required
+    everywhere the wizard offers them, and the derived one must not be.
+
+    Issue #549: the flags were exactly inverted.  All five flow sensors
+    were ``required: false`` on every modbus platform, so the wizard
+    happily completed without them and the runtime then reported
+    "Energy Monitoring [ERROR] — SYSTEM DEGRADED".  Meanwhile
+    ``lifetime_load_consumption`` — which ``get_load_consumption_lifetime``
+    derives as ``solar + grid_import - grid_export`` when unmapped
+    (ha_api_controller.py) — was ``required: true`` on both cloud
+    platforms, demanding a sensor BESS can compute for itself.
+    """
+
+    #: Read directly by energy-flow calculation; no derivation exists.
+    FLOW_SENSORS: ClassVar[set[str]] = {
+        "lifetime_solar_energy",
+        "lifetime_import_from_grid",
+        "lifetime_export_to_grid",
+        "lifetime_battery_charged",
+        "lifetime_battery_discharged",
+    }
+
+    #: Derived from the three grid/solar flow sensors when unmapped.
+    DERIVED_SENSORS: ClassVar[set[str]] = {"lifetime_load_consumption"}
+
+    @staticmethod
+    def _parse_required_flags() -> dict[str, dict[str, bool]]:
+        """Parse sensorDefinitions.ts into platform_id -> {key: required}."""
+        import re
+        from pathlib import Path
+
+        ts_path = (
+            Path(__file__).parents[4]
+            / "frontend"
+            / "src"
+            / "lib"
+            / "sensorDefinitions.ts"
+        )
+        source = ts_path.read_text()
+
+        def _flags(text: str) -> dict[str, bool]:
+            return {
+                key: required == "true"
+                for key, required in re.findall(
+                    r"key:\s*'([^']+)'[^\n]*?required:\s*(true|false)", text
+                )
+            }
+
+        result: dict[str, dict[str, bool]] = {}
+        blocks = re.split(r"\{\s*\n\s*id:\s*'", source)
+        for block in blocks[1:]:
+            platform_match = re.match(r"([^']+)'", block)
+            if not platform_match:
+                continue
+            platform_id = platform_match.group(1)
+            if platform_id not in _INVERTER_PLATFORM_IDS:
+                continue
+
+            groups_ref = re.search(r"sensorGroups:\s*(\w+)", block)
+            search_text = block
+            if groups_ref:
+                const_match = re.search(
+                    rf"const\s+{groups_ref.group(1)}.*?=\s*\[(.*?)\];",
+                    source,
+                    re.DOTALL,
+                )
+                if const_match:
+                    search_text = const_match.group(1)
+                    for ref in re.findall(
+                        r"\b([A-Z_]+(?:_MONITORING|_LIFETIME))\b", search_text
+                    ):
+                        ref_match = re.search(
+                            rf"const\s+{ref}.*?sensors:\s*\[(.*?)\]",
+                            source,
+                            re.DOTALL,
+                        )
+                        if ref_match:
+                            search_text += ref_match.group(1)
+
+            flags = _flags(search_text)
+            if flags:
+                result[platform_id] = flags
+        return result
+
+    def test_flow_sensors_are_required_on_every_platform_offering_them(self):
+        flags = self._parse_required_flags()
+        assert flags, "No platforms parsed — parser broken?"
+
+        optional_anywhere = {
+            f"{platform}.{key}"
+            for platform, keys in flags.items()
+            for key in self.FLOW_SENSORS & keys.keys()
+            if not keys[key]
+        }
+
+        assert not optional_anywhere, (
+            "Energy-flow sensors must be required — the optimizer cannot "
+            "derive them and the runtime health check treats Energy "
+            "Monitoring as a required component: "
+            f"{sorted(optional_anywhere)}"
+        )
+
+    def test_derived_load_consumption_is_never_required(self):
+        flags = self._parse_required_flags()
+
+        required_anywhere = {
+            f"{platform}.{key}"
+            for platform, keys in flags.items()
+            for key in self.DERIVED_SENSORS & keys.keys()
+            if keys[key]
+        }
+
+        assert not required_anywhere, (
+            "lifetime_load_consumption is derived from solar + grid_import - "
+            "grid_export when unmapped, so requiring it blocks the wizard on "
+            f"a sensor BESS can compute itself: {sorted(required_anywhere)}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Solcast entity-registry discovery (#218): unique_id matching instead of
 # entity_id substrings, so detection survives non-English HA locale renames.
@@ -2040,7 +2270,7 @@ class TestHuaweiDiscovery:
         assert detected["huawei"] is True
 
     def test_huawei_map_matches_registry(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
@@ -2051,14 +2281,14 @@ class TestHuaweiDiscovery:
         """issue #438: real-time PV power and signed grid power (single
         power-meter register, split by HAApiController.grid_power_polarity —
         see #475's mechanism, reused here with export_positive polarity)."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert result["pv_power"] == "sensor.huawei_inverter_input_power"
         assert result["import_power"] == "sensor.huawei_meter_power_meter_active_power"
 
     def test_huawei_lifetime_energy_sensors_mapped(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert (
@@ -2089,7 +2319,9 @@ class TestHuaweiDiscovery:
         only. This is the production entry point the setup wizard actually
         calls (backend/api.py), not _map_registry_entities in isolation.
         """
-        sensors, platform = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
         assert platform == "huawei_solar_luna2000"
         assert "huawei_solar_luna2000" in sensors
         huawei = sensors["huawei_solar_luna2000"]

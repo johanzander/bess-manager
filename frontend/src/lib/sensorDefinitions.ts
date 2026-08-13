@@ -117,7 +117,7 @@ const GROWATT_CLOUD_LIFETIME: SensorGroup = {
     { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
     { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
     { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
-    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
+    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: false },
   ],
 };
 
@@ -162,7 +162,7 @@ const GROWATT_CLOUD_SPH_LIFETIME: SensorGroup = {
     { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
     { key: 'lifetime_export_to_grid', label: 'Total Export to Grid', required: true },
     { key: 'lifetime_import_from_grid', label: 'Total Import from Grid', required: true },
-    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: true },
+    { key: 'lifetime_load_consumption', label: 'Total Load Consumption', required: false },
   ],
 };
 
@@ -224,11 +224,11 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: true },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: true },
         ],
       },
       {
@@ -280,11 +280,11 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: true },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: true },
           { key: 'lifetime_load_consumption', label: 'Total Load Energy', required: false },
         ],
       },
@@ -353,11 +353,11 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: false },
-          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: false },
+          { key: 'lifetime_battery_charged', label: 'Battery Input Energy Total', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Battery Output Energy Total', required: true },
+          { key: 'lifetime_solar_energy', label: 'Total Solar Energy', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Grid Import Total', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Grid Export Total', required: true },
           { key: 'lifetime_load_consumption', label: 'Total Load', required: false },
         ],
       },
@@ -405,11 +405,11 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_battery_charged', label: 'Total Battery Charge Energy', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharge Energy', required: false },
-          { key: 'lifetime_solar_energy', label: 'PV Total Energy Generation', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Total Energy Imported From Grid', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Total Energy Fed Into Grid', required: false },
+          { key: 'lifetime_battery_charged', label: 'Total Battery Charge Energy', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Total Battery Discharge Energy', required: true },
+          { key: 'lifetime_solar_energy', label: 'PV Total Energy Generation', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Total Energy Imported From Grid', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Total Energy Fed Into Grid', required: true },
         ],
       },
       {
@@ -495,11 +495,11 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Lifetime Energy',
         sensors: [
-          { key: 'lifetime_solar_energy', label: 'Accumulated Yield Energy', required: false },
-          { key: 'lifetime_battery_charged', label: 'Battery Total Charge', required: false },
-          { key: 'lifetime_battery_discharged', label: 'Battery Total Discharge', required: false },
-          { key: 'lifetime_export_to_grid', label: 'Grid Exported Energy (power meter)', required: false },
-          { key: 'lifetime_import_from_grid', label: 'Grid Accumulated Energy (power meter)', required: false },
+          { key: 'lifetime_solar_energy', label: 'Accumulated Yield Energy', required: true },
+          { key: 'lifetime_battery_charged', label: 'Battery Total Charge', required: true },
+          { key: 'lifetime_battery_discharged', label: 'Battery Total Discharge', required: true },
+          { key: 'lifetime_export_to_grid', label: 'Grid Exported Energy (power meter)', required: true },
+          { key: 'lifetime_import_from_grid', label: 'Grid Accumulated Energy (power meter)', required: true },
         ],
       },
     ],

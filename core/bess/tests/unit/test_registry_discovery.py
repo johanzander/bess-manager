@@ -1198,7 +1198,9 @@ class TestDiscoverSensorsFromRegistry:
         grid pairing (#475/#438): point both keys at the one entity and let
         HAApiController split it via battery_power_polarity.
         """
-        sensors, _ = self.ctrl.discover_sensors_from_registry(_solax_native_registry())
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solax_native_registry()
+        )
         solax = sensors["solax_modbus_native"]
         assert solax["battery_charge_power"] == "sensor.solax_battery_power_charge"
         assert solax["battery_discharge_power"] == "sensor.solax_battery_power_charge"
@@ -2337,7 +2339,9 @@ class TestHuaweiDiscovery:
         """issue #542: storage_charge_discharge_power (I32Register, reg 37765)
         is Huawei's only battery power register — same one-signed-sensor shape
         as native SolaX, so battery_discharge_power must resolve to it too."""
-        sensors, _ = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
         huawei = sensors["huawei_solar_luna2000"]
         assert (
             huawei["battery_charge_power"]

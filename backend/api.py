@@ -158,6 +158,44 @@ def _validate_power_monitoring_sensors(
         )
 
 
+_CONSUMPTION_STRATEGIES = ("fixed", "sensor", "influxdb_7d_avg", "ha_statistics")
+
+
+def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> None:
+    """Raise HTTPException(422) for a consumption strategy that cannot work.
+
+    Mirrors the frontend gating in HomeFormSection.tsx — the server-side
+    backstop so the API refuses the combination regardless of which client
+    called it. Only ``sensor`` is checked against its sensor: it is the one
+    strategy with no fallback, so without ``48h_avg_grid_import`` every
+    optimization run aborts, no schedule is ever built, and the dashboard
+    sits on "Initializing" forever (#558). ``ha_statistics`` and
+    ``influxdb_7d_avg`` are left alone — they degrade to the fixed profile
+    and report it, rather than stalling.
+    """
+    strategy = home_section.get("consumption_strategy")
+    if strategy is None:
+        return
+    if strategy not in _CONSUMPTION_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown consumption strategy '{strategy}'. Valid values: "
+                f"{', '.join(_CONSUMPTION_STRATEGIES)}."
+            ),
+        )
+    if strategy == "sensor" and not active_sensors.get("48h_avg_grid_import"):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Consumption strategy 'sensor' requires the "
+                "'48h_avg_grid_import' sensor, which is not configured. "
+                "Configure it in Settings → Sensors first, or choose a "
+                "strategy that does not need it."
+            ),
+        )
+
+
 def _require_configured_system(bess_controller) -> None:
     """Raise HTTP 503 if the BESS system has not been configured yet.
 
@@ -327,6 +365,7 @@ async def patch_settings(updates: dict):
                     **flatten_sensors(updates.get("sensors") or {}),
                 }
                 _validate_power_monitoring_sensors(section, effective_sensors)
+                _validate_consumption_strategy(section, effective_sensors)
 
             if store_key == "sensors":
                 # A sensor removal (e.g. unmapping a phase-current sensor) can
@@ -337,6 +376,7 @@ async def patch_settings(updates: dict):
                 _validate_power_monitoring_sensors(
                     persisted_home, flatten_sensors(section)
                 )
+                _validate_consumption_strategy(persisted_home, flatten_sensors(section))
 
             bess_controller.settings_store.save_section(store_key, section)
 
@@ -3071,6 +3111,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                 **flatten_sensors(sections.get("sensors") or {}),
             }
             _validate_power_monitoring_sensors(home, effective_sensors)
+            _validate_consumption_strategy(home, effective_sensors)
             sections["home"] = home
 
         # --- electricity price ---

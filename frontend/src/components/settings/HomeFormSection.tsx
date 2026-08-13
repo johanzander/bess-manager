@@ -51,8 +51,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
         {!avgGridImportSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
             Home Assistant sensor requires the <strong>48h Avg Grid Import</strong> sensor to be
-            configured in the <strong>Sensors</strong> tab under Consumption Forecast. Without it
-            no schedule can be built at all.
+            configured in the <strong>Sensors</strong> tab under Consumption Forecast.
           </p>
         )}
         {!haStatsSensorConfigured && (

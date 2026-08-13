@@ -171,6 +171,16 @@ def perform_health_check(
         required_methods = (
             all_methods if required_methods is None else list(required_methods)
         )
+        # A required method that is not also checked is never returned by
+        # validate_methods_sensors, so required_total stays 0 and the
+        # "specified but none configured" branch below reports ERROR for
+        # something that was never looked at.
+        unchecked = set(required_methods) - set(all_methods)
+        if unchecked:
+            raise ValueError(
+                f"required_methods {sorted(unchecked)} are not in all_methods "
+                f"for component '{component_name}'"
+            )
     else:
         required_methods = []
     health_check = {

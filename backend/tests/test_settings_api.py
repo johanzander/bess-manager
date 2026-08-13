@@ -708,6 +708,67 @@ class TestPatchSettingsPowerMonitoringValidation:
 
 
 # ===========================================================================
+# PATCH /api/settings — consumption strategy gating
+# ===========================================================================
+
+
+class TestPatchSettingsConsumptionStrategyValidation:
+    """Selecting the "sensor" consumption strategy without its sensor leaves
+    the system unable to build any schedule at all, so the dashboard never
+    leaves "Initializing" (#558). The UI hides the option, but PATCH is what
+    persists it, so the check has to exist here too."""
+
+    def test_rejects_sensor_strategy_without_its_sensor(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "sensor"}},
+        )
+        assert response.status_code == 422
+        assert "48h_avg_grid_import" in response.json()["detail"]
+        # Never persisted — a rejected request must not leave the stalling
+        # config on disk.
+        assert (
+            mock_controller.settings_store.data["home"]["consumption_strategy"]
+            == "fixed"
+        )
+
+    def test_allows_sensor_strategy_when_its_sensor_is_mapped(self, mock_controller):
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "48h_avg_grid_import": "sensor.avg_grid_import",
+        }
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "sensor"}},
+        )
+        assert response.status_code == 200
+
+    def test_rejects_unknown_strategy(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "bogus_strategy"}},
+        )
+        assert response.status_code == 422
+
+    def test_rejects_unmapping_the_sensor_the_active_strategy_needs(
+        self, mock_controller
+    ):
+        """Removing 48h_avg_grid_import while the sensor strategy is active
+        breaks the system exactly as selecting the strategy without it does —
+        the same shape as the power-monitoring sensor-removal guard."""
+        mock_controller.settings_store.data["home"]["consumption_strategy"] = "sensor"
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "48h_avg_grid_import": "sensor.avg_grid_import",
+        }
+
+        response = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"48h_avg_grid_import": ""}}},
+        )
+
+        assert response.status_code == 422
+
+
+# ===========================================================================
 # PATCH /api/settings — response shape
 # ===========================================================================
 

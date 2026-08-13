@@ -19,6 +19,7 @@ interface Props {
 
 export function HomeFormSection({ form, onChange, sensors }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
+  const avgGridImportSensorConfigured = Boolean(sensors?.['48h_avg_grid_import']);
   const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
   const chargeRateSensorConfigured = Boolean(sensors?.['battery_charging_power_rate']);
   const currentSensorsConfigured = form.phaseCount === 1
@@ -34,7 +35,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           'Data source',
           [
             { value: 'fixed', label: 'Fixed value' },
-            { value: 'sensor', label: 'Home Assistant sensor' },
+            { value: 'sensor', label: 'Home Assistant sensor', disabled: !avgGridImportSensorConfigured },
             { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)', disabled: !localLoadSensorConfigured },
             { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
           ],
@@ -45,6 +46,13 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
             InfluxDB requires the <strong>Local Load Power</strong> sensor to be configured in the{' '}
             <strong>Sensors</strong> tab. This sensor is not available on all inverter platforms (e.g. Growatt SPH).
+          </p>
+        )}
+        {!avgGridImportSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
+            Home Assistant sensor requires the <strong>48h Avg Grid Import</strong> sensor to be
+            configured in the <strong>Sensors</strong> tab under Consumption Forecast. Without it
+            no schedule can be built at all.
           </p>
         )}
         {!haStatsSensorConfigured && (

@@ -302,7 +302,9 @@ For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, V
 
 BESS needs a forecast of your home consumption to plan the battery schedule. Four strategies are available, configured via `home.consumption_strategy` in your add-on settings:
 
-#### Strategy 1: `sensor` (default)
+#### Strategy 1: `sensor` (legacy)
+
+This strategy is selectable only once the `48h_avg_grid_import` sensor is configured: it is the one strategy with no fallback, so choosing it without that sensor means no schedule can be built at all and the dashboard never leaves "Initializing". New installs default to `fixed`; `ha_statistics` is the recommended choice (see [INSTALLATION.md](INSTALLATION.md), Step 3).
 
 BESS reads a Home Assistant sensor named `*48h_avg*grid_import*` (the exact entity ID is auto-discovered by name pattern). This sensor should be a 48-hour rolling average of your grid import power, filtered to exclude periods when the battery is active. See [INSTALLATION.md](INSTALLATION.md), Step 3 for how to create it.
 

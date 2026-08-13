@@ -141,6 +141,7 @@ def perform_health_check(
     is_required: bool,
     controller,
     all_methods: list[str],
+    required_methods: list[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
 
@@ -156,11 +157,22 @@ def perform_health_check(
             optional components show WARNING.
         controller: The controller instance with validate_methods_sensors method
         all_methods: List of all method names this component uses
+        required_methods: Subset of ``all_methods`` that is required, for
+            components where only some methods are load-bearing. Only
+            meaningful with ``is_required=True``; defaults to all of them.
+            Energy Prediction uses this: under the ``sensor`` consumption
+            strategy the consumption sensor is mandatory while the solar
+            forecast stays genuinely optional (#558).
 
     Returns:
         Health check result dictionary
     """
-    required_methods = all_methods if is_required else []
+    if is_required:
+        required_methods = (
+            all_methods if required_methods is None else list(required_methods)
+        )
+    else:
+        required_methods = []
     health_check = {
         "name": component_name,
         "description": description,

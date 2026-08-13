@@ -616,16 +616,17 @@ map). Recorded for #352 on 2026-08-10: 22 sub-load `grid_first` periods live,
 16 of them in the 0.1–0.5 kWh band #511 does not reach, 5 clearly
 spike-exposed.
 
-⚠️ **That figure does not currently reproduce, and it gates 4b (2026-08-11).**
-Scanning all 36 scenario fixtures on `2dcd540f` for BATTERY_EXPORT periods
-planned below the house deficit gives **0**, none in the band. The fixtures'
-plans have not moved in between — the action-selector goldens predate
-2026-08-10 and still pass bit-identically — so the two measurements count
-different things. The likely explanation is that the fixture set is the wrong
-instrument: none of them comes from a configuration like the reporter's (5 kW
-inverter, UK/Octopus, evening load against a 0.6–0.95 kW `grid_first`
-commitment). Reconcile the figure, and build a reproduction fixture from a real
-bundle, before writing 4b — that number is the justification for the work.
+✅ **Reconciled 2026-08-13 — the figure reproduces bit-exactly; the "0" was
+vacuous.** The 22/16 criterion is a BATTERY_EXPORT period whose planned
+*discharge* is below the period's *home consumption*: 22 periods, 16 with
+export in the 0.1–0.5 kWh band, unchanged from 2026-08-10. The 2026-08-11
+scan read "below the house deficit" literally, and that count is 0 *by
+construction* — `EnergyData._calculate_detailed_flows` sets
+`battery_to_home = min(discharged, home − solar)`, so any export at all
+requires discharge above the deficit. It measured an identity, not the corpus.
+Full criterion table, and the reproduction fixture
+(`regression_2026_08_12_202906`, from the maintainer's 2026-08-12 Growatt MIN
+bundle), in the design doc §2.
 
 **#352 is two bugs; only one is Phase 4's** (split recorded on the issue,
 2026-08-11). *Shape A* — LOAD_SUPPORT throttled below house load — is gatable

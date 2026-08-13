@@ -5,9 +5,10 @@ Phase 4's plan entry requires a design doc before code and says `rules.md`'s
 new-class approval applies — the modules named in D1 and D2 below carry that
 approval.
 
-**4a is startable.** 4b additionally needs D3 and the #352 reproduction
-fixture; 4b and 4c both wait for the beta to ship (§7). 4d has been removed
-from Phase 4 entirely and is now Phase 5 in the parent plan.
+**4a is startable.** 4b additionally needs D3 — its other precondition, the
+#352 reproduction fixture, landed 2026-08-13 along with the 22/16
+reconciliation (§2). 4b and 4c both wait for the beta to ship (§7). 4d has
+been removed from Phase 4 entirely and is now Phase 5 in the parent plan.
 
 Parent: `docs/superpowers/plans/2026-08-09-optimizer-target-architecture.md`
 → Phase 4. Normative: `docs/agents/optimizer-architecture.md` (P1–P7).
@@ -53,24 +54,51 @@ executor is configured not to deliver. That is a structural R≠P divergence on
 the charge path, untouched by #511 and #517 (both discharge-side). **Phase 4
 stands.**
 
-### The #352 evidence does not currently reproduce, and that is a blocker
+### The #352 evidence reproduces — the earlier 0 was a tautology (resolved 2026-08-13)
 
-Scanning all 36 fixtures for BATTERY_EXPORT periods planned below the house
-deficit: **0 periods**, none in the 0.1–0.5 kWh band — against the plan's
-recorded "22 sub-load `grid_first` periods, 16 in the band" from 2026-08-10.
+The 2026-08-11 revision of this section recorded "0 periods" and called it a
+blocker. **That measurement was vacuous.** Both halves are now reconciled by
+running every criterion over all 36 fixtures, on `main` post-#545.
 
-The corpus plans have not moved in between (the action-selector goldens
-predate that date and still pass bit-identically), so the two measurements
-count different things. Most likely the corpus is simply the wrong instrument:
-no fixture comes from a configuration like #352's reporter's (5 kW inverter,
-UK/Octopus, evening load against a 0.6–0.95 kW `grid_first` commitment).
+**The 22/16 figure is real and reproduces bit-exactly.** Its criterion is a
+BATTERY_EXPORT period whose *planned battery discharge* is below the period's
+*home consumption*: **22 periods, 16 of them with planned export in the
+0.1–0.5 kWh band.** Both numbers match 2026-08-10 exactly, so nothing has
+regressed or been silently fixed since.
 
-**Two things must land before 4b is written**, both non-code:
+**The 0 came from reading "below the house deficit" literally, and that count
+is 0 by construction.** `EnergyData._calculate_detailed_flows` sets
+`battery_to_home = min(battery_discharged, home − solar)`, so
+`battery_to_grid > 0` *requires* `battery_discharged > deficit`. A scan for
+BATTERY_EXPORT periods discharging below the deficit measures the flow
+derivation's own identity, not the corpus. Measured: 0, exactly as the algebra
+demands. **A zero of that shape is never evidence about a bug.**
 
-- A reproduction fixture built from a real bundle via
-  `scripts/mock_ha/scenarios/from_debug_log.py`. Nothing can be seen to fail
-  without it, which this repo now requires of every fix.
-- Reconciliation of the 22/16 figure. It is the justification for the work.
+Measured together over the corpus's 226 BATTERY_EXPORT periods:
+
+| criterion | count | in 0.1–0.5 kWh band |
+|---|---|---|
+| planned discharge < home consumption (**the 22/16 figure**) | 22 | 16 |
+| planned export < house deficit (≡ home-dominant) | 59 | 48 |
+| forfeited headroom > planned export | 102 | 86 |
+| **#354 two-sided: home-dominant AND headroom > export** | **49** | **47** |
+| planned discharge < house deficit (the vacuous scan) | **0** | 0 |
+
+Note which of these is the exposure metric. Planned *import* in a
+BATTERY_EXPORT period is identically zero on 15-minute point forecasts — the
+corpus cannot show the harm, per "What the corpus is" in the parent plan. What
+it can show is the **commitment**: 102 periods commit the inverter to
+`grid_first` while forfeiting more load-following headroom than the export
+they defend, and 49 fail #354's two-sided test on both readings at once. That
+is the quantity D3 has to threshold.
+
+**Reproduction fixture: landed.** `regression_2026_08_12_202906` (from the
+maintainer's 2026-08-12 Growatt MIN bundle, the four-period hardware
+reproduction on the issue). Its period 99 carries the shape: 0.825 kWh
+discharged against 0.700 kWh home, **0.125 kWh planned export defended at the
+cost of 2.925 kWh of forfeited headroom** — a 22% rate command, the same gear
+as the live period 78. `expected_results` is pinned PRE-fix on purpose; 4b
+moves it and states the delta.
 
 ### #352 is two bugs; only one is Phase 4's
 
@@ -164,10 +192,14 @@ plausible in-period load excursion, or if declining it forfeits headroom that
 has real value. Undecided: whether the threshold is configured, derived from
 the lattice, or derived from forecast granularity.
 
-**Do not settle this before the #352 reproduction fixture exists.** The bug
-does not currently reproduce on any fixture (§2), so a predicate chosen now
-would be fitted to no observable failure. This is the one decision where
-waiting is the correct action rather than a delay.
+**Unblocked 2026-08-13, and now has a measured target.** The reason to wait —
+"the bug reproduces on no fixture" — was itself the vacuous measurement §2
+retracts. D3's predicate can now be fitted against real counts: 102 corpus
+periods forfeit more headroom than they defend, 49 fail both sides of the
+test, and `regression_2026_08_12_202906` p99 (0.125 kWh export, 2.925 kWh
+headroom) is the concrete instance to make the predicate reject. A candidate
+predicate is testable the moment it is written: run it over the corpus and
+state what it demotes.
 
 **D4 — What happens to `strategic_intent` consumers? ✅ APPROVED 2026-08-11:
 removed from Phase 4, becomes Phase 5.** Measured blast radius: 25 non-test
@@ -222,5 +254,6 @@ that moves most plans would make any report from those reporters ambiguous
 between "the audited refactor regressed something" and "the new candidate space
 chose differently".
 
-Work that can proceed now, all non-behavioural: the #352 reproduction fixture,
-the 22/16 reconciliation, D3, and 4a (whose two decisions are approved).
+Work that can proceed now, all non-behavioural: D3 (now unblocked — see §5)
+and 4a (whose two decisions are approved). The #352 reproduction fixture and
+the 22/16 reconciliation are **done** (2026-08-13, §2).

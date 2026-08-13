@@ -200,10 +200,20 @@ Bash commands whose cwd is a linked worktree, and falls through everywhere else
 so the shared main checkout keeps its `ask`/`deny` rules. Do not "fix" a prompt
 by adding the offending command to an allowlist — an `ask` rule beats an `allow`
 rule, so that never works, and enumerating command shapes is what the inverted
-hook exists to replace. The only additions that belong in that hook are the
-*escape* list: commands whose blast radius leaves the worktree (`sudo`,
-`podman machine rm`, `gh pr merge`, pushes to `main`/`beta`, absolute paths
-outside the worktree root).
+hook exists to replace.
+
+Two classes still prompt inside a worktree: **globally-scoped** actions no
+worktree can contain (`sudo`, `podman machine rm`, `gh pr merge`/`release`,
+pushes moving `main`/`beta`/tags), and commands that **reach outside the
+worktree** — an absolute path beyond its root, or a target hidden behind `..`,
+`~`, a variable, or a command substitution.
+
+That second check guards against *accidents* — a stale absolute path from before
+a worktree switch, a `../..` counted from the wrong cwd — and is the Bash-side
+counterpart of `check-worktree-path.sh`. It is **not a sandbox**: a hook sees the
+command string, not the syscalls, so indirection can defeat it. The real
+containment is that a worktree is disposable. Don't extend it as if it were a
+security boundary, and don't weaken it on the grounds that it isn't one.
 
 **Only tracked files travel into a worktree.** `.claude/settings.json` and
 `.claude/hooks/*` are tracked and follow automatically;

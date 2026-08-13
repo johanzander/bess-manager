@@ -44,7 +44,10 @@ if [ -z "$worktree_list" ]; then
   exit 0
 fi
 
-roots=$(printf '%s\n' "$worktree_list" | awk '/^worktree /{print $2}')
+# Strip the prefix rather than taking $2 -- awk's $2 truncates at the first
+# space, so a checkout path containing one would yield a short root and be
+# silently skipped.
+roots=$(printf '%s\n' "$worktree_list" | awk '/^worktree /{sub(/^worktree /, ""); print}')
 main_root=$(printf '%s\n' "$roots" | head -n 1)
 source_file="${main_root}/.claude/settings.local.json"
 
@@ -66,7 +69,10 @@ printf '%s\n' "$roots" | tail -n +2 | while IFS= read -r root; do
     continue
   fi
 
-  ln -sfn "$source_file" "$target"
+  # Never let one unwritable or racing worktree abort the sweep: under
+  # `set -e` a single ln failure would kill the script before `exit 0`, and
+  # as a SessionStart hook that surfaces an error on every new session.
+  ln -sfn "$source_file" "$target" 2>/dev/null || true
 done
 
 exit 0

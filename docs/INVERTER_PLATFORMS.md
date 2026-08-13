@@ -761,7 +761,7 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
-| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `storage_charge_discharge_power` (signed) | Net battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #120) |
 | `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
 | `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
 | `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |

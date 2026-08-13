@@ -2085,3 +2085,22 @@ class TestHuaweiDiscovery:
         # Single signed power-meter register backs both keys (same pattern
         # as Solis, #475) — HAApiController splits it via grid_power_polarity.
         assert huawei["export_power"] == "sensor.huawei_meter_power_meter_active_power"
+
+    def test_huawei_battery_discharge_power_shares_the_signed_charge_entity(self):
+        """issue #120: storage_charge_discharge_power is a single signed
+        register, so battery_discharge_power had nothing to bind to and the
+        required Battery Monitoring health check reported it permanently
+        'Not configured'. Point it at the same entity, as done for grid
+        power, and let HAApiController split it by battery_power_polarity.
+        """
+        sensors, _ = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        huawei = sensors["huawei_solar_luna2000"]
+
+        assert (
+            huawei["battery_charge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )
+        assert (
+            huawei["battery_discharge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )

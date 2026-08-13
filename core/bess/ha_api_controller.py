@@ -79,6 +79,7 @@ class HomeAssistantAPIController:
         huawei_device_id: str | None = None,
         service_domain: str | None = None,
         grid_power_polarity: str | None = None,
+        battery_power_polarity: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -99,6 +100,11 @@ class HomeAssistantAPIController:
                 import_power/export_power share one signed entity
                 (SettingsStore.get_grid_power_polarity() — "import_positive"
                 or "" when the platform has separate entities)
+            battery_power_polarity: Sign convention for a platform whose
+                battery_charge_power/battery_discharge_power share one signed
+                entity (SettingsStore.get_battery_power_polarity() —
+                "charge_positive" or "" when the platform has separate
+                entities)
 
         """
         self.base_url = ha_url
@@ -128,6 +134,11 @@ class HomeAssistantAPIController:
         # Sign convention for a platform whose import_power/export_power
         # share one signed entity (see get_import_power/get_export_power).
         self.grid_power_polarity = grid_power_polarity or ""
+
+        # Sign convention for a platform whose battery charge/discharge power
+        # share one signed entity (see get_battery_charge_power/
+        # get_battery_discharge_power).
+        self.battery_power_polarity = battery_power_polarity or ""
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -1430,12 +1441,43 @@ class HomeAssistantAPIController:
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
         self._set_number_like(entity_id, rate, "Set discharging power rate")
 
+    def _is_shared_signed_battery_power(self) -> bool:
+        """True when battery charge/discharge resolve to one signed entity.
+
+        Some platforms (Huawei LUNA2000) expose battery power as a single
+        signed register instead of separate charge/discharge entities.
+        get_battery_charge_power/get_battery_discharge_power detect this case
+        and split the one raw reading by sign instead of reading the entity
+        twice unmodified.
+
+        Matched against the one convention that split is written for rather
+        than on truthiness: adding a second convention must change the split
+        itself, so it must not silently inherit charge_positive's sign here.
+        """
+        charge_entity = self.sensors.get("battery_charge_power")
+        discharge_entity = self.sensors.get("battery_discharge_power")
+        return bool(
+            self.battery_power_polarity == "charge_positive"
+            and charge_entity
+            and charge_entity == discharge_entity
+        )
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return max(0.0, raw)  # charge_positive
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return max(0.0, -raw)  # charge_positive
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -3114,7 +3156,18 @@ class HomeAssistantAPIController:
         """Discover phase current sensor entity IDs.
 
         Scans entity states for sensors with device_class 'current' that
-        match household phase current naming (L1/L2/L3).
+        match household phase current naming, in two conventions:
+
+        - ``current_l1``/``l2``/``l3`` (Tibber Pulse, Shelly 3EM, ...).
+        - ``phase_a``/``b``/``c`` on a *metering* device (#120). huawei_solar
+          names its three-phase meter's currents "Phase A/B/C current"
+          (register keys ``active_grid_a/b/c_current``), which yields
+          ``sensor.power_meter_phase_a_current``. The inverter's own AC output
+          currents carry the identical display name and differ only by device
+          prefix, so the phase_a/b/c form is only accepted on an entity whose
+          id also marks it as a meter — binding fuse protection to the
+          inverter's output instead of the house feed would silently protect
+          the wrong circuit.
 
         Args:
             states: List of state dicts from /api/states
@@ -3132,15 +3185,38 @@ class HomeAssistantAPIController:
             if attrs.get("device_class") != "current":
                 continue
             lower_id = entity_id.lower()
-            if "current_l1" in lower_id and "current_l1" not in result:
-                result["current_l1"] = entity_id
-            elif "current_l2" in lower_id and "current_l2" not in result:
-                result["current_l2"] = entity_id
-            elif "current_l3" in lower_id and "current_l3" not in result:
-                result["current_l3"] = entity_id
+            key = self._match_phase_current_key(lower_id)
+            if key and key not in result:
+                result[key] = entity_id
 
         logger.info("Discovered %d phase current sensor(s)", len(result))
         return result
+
+    # Household phase-current naming conventions, most specific first. The
+    # phase_a/b/c form is meter-gated — see discover_current_sensors.
+    PHASE_CURRENT_PATTERNS: ClassVar[tuple[tuple[str, str, bool], ...]] = (
+        ("current_l1", "current_l1", False),
+        ("current_l2", "current_l2", False),
+        ("current_l3", "current_l3", False),
+        ("phase_a", "current_l1", True),
+        ("phase_b", "current_l2", True),
+        ("phase_c", "current_l3", True),
+    )
+
+    # Entity-id marker identifying a metering device, used to keep the
+    # phase_a/b/c form off the inverter's own output currents.
+    METER_ID_MARKER: ClassVar[str] = "meter"
+
+    def _match_phase_current_key(self, lower_id: str) -> str | None:
+        """Return the phase key a current sensor's entity_id maps to, if any."""
+        is_meter = self.METER_ID_MARKER in lower_id
+        for pattern, key, meter_only in self.PHASE_CURRENT_PATTERNS:
+            if pattern not in lower_id:
+                continue
+            if meter_only and not is_meter:
+                continue
+            return key
+        return None
 
     def _match_optional_sensor(
         self, entity_id: str, lower_id: str
@@ -3668,6 +3744,19 @@ class HomeAssistantAPIController:
                 and "export_power" not in huawei_sensors
             ):
                 huawei_sensors["export_power"] = huawei_sensors["import_power"]
+            # storage_charge_discharge_power is likewise a single signed
+            # register — there is no separate discharge entity, so
+            # battery_discharge_power would stay unmapped and the required
+            # Battery Monitoring health check would report it permanently
+            # "Not configured" (#120). Same treatment as the grid pair, split
+            # at read time by battery_power_polarity.
+            if (
+                "battery_charge_power" in huawei_sensors
+                and "battery_discharge_power" not in huawei_sensors
+            ):
+                huawei_sensors["battery_discharge_power"] = huawei_sensors[
+                    "battery_charge_power"
+                ]
             platform_sensors["huawei_solar_luna2000"] = huawei_sensors
             if not detected_platform:
                 detected_platform = "huawei_solar_luna2000"

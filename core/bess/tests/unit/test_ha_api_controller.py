@@ -392,6 +392,161 @@ class TestSignedGridPowerSplit:
         assert ctrl.get_export_power() == 42.0
 
 
+# ── Signed battery power split (issue #120) ──────────────────────────────────
+#
+# Huawei LUNA2000 exposes battery power as one signed register
+# (storage_charge_discharge_power, positive = charging — see
+# docs/INVERTER_PLATFORMS.md), not as separate charge/discharge entities.
+# Same shape as the grid split above, applied to the battery keys.
+
+
+@pytest.fixture
+def signed_battery_ctrl():
+    """Controller whose battery charge/discharge share one signed entity."""
+    c = HomeAssistantAPIController(
+        ha_url="http://ha.local:8123",
+        token="test-token",
+        settings_store=_settings_store(
+            {
+                "battery_charge_power": "sensor.huawei_battery_charge_discharge_power",
+                "battery_discharge_power": (
+                    "sensor.huawei_battery_charge_discharge_power"
+                ),
+            }
+        ),
+        battery_power_polarity="charge_positive",
+    )
+    c.max_attempts = 1
+    c.retry_base_delay = 0
+    return c
+
+
+class TestSignedBatteryPowerSplit:
+    def test_positive_raw_is_charge_only(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2000"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() == 2000.0
+        assert signed_battery_ctrl.get_battery_discharge_power() == 0.0
+
+    def test_negative_raw_is_discharge_only(self, signed_battery_ctrl):
+        """The reporter's own reading: -4876 W while the battery discharges
+        (issue #120) — previously surfaced as a negative *charge* power with
+        discharge power reported 'Not configured'."""
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() == 0.0
+        assert signed_battery_ctrl.get_battery_discharge_power() == 4876.0
+
+    def test_net_battery_power_keeps_its_sign_convention(self, signed_battery_ctrl):
+        """get_net_battery_power is charge - discharge; the split must leave
+        it negative while discharging rather than double-counting."""
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        assert signed_battery_ctrl.get_net_battery_power() == -4876.0
+
+    def test_unavailable_raw_returns_none(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "unavailable"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() is None
+        assert signed_battery_ctrl.get_battery_discharge_power() is None
+
+    def test_separate_entities_unaffected_by_polarity(self, ctrl):
+        """A platform with two distinct battery entities must read them
+        independently even if battery_power_polarity somehow ended up set."""
+        ctrl.battery_power_polarity = "charge_positive"
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "42"})
+        )
+        assert ctrl.get_battery_charge_power() == 42.0
+        assert ctrl.get_battery_discharge_power() == 42.0
+
+
+# ── Phase current discovery (issue #120) ─────────────────────────────────────
+
+
+def _current_state(entity_id: str) -> dict:
+    """A minimal /api/states entry for a current-measuring sensor."""
+    return {"entity_id": entity_id, "attributes": {"device_class": "current"}}
+
+
+class TestPhaseCurrentDiscovery:
+    def setup_method(self):
+        self.ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123", token="test-token"
+        )
+
+    def test_current_l1_naming_is_discovered(self):
+        """Tibber Pulse / Shelly 3EM style naming — the pre-existing case."""
+        states = [
+            _current_state("sensor.tibber_pulse_current_l1"),
+            _current_state("sensor.tibber_pulse_current_l2"),
+            _current_state("sensor.tibber_pulse_current_l3"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.tibber_pulse_current_l1",
+            "current_l2": "sensor.tibber_pulse_current_l2",
+            "current_l3": "sensor.tibber_pulse_current_l3",
+        }
+
+    def test_power_meter_phase_abc_naming_is_discovered(self):
+        """issue #120: huawei_solar names the three-phase meter's currents
+        'Phase A/B/C current' (register keys active_grid_a/b/c_current), so
+        they land as sensor.power_meter_phase_a_current — never matching the
+        current_l1/l2/l3 substrings the discovery used to require."""
+        states = [
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_inverter_phase_currents_are_not_discovered(self):
+        """huawei_solar gives the *inverter's* own AC output currents the same
+        display name ('Phase A current') as the meter's, so they differ only
+        by device prefix. Binding fuse protection to the inverter's output
+        instead of the house feed would silently protect the wrong circuit."""
+        states = [
+            _current_state("sensor.inverter_phase_a_current"),
+            _current_state("sensor.inverter_phase_b_current"),
+            _current_state("sensor.inverter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+    def test_meter_phases_win_when_both_devices_are_present(self):
+        """The realistic Huawei install: inverter and power meter both expose
+        'Phase A/B/C current'. Only the meter's may be selected."""
+        states = [
+            _current_state("sensor.inverter_phase_a_current"),
+            _current_state("sensor.inverter_phase_b_current"),
+            _current_state("sensor.inverter_phase_c_current"),
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_non_current_device_class_is_ignored(self):
+        states = [
+            {
+                "entity_id": "sensor.power_meter_phase_a_voltage",
+                "attributes": {"device_class": "voltage"},
+            }
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+
 # ── set_* / grid_charge ─────────────────────────────────────────────────────
 
 

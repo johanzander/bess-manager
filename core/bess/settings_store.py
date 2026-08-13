@@ -95,6 +95,18 @@ PLATFORM_GRID_POWER_POLARITY = {
     "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
 }
 
+# Same idea for battery power: some platforms expose one signed register
+# instead of separate charge/discharge entities, so battery_discharge_power
+# has nothing of its own to bind to and the required Battery Monitoring health
+# check reports it permanently "Not configured" (#120).
+#
+# "charge_positive": positive raw value = charging, negative = discharging.
+PLATFORM_BATTERY_POWER_POLARITY = {
+    # storage_charge_discharge_power, "Net power (W; positive=charging)"
+    # — see docs/INVERTER_PLATFORMS.md (#120)
+    "huawei_solar_luna2000": "charge_positive",
+}
+
 
 def flatten_sensors(sensors: dict) -> dict:
     """Flatten a per-platform sensors dict into a flat sensor_key -> entity_id dict.
@@ -236,6 +248,16 @@ class SettingsStore:
         """
         inverter = self.data.get("inverter", {})
         return PLATFORM_GRID_POWER_POLARITY.get(inverter.get("platform", ""), "")
+
+    def get_battery_power_polarity(self) -> str:
+        """Return the sign convention for this platform's battery power sensor.
+
+        "" for platforms with separate charge/discharge entities (no split
+        needed) and for an unconfigured install. Not user-overridable —
+        see PLATFORM_BATTERY_POWER_POLARITY.
+        """
+        inverter = self.data.get("inverter", {})
+        return PLATFORM_BATTERY_POWER_POLARITY.get(inverter.get("platform", ""), "")
 
     def get_active_sensors(self) -> dict:
         """Return a flat sensor dict merging the active platform's sensors with shared sensors.

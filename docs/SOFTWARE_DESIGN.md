@@ -415,9 +415,11 @@ This is what lets an integration that exposes the same services under its own do
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
-#### Signed grid power sensors
+#### Signed power sensors
 
 A platform-fixed sibling of the service-domain pattern above: some platforms (Solis) expose grid power as one signed sensor instead of separate import/export entities. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `""` elsewhere) — not user-overridable, since polarity is a hardware fact, not configuration. Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign whenever both keys resolve to the same entity_id.
+
+Battery power works the same way where a platform exposes one signed register rather than separate charge/discharge entities: `SettingsStore.get_battery_power_polarity()` resolves `PLATFORM_BATTERY_POWER_POLARITY` (`"charge_positive"` for `huawei_solar_luna2000`, `""` elsewhere), held on `HomeAssistantAPIController.battery_power_polarity`, and `get_battery_charge_power()`/`get_battery_discharge_power()` split the reading by sign when both keys resolve to the same entity_id. Registry discovery points the second key at the first for these platforms; without that, the required Battery Monitoring health check reports discharge power permanently "Not configured" (#120). `BESSController.refresh_power_polarity()` re-syncs both conventions after any settings mutation that can touch the inverter section.
 
 ### Platform Capabilities
 
@@ -504,7 +506,7 @@ The HA REST API `/api/states` provides all entity IDs and current values. BESS e
 
 - **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
 - **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
-- **Phase count**: Detected from phase current sensor entities (L1/L2/L3)
+- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; the inverter's own output currents share that display name, so the phase_a/b/c form is meter-gated)
 
 #### Stage 3 — WebSocket Metadata Query
 
@@ -558,7 +560,7 @@ Beyond core inverter and price sensors, discovery also detects:
 
 - **Solcast solar forecast**: Entity registry entries on the `solcast_solar` platform, matched by `unique_id` suffix (robust against non-English HA locale renaming of the entity ID)
 - **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
-- **Phase currents**: `current_l1`, `current_l2`, `current_l3`
+- **Phase currents**: `current_l1`, `current_l2`, `current_l3` (also discovered from meter-side `phase_a/b/c` naming — see `discover_current_sensors`)
 - **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`
 - **Consumption forecast**: Custom helper sensor for 48-hour average grid import
 

@@ -403,12 +403,12 @@ async def patch_settings(updates: dict):
                 bess_controller.system.set_demo_mode(enabled)
 
         # Any of the sections above (sensors directly, or growatt/inverter via
-        # a platform switch) can change service_domain/grid_power_polarity —
+        # a platform switch) can change service_domain/power polarities —
         # refresh those unconditionally rather than only on a key match.
         # ha_controller.sensors is a live settings_store view (#334) and
         # needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarity()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -3122,10 +3122,10 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Apply settings to live system so BESS starts immediately without
         # requiring a restart. Unconditional, not gated on payload.sensors:
         # an inverter platform switch above also changes service_domain and
-        # grid_power_polarity. ha_controller.sensors is a live settings_store
+        # the power polarities. ha_controller.sensors is a live settings_store
         # view (#334) and needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarity()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:

@@ -8,6 +8,7 @@ Tests cover:
   GEN3 lacks a system-production one)
 """
 
+import logging
 from typing import ClassVar
 from unittest.mock import patch
 
@@ -1683,6 +1684,27 @@ class TestDerivedLifetimeSensors:
         ):
             assert self.ctrl.get_load_consumption_lifetime() is None
 
+    def test_load_consumption_names_the_missing_counter_in_the_log(self, caplog):
+        """"N/A" in the health check must be traceable to a specific sensor.
+
+        Returning ``None`` silently would leave a user with a degraded
+        Energy Monitoring component and nothing naming the cause.
+        """
+        with self._mock_sensor(
+            {
+                "lifetime_solar_energy": 5000.0,
+                "lifetime_import_from_grid": 3000.0,
+                "lifetime_export_to_grid": 1500.0,
+                "lifetime_battery_charged": 2000.0,
+                # lifetime_battery_discharged deliberately absent
+            }
+        ):
+            with caplog.at_level(logging.WARNING):
+                assert self.ctrl.get_load_consumption_lifetime() is None
+
+        assert "lifetime_battery_discharged" in caplog.text
+        assert "lifetime_solar_energy" not in caplog.text
+
     def test_load_consumption_none_when_balance_is_negative(self):
         """A negative balance means the counters disagree, so report nothing.
 
@@ -2150,9 +2172,10 @@ class TestEnergyFlowSensorsRequiredOnEveryPlatform:
     happily completed without them and the runtime then reported
     "Energy Monitoring [ERROR] — SYSTEM DEGRADED".  Meanwhile
     ``lifetime_load_consumption`` — which ``get_load_consumption_lifetime``
-    derives as ``solar + grid_import - grid_export`` when unmapped
-    (ha_api_controller.py) — was ``required: true`` on both cloud
-    platforms, demanding a sensor BESS can compute for itself.
+    derives from the five flow sensors when unmapped (issue #528:
+    ``solar + import + discharged - charged - export``) — was
+    ``required: true`` on both cloud platforms, demanding a sensor BESS
+    can compute for itself.
     """
 
     #: Read directly by energy-flow calculation; no derivation exists.
@@ -2255,9 +2278,9 @@ class TestEnergyFlowSensorsRequiredOnEveryPlatform:
         }
 
         assert not required_anywhere, (
-            "lifetime_load_consumption is derived from solar + grid_import - "
-            "grid_export when unmapped, so requiring it blocks the wizard on "
-            f"a sensor BESS can compute itself: {sorted(required_anywhere)}"
+            "lifetime_load_consumption is derived from the five flow sensors "
+            "when unmapped, so requiring it blocks the wizard on a sensor "
+            f"BESS can compute itself: {sorted(required_anywhere)}"
         )
 
 

@@ -2528,35 +2528,56 @@ class HomeAssistantAPIController:
     def get_load_consumption_lifetime(self):
         """Get lifetime total load consumption energy in kWh.
 
-        If no direct sensor is configured, derives the value from the energy
-        balance (see :func:`core.bess.energy_balance.derive_load_consumption`).
-        SolaX native, Solis and Huawei lack a native load register and take
-        this path; all three map both battery counters.
+        Falls through to the derived path whenever the direct reading is
+        missing — the gate is the runtime value, not the platform, so an
+        unmapped *or* momentarily unavailable entity reaches it. SolaX native,
+        Solis and Huawei are the platforms with no native load register at
+        all, so they take it on every call; any other platform lands here only
+        while its own load sensor is unreadable.
 
-        Returns ``None`` when any input is unmapped — the battery terms are
-        not optional, and dropping them reports load plus net battery charge
-        (issue #528) — and also when the balance comes out negative, which on
-        monotonic lifetime totals means a counter is stalled or
-        under-reporting rather than rounding noise.
+        The derived value comes from the energy balance (see
+        :func:`core.bess.energy_balance.derive_load_consumption`), which needs
+        all five counters. Returns ``None`` when any is unreadable — the
+        battery terms are not optional, and dropping them reports load plus
+        net battery charge (issue #528) — and also when the balance comes out
+        negative, which on monotonic lifetime totals means a counter is
+        stalled or under-reporting rather than rounding noise.
         """
         direct = self._get_sensor_value("lifetime_load_consumption")
         if direct is not None:
             return direct
 
         # Derive from other lifetime sensors when direct sensor unavailable
-        solar = self._get_sensor_value("lifetime_solar_energy")
-        grid_import = self._get_sensor_value("lifetime_import_from_grid")
-        grid_export = self._get_sensor_value("lifetime_export_to_grid")
-        battery_charged = self._get_sensor_value("lifetime_battery_charged")
-        battery_discharged = self._get_sensor_value("lifetime_battery_discharged")
-        if None in (
-            solar,
-            grid_import,
-            grid_export,
-            battery_charged,
-            battery_discharged,
-        ):
+        inputs = {
+            "lifetime_solar_energy": self._get_sensor_value("lifetime_solar_energy"),
+            "lifetime_import_from_grid": self._get_sensor_value(
+                "lifetime_import_from_grid"
+            ),
+            "lifetime_export_to_grid": self._get_sensor_value(
+                "lifetime_export_to_grid"
+            ),
+            "lifetime_battery_charged": self._get_sensor_value(
+                "lifetime_battery_charged"
+            ),
+            "lifetime_battery_discharged": self._get_sensor_value(
+                "lifetime_battery_discharged"
+            ),
+        }
+        missing = [key for key, value in inputs.items() if value is None]
+        if missing:
+            # Name the counters, so "N/A" in the health check is traceable to
+            # a specific unmapped or unavailable sensor rather than silent.
+            logger.warning(
+                "Cannot derive lifetime load consumption: %s unreadable "
+                "(unmapped or unavailable). All five counters are required.",
+                ", ".join(missing),
+            )
             return None
+        solar = inputs["lifetime_solar_energy"]
+        grid_import = inputs["lifetime_import_from_grid"]
+        grid_export = inputs["lifetime_export_to_grid"]
+        battery_charged = inputs["lifetime_battery_charged"]
+        battery_discharged = inputs["lifetime_battery_discharged"]
         derived = derive_load_consumption(
             solar_production=solar,
             import_from_grid=grid_import,

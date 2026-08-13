@@ -2325,7 +2325,9 @@ class TestHuaweiDiscovery:
         'Not configured'. Point it at the same entity, as done for grid
         power, and let HAApiController split it by battery_power_polarity.
         """
-        sensors, _ = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
         huawei = sensors["huawei_solar_luna2000"]
 
         assert (
@@ -2336,3 +2338,22 @@ class TestHuaweiDiscovery:
             huawei["battery_discharge_power"]
             == "sensor.huawei_battery_charge_discharge_power"
         )
+
+    def test_huawei_disabled_battery_register_maps_neither_power_key(self):
+        """A disabled signed register must not be dual-mapped (#120 + #549).
+
+        Mapping a disabled entity guarantees a 404 at read time; synthesizing
+        battery_discharge_power from one would turn a single reported
+        disabled sensor into two broken ones.
+        """
+        registry = [dict(e) for e in _huawei_registry()]
+        for entity in registry:
+            if entity["entity_id"] == "sensor.huawei_battery_charge_discharge_power":
+                entity["disabled_by"] = "user"
+
+        sensors, _, disabled = self.ctrl.discover_sensors_from_registry(registry)
+        huawei = sensors["huawei_solar_luna2000"]
+
+        assert "battery_charge_power" not in huawei
+        assert "battery_discharge_power" not in huawei
+        assert "battery_charge_power" in disabled["huawei_solar_luna2000"]

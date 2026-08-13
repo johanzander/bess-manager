@@ -87,24 +87,41 @@ is_globally_scoped() {
   # subcommands fails the wrong way: `gh api -X DELETE repos/...` is the
   # general form of every entry such a list could hold, and `gh workflow
   # run` / `gh secret set` / `gh repo edit` are not obviously "destructive"
-  # names. So invert -- every `gh` asks unless it is a read-only query.
+  # names. So invert -- every `gh` asks unless it is on the safe list.
   # Counting both forms catches a compound `gh pr view && gh pr merge`,
   # where matching only the first invocation would clear the whole command.
-  local gh_all gh_readonly
+  #
+  # The safe list covers reads AND authoring, not reads alone. A read-only
+  # list looks tighter but defeats the point of the hook: `gh pr create` is
+  # the closing step of implement-issue, so a run that no longer stalls on
+  # `rm -f` would instead stall at the finish line, and `gh issue comment`
+  # would stall it in the middle. Authoring a PR/issue on this repo IS the
+  # work product. What stays behind a prompt is everything that publishes,
+  # merges, or reconfigures: pr merge, release, repo edit/delete, secret,
+  # workflow run, and any non-GET `gh api`.
+  local gh_all gh_safe
   # `grep -c` counts LINES, and a command is normally one line, so both
   # counts would be 1 for that compound. Count occurrences with -o | wc -l.
   gh_all=$(printf '%s' "$1" | grep -oE "${CMD_START}gh[[:space:]]" | wc -l | tr -d ' ' || true)
-  gh_readonly=$(printf '%s' "$1" | grep -oE "${CMD_START}gh[[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status)|issue[[:space:]]+(view|list)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+view|workflow[[:space:]]+(view|list)|label[[:space:]]+list|search|auth[[:space:]]+status)([[:space:]]|$)" | wc -l | tr -d ' ' || true)
-  [ "$gh_all" -ne "$gh_readonly" ] && return 0
+  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh[[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+view|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status)([[:space:]]|$)" | wc -l | tr -d ' ' || true)
+  [ "$gh_all" -ne "$gh_safe" ] && return 0
 
   # Any push that can move a shared ref. The ref has to be matched in every
   # refspec form -- `main`, `HEAD:main`, `br:refs/heads/main`, `+main` --
   # not just as a bare word, since the bare word is the spelling least
-  # likely to appear when something force-updates a ref. Force pushes ask
-  # unconditionally: settings.json already asks for them, and this hook's
-  # explicit allow would otherwise override that.
+  # likely to appear when something force-updates a ref.
+  #
+  # `--force-with-lease` is exempt: it is the one force form that REFUSES to
+  # clobber an update it has not seen, which is exactly the accident a
+  # prompt here would be guarding against. It is also routine after the
+  # Step 4 merge, so asking costs a stall on every run. Bare `--force`/`-f`
+  # keeps asking -- that one overwrites unconditionally. Order matters
+  # below: test the lease form first, or `--force` matches its prefix.
   if printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+push([[:space:]]|$)"; then
-    printf '%s' "$1" | grep -qE "(--force|--force-with-lease|[[:space:]]-f([[:space:]]|$)|--all|--mirror|--tags)" && return 0
+    if ! printf '%s' "$1" | grep -qE '\-\-force-with-lease'; then
+      printf '%s' "$1" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
+    fi
+    printf '%s' "$1" | grep -qE "(--all|--mirror|--tags)" && return 0
     printf '%s' "$1" | grep -qE "(^|[[:space:]:+])(refs/heads/)?(main|beta)([[:space:]]|:|$)" && return 0
     printf '%s' "$1" | grep -qE "(^|[[:space:]:+])(refs/tags/)?v[0-9]" && return 0
   fi
@@ -119,9 +136,28 @@ is_globally_scoped() {
 # deleting a branch another agent is on, expiring the reflog that would
 # have recovered it, or removing another agent's checkout outright.
 mutates_shared_state() {
-  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+(branch|tag)[[:space:]]+(.*[[:space:]])?(-D|-d|--delete)([[:space:]]|$)" && return 0
+  # `git branch -D` is deliberately NOT here. implement-issue Step 4 prunes
+  # merged worktrees in a loop, so asking turns one cleanup step into dozens
+  # of prompts -- and the danger it would be guarding is already handled
+  # upstream: git itself REFUSES to delete a branch checked out in another
+  # worktree ("error: cannot delete branch 'x' used by worktree at ...",
+  # exit 1), so it cannot cut another agent out from under itself. What is
+  # left is an unchecked-out branch, whose SHA git prints on delete and
+  # which stays reachable -- protected because `reflog expire`, `gc` and
+  # `filter-branch` below keep asking. `git tag -d` DOES stay: a tag is how
+  # a release is addressed, and nothing refuses to delete one.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+tag[[:space:]]+(.*[[:space:]])?(-d|--delete)([[:space:]]|$)" && return 0
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+(gc|prune|reflog[[:space:]]+expire|update-ref[[:space:]]+-d|filter-branch)([[:space:]]|$)" && return 0
-  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+worktree[[:space:]]+(remove|prune)([[:space:]]|$)" && return 0
+  # Same upstream-protection argument as `git branch -D`: plain `git worktree
+  # remove` REFUSES a worktree holding uncommitted or untracked files
+  # (verified: "contains modified or untracked files, use --force to delete
+  # it", exit 128), so it cannot destroy unsaved work, and a clean worktree
+  # has nothing to lose -- its branch survives. Step 4 removes merged
+  # worktrees in a loop, so asking here meant ~24 prompts in one step. Only
+  # `--force`, which is what actually discards the work, still asks.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+worktree[[:space:]]+remove([[:space:]]|$)" &&
+    printf '%s' "$1" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+worktree[[:space:]]+prune([[:space:]]|$)" && return 0
   return 1
 }
 
@@ -255,7 +291,21 @@ escapes_worktree() {
   return 1
 }
 
-if needs_scrutiny "$command" && escapes_worktree "$command"; then
+# Pruning a merged worktree necessarily names a path outside this one, so
+# the containment check below would ask on every iteration of Step 4's
+# cleanup loop -- ~24 prompts for the step whose whole purpose is unattended
+# tidying. Exempt exactly that command and nothing else: a lone `git
+# worktree remove` with no `--force` (matched above in mutates_shared_state)
+# and no second invocation chained after it. git refuses to remove a
+# worktree holding uncommitted or untracked files, so this cannot discard
+# work; `rm -rf <other worktree>` gets no such exemption, because nothing
+# protects it.
+is_lone_worktree_removal() {
+  printf '%s' "$1" | grep -qE '^[[:space:]]*git[[:space:]]+worktree[[:space:]]+remove[[:space:]]+[^;&|]+$' &&
+    ! printf '%s' "$1" | grep -qE '(--force|[[:space:]]-f([[:space:]]|$))'
+}
+
+if ! is_lone_worktree_removal "$command" && needs_scrutiny "$command" && escapes_worktree "$command"; then
   reason="Not auto-allowed: this command can write outside '${session_root}' -- it names an absolute path beyond the worktree, or hides its target behind '..', '~', a variable, or a command substitution. This is the Bash-side counterpart of the cross-checkout path confusion check-worktree-path.sh blocks for Edit/Write. Re-derive the path from \`pwd\` if that was unintended."
   jq -n --arg reason "$reason" '{
     hookSpecificOutput: {

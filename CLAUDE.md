@@ -225,6 +225,20 @@ pushes moving `main`/`beta`/tags), and commands that **reach outside the
 worktree** — an absolute path beyond its root, or a target hidden behind `..`,
 `~`, a variable, or a command substitution.
 
+**Don't add a prompt where git already refuses.** `git branch -D`, plain `git
+worktree remove` and `git push --force-with-lease` are auto-allowed on purpose:
+git itself blocks the dangerous case (it won't delete a branch checked out in
+another worktree, won't remove a worktree holding uncommitted or untracked
+files, and `--force-with-lease` won't clobber an update it hasn't seen). A
+second prompt there buys nothing and costs a stall on every run — Step 4's
+prune loop alone would have hit ~24 of them. The forcing variants (`--force`,
+`-f`, `git tag -d`, `reflog expire`, `gc`) still ask, because those are the
+ones that actually discard recoverable state. Likewise `gh` allows *authoring*
+(`pr create`/`edit`/`comment`, `issue comment`) — that's the work product, and
+`gh pr create` is the closing step of `implement-issue` — while publishing and
+reconfiguring (`pr merge`, `release`, `repo edit`, `secret`, `workflow run`,
+non-GET `gh api`) still ask.
+
 That second check guards against *accidents* — a stale absolute path from before
 a worktree switch, a `../..` counted from the wrong cwd — and is the Bash-side
 counterpart of `check-worktree-path.sh`. It is **not a sandbox**: a hook sees the

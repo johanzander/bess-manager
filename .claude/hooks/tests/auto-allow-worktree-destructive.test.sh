@@ -61,6 +61,15 @@ run ask "git push --tags"
 run ask "git push beta main"
 run allow "git push origin feat/issue-561-thing"
 run allow "git push -u origin feat/main-ish"
+# --force-with-lease is the one force form that REFUSES to clobber an
+# update it has not seen -- the accident a prompt here would guard. It is
+# routine after the Step 4 merge, so asking would stall every run. Bare
+# --force still asks (pinned above), including when both could match.
+run allow "git push --force-with-lease origin HEAD"
+run allow "git push --force-with-lease origin feat/issue-561-thing"
+# ...but never onto a shared ref, lease or not.
+run ask "git push --force-with-lease origin main"
+run ask "git push --force-with-lease origin HEAD:refs/heads/beta"
 
 echo "== writes that reach the main checkout =="
 run ask "sed -i '' s/a/b/ $MAIN/backend/app.py"
@@ -80,12 +89,27 @@ run ask "tar -C $MAIN -xf x.tar"
 echo "== state shared with the main checkout =="
 # A linked worktree has its own working tree but ONE object database and
 # ONE ref namespace, so these escape it even without -C.
-run ask "git branch -D some-branch"
-run ask "git branch --delete some-branch"
+# `git branch -D` is allowed on purpose. implement-issue Step 4 prunes
+# merged worktrees in a loop, and the danger is already handled upstream:
+# git REFUSES to delete a branch checked out in another worktree (verified:
+# "error: cannot delete branch 'x' used by worktree at ...", exit 1). An
+# unchecked-out branch stays reachable by the SHA git prints, which is why
+# reflog expire / gc / filter-branch below must keep asking.
+run allow "git branch -D some-branch"
+run allow "git branch --delete some-branch"
+# A tag is how a release is addressed and nothing refuses to delete one.
 run ask "git tag -d v1.0.0"
 run ask "git gc --prune=now"
 run ask "git reflog expire --expire=now --all"
-run ask "git worktree remove $TMP/other"
+# Plain `remove` refuses a worktree with uncommitted or untracked files
+# (verified: exit 128), so only --force can actually discard work.
+run allow "git worktree remove $TMP/other"
+run ask "git worktree remove --force $TMP/other"
+run ask "git worktree remove -f $TMP/other"
+# The exemption is for a LONE removal only -- it must not carry an
+# unprotected second command through with it.
+run ask "git worktree remove $TMP/other && rm -rf $MAIN"
+run ask "rm -rf $TMP/other"
 run ask "git worktree prune"
 run allow "git branch --show-current"
 run allow "git status --short"
@@ -102,6 +126,17 @@ run ask "gh pr merge 561"
 run ask "gh pr view 561 && gh pr merge 561"
 run allow "gh pr view 561 --json title"
 run allow "gh pr list"
+# Authoring a PR/issue on this repo IS the work product -- `gh pr create` is
+# the closing step of implement-issue, so a read-only-only safe list would
+# move the stall from `rm -f` to the finish line. Publishing, merging and
+# reconfiguring stay behind a prompt (pinned above).
+run allow "gh pr create --draft --base main --title x --body-file /tmp/b.md"
+run allow "gh pr edit 561 --body-file /tmp/b.md"
+run allow "gh pr ready 561"
+run allow "gh issue comment 558 --body 'working on it'"
+run allow "gh issue edit 558 --add-label analyzed"
+# Authoring first must still not clear a publishing invocation after it.
+run ask "gh pr create --draft --title x && gh pr merge 561"
 run allow "gh run watch 123"
 
 echo "== settings.json denials stay denials =="

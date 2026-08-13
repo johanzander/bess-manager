@@ -649,25 +649,39 @@ Findings (top) and System Logs (bottom).*
 
         table = "\n".join(rows)
 
-        # Each snapshot already carries its own forward-looking forecast
-        # (predicted_periods -- see _serialize_snapshots) at exact precision,
-        # excluding periods already realized by that run's own decision time
-        # (those are in Historical Sensor Data instead, not repeated here).
-        # This is the authoritative source for "what changed between run N
-        # and run N+1" -- diff two snapshots' predicted_periods directly,
-        # rather than reconstructing it from rounded System Logs box tables.
+        # Each snapshot carries the periods of its forward-looking forecast
+        # that moved since the previous run (predicted_periods_delta -- see
+        # _serialize_snapshots) at exact precision, excluding periods already
+        # realized by that run's own decision time (those are in Historical
+        # Sensor Data instead, not repeated here). This is the authoritative
+        # source for "what changed between run N and run N+1" -- read a
+        # snapshot's delta directly, rather than reconstructing it from
+        # rounded System Logs box tables.
         details = f"""
 <details>
 <summary>Per-run forecasts ({total} snapshots — click to expand)</summary>
 
-`predicted_periods` is only populated when it differs from the immediately preceding
-snapshot (same intent + battery_action for every period both cover means nothing to
-see); `predicted_periods_unchanged: true` marks a snapshot where the plan didn't move
-that cycle. This keeps every real change fully visible — including a single flipped
-period — without repeating the same unchanged forecast dozens of times a day.
+`predicted_periods_delta` is a **field-level** delta: for each period that moved since
+the previous snapshot, only the fields that moved, plus `period` to key it. A period's
+first appearance carries its complete payload. `predicted_periods_dropped` lists the
+period indices that left the forecast that cycle, having realized into actuals.
+
+To reconstruct any run's complete forecast: walk the snapshots in order, deep-merging
+each delta entry into the accumulated state for its `period`, and deleting the dropped
+indices. Two things go wrong if you shortcut it — replacing instead of merging loses
+every field the delta didn't mention, and skipping the deletes leaves realized periods
+behind as stale ghosts, since the window shrinks all day and a departure has no delta
+entry to signal it.
+
+An empty delta means the plan didn't move that cycle. Every real change stays fully
+visible at exact precision — nothing is rounded or summarized away — without
+re-serializing ~37 unchanged fields on every period of every one of the day's ~83 runs.
+
+Period objects are written one per line to keep the section greppable at a fraction of
+the size; it is still a single valid JSON array.
 
 ```json
-{self._format_json(export.snapshots)}
+{self._format_snapshots_json(export.snapshots)}
 ```
 
 </details>"""
@@ -751,6 +765,38 @@ period — without repeating the same unchanged forecast dozens of times a day.
 ```
 
 </details>"""
+
+    def _format_snapshots_json(self, snapshots: list[dict]) -> str:
+        """Render the per-run forecasts as compact, still-valid JSON.
+
+        `_format_json`'s 2-space indent costs ~1,663 bytes per period object
+        (~45 lines for 37 fields, every key name repeated). Here each period
+        object is one line and each snapshot's scalar fields are one line, so
+        a period stays greppable and diffable but the section is several times
+        smaller. The output is a single JSON array: `extract_decision_evidence`
+        json.loads() this block whole and walks it for period entries, so it
+        must not degrade into a table or line-delimited JSON.
+
+        Args:
+            snapshots: Compact snapshot dicts from `_serialize_snapshots`.
+
+        Returns:
+            JSON array string, one line per period object.
+        """
+        blocks = []
+        for sn in snapshots:
+            head = {k: v for k, v in sn.items() if k != "predicted_periods_delta"}
+            head_json = json.dumps(head, default=str, separators=(",", ":"))[1:-1]
+            periods = sn.get("predicted_periods_delta", [])
+            period_lines = ",\n".join(
+                json.dumps(p, default=str, separators=(",", ":")) for p in periods
+            )
+            if period_lines:
+                period_lines = "\n" + period_lines + "\n"
+            blocks.append(
+                "{" + head_json + ',"predicted_periods_delta":[' + period_lines + "]}"
+            )
+        return "[\n" + ",\n".join(blocks) + "\n]"
 
     def _format_json(self, data: Any) -> str:
         """Format data as indented JSON.

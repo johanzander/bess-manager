@@ -152,6 +152,57 @@ def parse_tou_rows(text: str, target_min: int) -> list[dict]:
     return rows
 
 
+def _merge_delta(state: dict, delta: dict) -> dict:
+    """Deep-merge one field-level period delta into a period's known state."""
+    merged = {k: (dict(v) if isinstance(v, dict) else v) for k, v in state.items()}
+    for key, value in delta.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key].update(value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def replay_snapshot_deltas(data, period: int) -> list[dict] | None:
+    """Full states of `period` from a delta-encoded Prediction Snapshots array.
+
+    Since #555 a snapshot carries `predicted_periods_delta` — for each period
+    that moved, only the fields that moved — plus `predicted_periods_dropped`
+    for periods that realized out of the forecast. Reading those entries
+    directly would report a period as having no intent or no price merely
+    because that field didn't change, so they have to be replayed into full
+    states first.
+
+    One state is returned per snapshot in which the period actually moved,
+    which is exactly what cross-run reconciliation wants: consecutive
+    identical rows carry no information.
+
+    Returns None when `data` is not a delta-encoded snapshots array, so
+    callers fall through to their normal handling for every other JSON block
+    and for bundles predating #555.
+    """
+    if not isinstance(data, list) or not data:
+        return None
+    if not any(isinstance(sn, dict) and "predicted_periods_delta" in sn for sn in data):
+        return None
+
+    states: dict[int, dict] = {}
+    seen: list[dict] = []
+    for snapshot in data:
+        if not isinstance(snapshot, dict):
+            continue
+        for delta in snapshot.get("predicted_periods_delta", []) or []:
+            key = delta.get("period")
+            if key is None:
+                continue
+            states[key] = _merge_delta(states.get(key, {}), delta)
+            if key == period:
+                seen.append(states[key])
+        for key in snapshot.get("predicted_periods_dropped", []) or []:
+            states.pop(key, None)
+    return seen
+
+
 def parse_json_economics(text: str, period: int) -> list[dict]:
     """Per-period economics from every ```json block that contains the period."""
     results = []
@@ -160,7 +211,11 @@ def parse_json_economics(text: str, period: int) -> list[dict]:
             data = json.loads(block)
         except (ValueError, json.JSONDecodeError):
             continue
-        for entry in _find_period_entries(data, period):
+        replayed = replay_snapshot_deltas(data, period)
+        entries = (
+            replayed if replayed is not None else _find_period_entries(data, period)
+        )
+        for entry in entries:
             econ = entry.get("economic", {})
             dec = entry.get("decision", {})
             results.append(

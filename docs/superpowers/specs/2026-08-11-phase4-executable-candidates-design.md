@@ -1,13 +1,13 @@
 # Phase 4: Executable-command candidates (P3) — design
 
-**Status: D1, D2 and D4 approved 2026-08-11. D3 remains open by choice.**
-Phase 4's plan entry requires a design doc before code and says `rules.md`'s
-new-class approval applies — the modules named in D1 and D2 below carry that
-approval.
+**Status: D1, D2 and D4 approved 2026-08-11. D3 proposed with corpus
+measurements 2026-08-13, awaiting approval.** Phase 4's plan entry requires a
+design doc before code and says `rules.md`'s new-class approval applies — the
+modules named in D1 and D2 below carry that approval.
 
-**4a is startable.** 4b additionally needs D3 — its other precondition, the
-#352 reproduction fixture, landed 2026-08-13 along with the 22/16
-reconciliation (§2). 4b and 4c both wait for the beta to ship (§7). 4d has
+**4a is startable.** 4b's non-code preconditions — the #352 reproduction
+fixture and the 22/16 reconciliation — both landed 2026-08-13 (§2); it now
+needs only D3 approved. 4b and 4c both wait for the beta to ship (§7). 4d has
 been removed from Phase 4 entirely and is now Phase 5 in the parent plan.
 
 Parent: `docs/superpowers/plans/2026-08-09-optimizer-target-architecture.md`
@@ -74,23 +74,26 @@ BATTERY_EXPORT periods discharging below the deficit measures the flow
 derivation's own identity, not the corpus. Measured: 0, exactly as the algebra
 demands. **A zero of that shape is never evidence about a bug.**
 
-Measured together over the corpus's 226 BATTERY_EXPORT periods:
+Measured together over the 232 BATTERY_EXPORT periods in the corpus (37
+fixtures, i.e. including the new reproduction fixture below; the 22/16 row is
+identical on the 36 that predate it):
 
 | criterion | count | in 0.1–0.5 kWh band |
 |---|---|---|
 | planned discharge < home consumption (**the 22/16 figure**) | 22 | 16 |
-| planned export < house deficit (≡ home-dominant) | 59 | 48 |
-| forfeited headroom > planned export | 102 | 86 |
-| **#354 two-sided: home-dominant AND headroom > export** | **49** | **47** |
+| planned export < house deficit (≡ home-dominant) | 60 | 49 |
+| forfeited headroom > planned export | 103 | 87 |
+| **#354's two readings both failing: home-dominant AND headroom > export** | **50** | **48** |
 | planned discharge < house deficit (the vacuous scan) | **0** | 0 |
 
 Note which of these is the exposure metric. Planned *import* in a
 BATTERY_EXPORT period is identically zero on 15-minute point forecasts — the
 corpus cannot show the harm, per "What the corpus is" in the parent plan. What
-it can show is the **commitment**: 102 periods commit the inverter to
+it can show is the **commitment**: 103 periods commit the inverter to
 `grid_first` while forfeiting more load-following headroom than the export
-they defend, and 49 fail #354's two-sided test on both readings at once. That
-is the quantity D3 has to threshold.
+they defend, and 50 fail both of #354's readings at once. (#354's rule as
+written also carries a 0.1 kWh flow floor, under which it rejects 54 — §5.)
+That is the quantity D3 thresholds.
 
 **Reproduction fixture: landed.** `regression_2026_08_12_202906` (from the
 maintainer's 2026-08-12 Growatt MIN bundle, the four-period hardware
@@ -183,23 +186,83 @@ already living on the controller is evidence the split is real rather than
 tidy-minded. Folding them in would also overload an object passed through
 almost every function in the optimizer.
 
-**D3 — What is "dominance OR forfeited headroom", concretely? ⬜ OPEN, and
-deliberately so.** #354's two-sided materiality test kept as candidate scoring.
-P7 constrains the shape: risk handling must be **structural, not stochastic**,
-so no probability distribution over load. Likely reading: a low-rate
-`grid_first` export is admissible only if the planned export dominates the
-plausible in-period load excursion, or if declining it forfeits headroom that
-has real value. Undecided: whether the threshold is configured, derived from
-the lattice, or derived from forecast granularity.
+**D3 — What is "dominance OR forfeited headroom", concretely? 🟡 PROPOSED
+2026-08-13, measured over the corpus, awaiting approval.** It was blocked on
+"the bug reproduces on no fixture", which §2 retracts as vacuous, so it is
+answerable now.
 
-**Unblocked 2026-08-13, and now has a measured target.** The reason to wait —
-"the bug reproduces on no fixture" — was itself the vacuous measurement §2
-retracts. D3's predicate can now be fitted against real counts: 102 corpus
-periods forfeit more headroom than they defend, 49 fail both sides of the
-test, and `regression_2026_08_12_202906` p99 (0.125 kWh export, 2.925 kWh
-headroom) is the concrete instance to make the predicate reject. A candidate
-predicate is testable the moment it is written: run it over the corpus and
-state what it demotes.
+**The predicate.** A `grid_first` export command is admissible iff the export
+revenue covers the import it exposes the house to at a reference load
+excursion:
+
+```
+headroom = max_discharge_power_kw * dt - planned_discharge     # kWh unused
+harm     = buy_price  * min(D_ref * dt, headroom)
+benefit  = sell_price * planned_export
+admit    iff  benefit >= harm
+```
+
+`D_ref` is a load excursion expressed as **power**, so it means the same thing
+on the corpus's 15-minute and hourly fixtures. **Proposed value: 2 kW.**
+
+Three properties this has that a one-sided rule does not:
+
+- **A full-rate export is always admitted.** `headroom == 0` ⇒ `harm == 0`.
+  This is #354's live-E2E lesson (a near-full-rate spike export has nothing
+  left to protect) falling out of the arithmetic instead of being a special
+  case. 69 of the 232 corpus export periods are full-rate; every predicate
+  variant below admits all 69.
+- **It is price-aware**, so a buy≫sell tariff (#352's UK/Octopus reporter,
+  #393's Belgian one) demotes more readily than a flat one. That is the actual
+  economics of the bug, and no fixture in the corpus has such a tariff — the
+  test carries the behaviour the corpus cannot exhibit.
+- **It is structural, not stochastic** (P7): `D_ref` is a fixed reference
+  deviation, not a distribution over load.
+
+**Measured over all 232 corpus `grid_first` periods** (287.4 kWh planned
+export, 554.7 SEK revenue, 191.0 kWh headroom forfeited in total):
+
+| `D_ref` | rejected | revenue given up | headroom protected |
+|---|---|---|---|
+| 1 kW | 94 | 18.48 SEK (3.3%) | 163.7 kWh |
+| 1.5 kW | 97 | 21.35 SEK (3.8%) | 166.1 kWh |
+| **2 kW** | **101** | **23.41 SEK (4.2%)** | **168.4 kWh** |
+| 2.5 kW | 101 | 23.41 SEK (4.2%) | 168.4 kWh |
+| 3 kW | 102 | 26.25 SEK (4.7%) | 170.9 kWh |
+| 4 kW | 105 | 38.12 SEK (6.9%) | 177.4 kWh |
+| house fuse (17.2 kW ≡ ∞) | 106 | 41.00 SEK (7.4%) | 179.2 kWh |
+
+**Why 2 kW rather than a derived quantity.** The answer is insensitive across
+1–3 kW (94→102 periods, 18→26 SEK) and then turns sharply at 4 kW, so the
+choice is being made inside a flat region rather than fitted to a cliff.
+Deriving `D_ref` from `HomeSettings`' connection capacity
+(`max_fuse_current × voltage × phase_count` = 17.2 kW on defaults) was measured
+and **rejected**: it is indistinguishable from ∞ and costs 17.6 SEK more across
+just 5 periods — genuine 1.0–1.4 kWh exports at 32–54% rate on a 15 kW battery,
+refused because *the battery* is large, not because the house could plausibly
+draw 6.9 kW more than forecast for a full quarter-hour. A house's fuse rating
+is the wrong scale for a sub-period excursion.
+
+**It strictly subsumes #354's two-sided test.** Measured: of the 54 periods
+#354's rule rejects, this rejects **all 54**, plus 47 more — `#354-only = 0`.
+Pookey's analysis is preserved, not replaced, and extended to the band a
+dominance test alone cannot see.
+
+**On `regression_2026_08_12_202906` p99** — the #352 reproduction — benefit is
+0.329 SEK against harm 1.959 SEK at `D_ref = 2 kW`: **REJECT**, as required by
+the acceptance criteria. (#354's rule also rejects it.)
+
+**Three caveats that belong with the numbers.**
+
+- "Revenue given up" is an **upper bound, not a cost**. Rejecting a candidate
+  does not delete the export — under Phase 4 the DP re-optimises and can move
+  it into a fuller period, which is direction 2 of the issue. The realised
+  delta will be smaller and is only measurable once 4b exists.
+- The corpus **cannot show the harm side at all**: planned import in an export
+  period is identically zero on 15-minute point forecasts (§2). The table
+  measures what the commitment gives up, never what the spike costs.
+- Applies only where `discharge_rate_is_load_following` (#324). VPP-style
+  platforms have no load-following behaviour to demote to and are untouched.
 
 **D4 — What happens to `strategic_intent` consumers? ✅ APPROVED 2026-08-11:
 removed from Phase 4, becomes Phase 5.** Measured blast radius: 25 non-test
@@ -254,6 +317,10 @@ that moves most plans would make any report from those reporters ambiguous
 between "the audited refactor regressed something" and "the new candidate space
 chose differently".
 
-Work that can proceed now, all non-behavioural: D3 (now unblocked — see §5)
-and 4a (whose two decisions are approved). The #352 reproduction fixture and
-the 22/16 reconciliation are **done** (2026-08-13, §2).
+Work that can proceed now, all non-behavioural: 4a (whose two decisions are
+approved). The #352 reproduction fixture and the 22/16 reconciliation are
+**done** (2026-08-13, §2), and D3 is proposed with its corpus measurements
+(§5) — approving it is the last thing 4b waits on besides the beta.
+
+Every number in §2 and §5 is re-derivable:
+`PYTHONPATH=. .venv/bin/python scripts/measure_export_commitment.py`.

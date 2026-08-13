@@ -42,8 +42,8 @@ canonical scenario harness (`core/bess/tests/unit/test_scenarios.py` +
 (`verify` skill / `mock-run.sh`).
 
 **"The corpus", used throughout this document and the code comments**, means
-the 36 scenario fixtures in `core/bess/tests/unit/data/` — 2168 periods across
-five `historical_*` (real price days), ten `realworld_*` and eight
+the scenario fixtures in `core/bess/tests/unit/data/` — 37 as of 2026-08-13,
+across five `historical_*` (real price days), ten `realworld_*` and nine
 `regression_*` (built from real user debug bundles), and thirteen `synthetic_*`
 (constructed edge cases). Every pin iterates that same set: `test_scenarios.py`
 auto-discovers it, and the action-selector goldens, the VPP baseline and the
@@ -54,10 +54,18 @@ Worth stating because it bounds what "measured on the corpus" can ever mean.
 These are Swedish and Belgian systems at 15-minute **point** forecasts, so a
 sub-period effect (load exceeding the period average within the slot) is
 arithmetically zero here by construction, and no fixture represents a
-configuration nobody has sent a bundle for. Two 2026-08-11 findings turn on
-exactly that — #393's overnight residual and #352's Shape B both measure 0 on
-the corpus while remaining live on real hardware. A zero here means the
-instrument cannot see it, not that it does not happen.
+configuration nobody has sent a bundle for. #393's overnight residual measures
+0 here while remaining live on real hardware: a zero can mean the instrument
+cannot see it, not that it does not happen.
+
+**But check that a zero is not an identity first (2026-08-13).** #352's
+Shape B was recorded as "measures 0 on the corpus" on the same reasoning, and
+that was wrong for a different reason: the scan asked whether a
+`BATTERY_EXPORT` period discharges below the house deficit, which the flow
+derivation makes impossible by construction. It measured algebra, not the
+corpus. The real criterion reproduces 22 periods, exactly as first recorded —
+see the Phase 4 section. Before concluding "the instrument cannot see it",
+confirm the criterion *could* have returned non-zero.
 
 ## Global constraints
 
@@ -84,7 +92,7 @@ instrument cannot see it, not that it does not happen.
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
 | 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | **MERGED — PR #534** (re-scoped 2026-08-10). Closeable: all five follow-ups below are non-blocking, and #536 is explicitly "does not block a release" |
-| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; 4a startable. 4b gated on D3 + the #352 reproduction; 4b/4c behind the beta |
+| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; 4a startable. #352 reproduction landed 2026-08-13, D3 proposed; 4b/4c behind the beta |
 | 5 | intent-as-input (was Phase 4d — split out 2026-08-11; 25 backend modules + 10 frontend files + the goldens) | 2, 3 | after 4b/4c |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
@@ -647,7 +655,7 @@ Two things gate it now, neither a code dependency:
 
 1. **The design doc exists; its decisions are open.**
    `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`
-   — **D1, D2 and D4 approved 2026-08-11; D3 open by choice** (see the split
+   — **D1, D2 and D4 approved 2026-08-11; D3 proposed 2026-08-13** (see the split
    below). D1 resolved a blocker the split did not anticipate: **the selector
    cannot simply import
    `inverter_simulator`.** That module imports `intra_period_discharge_gate`
@@ -675,7 +683,8 @@ from Phase 4** and becomes its own phase; see below.
   rather than folded into `BatterySettings` (D2). No candidate changes yet.
 - **4b — discharge commands.** Candidates become executable discharge
   commands; folds in #511/#517's tests as regression cover. Closes #352
-  **Shape B**. Gated on the #352 reproduction fixture and on D3.
+  **Shape B**. The #352 reproduction fixture landed 2026-08-13; now
+  gated on D3's approval alone (proposed, see below).
 - **4c — charge commands.** The six hardcoded `rate_throughput` sites above
   collapse to the configured rate; this is where the measured R≠P divergence
   closes.
@@ -699,13 +708,19 @@ constraints above *is* the `rules.md` new-class approval:
   `BatterySettings`. The latter is 17 fields of physical-battery facts with a
   different lifetime and source; `discharge_rate_is_load_following` already
   living on the controller is evidence the split is real.
-- **D3 — the materiality predicate is still OPEN**, deliberately. It is #354's
-  two-sided test (dominance OR forfeited headroom) as candidate scoring, and
-  P7 constrains it to be structural rather than stochastic — no probability
-  distribution over load. Undecided: whether the threshold is configured,
-  derived from the lattice, or derived from forecast granularity. **Do not pick
-  one before the #352 reproduction exists** — a predicate fitted to no
-  observable failure fits nothing.
+- **D3 — the materiality predicate is PROPOSED (2026-08-13), awaiting
+  approval.** A `grid_first` export command is admissible iff
+  `sell × export ≥ buy × min(D_ref × dt, headroom)`, with `D_ref = 2 kW` — the
+  export revenue must cover the import the commitment exposes the house to at
+  a reference load excursion. Structural, not stochastic (P7); price-aware, so
+  buy≫sell tariffs demote more readily; and a full-rate export (headroom 0) is
+  always admitted, which is #354's live-E2E lesson arriving as arithmetic.
+  Measured over the corpus: rejects 101 of 232 export periods, giving up 4.2%
+  of planned export revenue (an upper bound — the DP re-optimises) to keep
+  168 of 191 kWh of load-following headroom, and it **strictly subsumes**
+  #354's own test (all 54 of its rejects, plus 47). Sweep, the rejected
+  fuse-derived alternative, and the caveats are in the design doc §5;
+  re-derive with `scripts/measure_export_commitment.py`.
 
 - [x] Design doc —
       `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`.

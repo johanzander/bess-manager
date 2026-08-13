@@ -151,6 +151,28 @@ else
 fi
 
 echo ""
+echo "📋 Checking permission-hook decisions..."
+echo "-------------------------------------------"
+
+# The hook decides, per Bash command, whether an agent is prompted or runs
+# unattended -- including re-emitting the settings.json denials. Its
+# expectation matrix only protects that if something actually runs it.
+HOOK_TEST=".claude/hooks/tests/auto-allow-worktree-destructive.test.sh"
+if [ -f "$HOOK_TEST" ]; then
+    if bash "$HOOK_TEST" > /tmp/hook-test-out.txt 2>&1; then
+        echo "✅ Worktree permission hook behaves as pinned"
+    else
+        echo "❌ Worktree permission hook changed behaviour:"
+        grep "^FAIL" /tmp/hook-test-out.txt || tail -20 /tmp/hook-test-out.txt
+        ERRORS=$((ERRORS + 1))
+    fi
+    rm -f /tmp/hook-test-out.txt
+else
+    echo "⚠️  $HOOK_TEST not found"
+    WARNINGS=$((WARNINGS + 1))
+fi
+
+echo ""
 echo "📋 Checking scenario discovery coverage..."
 echo "-------------------------------------------"
 

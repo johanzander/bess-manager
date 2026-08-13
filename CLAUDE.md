@@ -209,6 +209,57 @@ frontend/node_modules` first) rather than installing through it. Re-running
 `worktree-setup.sh` handles the node case automatically once
 `package-lock.json` diverges — `requirements.txt` drift is not detected.
 
+### Permissions inside a worktree
+
+**The worktree is the safety boundary.** A linked worktree is disposable by
+construction, so `.claude/hooks/auto-allow-worktree-destructive.sh` auto-allows
+Bash commands whose cwd is a linked worktree, and falls through everywhere else
+so the shared main checkout keeps its `ask`/`deny` rules. Do not "fix" a prompt
+by adding the offending command to an allowlist — an `ask` rule beats an `allow`
+rule, so that never works, and enumerating command shapes is what the inverted
+hook exists to replace.
+
+Two classes still prompt inside a worktree: **globally-scoped** actions no
+worktree can contain (`sudo`, `podman machine rm`, `gh pr merge`/`release`,
+pushes moving `main`/`beta`/tags), and commands that **reach outside the
+worktree** — an absolute path beyond its root, or a target hidden behind `..`,
+`~`, a variable, or a command substitution.
+
+**Don't add a prompt where git already refuses.** `git branch -D`, plain `git
+worktree remove` and `git push --force-with-lease` are auto-allowed on purpose:
+git itself blocks the dangerous case (it won't delete a branch checked out in
+another worktree, won't remove a worktree holding uncommitted or untracked
+files, and `--force-with-lease` won't clobber an update it hasn't seen). A
+second prompt there buys nothing and costs a stall on every run — Step 4's
+prune loop alone would have hit ~24 of them. The forcing variants (`--force`,
+`-f`, `git tag -d`, `reflog expire`, `gc`) still ask, because those are the
+ones that actually discard recoverable state. Likewise `gh` allows *authoring*
+(`pr create`/`edit`/`comment`, `issue comment`) — that's the work product, and
+`gh pr create` is the closing step of `implement-issue` — while publishing and
+reconfiguring (`pr merge`, `release`, `repo edit`, `secret`, `workflow run`,
+non-GET `gh api`) still ask.
+
+That second check guards against *accidents* — a stale absolute path from before
+a worktree switch, a `../..` counted from the wrong cwd — and is the Bash-side
+counterpart of `check-worktree-path.sh`. It is **not a sandbox**: a hook sees the
+command string, not the syscalls, so indirection can defeat it. The real
+containment is that a worktree is disposable. Don't extend it as if it were a
+security boundary, and don't weaken it on the grounds that it isn't one.
+
+**Only tracked files travel into a worktree.** `.claude/settings.json` and
+`.claude/hooks/*` are tracked and follow automatically;
+`.claude/settings.local.json` is gitignored and therefore exists only in the
+main checkout. A session that enters a worktree silently loses every rule and
+mode set there while the tracked `ask:` list keeps applying — that asymmetry is
+why an autonomous run in the main checkout starts prompting mid-worktree.
+`.claude/hooks/link-worktree-local-settings.sh` symlinks it into every linked
+worktree. Note what that does **not** buy you: a hook decision supersedes a
+settings rule, so a Bash `deny`/`ask` you add to local settings is overridden
+inside a worktree by the auto-allow. `defaultMode` and non-Bash rules survive
+the trip; a Bash restriction has to go in the hook's own escape lists to have
+any effect there. The same doesn't-travel problem applies to `.venv` and
+`frontend/node_modules` (see `scripts/worktree-setup.sh`, issue #556).
+
 ## Home Assistant Integration
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing

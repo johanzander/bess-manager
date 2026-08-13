@@ -78,21 +78,6 @@ run allow "git push --force-with-lease origin feat/issue-561-thing"
 run ask "git push --force-with-lease origin main"
 run ask "git push --force-with-lease origin HEAD:refs/heads/beta"
 
-echo "== writes that reach the main checkout =="
-run ask "sed -i '' s/a/b/ $MAIN/backend/app.py"
-run ask "touch $MAIN/x"
-run ask "mkdir -p $MAIN/x"
-run ask "cp somefile $MAIN/somefile"
-# Absolute path quoted inside an argument, not at token start.
-run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
-# Relative traversal, redirect and rm alike.
-run ask "echo x > ../../main/README.md"
-run ask "rm -rf ../../main"
-# Traversal out THROUGH an allowed temp prefix.
-run ask "rm -rf /tmp/../$MAIN"
-run ask "git -C $MAIN reset --hard"
-run ask "tar -C $MAIN -xf x.tar"
-
 echo "== state shared with the main checkout =="
 # A linked worktree has its own working tree but ONE object database and
 # ONE ref namespace, so these escape it even without -C.
@@ -113,10 +98,17 @@ run ask "git reflog expire --expire=now --all"
 run allow "git worktree remove $TMP/other"
 run ask "git worktree remove --force $TMP/other"
 run ask "git worktree remove -f $TMP/other"
-# The exemption is for a LONE removal only -- it must not carry an
-# unprotected second command through with it.
-run ask "git worktree remove $TMP/other && rm -rf $MAIN"
-run ask "rm -rf $TMP/other"
+# THE ACCEPTED TRADE. Filesystem containment was removed, so a command that
+# names a path outside this worktree -- including the main checkout -- is no
+# longer inspected. These two are pinned as `allow` deliberately: they are
+# what the reduced hook lets through, and if a future change makes them ask
+# again, that is a decision to take knowingly rather than by accident.
+# Tracked content in the main checkout is recoverable from git; uncommitted
+# work is not. The Edit/Write equivalent is still guarded by
+# check-worktree-path.sh, which compares two `git rev-parse` results and
+# parses nothing.
+run allow "git worktree remove $TMP/other && rm -rf $MAIN"
+run allow "rm -rf $TMP/other"
 run ask "git worktree prune"
 run allow "git branch --show-current"
 run allow "git status --short"
@@ -209,46 +201,6 @@ run ask "git config --global user.email x@y.z"
 run ask "git remote set-url origin git@github.com:other/repo.git"
 run ask "git remote remove origin"
 run allow "git config --get user.email"
-
-echo "== reading outside the worktree is not a write =="
-# visualize-debug-log opens a user's bundle from ~/Downloads; the
-# containment guard is about writes, so reads must not prompt.
-run allow "cat $TMP/outside.json"
-run allow "head -50 $MAIN/CHANGELOG.md"
-run allow "ls ~/Downloads"
-run allow "grep -rn foo /usr/local/lib"
-run allow "git log --oneline -5"
-run allow "cat $MAIN/x.json | jq .a"
-# ...but anything that can write is still scrutinised.
-run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
-run ask "sed -i '' s/a/b/ $MAIN/app.py"
-run ask "cat x.json > $MAIN/out.json"
-
-echo "== shapes that reached the user as false prompts =="
-# Each of these blocked real work. They are pinned because every one was
-# introduced by a *fix* to the containment check, not by the original code.
-# A worktree must not be judged foreign to itself: `;` is a separator, so
-# `cd <own worktree>; cmd` must not yield the token "<worktree>;".
-run allow "cd $WT; .venv/bin/pytest -m 'not slow' -q 2>&1 | tail -8"
-run allow "cd $WT; python3 - <<'PY'
-open('config.yaml','w').write(s)
-PY"
-run allow "cd $WT; git add -A; git commit -m 'merge: reconcile beta/main'"
-# A literal \$( inside a quoted search pattern is not command substitution.
-run allow "grep -n 'main_root=\$(printf' .claude/hooks/x.sh"
-run allow "grep -n 'session_root\"/\*) ;;' .claude/hooks/x.sh"
-# Read-only work plus a discarded stderr redirect.
-run allow "git show origin/main:x.sh 2>/dev/null | grep -n 'case \"\$command\"'"
-# A SIBLING worktree is disposable too; only the main checkout is protected.
-run allow "cp report.md $TMP/sibling-wt/report.md"
-
-echo "== ...while the main checkout is still protected =="
-run ask "rm -rf $MAIN/core"
-run ask "sed -i '' s/a/b/ $MAIN/backend/app.py"
-run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
-run ask "echo x > $MAIN/README.md"
-run ask "rm -rf \$HOME/GitHub/bess-manager"
-run ask "rm -rf ../../../bess-manager"
 
 echo "== the main checkout keeps its own rules =="
 # In the main checkout the hook must stay silent so settings.json applies

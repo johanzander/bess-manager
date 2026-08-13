@@ -219,11 +219,31 @@ by adding the offending command to an allowlist — an `ask` rule beats an `allo
 rule, so that never works, and enumerating command shapes is what the inverted
 hook exists to replace.
 
-Two classes still prompt inside a worktree: **globally-scoped** actions no
-worktree can contain (`sudo`, `podman machine rm`, `gh pr merge`/`release`,
-pushes moving `main`/`beta`/tags), and commands that **reach outside the
-worktree** — an absolute path beyond its root, or a target hidden behind `..`,
-`~`, a variable, or a command substitution.
+Inside a worktree the rule is: **do anything to the repo, except destroy the
+repo or its history.** What still prompts is a short, closed list of effects no
+worktree can contain — the shared podman VM (a `deny`, re-emitted so it can't be
+downgraded to one keystroke), elevated privileges, anything reaching GitHub,
+pushes that move a shared ref (`main`, `beta`, `beta-release-*`, tags), and
+writes to state shared across every checkout: the single object database, ref
+namespace, stash, and `.git/config`.
+
+**What it deliberately does not do is infer which files a command will touch.**
+An earlier version tried, using absolute paths, `..`, `~`, variables and
+substitutions to decide whether a command wrote outside the worktree. That is
+shell parsing by regex, and it does not work — quoting, globs, heredocs and `cd`
+all defeat it. It produced six distinct false positives in a single day, *every
+one introduced by the fix to the previous one*, including blocking a live beta
+release and judging a worktree foreign to itself because `;` wasn't treated as a
+separator. It was removed rather than patched again. The accepted cost: a stale
+absolute path in a Bash command can reach the main checkout unprompted; tracked
+content there is recoverable from git, uncommitted work isn't.
+
+If you want real containment, the mechanism is the sandbox
+(`sandbox.filesystem.allowWrite`/`denyWrite`), which the OS enforces — not more
+regex. **Anything added to this hook must classify by command shape, never by
+guessing at paths.** The Edit/Write guard `check-worktree-path.sh` is the shape
+to copy: it compares two `git rev-parse` results as strings and has never
+produced a false positive.
 
 **Don't add a prompt where git already refuses.** `git branch -D`, plain `git
 worktree remove` and `git push --force-with-lease` are auto-allowed on purpose:
@@ -237,14 +257,9 @@ ones that actually discard recoverable state. Likewise `gh` allows *authoring*
 (`pr create`/`edit`/`comment`, `issue comment`) — that's the work product, and
 `gh pr create` is the closing step of `implement-issue` — while publishing and
 reconfiguring (`pr merge`, `release`, `repo edit`, `secret`, `workflow run`,
-non-GET `gh api`) still ask.
-
-That second check guards against *accidents* — a stale absolute path from before
-a worktree switch, a `../..` counted from the wrong cwd — and is the Bash-side
-counterpart of `check-worktree-path.sh`. It is **not a sandbox**: a hook sees the
-command string, not the syscalls, so indirection can defeat it. The real
-containment is that a worktree is disposable. Don't extend it as if it were a
-security boundary, and don't weaken it on the grounds that it isn't one.
+non-GET `gh api`) still ask. The `gh` safe list must also stay a superset of
+settings.json's `gh` allow patterns, or a hook decision silently revokes a
+permission you granted.
 
 **Only tracked files travel into a worktree.** `.claude/settings.json` and
 `.claude/hooks/*` are tracked and follow automatically;

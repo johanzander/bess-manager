@@ -283,6 +283,35 @@ def test_refuses_to_run_outside_a_worktree(tmp_path):
     assert "worktree" in (result.stderr + result.stdout).lower()
 
 
+def test_fails_loudly_when_the_browser_install_hangs(tmp_path):
+    """`playwright install` can hang indefinitely after its download finishes,
+    holding the completed zip and burning no CPU — observed twice while working
+    #556, once for 9h24m, each time leaving the same 448K partial `chromium-*`
+    directory that IS the corruption the issue reports. Since this script runs
+    the install on every worktree setup, an unbounded wait would hang setup
+    itself forever. Bound it and fail with something actionable instead."""
+    _, wt, env, _, _ = _setup(tmp_path)
+    hanging_npx = Path(env["PATH"].split(":")[0]) / "npx"
+    hanging_npx.write_text("#!/bin/sh\nsleep 600\n")
+    hanging_npx.chmod(0o755)
+    env = {**env, "WORKTREE_SETUP_INSTALL_TIMEOUT": "3"}
+
+    result = subprocess.run(
+        [str(wt / "scripts" / "worktree-setup.sh")],
+        cwd=wt,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+
+    assert result.returncode != 0, "a hung install must not be reported as success"
+    output = result.stdout + result.stderr
+    assert "playwright install" in output.lower()
+    # The dependency sharing that already succeeded must survive the failure.
+    assert (wt / ".venv").is_symlink()
+
+
 def test_leaves_the_worktree_git_status_clean(tmp_path):
     """The links the script creates must be invisible to git. `.gitignore`'s
     `node_modules/` pattern matches a directory but NOT a symlink pointing at

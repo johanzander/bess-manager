@@ -116,7 +116,42 @@ if [ -d "$BROWSER_CACHE" ]; then
     done
 fi
 
+# The install is bounded because it can hang indefinitely: observed twice while
+# working #556 (once for 9h24m), the downloader finishes fetching the ~173MB
+# zip and then stops making progress, holding the file open and burning no CPU.
+# That hang is what produces the corrupt directory this script has to repair, so
+# waiting it out is never the right move — and an unbounded wait here would hang
+# worktree setup itself. Fail loudly with the recovery instead.
+INSTALL_TIMEOUT="${WORKTREE_SETUP_INSTALL_TIMEOUT:-300}"
+
 echo "🌐 Verifying Playwright browsers (downloads only what is missing)"
-(cd e2e && npx playwright install chromium)
+# `set -m` puts the install in its own process group, so the timeout below can
+# kill the whole tree. Killing just the direct child leaves npx's grandchildren
+# (node, the downloader) alive, still holding this script's stdout open.
+set -m
+(cd e2e && npx playwright install chromium) &
+install_pid=$!
+set +m
+
+waited=0
+while kill -0 "$install_pid" 2>/dev/null; do
+    if [ "$waited" -ge "$INSTALL_TIMEOUT" ]; then
+        kill -9 -- "-$install_pid" 2>/dev/null || kill -9 "$install_pid" 2>/dev/null || true
+        echo "" >&2
+        echo "❌ playwright install made no progress within ${INSTALL_TIMEOUT}s — killed." >&2
+        echo "   It usually finishes in 1-3 minutes. A hung install leaves a partial" >&2
+        echo "   browser directory behind, so clear it and retry:" >&2
+        echo "" >&2
+        echo "     rm -rf \"$BROWSER_CACHE\"/chromium*" >&2
+        echo "     cd e2e && npx playwright install chromium" >&2
+        echo "" >&2
+        echo "   Dependency sharing above completed — only the browsers are missing." >&2
+        exit 1
+    fi
+    sleep 1
+    waited=$((waited + 1))
+done
+
+wait "$install_pid"
 
 echo "✅ Worktree ready"

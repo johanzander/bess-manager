@@ -1685,7 +1685,7 @@ class TestDerivedLifetimeSensors:
             assert self.ctrl.get_load_consumption_lifetime() is None
 
     def test_load_consumption_names_the_missing_counter_in_the_log(self, caplog):
-        """"N/A" in the health check must be traceable to a specific sensor.
+        """An N/A in the health check must be traceable to a specific sensor.
 
         Returning ``None`` silently would leave a user with a degraded
         Energy Monitoring component and nothing naming the cause.

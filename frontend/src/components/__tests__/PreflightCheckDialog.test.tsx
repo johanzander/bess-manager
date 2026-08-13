@@ -54,6 +54,28 @@ describe('PreflightCheckDialog', () => {
     })
   })
 
+  it('enables the button when a required component has WARNING status', async () => {
+    // #558: "Energy Prediction" is required under the sensor consumption
+    // strategy, but its solar-forecast member stays optional. A required
+    // component only reports WARNING when every required method works, so a
+    // failing optional member must not block leaving demo mode.
+    mockGet.mockResolvedValueOnce({
+      data: {
+        checks: [
+          { name: 'Battery Control', status: 'OK', required: true },
+          { name: 'Energy Prediction', status: 'WARNING', required: true },
+        ],
+      },
+    })
+
+    render(<PreflightCheckDialog open={true} onClose={() => {}} onConfirm={() => {}} />)
+
+    await waitFor(() => {
+      const button = screen.getByRole('button', { name: /enable live control/i })
+      expect(button).not.toBeDisabled()
+    })
+  })
+
   it('disables the button when a required component has ERROR status', async () => {
     mockGet.mockResolvedValueOnce({
       data: {

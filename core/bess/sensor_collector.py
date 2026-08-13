@@ -879,17 +879,27 @@ class SensorCollector:
         Only validates the ``get_estimated_consumption`` sensor when the
         ``sensor`` strategy is active — other strategies (fixed,
         influxdb_7d_avg, ha_statistics) do not rely on that HA sensor.
+
+        Under the ``sensor`` strategy that sensor is *required*: every
+        optimization run reads it and aborts without it, so no schedule can
+        ever be built and the dashboard sits on "Initializing" indefinitely
+        (#558). The solar forecast stays optional under every strategy, so
+        only the consumption method is named as required.
         """
         all_methods = ["get_solar_forecast"]
-        if consumption_strategy == "sensor":
+        sensor_strategy_active = consumption_strategy == "sensor"
+        if sensor_strategy_active:
             all_methods = ["get_estimated_consumption", *all_methods]
 
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
-            is_required=False,
+            is_required=sensor_strategy_active,
             controller=self.ha_controller,
             all_methods=all_methods,
+            required_methods=(
+                ["get_estimated_consumption"] if sensor_strategy_active else None
+            ),
         )
 
     def check_health(self, consumption_strategy: str = "sensor") -> list:

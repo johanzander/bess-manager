@@ -139,6 +139,11 @@ def _full_wizard_payload(**overrides) -> dict:
                 "current_l2": "sensor.current_l2",
                 "current_l3": "sensor.current_l3",
                 "battery_charging_power_rate": "sensor.charge_rate",
+                # consumptionStrategy is "sensor" below, which has no
+                # fallback — without this sensor every optimization run
+                # aborts and the dashboard never leaves "Initializing", so
+                # the API rejects that combination with a 422 (#558).
+                "48h_avg_grid_import": "sensor.avg_grid_import",
             },
         },
         "nordpoolArea": "SE4",
@@ -640,6 +645,8 @@ class TestSetupComplete:
                     "current_l2": "sensor.current_l2",
                     "current_l3": "sensor.current_l3",
                     "battery_charging_power_rate": "sensor.charge_rate",
+                    # matches the base payload's "sensor" strategy (#558)
+                    "48h_avg_grid_import": "sensor.avg_grid_import",
                 },
             },
             powerMonitoringEnabled=True,
@@ -1326,6 +1333,63 @@ class TestSetupCompleteRejectsUnusableProvider:
         resp = _client.post("/api/setup/complete", json=payload)
 
         assert resp.status_code == 200
+
+
+class TestSetupCompleteRejectsUnusableConsumptionStrategy:
+    """POST /api/setup/complete must refuse a consumption strategy it cannot
+    read a forecast from (#558).
+
+    The reporter's system had consumption_strategy="sensor" with no
+    48h_avg_grid_import entity. Every optimization run aborted, no schedule
+    was ever stored, and the dashboard sat on "Initializing" forever. The
+    frontend now hides that combination, but the API is what actually
+    persists it, so the guarantee has to live here too.
+    """
+
+    def _strip_48h(self, payload: dict) -> dict:
+        payload["sensors"]["shared"].pop("48h_avg_grid_import", None)
+        return payload
+
+    def test_sensor_strategy_without_its_sensor_is_rejected(self, complete_controller):
+        payload = self._strip_48h(_full_wizard_payload(consumptionStrategy="sensor"))
+
+        resp = _client.post("/api/setup/complete", json=payload)
+
+        assert resp.status_code == 422
+        assert "48h_avg_grid_import" in resp.json()["detail"]
+        complete_controller.settings_store.save_all.assert_not_called()
+
+    def test_sensor_strategy_with_its_sensor_is_accepted(self, complete_controller):
+        resp = _client.post(
+            "/api/setup/complete",
+            json=_full_wizard_payload(consumptionStrategy="sensor"),
+        )
+
+        assert resp.status_code == 200
+
+    @pytest.mark.parametrize("strategy", ["fixed", "ha_statistics", "influxdb_7d_avg"])
+    def test_other_strategies_do_not_need_that_sensor(
+        self, complete_controller, strategy
+    ):
+        """Only "sensor" has no fallback. ha_statistics and influxdb_7d_avg
+        degrade to the fixed profile and report it, so rejecting them here
+        would invent a failure the optimizer does not have."""
+        payload = self._strip_48h(_full_wizard_payload(consumptionStrategy=strategy))
+
+        resp = _client.post("/api/setup/complete", json=payload)
+
+        assert resp.status_code == 200
+
+    def test_unknown_strategy_is_rejected(self, complete_controller):
+        """An unrecognised value otherwise persists fine and only surfaces
+        later, as a ValueError from _get_consumption_forecast on every run."""
+        payload = _full_wizard_payload(consumptionStrategy="bogus_strategy")
+
+        resp = _client.post("/api/setup/complete", json=payload)
+
+        assert resp.status_code == 422
+        assert "bogus_strategy" in resp.json()["detail"]
+        complete_controller.settings_store.save_all.assert_not_called()
 
 
 class TestSetupCompleteDemoMode:

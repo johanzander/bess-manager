@@ -192,6 +192,29 @@ same. Choose by how you want to reach an agent's work:
 Find any session's worktree path by peeking/attaching it in Agent View, or via
 `claude agents --json` (the `cwd` field).
 
+### Permissions inside a worktree
+
+**The worktree is the safety boundary.** A linked worktree is disposable by
+construction, so `.claude/hooks/auto-allow-worktree-destructive.sh` auto-allows
+Bash commands whose cwd is a linked worktree, and falls through everywhere else
+so the shared main checkout keeps its `ask`/`deny` rules. Do not "fix" a prompt
+by adding the offending command to an allowlist — an `ask` rule beats an `allow`
+rule, so that never works, and enumerating command shapes is what the inverted
+hook exists to replace. The only additions that belong in that hook are the
+*escape* list: commands whose blast radius leaves the worktree (`sudo`,
+`podman machine rm`, `gh pr merge`, pushes to `main`/`beta`, absolute paths
+outside the worktree root).
+
+**Only tracked files travel into a worktree.** `.claude/settings.json` and
+`.claude/hooks/*` are tracked and follow automatically;
+`.claude/settings.local.json` is gitignored and therefore exists only in the
+main checkout. A session that enters a worktree silently loses every rule and
+mode set there while the tracked `ask:` list keeps applying — that asymmetry is
+why an autonomous run in the main checkout starts prompting mid-worktree.
+`.claude/hooks/link-worktree-local-settings.sh` symlinks it into every linked
+worktree. The same doesn't-travel problem applies to `.venv` and
+`frontend/node_modules` (see `scripts/worktree-setup.sh`, issue #556).
+
 ## Home Assistant Integration
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing

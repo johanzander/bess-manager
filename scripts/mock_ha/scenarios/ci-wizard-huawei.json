@@ -52,6 +52,30 @@
     "sensors": {}
   },
   "sensors": {
+    "sensor.inverter_phase_a_current": {
+      "state": "2.1",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.inverter_phase_b_current": {
+      "state": "2.0",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.inverter_phase_c_current": {
+      "state": "2.2",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
     "sensor.batteries_state_of_capacity": {
       "state": "88",
       "attributes": {
@@ -173,30 +197,6 @@
     },
     "sensor.power_meter_phase_c_current": {
       "state": "7.2",
-      "attributes": {
-        "unit_of_measurement": "A",
-        "device_class": "current",
-        "state_class": "measurement"
-      }
-    },
-    "sensor.inverter_phase_a_current": {
-      "state": "2.1",
-      "attributes": {
-        "unit_of_measurement": "A",
-        "device_class": "current",
-        "state_class": "measurement"
-      }
-    },
-    "sensor.inverter_phase_b_current": {
-      "state": "2.0",
-      "attributes": {
-        "unit_of_measurement": "A",
-        "device_class": "current",
-        "state_class": "measurement"
-      }
-    },
-    "sensor.inverter_phase_c_current": {
-      "state": "2.2",
       "attributes": {
         "unit_of_measurement": "A",
         "device_class": "current",
@@ -510,7 +510,12 @@
     ],
     "detected_inverter_platforms": [
       "huawei_solar_luna2000"
-    ]
+    ],
+    "phase_currents": {
+      "current_l1": "sensor.power_meter_phase_a_current",
+      "current_l2": "sensor.power_meter_phase_b_current",
+      "current_l3": "sensor.power_meter_phase_c_current"
+    }
   },
   "inverter_platform": "huawei_solar_luna2000"
 }

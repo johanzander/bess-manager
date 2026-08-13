@@ -3226,6 +3226,18 @@ class HomeAssistantAPIController:
           inverter's output instead of the house feed would silently protect
           the wrong circuit.
 
+        Candidates are grouped by the device their entity_id belongs to, and
+        one group supplies all phases. ``meter`` is a bare substring, so a
+        sub-circuit meter (heat pump, EV charger) passes the gate too;
+        selecting per phase independently would mix two devices into a reading
+        set describing no real circuit. Preference is: the explicit
+        ``current_lN`` convention over inferred ``phase_a/b/c`` naming, then
+        the most phases, then lowest group id — never ``/api/states`` order,
+        which is arbitrary and varies across restarts. A lone sub-circuit
+        meter can still win when it is the only complete set; the wizard lets
+        the user correct that, and grid-side entities cannot be told apart by
+        name alone on a discovery path with no unique_id suffix map.
+
         Args:
             states: List of state dicts from /api/states
 
@@ -3233,7 +3245,8 @@ class HomeAssistantAPIController:
             dict mapping phase key ('current_l1', 'current_l2', 'current_l3') ->
             entity_id for detected sensors. Empty dict if none found.
         """
-        result: dict[str, str] = {}
+        # group_id -> (convention_rank, {phase_key: entity_id})
+        groups: dict[str, tuple[int, dict[str, str]]] = {}
         for state in states:
             entity_id = str(state.get("entity_id", ""))
             if not entity_id.startswith("sensor."):
@@ -3242,37 +3255,64 @@ class HomeAssistantAPIController:
             if attrs.get("device_class") != "current":
                 continue
             lower_id = entity_id.lower()
-            key = self._match_phase_current_key(lower_id)
-            if key and key not in result:
-                result[key] = entity_id
+            matched = self._match_phase_current_key(lower_id)
+            if not matched:
+                continue
+            key, pattern, rank = matched
+            group_id = lower_id.replace(pattern, "*")
+            _, phases = groups.setdefault(group_id, (rank, {}))
+            phases.setdefault(key, entity_id)
 
+        if not groups:
+            logger.info("Discovered 0 phase current sensor(s)")
+            return {}
+
+        group_id, (_, result) = min(
+            groups.items(),
+            key=lambda kv: (kv[1][0], -len(kv[1][1]), kv[0]),
+        )
+        if len(groups) > 1:
+            logger.info(
+                "Phase currents: %d candidate device(s), selected %s",
+                len(groups),
+                group_id,
+            )
         logger.info("Discovered %d phase current sensor(s)", len(result))
-        return result
+        return dict(result)
 
-    # Household phase-current naming conventions, most specific first. The
-    # phase_a/b/c form is meter-gated — see discover_current_sensors.
-    PHASE_CURRENT_PATTERNS: ClassVar[tuple[tuple[str, str, bool], ...]] = (
-        ("current_l1", "current_l1", False),
-        ("current_l2", "current_l2", False),
-        ("current_l3", "current_l3", False),
-        ("phase_a", "current_l1", True),
-        ("phase_b", "current_l2", True),
-        ("phase_c", "current_l3", True),
+    # Household phase-current naming conventions: (pattern, phase key,
+    # meter-gated, convention rank). Lower rank wins when one install exposes
+    # both conventions — the explicit current_lN form is a deliberate
+    # household-phase naming, phase_a/b/c is inferred from a meter's own
+    # per-phase registers. The phase_a/b/c form is meter-gated; see
+    # discover_current_sensors.
+    PHASE_CURRENT_PATTERNS: ClassVar[tuple[tuple[str, str, bool, int], ...]] = (
+        ("current_l1", "current_l1", False, 0),
+        ("current_l2", "current_l2", False, 0),
+        ("current_l3", "current_l3", False, 0),
+        ("phase_a", "current_l1", True, 1),
+        ("phase_b", "current_l2", True, 1),
+        ("phase_c", "current_l3", True, 1),
     )
 
     # Entity-id marker identifying a metering device, used to keep the
     # phase_a/b/c form off the inverter's own output currents.
     METER_ID_MARKER: ClassVar[str] = "meter"
 
-    def _match_phase_current_key(self, lower_id: str) -> str | None:
-        """Return the phase key a current sensor's entity_id maps to, if any."""
+    def _match_phase_current_key(self, lower_id: str) -> tuple[str, str, int] | None:
+        """Match a current sensor's entity_id to a phase.
+
+        Returns (phase_key, matched_pattern, convention_rank), or None. The
+        pattern is returned so the caller can derive the owning device's group
+        id by blanking it out of the entity_id.
+        """
         is_meter = self.METER_ID_MARKER in lower_id
-        for pattern, key, meter_only in self.PHASE_CURRENT_PATTERNS:
+        for pattern, key, meter_only, rank in self.PHASE_CURRENT_PATTERNS:
             if pattern not in lower_id:
                 continue
             if meter_only and not is_meter:
                 continue
-            return key
+            return key, pattern, rank
         return None
 
     def _match_optional_sensor(

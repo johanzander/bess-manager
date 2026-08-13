@@ -508,7 +508,7 @@ The HA REST API `/api/states` provides all entity IDs and current values. BESS e
 
 - **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
 - **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
-- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; the inverter's own output currents share that display name, so the phase_a/b/c form is meter-gated)
+- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; the inverter's own output currents share that display name, so the phase_a/b/c form is meter-gated). Candidates are grouped by owning device and one group supplies every phase, preferring the explicit `current_lN` convention, then the most phases, then the lowest group id — never `/api/states` order, which is arbitrary. This keeps a sub-circuit meter from supplying some phases and the grid meter the rest
 
 #### Stage 3 — WebSocket Metadata Query
 

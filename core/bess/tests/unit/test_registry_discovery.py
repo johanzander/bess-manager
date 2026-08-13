@@ -4,11 +4,14 @@ Tests cover:
 - _map_registry_entities: unique_id-based suffix matching
 - discover_sensors_from_registry: single suffix map per platform
 - Robustness against user entity renaming (unique_id is immutable)
-- Derived lifetime sensor fallbacks (GEN3/GEN4)
+- Derived lifetime sensors (SolaX native/Solis/Huawei lack a load register;
+  GEN3 lacks a system-production one)
 """
 
 from typing import ClassVar
 from unittest.mock import patch
+
+import pytest
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.settings_store import SettingsStore
@@ -1608,8 +1611,69 @@ class TestDerivedLifetimeSensors:
         with self._mock_sensor({"lifetime_load_consumption": 1234.5}):
             assert self.ctrl.get_load_consumption_lifetime() == 1234.5
 
-    def test_load_consumption_derived_for_gen4(self):
-        """When no direct sensor, derive from solar + import - export."""
+    @pytest.mark.parametrize(
+        (
+            "solar_to_home,solar_to_battery,solar_to_grid,"
+            "grid_to_home,grid_to_battery,battery_to_home,battery_to_grid"
+        ),
+        [
+            # Overnight discharge: battery serves the house.
+            (0.0, 0.0, 0.0, 0.40, 0.0, 1.60, 0.0),
+            # Midday charging from solar.
+            (1.00, 2.00, 0.0, 0.0, 0.0, 0.0, 0.0),
+            # Battery idle, house on grid only.
+            (0.0, 0.0, 0.0, 2.00, 0.0, 0.0, 0.0),
+            # Battery exporting to grid: the case the old clamp hid.
+            (0.30, 0.0, 0.0, 0.50, 0.0, 0.0, 1.70),
+            # Mixed: solar splits three ways while the grid also charges.
+            (1.20, 0.80, 0.60, 0.40, 0.90, 0.0, 0.0),
+        ],
+        ids=["discharge", "charge", "idle", "export", "mixed"],
+    )
+    def test_derived_load_equals_actual_load_whatever_the_battery_does(
+        self,
+        solar_to_home,
+        solar_to_battery,
+        solar_to_grid,
+        grid_to_home,
+        grid_to_battery,
+        battery_to_home,
+        battery_to_grid,
+    ):
+        """Derived lifetime load must equal real house consumption (issue #528).
+
+        The counters are built up from the seven physical flows rather than
+        from the derivation formula, so this asserts the energy balance
+        itself, not an arithmetic restatement of the implementation. The old
+        ``solar + import - export`` formula returns ``actual + net battery
+        charge`` and fails every case here except ``idle``.
+        """
+        counters = {
+            "lifetime_solar_energy": solar_to_home + solar_to_battery + solar_to_grid,
+            "lifetime_import_from_grid": grid_to_home + grid_to_battery,
+            "lifetime_export_to_grid": solar_to_grid + battery_to_grid,
+            "lifetime_battery_charged": solar_to_battery + grid_to_battery,
+            "lifetime_battery_discharged": battery_to_home + battery_to_grid,
+        }
+        actual_load = solar_to_home + battery_to_home + grid_to_home
+
+        with self._mock_sensor(counters):
+            assert self.ctrl.get_load_consumption_lifetime() == pytest.approx(
+                actual_load
+            )
+
+    def test_load_consumption_none_when_missing_sources(self):
+        """Returns None when derivation sources are incomplete."""
+        with self._mock_sensor({"lifetime_solar_energy": 5000.0}):
+            assert self.ctrl.get_load_consumption_lifetime() is None
+
+    def test_load_consumption_none_when_battery_counters_missing(self):
+        """No battery counters means no honest answer, so return None.
+
+        Per ``docs/agents/rules.md`` (no silent fallbacks): deriving without
+        the battery terms would return a wrong-but-plausible number, which is
+        exactly the defect in issue #528.
+        """
         with self._mock_sensor(
             {
                 "lifetime_solar_energy": 5000.0,
@@ -1617,23 +1681,28 @@ class TestDerivedLifetimeSensors:
                 "lifetime_export_to_grid": 1500.0,
             }
         ):
-            assert self.ctrl.get_load_consumption_lifetime() == 6500.0
-
-    def test_load_consumption_none_when_missing_sources(self):
-        """Returns None when derivation sources are incomplete."""
-        with self._mock_sensor({"lifetime_solar_energy": 5000.0}):
             assert self.ctrl.get_load_consumption_lifetime() is None
 
-    def test_load_consumption_clamps_negative(self):
-        """Derived value is clamped to 0 to guard against rounding."""
+    def test_load_consumption_none_when_balance_is_negative(self):
+        """A negative balance means the counters disagree, so report nothing.
+
+        Lifetime totals are large and monotonic, so the balance cannot go
+        negative through rounding — only through a stalled or under-reporting
+        counter. Returning the negative would surface as a healthy "OK"
+        reading (``health_check.py`` treats any float as OK), which is the
+        silent degradation ``docs/agents/rules.md`` forbids. ``None`` drives
+        the Energy Monitoring check to WARNING instead.
+        """
         with self._mock_sensor(
             {
                 "lifetime_solar_energy": 100.0,
                 "lifetime_import_from_grid": 50.0,
                 "lifetime_export_to_grid": 200.0,
+                "lifetime_battery_charged": 40.0,
+                "lifetime_battery_discharged": 30.0,
             }
         ):
-            assert self.ctrl.get_load_consumption_lifetime() == 0.0
+            assert self.ctrl.get_load_consumption_lifetime() is None
 
     def test_system_production_direct_sensor(self):
         """Direct sensor is returned when available."""

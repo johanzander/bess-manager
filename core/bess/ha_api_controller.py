@@ -15,6 +15,7 @@ from typing import ClassVar
 import requests
 import websocket
 
+from .energy_balance import derive_load_consumption
 from .exceptions import SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .settings_store import SettingsStore
@@ -2527,9 +2528,16 @@ class HomeAssistantAPIController:
     def get_load_consumption_lifetime(self):
         """Get lifetime total load consumption energy in kWh.
 
-        If no direct sensor is configured (e.g. GEN4 Growatt inverters lack a
-        native load consumption register), derives the value from:
-            load = solar + grid_import - grid_export
+        If no direct sensor is configured, derives the value from the energy
+        balance (see :func:`core.bess.energy_balance.derive_load_consumption`).
+        SolaX native, Solis and Huawei lack a native load register and take
+        this path; all three map both battery counters.
+
+        Returns ``None`` when any input is unmapped — the battery terms are
+        not optional, and dropping them reports load plus net battery charge
+        (issue #528) — and also when the balance comes out negative, which on
+        monotonic lifetime totals means a counter is stalled or
+        under-reporting rather than rounding noise.
         """
         direct = self._get_sensor_value("lifetime_load_consumption")
         if direct is not None:
@@ -2539,10 +2547,39 @@ class HomeAssistantAPIController:
         solar = self._get_sensor_value("lifetime_solar_energy")
         grid_import = self._get_sensor_value("lifetime_import_from_grid")
         grid_export = self._get_sensor_value("lifetime_export_to_grid")
-        if solar is not None and grid_import is not None and grid_export is not None:
-            derived = solar + grid_import - grid_export
-            return max(derived, 0.0)  # Guard against small negative rounding
-        return None
+        battery_charged = self._get_sensor_value("lifetime_battery_charged")
+        battery_discharged = self._get_sensor_value("lifetime_battery_discharged")
+        if None in (
+            solar,
+            grid_import,
+            grid_export,
+            battery_charged,
+            battery_discharged,
+        ):
+            return None
+        derived = derive_load_consumption(
+            solar_production=solar,
+            import_from_grid=grid_import,
+            export_to_grid=grid_export,
+            battery_charged=battery_charged,
+            battery_discharged=battery_discharged,
+        )
+        if derived < 0:
+            # Report the inputs rather than a laundered number: a health check
+            # showing a plausible value would hide the broken counter.
+            logger.warning(
+                "Derived lifetime load consumption is negative (%.1f kWh) - "
+                "lifetime counters disagree, so no value can be reported. "
+                "solar=%.1f import=%.1f export=%.1f charged=%.1f discharged=%.1f",
+                derived,
+                solar,
+                grid_import,
+                grid_export,
+                battery_charged,
+                battery_discharged,
+            )
+            return None
+        return derived
 
     def get_system_production_lifetime(self):
         """Get lifetime total system production energy in kWh.

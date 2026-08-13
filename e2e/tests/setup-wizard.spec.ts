@@ -40,7 +40,26 @@ const PROVIDER_LABEL: Record<string, string> = {
 // Tests
 // ---------------------------------------------------------------------------
 
+/**
+ * Some scenarios exist to prove a wizard gate holds (#549), so the step
+ * they block is unreachable by design. Call these as the first line of any
+ * test that navigates past that step.
+ */
+function skipIfSensorStepBlocked() {
+  test.skip(
+    !!expected.sensorStepBlocked,
+    'scenario deliberately blocks the sensor step (disabled entities)',
+  );
+}
+function skipIfPricingStepBlocked() {
+  test.skip(
+    !!expected.sensorStepBlocked || !!expected.pricingBlocked,
+    'scenario deliberately blocks the sensor or pricing step',
+  );
+}
+
 test.describe('Setup Wizard', () => {
+
   test('redirects to /setup when no sensors are configured', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL('/setup', { timeout: 15_000 });
@@ -59,6 +78,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('auto-selects correct pricing provider', async ({ page }) => {
+    skipIfSensorStepBlocked()
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
@@ -113,6 +133,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('provider-specific fields shown correctly', async ({ page }) => {
+    skipIfSensorStepBlocked()
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
@@ -147,6 +168,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('can switch provider when both are available', async ({ page }) => {
+    skipIfSensorStepBlocked()
     // Only meaningful when both providers are detected
     test.skip(!expected.nordpoolFound || !expected.octopusFound,
       'Scenario has only one provider');
@@ -176,6 +198,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('completes full wizard flow end-to-end', async ({ page }) => {
+    skipIfPricingStepBlocked()
     await page.goto('/setup');
 
     // Step 0 → 1: Scan
@@ -213,6 +236,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('can navigate back and forth without losing state', async ({ page }) => {
+    skipIfSensorStepBlocked()
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
@@ -233,6 +257,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('edited battery values appear in summary', async ({ page }) => {
+    skipIfPricingStepBlocked()
     await page.goto('/setup');
     await expectActiveStep(page, 1);
 
@@ -264,6 +289,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('home step gates features by platform capabilities', async ({ page }) => {
+    skipIfPricingStepBlocked()
     // SPH lacks local_load_power; SolaX native has it (as house_load)
     const platformsWithoutLocalLoad = ['growatt_server_sph'];
     const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus'];
@@ -305,6 +331,7 @@ test.describe('Setup Wizard', () => {
   });
 
   test('partial phase-current discovery does not auto-enable fuse protection or seed an invalid phase count', async ({ page }) => {
+    skipIfPricingStepBlocked()
     // Regression test: discovery finding only 2 of the 3 current_l1/l2/l3
     // sensors (detectedPhaseCount === 2) must not auto-enable fuse
     // protection (current_l3 is missing, so real-time monitoring would
@@ -413,5 +440,49 @@ test.describe('Setup Wizard', () => {
     // the 1-phase option was not selected either.
     await expect(page.getByRole('radio', { name: '3-phase' })).toBeChecked();
     await expect(page.getByRole('radio', { name: '1-phase' })).not.toBeChecked();
+  });
+
+  // -------------------------------------------------------------------------
+  // Issue #549: the wizard must refuse configuration it cannot make work
+  // -------------------------------------------------------------------------
+
+  test('blocks the sensor step when a required entity is disabled in HA', async ({ page }) => {
+    test.skip(!expected.disabledEntities, 'scenario has no disabled entities');
+
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    // The user is told which entities to switch on — not that they are
+    // "missing", which is what the old runtime 404 claimed.
+    const warning = page.getByTestId('disabled-entities-warning');
+    await expect(warning).toBeVisible();
+    for (const entityId of expected.disabledEntities!) {
+      await expect(warning).toContainText(entityId);
+    }
+
+    // And setup cannot proceed with a mapping that would 404 at runtime.
+    await expect(
+      page.getByRole('button', { name: /Next: Electricity Pricing/i }),
+    ).toBeDisabled();
+  });
+
+  test('blocks the pricing step when the selected provider is unconfigured', async ({ page }) => {
+    test.skip(!expected.pricingBlocked, 'scenario has a usable price provider');
+
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+    await page.getByRole('button', { name: /Next: Electricity Pricing/i }).click();
+    await expectActiveStep(page, 2);
+
+    // No Nord Pool integration exists, so the defaulted provider has an
+    // empty config entry — completing here would persist a config that can
+    // never fetch a price and abort every optimizer cycle.
+    await expect(page.getByTestId('pricing-incomplete-warning')).toBeVisible();
+    await expect(page.getByRole('button', { name: /Next: Battery/i })).toBeDisabled();
+
+    // Supplying the missing field releases the gate.
+    await fieldByLabel(page, /Config Entry ID/).fill('entry-nordpool-manual');
+    await expect(page.getByTestId('pricing-incomplete-warning')).toBeHidden();
+    await expect(page.getByRole('button', { name: /Next: Battery/i })).toBeEnabled();
   });
 });

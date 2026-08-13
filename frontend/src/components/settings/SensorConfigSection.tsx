@@ -83,6 +83,18 @@ export interface DiscoveryResult {
   sensors: Record<string, string>;
   platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];
+  /**
+   * Sensor keys left unmapped because their only matching HA entity is
+   * disabled (#549).  Distinct from missingSensors: the entity exists, it
+   * just has no state until the user switches it on, so the fix is
+   * "enable it in HA", not "install something".
+   */
+  disabledSensors?: Record<string, string>;
+  /**
+   * Same, but keyed by platform — the user can switch the inverter tab away
+   * from the auto-detected platform, and the gate must follow that choice.
+   */
+  platformDisabledSensors?: Record<string, Record<string, string>>;
   detectedInverterPlatforms?: string[];
   detectedPhaseCount: number | null;
   currency: string | null;

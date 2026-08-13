@@ -16,8 +16,10 @@ venv/
 .mypy_cache/
 .ruff_cache/
 
-# Node.js dependencies
-node_modules/
+# Node.js dependencies (no trailing slash: in a worktree set up by
+# scripts/worktree-setup.sh these are symlinks to the main checkout, and a
+# trailing slash matches a directory but not a symlink to one)
+node_modules
 # A worktree gets this as a symlink to the main checkout (see
 # .claude/hooks/link-worktree-local-settings.sh). Ignoring it only via a
 # personal ~/.config/git/ignore means another clone -- or CI -- would see an

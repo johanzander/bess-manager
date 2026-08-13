@@ -506,6 +506,48 @@ targets whichever domain `inverter.service_domain` resolves to (default
 `huawei_solar`) — see "Bring-your-own integration" above for when and how to
 change it.
 
+**Schedule readback (optional, #431).** `huawei_solar` has no
+`read_tou_periods` service, but its TOU period sensor publishes the
+programmed periods as `Period N` extra state attributes, in the very text
+format `set_tou_periods` accepts (`HuaweiSolarTOUSensorEntity`, sensor.py).
+When the `huawei_tou_periods` sensor is mapped, BESS reads those in two
+places, the same read-compare-write shape Growatt MIN adopted in #551/#552:
+
+- at startup, to initialise the period list from what the battery actually
+  holds, so a restart doesn't rewrite a schedule already running. The periods
+  carry no strategic intent (the battery reports only charge/discharge
+  flags), so they display as `existing_schedule` until the first optimization.
+- before every write, comparing the plan against a fresh read rather than
+  against BESS's own model of the battery — a model can only ever claim what
+  BESS *meant* to write. `set_tou_periods` rewrites the whole list atomically
+  and cannot update just what moved, so every skipped write is a flash-wear
+  event spared. Paths that write without consulting `evaluate_intents` (a
+  retried write, the corruption flag, the 23:55 next-day preparation) go
+  through this check too.
+
+An empty plan still writes: the empty string is how BESS clears periods the
+battery is otherwise left running.
+
+Readback is enabled by the sensor being *mapped*, never by attempting the
+read and catching failure. Installs whose integration exposes no such entity
+keep the original behaviour: start with an empty period list, converge on the
+first cycle. If the entity is mapped but unreadable, that raises rather than
+reading as "no periods programmed" — the two must not look alike, or BESS
+would skip a write it genuinely needs. That read is the *first* thing
+`sync_to_hardware` does, ahead of the working-mode and grid-charge writes, so
+a failed read aborts the cycle with the battery untouched instead of arming
+grid charging against the period list the old plan left behind; BSM's
+`_hardware_write_pending` then retries the whole sync next cycle.
+
+`days` is part of a period's identity in that comparison. BESS always writes
+all-days (`1234567`) periods, so a period programmed elsewhere for a subset
+of weekdays is not a match for BESS's own period even at identical times.
+
+EMMA's equivalent register (`emma_tou_periods`) uses the same period format
+but its entity is disabled by default upstream, so it is deliberately left
+out of `HUAWEI_SUFFIX_MAP` — auto-discovery would otherwise map a disabled,
+stateless entity. EMMA users who enable it can map it by hand in Settings.
+
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.
 Periods without an explicit flag (SOLAR_STORAGE, SOLAR_EXPORT, IDLE) use the
@@ -687,8 +729,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `battery_capacity` | Current battery level |
-| `battery_charge_power` | sensor | `battery_power_charge` | Charge power (W) |
-| `battery_discharge_power` | sensor | `battery_power_discharge` | Discharge power (W) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `battery_power_charge` (signed) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `import_power` | sensor | `measured_power` | Grid import (W) |
 | `export_power` | sensor | `grid_export` | Grid export (W) |
 | `pv_power` | sensor | `pv_power_1` | Solar production (W) |
@@ -761,13 +802,14 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
-| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `storage_charge_discharge_power` (signed, reg 37765) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
 | `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
 | `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |
 | `battery_discharge_stop_soc` | number | `storage_grid_charge_cutoff_state_of_charge` | Discharge stop SOC (%) |
 | `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
 | `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
+| `huawei_tou_periods` | sensor | `storage_huawei_luna2000_time_of_use_charging_and_discharging_periods` | Optional: programmed TOU periods, read back at startup (#431) |
 | `local_load_power` | sensor | `active_power` | Home consumption (W) |
 | `pv_power` | sensor | `input_power` | Real-time solar PV power (W) |
 | `import_power` / `export_power` | sensor | `power_meter_active_power` (separate power-meter device, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`, `"export_positive"` — issue #438) |

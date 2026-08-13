@@ -136,6 +136,12 @@ rewrites, other merged fixes), surfacing later as an avoidable merge
 conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
 branch on `origin/main`.
 
+Then run `./scripts/worktree-setup.sh` in the new worktree — once, before any
+test, build or `verify` step. It shares `.venv` and both `node_modules` trees
+with the main checkout and repairs a stale Playwright browser cache. Skipping
+it means paying ~35 minutes of reinstall against ~5 minutes of real testing,
+which is what makes Step 8 feel skippable (#556).
+
 **Do not change the session's worktree while a background agent spawned from
 it is still running.** The agent's isolation follows the session, so
 switching drags it into the new worktree mid-run — observed in practice: a

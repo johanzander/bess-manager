@@ -107,15 +107,48 @@ class SensorCollector:
         self.power_sensors = self._resolve_power_sensor_ids()
         self.energy_flow_calculator.rebuild_sensor_mapping()
 
+    def _shared_signed_power_entities(self) -> set[str]:
+        """Entity IDs that back more than one power flow key.
+
+        Some platforms publish one signed sensor where BESS wants two
+        directional readings — battery power on native SolaX / Huawei (#542),
+        grid power on Solis / Huawei (#475/#438) — so both keys resolve to the
+        same entity and HAApiController splits the live reading by sign.
+
+        That split is impossible here: InfluxDB returns a period *mean* of the
+        entity, in which charge and discharge (or import and export) have
+        already cancelled into one number. Such entities are therefore
+        excluded from the InfluxDB power path entirely rather than being
+        attributed to whichever flow ``power_sensor_flow_map`` happens to
+        iterate last. The live PowerSampleBuffer path (#387) still covers
+        these installs — it samples through the sign-splitting getters.
+        """
+        seen: dict[str, int] = {}
+        for sensor_key in self.power_sensor_flow_map:
+            entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
+            if entity_id:
+                seen[entity_id] = seen.get(entity_id, 0) + 1
+        return {entity_id for entity_id, count in seen.items() if count > 1}
+
     def _resolve_power_sensor_ids(self) -> list[str]:
         """Resolve power sensor keys to entity IDs for InfluxDB.
 
         Returns list of entity IDs (without 'sensor.' prefix).
         """
+        shared = self._shared_signed_power_entities()
         resolved_ids = []
         for sensor_key in self.power_sensor_flow_map:
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
-            if entity_id:
+            if entity_id in shared:
+                logger.info(
+                    "Power sensor key '%s' resolves to shared signed entity "
+                    "'%s' — excluded from InfluxDB gap-fill (direction is not "
+                    "recoverable from a period mean); live sampling still "
+                    "covers it",
+                    sensor_key,
+                    entity_id,
+                )
+            elif entity_id:
                 resolved_ids.append(entity_id)
                 logger.debug(
                     f"Resolved power sensor key '{sensor_key}' to '{entity_id}'"
@@ -560,10 +593,11 @@ class SensorCollector:
         Returns:
             Dict mapping "sensor.entity_id" -> flow_name
         """
+        shared = self._shared_signed_power_entities()
         entity_to_flow = {}
         for sensor_key, flow_name in self.power_sensor_flow_map.items():
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
-            if entity_id:
+            if entity_id and entity_id not in shared:
                 entity_to_flow[f"sensor.{entity_id}"] = flow_name
         return entity_to_flow
 

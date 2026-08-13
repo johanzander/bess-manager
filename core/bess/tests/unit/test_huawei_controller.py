@@ -115,14 +115,20 @@ class TestWriteSchedule:
         assert "02:00-02:59/1234567/+" in text
         assert "18:00-18:59/1234567/-" in text
 
-    def test_write_schedule_no_periods_writes_empty_string(
+    def test_write_schedule_no_periods_clears_the_battery(
         self, controller: HuaweiController
     ) -> None:
+        """An idle plan must clear periods the battery still holds.
+
+        Skipping the write when the plan is empty would leave the old periods
+        running — the empty string is how BESS says "no periods".
+        """
         intents = make_intents({})
         controller.apply_intents(make_schedule_mock(intents))
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        ha.read_huawei_tou_periods.return_value = ["02:00-02:59/1234567/+"]
         controller.sync_to_hardware(ha, 0)
         ha.write_huawei_tou_periods.assert_called_once_with("")
 
@@ -297,6 +303,273 @@ class TestEvaluateIntentsHuawei:
             make_schedule_mock(make_intents({18: "BATTERY_EXPORT"}))
         )
         assert differ is True
+
+
+class FakeHuaweiInverter:
+    """Execution model of a LUNA2000's TOU period list.
+
+    Holds whatever BESS last wrote and reports it back in the huawei_solar
+    sensor's attribute text format, so a restart can be replayed end to end:
+    write → read back → decide whether to write again. Without this the tests
+    could only pin the text BESS emits, which says nothing about whether a
+    restart leaves the hardware alone.
+    """
+
+    def __init__(self, periods_text: str = "", tou_sensor_mapped: bool = True) -> None:
+        self.periods_text = periods_text
+        self.tou_sensor_mapped = tou_sensor_mapped
+        self.write_count = 0
+
+    def is_sensor_configured(self, sensor_key: str) -> bool:
+        if sensor_key == "huawei_tou_periods":
+            return self.tou_sensor_mapped
+        return True
+
+    def read_huawei_tou_periods(self) -> list[str]:
+        if not self.tou_sensor_mapped:
+            raise AssertionError("read attempted while the sensor is unmapped")
+        return self.periods_text.splitlines() if self.periods_text else []
+
+    def write_huawei_tou_periods(self, periods_text: str) -> None:
+        self.periods_text = periods_text
+        self.write_count += 1
+
+    def get_huawei_working_mode(self) -> str:
+        return "time_of_use_luna2000"
+
+    def get_huawei_working_mode_options(self) -> list[str]:
+        return ["maximise_self_consumption", "time_of_use_luna2000"]
+
+    def set_huawei_working_mode(self, option: str) -> None:
+        pass
+
+    def set_grid_charge(self, enabled: bool) -> None:
+        pass
+
+
+def restart_against(
+    inverter: FakeHuaweiInverter, battery_settings: BatterySettings
+) -> HuaweiController:
+    """A freshly constructed controller initialized from that inverter."""
+    restarted = HuaweiController(battery_settings=battery_settings)
+    restarted.read_and_initialize_from_hardware(inverter, current_hour=10)
+    return restarted
+
+
+def run_cycle(
+    controller: HuaweiController, inverter: FakeHuaweiInverter, schedule: MagicMock
+) -> bool:
+    """One BESS decision cycle, as battery_system_manager drives it.
+
+    evaluate_intents gates the write (_evaluate_schedule_application →
+    _apply_schedule, battery_system_manager.py:2537/2585): no difference
+    means the inverter is never touched. Returns whether it was written.
+    """
+    differs, _ = controller.evaluate_intents(schedule)
+    if differs:
+        controller.apply_intents(schedule)
+        controller.sync_to_hardware(inverter, 0)
+    return differs
+
+
+class TestTouReadback:
+    """Startup readback of the periods already programmed on the battery."""
+
+    def test_restart_leaves_matching_hardware_untouched(
+        self, controller: HuaweiController, battery_settings: BatterySettings
+    ) -> None:
+        """The point of the readback: no redundant rewrite after a restart.
+
+        Every write is a flash-wear event on the battery, and until now BESS
+        started blind and always rewrote the schedule it had just written.
+        """
+        intents = make_intents({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
+        inverter = FakeHuaweiInverter()
+        controller.apply_intents(make_schedule_mock(intents))
+        controller.sync_to_hardware(inverter, 0)
+        assert inverter.write_count == 1
+
+        restarted = restart_against(inverter, battery_settings)
+        wrote = run_cycle(restarted, inverter, make_schedule_mock(intents))
+
+        assert wrote is False
+        assert inverter.write_count == 1
+
+    def test_restart_rewrites_when_the_plan_has_moved_on(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        inverter = FakeHuaweiInverter("02:00-02:59/1234567/+")
+        restarted = restart_against(inverter, battery_settings)
+
+        new_plan = make_intents({18: "BATTERY_EXPORT"})
+        wrote = run_cycle(restarted, inverter, make_schedule_mock(new_plan))
+
+        assert wrote is True
+        assert inverter.periods_text == "18:00-18:59/1234567/-"
+
+    def test_period_limited_to_some_weekdays_is_not_a_match(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """BESS only ever writes all-days periods.
+
+        A period programmed elsewhere for Mon-Fri covers the same clock times
+        but not the same days, so BESS's own all-days period is still missing
+        from the battery — treating it as a match would suppress a write that
+        is genuinely needed.
+        """
+        inverter = FakeHuaweiInverter("02:00-02:59/12345/+")
+        restarted = restart_against(inverter, battery_settings)
+
+        wrote = run_cycle(
+            restarted, inverter, make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+        )
+
+        assert wrote is True
+        assert inverter.periods_text == "02:00-02:59/1234567/+"
+
+    def test_unmapped_sensor_keeps_the_previous_blind_start(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """Readback is opt-in by configuration, never probed for.
+
+        Installs whose integration exposes no TOU period entity (EMMA behind
+        its own bridge) keep the documented pre-#431 behaviour: start with an
+        empty schedule and let the first cycle converge.
+        """
+        inverter = FakeHuaweiInverter("02:00-02:59/1234567/+", tou_sensor_mapped=False)
+        restarted = restart_against(inverter, battery_settings)
+
+        assert restarted._periods == []
+        wrote = run_cycle(
+            restarted, inverter, make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+        )
+        assert wrote is True
+
+    def test_readback_survives_a_second_restart(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """Periods parsed from hardware must round-trip back out unchanged.
+
+        A parse that dropped or reshaped a field would only show up when the
+        read-back state is written out again.
+        """
+        inverter = FakeHuaweiInverter()
+        first = HuaweiController(battery_settings=battery_settings)
+        intents = make_intents({2: "GRID_CHARGING", 18: "LOAD_SUPPORT"})
+        first.apply_intents(make_schedule_mock(intents))
+        first.sync_to_hardware(inverter, 0)
+        text_after_first = inverter.periods_text
+
+        second = restart_against(inverter, battery_settings)
+        second.sync_to_hardware(inverter, 0)
+
+        assert inverter.periods_text == text_after_first
+
+    def test_unparseable_period_text_raises(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """No silent skip: a period BESS can't read is not a period it may
+        pretend isn't there — that would suppress a needed write."""
+        inverter = FakeHuaweiInverter("02:00-02:59/1234567")
+        with pytest.raises(ValueError):
+            restart_against(inverter, battery_settings)
+
+    def test_write_is_skipped_when_the_battery_already_holds_the_plan(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """The read-compare-write guard, same shape as Growatt MIN (#551/#552).
+
+        Not every write goes through the evaluate_intents gate — a retry of a
+        failed write, the corruption flag and the 23:55 next-day preparation
+        all call sync_to_hardware directly. Each one is a flash-wear event on
+        a battery that may already hold exactly these periods.
+        """
+        inverter = FakeHuaweiInverter()
+        controller = HuaweiController(battery_settings=battery_settings)
+        schedule = make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+
+        controller.apply_intents(schedule)
+        controller.sync_to_hardware(inverter, 0)
+        assert inverter.write_count == 1
+
+        controller.apply_intents(schedule)
+        controller.sync_to_hardware(inverter, 0)
+
+        assert inverter.write_count == 1
+
+    def test_periods_changed_behind_bess_are_rewritten(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """Skipping is decided against hardware, never against the model."""
+        inverter = FakeHuaweiInverter()
+        controller = HuaweiController(battery_settings=battery_settings)
+        schedule = make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+
+        controller.apply_intents(schedule)
+        controller.sync_to_hardware(inverter, 0)
+        inverter.periods_text = "07:00-07:59/1234567/-"
+
+        controller.sync_to_hardware(inverter, 0)
+
+        assert inverter.write_count == 2
+        assert inverter.periods_text == "02:00-02:59/1234567/+"
+
+    def test_unmapped_sensor_still_writes_every_cycle(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """No readback, no comparison — the blind rewrite is all BESS has."""
+        inverter = FakeHuaweiInverter(tou_sensor_mapped=False)
+        controller = HuaweiController(battery_settings=battery_settings)
+        schedule = make_schedule_mock(make_intents({2: "GRID_CHARGING"}))
+
+        controller.apply_intents(schedule)
+        controller.sync_to_hardware(inverter, 0)
+        controller.sync_to_hardware(inverter, 0)
+
+        assert inverter.write_count == 2
+
+    def test_failed_read_leaves_the_battery_untouched(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """An unreadable sensor aborts the cycle before anything is written.
+
+        The read raises rather than reporting "no periods programmed", so the
+        only question is what it leaves behind. Reading after set_grid_charge
+        would arm grid charging against the period list from the previous
+        plan and leave it that way until the next cycle's retry.
+        """
+
+        class UnreadableInverter(FakeHuaweiInverter):
+            def __init__(self) -> None:
+                super().__init__()
+                self.grid_charge_calls: list[bool] = []
+
+            def read_huawei_tou_periods(self) -> list[str]:
+                raise SystemConfigurationError("TOU period entity unavailable")
+
+            def set_grid_charge(self, enabled: bool) -> None:
+                self.grid_charge_calls.append(enabled)
+
+        inverter = UnreadableInverter()
+        controller = HuaweiController(battery_settings=battery_settings)
+        controller.apply_intents(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+
+        with pytest.raises(SystemConfigurationError):
+            controller.sync_to_hardware(inverter, 0)
+
+        assert inverter.grid_charge_calls == []
+        assert inverter.write_count == 0
+
+    def test_read_periods_are_shown_as_the_existing_schedule(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """Read-back periods carry no intent — BESS didn't plan them."""
+        inverter = FakeHuaweiInverter("02:00-02:59/1234567/+")
+        restarted = restart_against(inverter, battery_settings)
+        intervals = restarted.get_daily_TOU_settings()
+        assert len(intervals) == 1
+        assert intervals[0]["start_time"] == "02:00"
+        assert intervals[0]["strategic_intent"] == "existing_schedule"
 
 
 class TestWorkingModeAbsenceSeverity:

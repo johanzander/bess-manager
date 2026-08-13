@@ -192,6 +192,14 @@ same. Choose by how you want to reach an agent's work:
 Find any session's worktree path by peeking/attaching it in Agent View, or via
 `claude agents --json` (the `cwd` field).
 
+**Run `./scripts/worktree-setup.sh` once in every new worktree, before any
+test/build/verify step.** A fresh worktree has no `.venv` and no
+`node_modules`, and reinstalling them costs ~35 minutes against ~5 minutes of
+actual testing. The script shares all three dependency trees with the main
+checkout (falling back to a real `npm install` only for a package root whose
+lockfile actually diverged) and repairs a Playwright browser cache left
+unusable by an interrupted install.
+
 ## Home Assistant Integration
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing

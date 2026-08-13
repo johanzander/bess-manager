@@ -11,6 +11,9 @@ HTTP API (or load the served frontend) to observe the change.
 
 ## One-time setup
 
+- In a fresh worktree, run `./scripts/worktree-setup.sh` first — it shares
+  `.venv` and both `node_modules` trees with the main checkout and repairs a
+  broken Playwright browser cache, instead of reinstalling all of it (~35 min).
 - `podman-compose` isn't always on PATH: `pip install --user podman-compose`,
   then add `~/Library/Python/<ver>/bin` to PATH for the shell session.
   `podman compose` (the built-in plugin) does NOT work here — it looks for a
@@ -26,8 +29,12 @@ with another worktree's running stack:
 
 ```bash
 SCENARIO=ci-normal-day BESS_PORT=18180 MOCK_HA_PORT=18123 \
-  podman-compose -p <unique-name> -f docker-compose.ci.yml up -d --build
+  podman-compose -p <unique-name> -f docker-compose.ci.yml up -d
 ```
+
+Add `--build` only when you changed something baked into the image
+(`backend/Dockerfile.dev`, `requirements*.txt`) — the compose file bind-mounts
+the source, so an unnecessary rebuild costs minutes and changes nothing.
 
 Wait for both containers healthy (`podman ps --filter name=<unique-name>`),
 then hit the real API:

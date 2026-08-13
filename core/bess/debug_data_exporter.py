@@ -804,10 +804,13 @@ class DebugDataAggregator:
         return snapshot
 
     def _serialize_inverter_tou(self) -> list[dict]:
-        """Serialize the current inverter TOU segments from memory.
+        """Serialize the TOU segments this controller intends to have on hardware.
 
-        Returns the segments that were last read from / written to the inverter,
-        so debug log replays can seed the mock with the real inverter state.
+        NOT a hardware read: active_tou_intervals is the *desired* schedule.
+        Since #551 that is explicitly not the same thing as what the inverter
+        holds — the two diverging is the bug that issue documents — so a replay
+        seeded from this reproduces the plan, not the inverter's real state.
+        Reproducing hardware drift needs a genuine read (see #553).
 
         Returns:
             List of TOU segment dicts as held in active_tou_intervals

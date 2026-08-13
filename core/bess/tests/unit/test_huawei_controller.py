@@ -87,7 +87,7 @@ class TestWriteSchedule:
             "time_of_use_luna2000",
         ]
         ha.get_huawei_working_mode.return_value = "maximise_self_consumption"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.set_huawei_working_mode.assert_called_once_with("time_of_use_luna2000")
 
     def test_write_schedule_skips_mode_write_when_already_set(
@@ -98,7 +98,7 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.set_huawei_working_mode.assert_not_called()
 
     def test_write_schedule_calls_write_tou_periods_with_joined_text(
@@ -109,7 +109,7 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.write_huawei_tou_periods.assert_called_once()
         text = ha.write_huawei_tou_periods.call_args[0][0]
         assert "02:00-02:59/1234567/+" in text
@@ -123,7 +123,7 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.write_huawei_tou_periods.assert_called_once_with("")
 
     def test_write_schedule_raises_for_lg_resu_battery(
@@ -143,7 +143,7 @@ class TestWriteSchedule:
             "fully_fed_to_grid",
         ]
         with pytest.raises(SystemConfigurationError):
-            controller.write_to_hardware(ha, 0, [])
+            controller.sync_to_hardware(ha, 0)
         ha.write_huawei_tou_periods.assert_not_called()
 
     def test_write_schedule_proceeds_when_options_unavailable(
@@ -156,7 +156,7 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.write_huawei_tou_periods.assert_called_once()
 
     def test_write_schedule_enables_grid_charge_when_charge_period_present(
@@ -167,7 +167,7 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.set_grid_charge.assert_called_once_with(True)
 
     def test_write_schedule_disables_grid_charge_when_no_charge_period(
@@ -178,14 +178,14 @@ class TestWriteSchedule:
         ha = MagicMock()
         ha.get_huawei_working_mode_options.return_value = []
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.set_grid_charge.assert_called_once_with(False)
 
 
 class TestWorkingModeGateIsConditional:
     """Installs behind an energy manager (e.g. Huawei EMMA, PR #412) expose no
     LUNA2000 working-mode select. The gate must be skipped when the entity
-    isn't mapped, rather than raising out of write_to_hardware — but skipping
+    isn't mapped, rather than raising out of sync_to_hardware — but skipping
     it also skips the LG-RESU family check, so it is logged, not silent."""
 
     def test_write_proceeds_when_working_mode_entity_unmapped(
@@ -195,7 +195,7 @@ class TestWorkingModeGateIsConditional:
         controller.apply_intents(make_schedule_mock(intents))
         ha = MagicMock()
         ha.is_sensor_configured.return_value = False
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.get_huawei_working_mode_options.assert_not_called()
         ha.get_huawei_working_mode.assert_not_called()
         ha.set_huawei_working_mode.assert_not_called()
@@ -208,7 +208,7 @@ class TestWorkingModeGateIsConditional:
         ha = MagicMock()
         ha.is_sensor_configured.return_value = False
         with caplog.at_level("INFO", logger="core.bess.huawei_controller"):
-            controller.write_to_hardware(ha, 0, [])
+            controller.sync_to_hardware(ha, 0)
         assert any(
             "working mode" in r.message.lower() for r in caplog.records
         ), "skipping the working-mode gate must be logged, not silent"
@@ -224,7 +224,7 @@ class TestWorkingModeGateIsConditional:
             "time_of_use_luna2000",
         ]
         ha.get_huawei_working_mode.return_value = "maximise_self_consumption"
-        controller.write_to_hardware(ha, 0, [])
+        controller.sync_to_hardware(ha, 0)
         ha.set_huawei_working_mode.assert_called_once_with("time_of_use_luna2000")
 
 

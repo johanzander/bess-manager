@@ -125,6 +125,27 @@ class TestGrowattCallsUseConfiguredDomain:
             path = mock_request.call_args[0][1]
             assert path.startswith("/api/services/my_growatt_bridge/read_time_segments")
 
+    def test_unreadable_segments_raise_instead_of_reporting_empty(self) -> None:
+        """A failed read must not be indistinguishable from an empty inverter.
+
+        GrowattMinController diffs its TOU plan against this return value to
+        decide what to write. Reporting failure as [] made it read "the
+        inverter holds no segments" and rewrite every one blind — the
+        duplicate writes Growatt rejects with a 500 (issue #551).
+        """
+        ctrl = self._controller("my_growatt_bridge")
+        with patch.object(ctrl, "_api_request") as mock_request:
+            mock_request.return_value = {"unexpected": "shape"}
+            with pytest.raises(ValueError, match="Unexpected response format"):
+                ctrl.read_inverter_time_segments()
+
+    def test_empty_segment_list_is_returned_as_a_valid_answer(self) -> None:
+        """An inverter with nothing programmed is a state, not an error."""
+        ctrl = self._controller("my_growatt_bridge")
+        with patch.object(ctrl, "_api_request") as mock_request:
+            mock_request.return_value = {"service_response": {"time_segments": []}}
+            assert ctrl.read_inverter_time_segments() == []
+
     def test_ac_charge_times_target_configured_domain(self) -> None:
         ctrl = self._controller("my_growatt_bridge")
         with patch.object(ctrl, "_api_request") as mock_request:

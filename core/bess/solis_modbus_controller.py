@@ -87,11 +87,11 @@ class SolisModbusController(InverterController):
     def _write_period_to_hardware(
         self, controller, grid_charge: bool, discharge_rate: int
     ) -> tuple[bool, str]:
-        """No-op: Solis deploys the full schedule via write_to_hardware.
+        """No-op: Solis deploys the full schedule via sync_to_hardware.
 
         Solis has no per-period entity controls beyond the TOU schedule
         itself (no separate grid_charge switch / discharge rate number) —
-        the entire period list is written in ``write_to_hardware``.
+        the entire period list is written in ``sync_to_hardware``.
         """
         return True, ""
 
@@ -157,11 +157,10 @@ class SolisModbusController(InverterController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write Solis charge and discharge periods to hardware.
 
@@ -173,7 +172,6 @@ class SolisModbusController(InverterController):
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Unused for Solis (full rewrite each time)
-            current_tou: Unused for Solis (full rewrite each time)
 
         Returns:
             Tuple of (writes, disables)

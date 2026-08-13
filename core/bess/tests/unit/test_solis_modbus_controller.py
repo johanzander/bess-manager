@@ -78,7 +78,7 @@ class TestGridChargingProducesChargePeriod:
         manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_to_hardware(controller, 0, [])
+        manager.sync_to_hardware(controller, 0)
 
         # Slot 1 gets the real charge period, enabled=True
         controller.write_solis_period.assert_any_call(
@@ -92,7 +92,7 @@ class TestGridChargingProducesChargePeriod:
         manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_to_hardware(controller, 0, [])
+        manager.sync_to_hardware(controller, 0)
 
         for slot in range(1, manager.MAX_CHARGE_PERIODS + 1):
             controller.write_solis_period.assert_any_call(
@@ -158,7 +158,7 @@ class TestDischargeIntentsProduceDischargePeriod:
         manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        manager.write_to_hardware(controller, 0, [])
+        manager.sync_to_hardware(controller, 0)
 
         controller.write_solis_period.assert_any_call(
             "discharge", 1, "20:00", "20:59", True
@@ -192,7 +192,7 @@ class TestIdleOnlyDay:
         manager.apply_intents(make_schedule_mock(intents))
 
         controller = MagicMock()
-        writes, disables = manager.write_to_hardware(controller, 0, [])
+        writes, disables = manager.sync_to_hardware(controller, 0)
 
         assert writes == 12
         assert disables == 12

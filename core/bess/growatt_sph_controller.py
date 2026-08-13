@@ -81,7 +81,7 @@ class GrowattSphController(InverterController):
 
         SPH inverters have no per-period entity controls (grid_charge switch,
         discharge rate number).  The entire schedule is written in
-        ``write_to_hardware`` using ``write_ac_charge_times`` /
+        ``sync_to_hardware`` using ``write_ac_charge_times`` /
         ``write_ac_discharge_times``.
         """
         return True, ""
@@ -154,11 +154,10 @@ class GrowattSphController(InverterController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write SPH charge and discharge periods to hardware.
 
@@ -168,7 +167,6 @@ class GrowattSphController(InverterController):
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Unused for SPH (full rewrite each time)
-            current_tou: Unused for SPH (full rewrite each time)
 
         Returns:
             Tuple of (writes, disables) — always (2, 0) for SPH

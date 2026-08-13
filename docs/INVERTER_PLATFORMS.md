@@ -533,7 +533,11 @@ read and catching failure. Installs whose integration exposes no such entity
 keep the original behaviour: start with an empty period list, converge on the
 first cycle. If the entity is mapped but unreadable, that raises rather than
 reading as "no periods programmed" — the two must not look alike, or BESS
-would skip a write it genuinely needs.
+would skip a write it genuinely needs. That read is the *first* thing
+`sync_to_hardware` does, ahead of the working-mode and grid-charge writes, so
+a failed read aborts the cycle with the battery untouched instead of arming
+grid charging against the period list the old plan left behind; BSM's
+`_hardware_write_pending` then retries the whole sync next cycle.
 
 `days` is part of a period's identity in that comparison. BESS always writes
 all-days (`1234567`) periods, so a period programmed elsewhere for a subset

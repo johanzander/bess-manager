@@ -273,7 +273,8 @@ class HuaweiController(InverterController):
         also spares the battery a flash write per cycle, since set_tou_periods
         rewrites the whole list atomically and cannot update just what moved.
         The comparison is skipped, and the write always made, when no TOU
-        period sensor is mapped (#431).
+        period sensor is mapped (#431). The read happens before any hardware
+        write, so a failed read leaves the battery exactly as it was.
 
         First confirms the connected battery is LUNA2000 (via the
         integration-exposed working-mode option list — see
@@ -295,6 +296,19 @@ class HuaweiController(InverterController):
                 (i.e. it's an LG RESU battery, not supported).
         """
         writes = 0
+
+        # Read before writing anything. The read raises rather than reporting
+        # an empty list, so ordering decides what a failed read leaves behind:
+        # done here it aborts the cycle untouched, and BSM sets
+        # _hardware_write_pending and retries the whole sync next cycle. Done
+        # after set_grid_charge, it would leave the battery holding a new
+        # grid-charge state against the old period list for an hour.
+        hardware_periods = (
+            self._read_periods_from_hardware(controller)
+            if controller.is_sensor_configured("huawei_tou_periods")
+            else None
+        )
+
         has_working_mode = controller.is_sensor_configured("huawei_working_mode")
 
         if not has_working_mode:
@@ -333,14 +347,13 @@ class HuaweiController(InverterController):
         except Exception as e:
             logger.error("FAILED: set_grid_charge: %s", e)
 
-        if controller.is_sensor_configured("huawei_tou_periods"):
-            if self._read_periods_from_hardware(controller) == self._periods:
-                logger.info(
-                    "HUAWEI HARDWARE: battery already holds these %d TOU period(s) "
-                    "— no write",
-                    len(self._periods),
-                )
-                return writes, 0
+        if hardware_periods is not None and hardware_periods == self._periods:
+            logger.info(
+                "HUAWEI HARDWARE: battery already holds these %d TOU period(s) "
+                "— no write",
+                len(self._periods),
+            )
+            return writes, 0
 
         periods_text = self._periods_to_text()
         logger.info("HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods))

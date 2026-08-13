@@ -528,6 +528,38 @@ class TestTouReadback:
 
         assert inverter.write_count == 2
 
+    def test_failed_read_leaves_the_battery_untouched(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """An unreadable sensor aborts the cycle before anything is written.
+
+        The read raises rather than reporting "no periods programmed", so the
+        only question is what it leaves behind. Reading after set_grid_charge
+        would arm grid charging against the period list from the previous
+        plan and leave it that way until the next cycle's retry.
+        """
+
+        class UnreadableInverter(FakeHuaweiInverter):
+            def __init__(self) -> None:
+                super().__init__()
+                self.grid_charge_calls: list[bool] = []
+
+            def read_huawei_tou_periods(self) -> list[str]:
+                raise SystemConfigurationError("TOU period entity unavailable")
+
+            def set_grid_charge(self, enabled: bool) -> None:
+                self.grid_charge_calls.append(enabled)
+
+        inverter = UnreadableInverter()
+        controller = HuaweiController(battery_settings=battery_settings)
+        controller.apply_intents(make_schedule_mock(make_intents({2: "GRID_CHARGING"})))
+
+        with pytest.raises(SystemConfigurationError):
+            controller.sync_to_hardware(inverter, 0)
+
+        assert inverter.grid_charge_calls == []
+        assert inverter.write_count == 0
+
     def test_read_periods_are_shown_as_the_existing_schedule(
         self, battery_settings: BatterySettings
     ) -> None:

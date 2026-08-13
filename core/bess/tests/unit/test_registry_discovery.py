@@ -232,15 +232,16 @@ def _solax_native_registry() -> list[dict]:
         _entity(
             "sensor.solax_battery_capacity", "solax_modbus", "solax_battery_capacity"
         ),
+        # The ONLY battery power entity solax_modbus publishes: a signed
+        # register (plugin_solax.py, key="battery_power_charge", REGISTER_S16,
+        # reg 0x16) that goes negative while discharging. There is no
+        # "battery_power_discharge" key anywhere in the integration — an
+        # earlier version of this fixture invented one, which is why #542
+        # shipped with a discharge sensor that never resolved.
         _entity(
             "sensor.solax_battery_power_charge",
             "solax_modbus",
             "solax_battery_power_charge",
-        ),
-        _entity(
-            "sensor.solax_battery_power_discharge",
-            "solax_modbus",
-            "solax_battery_power_discharge",
         ),
         _entity("sensor.solax_measured_power", "solax_modbus", "solax_measured_power"),
         _entity("sensor.solax_grid_export", "solax_modbus", "solax_grid_export"),
@@ -1191,6 +1192,22 @@ class TestDiscoverSensorsFromRegistry:
         assert platform == "solax_modbus_native"
         assert "solax_modbus_native" in sensors
         assert len(sensors["solax_modbus_native"]) >= 10
+
+    def test_solax_native_pairs_discharge_to_the_signed_charge_sensor(self):
+        """issue #542: solax_modbus has one signed battery power entity.
+
+        Without the pairing, battery_discharge_power resolves to nothing —
+        check_battery_health (is_required=True) errors on it, and the reporter
+        has to hand-build two template sensors. Same fix as the Solis/Huawei
+        grid pairing (#475/#438): point both keys at the one entity and let
+        HAApiController split it via battery_power_polarity.
+        """
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solax_native_registry()
+        )
+        solax = sensors["solax_modbus_native"]
+        assert solax["battery_charge_power"] == "sensor.solax_battery_power_charge"
+        assert solax["battery_discharge_power"] == "sensor.solax_battery_power_charge"
 
     def test_solax_growatt_min(self):
         """Growatt GEN4 inverter via solax_modbus with TOU slots → solax_modbus_growatt_min."""
@@ -2409,3 +2426,20 @@ class TestHuaweiDiscovery:
         # Single signed power-meter register backs both keys (same pattern
         # as Solis, #475) — HAApiController splits it via grid_power_polarity.
         assert huawei["export_power"] == "sensor.huawei_meter_power_meter_active_power"
+
+    def test_huawei_pairs_discharge_to_the_signed_battery_sensor(self):
+        """issue #542: storage_charge_discharge_power (I32Register, reg 37765)
+        is Huawei's only battery power register — same one-signed-sensor shape
+        as native SolaX, so battery_discharge_power must resolve to it too."""
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
+        huawei = sensors["huawei_solar_luna2000"]
+        assert (
+            huawei["battery_charge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )
+        assert (
+            huawei["battery_discharge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )

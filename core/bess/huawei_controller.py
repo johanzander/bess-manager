@@ -156,6 +156,7 @@ class HuaweiController(InverterController):
                 {
                     "start_time": f"{sh:02d}:{sm:02d}",
                     "end_time": f"{eh:02d}:{em:02d}",
+                    "days": ALL_DAYS,
                     "flag": block["flag"],
                 }
             )
@@ -177,28 +178,34 @@ class HuaweiController(InverterController):
 
         return periods
 
+    def _periods_to_tou_intervals(
+        self, periods: list[dict], intent: str | None = None
+    ) -> list[dict]:
+        """Render periods for display. ``intent`` overrides the flag-derived
+        label for periods BESS read back rather than planned."""
+        return [
+            {
+                "start_time": p["start_time"],
+                "end_time": p["end_time"],
+                "enabled": True,
+                "is_default": False,
+                "strategic_intent": intent
+                or (
+                    "GRID_CHARGING"
+                    if p["flag"] == "+"
+                    else "LOAD_SUPPORT/BATTERY_EXPORT"
+                ),
+                "segment_id": idx + 1,
+            }
+            for idx, p in enumerate(periods)
+        ]
+
     def _build_huawei_periods(self) -> None:
         """Unchanged public behavior: mutates self._periods/self.tou_intervals
         from self.strategic_intents. Delegates to _build_candidate, shared
         with apply_intents/evaluate_intents."""
         self._periods = self._build_candidate(self.strategic_intents)
-
-        self.tou_intervals = []
-        for idx, p in enumerate(self._periods):
-            self.tou_intervals.append(
-                {
-                    "start_time": p["start_time"],
-                    "end_time": p["end_time"],
-                    "enabled": True,
-                    "is_default": False,
-                    "strategic_intent": (
-                        "GRID_CHARGING"
-                        if p["flag"] == "+"
-                        else "LOAD_SUPPORT/BATTERY_EXPORT"
-                    ),
-                    "segment_id": idx + 1,
-                }
-            )
+        self.tou_intervals = self._periods_to_tou_intervals(self._periods)
 
     def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
         """Adopt this cycle's DP intent list, rebuilding Huawei TOU periods."""
@@ -214,17 +221,60 @@ class HuaweiController(InverterController):
     def _periods_to_text(self) -> str:
         """Join periods into huawei_solar.set_tou_periods text format."""
         lines = [
-            f"{p['start_time']}-{p['end_time']}/{ALL_DAYS}/{p['flag']}"
+            f"{p['start_time']}-{p['end_time']}/{p['days']}/{p['flag']}"
             for p in self._periods
         ]
         return "\n".join(lines)
+
+    @staticmethod
+    def _period_from_text(line: str) -> dict:
+        """Inverse of one _periods_to_text line: "HH:MM-HH:MM/<days>/<+|->".
+
+        Raises:
+            ValueError: If the line isn't a period. A period BESS cannot read
+                is not one it may drop — a dropped period would make the
+                hardware look like it already holds BESS's plan.
+        """
+        times, days, flag = line.strip().split("/")
+        start_time, end_time = times.split("-")
+        if flag not in ("+", "-"):
+            raise ValueError(f"Unknown Huawei charge flag {flag!r} in {line!r}")
+        return {
+            "start_time": start_time,
+            "end_time": end_time,
+            "days": days,
+            "flag": flag,
+        }
+
+    def _read_periods_from_hardware(self, controller) -> list[dict]:
+        """The period list the battery currently holds, parsed.
+
+        Raises:
+            ValueError: If a reported period can't be parsed.
+            SystemConfigurationError: If the sensor can't be read — an
+                unreadable entity must not read as "no periods programmed".
+        """
+        return [
+            self._period_from_text(line)
+            for line in controller.read_huawei_tou_periods()
+        ]
 
     def sync_to_hardware(
         self,
         controller,
         effective_period: int,
     ) -> tuple[int, int]:
-        """Write Huawei TOU periods to hardware.
+        """Write Huawei TOU periods to hardware, unless it already holds them.
+
+        The period list is compared against one read fresh from the battery,
+        never against this controller's own model of it — the same
+        read-compare-write Growatt MIN adopted in #551/#552, for the same
+        reason: a model can only ever claim what BESS meant to write. Here it
+        also spares the battery a flash write per cycle, since set_tou_periods
+        rewrites the whole list atomically and cannot update just what moved.
+        The comparison is skipped, and the write always made, when no TOU
+        period sensor is mapped (#431). The read happens before any hardware
+        write, so a failed read leaves the battery exactly as it was.
 
         First confirms the connected battery is LUNA2000 (via the
         integration-exposed working-mode option list — see
@@ -246,6 +296,19 @@ class HuaweiController(InverterController):
                 (i.e. it's an LG RESU battery, not supported).
         """
         writes = 0
+
+        # Read before writing anything. The read raises rather than reporting
+        # an empty list, so ordering decides what a failed read leaves behind:
+        # done here it aborts the cycle untouched, and BSM sets
+        # _hardware_write_pending and retries the whole sync next cycle. Done
+        # after set_grid_charge, it would leave the battery holding a new
+        # grid-charge state against the old period list for an hour.
+        hardware_periods = (
+            self._read_periods_from_hardware(controller)
+            if controller.is_sensor_configured("huawei_tou_periods")
+            else None
+        )
+
         has_working_mode = controller.is_sensor_configured("huawei_working_mode")
 
         if not has_working_mode:
@@ -283,6 +346,14 @@ class HuaweiController(InverterController):
             writes += 1
         except Exception as e:
             logger.error("FAILED: set_grid_charge: %s", e)
+
+        if hardware_periods is not None and hardware_periods == self._periods:
+            logger.info(
+                "HUAWEI HARDWARE: battery already holds these %d TOU period(s) "
+                "— no write",
+                len(self._periods),
+            )
+            return writes, 0
 
         periods_text = self._periods_to_text()
         logger.info("HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods))
@@ -329,15 +400,36 @@ class HuaweiController(InverterController):
         self.sync_soc_limits(controller)
 
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
-        """Huawei has no readback API for TOU periods in this Phase 1 pass.
+        """Initialize the period list from what the battery currently holds.
 
-        huawei_solar exposes no read_tou_periods service — the periods are
-        only visible via the (undocumented) coordinator state, not a public
-        service call. Leaves strategic_intents empty; the next
-        apply_intents() call populates it, matching the pattern used
-        when hardware state genuinely can't be read back.
+        Readback is available when the integration's TOU period sensor is
+        mapped — declared configuration, not a probe (#431). Installs whose
+        integration exposes no such entity keep the original behaviour: an
+        empty schedule that the next apply_intents() converges, at the cost
+        of one redundant rewrite per restart.
+
+        strategic_intents stays empty either way: the battery reports charge
+        and discharge periods, never which intent produced them.
         """
-        logger.info("Huawei: no TOU readback available — starting with empty schedule")
+        if not controller.is_sensor_configured("huawei_tou_periods"):
+            logger.info(
+                "Huawei: no TOU period sensor mapped — starting with empty schedule"
+            )
+            return
+
+        logger.info("Reading Huawei TOU periods from the battery")
+        self._periods = self._read_periods_from_hardware(controller)
+        self.tou_intervals = self._periods_to_tou_intervals(
+            self._periods, intent="existing_schedule"
+        )
+
+        logger.info(
+            "Huawei initialized from hardware: %d period(s)", len(self._periods)
+        )
+        for p in self._periods:
+            logger.info(
+                "  %s: %s-%s/%s", p["flag"], p["start_time"], p["end_time"], p["days"]
+            )
 
     # ── Schedule comparison ───────────────────────────────────────────────
 
@@ -359,10 +451,14 @@ class HuaweiController(InverterController):
             return True, "Huawei period count differs"
 
         for pa, pb in zip(current, new, strict=False):
+            # days is part of the identity of a period, not decoration: BESS
+            # always writes all-days, so a period read back covering only
+            # some weekdays leaves BESS's own period genuinely missing (#431).
             if (
-                pa.get("start_time") != pb.get("start_time")
-                or pa.get("end_time") != pb.get("end_time")
-                or pa.get("flag") != pb.get("flag")
+                pa["start_time"] != pb["start_time"]
+                or pa["end_time"] != pb["end_time"]
+                or pa["days"] != pb["days"]
+                or pa["flag"] != pb["flag"]
             ):
                 logger.info(
                     "DECISION: Huawei periods differ — current=%s new=%s",

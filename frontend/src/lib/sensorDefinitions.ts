@@ -204,8 +204,12 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Battery Monitoring',
         sensors: [
           { key: 'battery_soc', label: 'Battery Capacity (SOC)', required: true },
-          { key: 'battery_charge_power', label: 'Battery Charge Power', required: true },
-          { key: 'battery_discharge_power', label: 'Battery Discharge Power', required: true },
+          // solax_modbus publishes one signed battery power entity
+          // (battery_power_charge, negative while discharging) and no
+          // discharge counterpart, so there is no second field to show —
+          // the backend derives discharge power from this one by sign
+          // (#542). Same shape as Solis grid power and Huawei battery power.
+          { key: 'battery_charge_power', label: 'Battery Power (net, signed)', required: true },
         ],
       },
       {
@@ -473,6 +477,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Battery Control',
         sensors: [
           { key: 'huawei_working_mode', label: 'Working Mode (select)', required: true },
+          { key: 'huawei_tou_periods', label: 'TOU Charging/Discharging Periods (readback)', required: false },
           { key: 'battery_charging_power_rate', label: 'Maximum Charging Power', required: false },
           { key: 'battery_discharging_power_rate', label: 'Maximum Discharging Power', required: false },
           { key: 'battery_charge_stop_soc', label: 'Charging Cutoff Capacity', required: true },

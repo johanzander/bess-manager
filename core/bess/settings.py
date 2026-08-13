@@ -213,7 +213,7 @@ class HomeSettings:
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
-    consumption_strategy: str = "sensor"
+    consumption_strategy: str = "fixed"
     power_monitoring_enabled: bool = False
 
     def __post_init__(self):
@@ -269,9 +269,7 @@ class HomeSettings:
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
-            self.consumption_strategy = home_config.get(
-                "consumption_strategy", "sensor"
-            )
+            self.consumption_strategy = home_config.get("consumption_strategy", "fixed")
             self.power_monitoring_enabled = home_config["power_monitoring_enabled"]
             self.__post_init__()
         return self

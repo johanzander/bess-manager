@@ -44,7 +44,7 @@ const EMPTY_BATTERY: BatteryForm = {
   exportCurtailmentEnabled: false, exportCurtailmentPriceFloor: 0,
 };
 const EMPTY_HOME: HomeForm = {
-  consumption: 3.5, consumptionStrategy: 'sensor',
+  consumption: 3.5, consumptionStrategy: 'fixed',
   maxFuseCurrent: 25, voltage: 230, safetyMarginFactor: 1.0,
   phaseCount: 3, powerMonitoringEnabled: true,
 };
@@ -181,7 +181,7 @@ const SettingsPage: React.FC = () => {
 
       const h: HomeForm = {
         consumption: home_s.defaultHourly ?? 3.5,
-        consumptionStrategy: home_s.consumptionStrategy ?? 'sensor',
+        consumptionStrategy: home_s.consumptionStrategy ?? 'fixed',
         maxFuseCurrent: home_s.maxFuseCurrent ?? 25,
         voltage: home_s.voltage ?? 230,
         safetyMarginFactor: home_s.safetyMargin ?? 1.0,

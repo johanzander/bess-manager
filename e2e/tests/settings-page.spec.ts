@@ -43,6 +43,28 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/Consumption/i).first()).toBeVisible();
   });
 
+  test('consumption strategy "Home Assistant sensor" is blocked without its sensor', async ({ page }) => {
+    // Issue #558: selecting this strategy without a 48h_avg_grid_import entity
+    // makes every optimization run abort, so no schedule is ever built and the
+    // dashboard sits on "Initializing" forever. The CI settings fixture has no
+    // such sensor configured, so the option must be unselectable here.
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+
+    const sensorOption = page.getByRole('radio', { name: 'Home Assistant sensor' });
+    await expect(sensorOption).toBeDisabled();
+    await expect(sensorOption).not.toBeChecked();
+    await expect(
+      page.getByText(/requires the 48h Avg Grid Import sensor/i),
+    ).toBeVisible();
+
+    // "Fixed value" needs no sensor and stays selectable — the guard must not
+    // leave the user with nothing to choose.
+    await expect(page.getByRole('radio', { name: 'Fixed value' })).toBeEnabled();
+  });
+
   test('pricing tab shows provider configuration', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });

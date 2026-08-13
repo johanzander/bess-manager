@@ -552,6 +552,9 @@ class TestTerminalValueCapExcludesCommittedPeriods:
         controller.consumption_forecast = [0.0] * n  # isolate export decisions
         system = _make_system(source, controller)
         system.battery_settings.cycle_cost_per_kwh = 0.035
+        # The "fixed" default ignores the mocked zero consumption_forecast;
+        # force "sensor" so the isolation above actually takes effect.
+        system.home_settings.consumption_strategy = "sensor"
 
         optimization_period = 75  # ~18:45 today, before the near-term peak
 

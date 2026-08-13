@@ -95,6 +95,34 @@ PLATFORM_GRID_POWER_POLARITY = {
     "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
 }
 
+# Same idea, one layer down: platforms exposing BATTERY power as a single
+# signed register instead of separate charge/discharge entities (#542). Also a
+# fixed integration fact, not install-overridable. "" (the default) means the
+# platform publishes two real entities and needs no split.
+#
+# "charge_positive": positive raw value = charging, negative = discharging.
+#
+# Both listed platforms are charge_positive, verified against their register
+# definitions:
+#   solax_modbus           plugin_solax.py key="battery_power_charge",
+#                          REGISTER_S16, register 0x16 — no discharge key
+#                          exists anywhere in the integration.
+#   huawei_solar_luna2000  huawei-solar-lib registers.py:1193,
+#                          STORAGE_CHARGE_DISCHARGE_POWER: I32Register("W", 1,
+#                          37765). Reg 37765 itself documents no sign, but its
+#                          writable twin — reg 47321, "Battery charge and
+#                          discharge power", same INT32/W/gain 1 — states the
+#                          vendor convention in Huawei's SUN2000MA Modbus
+#                          Interface Definitions (Issue 08, 2024-11-07):
+#                          "> 0: charging; < 0: discharging". evcc's
+#                          huawei-sun2000-hybrid template independently
+#                          corroborates it, reading 37765 with scale: -1 to
+#                          reach its own positive=discharging convention.
+PLATFORM_BATTERY_POWER_POLARITY = {
+    "solax_modbus_native": "charge_positive",
+    "huawei_solar_luna2000": "charge_positive",
+}
+
 
 def flatten_sensors(sensors: dict) -> dict:
     """Flatten a per-platform sensors dict into a flat sensor_key -> entity_id dict.
@@ -236,6 +264,16 @@ class SettingsStore:
         """
         inverter = self.data.get("inverter", {})
         return PLATFORM_GRID_POWER_POLARITY.get(inverter.get("platform", ""), "")
+
+    def get_battery_power_polarity(self) -> str:
+        """Return the sign convention for this platform's battery power sensor.
+
+        "" for platforms with separate charge/discharge entities (no split
+        needed) and for an unconfigured install. Not user-overridable —
+        see PLATFORM_BATTERY_POWER_POLARITY.
+        """
+        inverter = self.data.get("inverter", {})
+        return PLATFORM_BATTERY_POWER_POLARITY.get(inverter.get("platform", ""), "")
 
     def get_active_sensors(self) -> dict:
         """Return a flat sensor dict merging the active platform's sensors with shared sensors.
@@ -453,7 +491,7 @@ class SettingsStore:
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
                 "currency": DEFAULT_CURRENCY,
-                "consumption_strategy": "sensor",
+                "consumption_strategy": "fixed",
                 "max_fuse_current": HOUSE_MAX_FUSE_CURRENT_A,
                 "voltage": HOUSE_VOLTAGE_V,
                 "safety_margin": SAFETY_MARGIN_FACTOR,

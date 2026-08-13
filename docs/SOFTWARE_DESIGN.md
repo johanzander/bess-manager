@@ -415,9 +415,14 @@ This is what lets an integration that exposes the same services under its own do
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
-#### Signed grid power sensors
+#### Signed power sensors
 
-A platform-fixed sibling of the service-domain pattern above: some platforms (Solis) expose grid power as one signed sensor instead of separate import/export entities. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `""` elsewhere) — not user-overridable, since polarity is a hardware fact, not configuration. Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign whenever both keys resolve to the same entity_id.
+A platform-fixed sibling of the service-domain pattern above: some platforms expose a power flow as one signed sensor instead of two directional entities. Two independent cases, same mechanism:
+
+- **Grid.** Solis (`grid_power_net`) and Huawei (`power_meter_active_power`) publish one signed grid sensor. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `"export_positive"` for `huawei_solar_luna2000`, `""` elsewhere). Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign.
+- **Battery.** Native SolaX (`battery_power_charge`, REGISTER_S16) and Huawei (`storage_charge_discharge_power`, reg 37765) publish one signed battery sensor and no discharge counterpart. `SettingsStore.get_battery_power_polarity()` resolves `PLATFORM_BATTERY_POWER_POLARITY` (`"charge_positive"` for both, `""` elsewhere). Held on `HomeAssistantAPIController.battery_power_polarity`; `get_battery_charge_power()`/`get_battery_discharge_power()` split the single reading by sign (issue #542).
+
+Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
 
 ### Platform Capabilities
 

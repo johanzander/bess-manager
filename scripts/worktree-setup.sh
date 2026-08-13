@@ -76,10 +76,20 @@ done
 
 # --- Playwright browsers -----------------------------------------------------
 #
-# Browsers live in a shared user-level cache, so they are never per-worktree —
-# but a `playwright install` that is interrupted leaves an empty browser
-# directory next to an INSTALLATION_COMPLETE marker, and the marker makes every
-# later install a silent no-op. Trust the binary, not the marker.
+# Browsers live in a shared user-level cache, so they are never per-worktree.
+# This does exactly one thing Playwright cannot do for itself: delete a
+# directory that LIES. An interrupted `playwright install` leaves an empty
+# browser directory next to an INSTALLATION_COMPLETE marker, and that marker
+# makes every later install a silent no-op — so the missing binary is never
+# repaired and surfaces as "browserType.launch: Executable doesn't exist".
+# Trust the binary, not the marker.
+#
+# Deciding whether anything then needs installing is NOT this script's job:
+# a browser that is entirely absent leaves no directory to inspect, so any
+# such check silently passes a cache that cannot launch (observed during
+# #556 — an intact chromium-1217 while chromium_headless_shell-1217 was
+# simply missing). Playwright knows which browsers it needs; it always gets
+# to check, and is a fast no-op when they are all present.
 
 if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
     BROWSER_CACHE="$PLAYWRIGHT_BROWSERS_PATH"
@@ -89,12 +99,7 @@ else
     BROWSER_CACHE="$HOME/.cache/ms-playwright"
 fi
 
-needs_browsers=0
-
-if [ ! -d "$BROWSER_CACHE" ]; then
-    echo "🌐 No Playwright browser cache at $BROWSER_CACHE"
-    needs_browsers=1
-else
+if [ -d "$BROWSER_CACHE" ]; then
     # Only look at actual browser install directories (named e.g.
     # "chromium-1217" or "chromium_headless_shell-1217"). The cache also
     # holds Playwright-internal bookkeeping directories such as `__dirlock`
@@ -107,16 +112,11 @@ else
         if [ -z "$(find "$browser_dir" -type f -perm -u+x -print -quit)" ]; then
             echo "🌐 Stale browser install (no executable): $browser_dir — removing"
             rm -rf "$browser_dir"
-            needs_browsers=1
         fi
     done
 fi
 
-if [ "$needs_browsers" -eq 1 ]; then
-    echo "🌐 Installing Playwright browsers"
-    (cd e2e && npx playwright install chromium)
-else
-    echo "🌐 Playwright browser cache intact"
-fi
+echo "🌐 Verifying Playwright browsers (downloads only what is missing)"
+(cd e2e && npx playwright install chromium)
 
 echo "✅ Worktree ready"

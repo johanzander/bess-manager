@@ -173,16 +173,34 @@ def test_repairs_a_browser_cache_whose_marker_lies(tmp_path):
     ), "a repaired cache must be reinstalled"
 
 
-def test_leaves_an_intact_browser_cache_alone(tmp_path):
-    """The complement of the repair test: a cache with a real executable must
-    not be deleted and reinstalled on every worktree setup."""
-    _, wt, env, log, cache = _setup(tmp_path)
+def test_does_not_delete_an_intact_browser_install(tmp_path):
+    """The complement of the repair test: a directory holding a real executable
+    is a working install and must survive."""
+    _, wt, env, _, cache = _setup(tmp_path)
 
     result = _invoke(wt, env)
 
     assert result.returncode == 0, result.stderr
     assert (cache / "chromium-1217" / "chrome-mac-arm64" / "Chromium").exists()
-    assert not any("playwright install" in c for c in _shim_calls(log))
+
+
+def test_always_lets_playwright_verify_the_browsers(tmp_path):
+    """Pruning directories that lie is not enough to know the cache is usable:
+    a browser that is entirely ABSENT leaves no directory to inspect at all.
+    Observed live during #556 — the cache held an intact `chromium-1217`, the
+    script declared it intact, and `chromium.launch()` still failed with
+    "Executable doesn't exist at .../chromium_headless_shell-1217/...", which
+    is the very error the issue reports. Only Playwright knows which browsers
+    it needs, so it always gets to check; `playwright install` is a fast no-op
+    when they are all genuinely present."""
+    _, wt, env, log, _ = _setup(tmp_path)
+
+    result = _invoke(wt, env)
+
+    assert result.returncode == 0, result.stderr
+    assert any(
+        "playwright install" in c for c in _shim_calls(log)
+    ), "an apparently-intact cache must still be verified by Playwright itself"
 
 
 def test_ignores_playwright_bookkeeping_directories_in_the_cache(tmp_path):
@@ -193,7 +211,7 @@ def test_ignores_playwright_bookkeeping_directories_in_the_cache(tmp_path):
     and crashes the reinstall the script goes on to trigger (observed live:
     'Error: Unable to update lock within the stale threshold'). It — and any
     other non `name-<digits>` entry — must be left alone."""
-    _, wt, env, log, cache = _setup(tmp_path)
+    _, wt, env, _, cache = _setup(tmp_path)
     (cache / "__dirlock").mkdir()
     (cache / ".links").mkdir()
 
@@ -203,10 +221,9 @@ def test_ignores_playwright_bookkeeping_directories_in_the_cache(tmp_path):
     assert (
         cache / "__dirlock"
     ).exists(), "must not delete Playwright's own lock directory"
-    assert not any("playwright install" in c for c in _shim_calls(log)), (
-        "a bookkeeping directory with no executable must not be mistaken for "
-        "a stale browser install"
-    )
+    assert (
+        cache / ".links"
+    ).exists(), "must not delete Playwright's link bookkeeping directory"
 
 
 def test_repairs_a_broken_venv_symlink(tmp_path):

@@ -424,6 +424,8 @@ A platform-fixed sibling of the service-domain pattern above: some platforms exp
 
 Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
 
+The sign rule itself lives in one public method, `HAApiController.split_signed_power(sensor_key, raw)`, which the getters call. Any path that resolves a sensor key to an entity and reads that entity *directly* bypasses the getters and therefore holds the net value: the sensor health panel did exactly that and showed Charging Power as −4876 W while the battery discharged (#120). It now reports through `split_signed_power`; installs with two real entities keep showing their raw state verbatim, formatting included.
+
 ### Platform Capabilities
 
 Different inverter platforms support different hardware features. The class hierarchy handles **behavioral** differences (TOU scheduling vs. period lists vs. VPP commands — genuinely different algorithms). Capabilities handle the narrower question: what does code *outside* the controller need to know about the platform?
@@ -509,7 +511,7 @@ The HA REST API `/api/states` provides all entity IDs and current values. BESS e
 
 - **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
 - **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
-- **Phase count**: Detected from phase current sensor entities (L1/L2/L3)
+- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; huawei_solar gives the meter's `active_grid_{A,B,C}_current` and the inverter's own `phase_{A,B,C}_current` the same "Phase A/B/C current" display name, so the phase_a/b/c form is meter-gated). Candidates are grouped by owning device and one group supplies every phase, preferring the explicit `current_lN` convention, then the most phases, then the lowest group id — never `/api/states` order, which is arbitrary. This keeps a sub-circuit meter from supplying some phases and the grid meter the rest
 
 #### Stage 3 — WebSocket Metadata Query
 
@@ -565,7 +567,7 @@ Beyond core inverter and price sensors, discovery also detects:
 
 - **Solcast solar forecast**: Entity registry entries on the `solcast_solar` platform, matched by `unique_id` suffix (robust against non-English HA locale renaming of the entity ID)
 - **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
-- **Phase currents**: `current_l1`, `current_l2`, `current_l3`
+- **Phase currents**: `current_l1`, `current_l2`, `current_l3` (also discovered from meter-side `phase_a/b/c` naming — see `discover_current_sensors`)
 - **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`
 - **Consumption forecast**: Custom helper sensor for 48-hour average grid import
 

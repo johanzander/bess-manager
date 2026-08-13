@@ -499,6 +499,189 @@ def test_battery_power_polarity_per_platform(platform: str, expected: str) -> No
     assert store.get_battery_power_polarity() == expected
 
 
+class TestSignedPowerInSensorHealthPanel:
+    """The health panel reports what BESS reads, not the raw entity state.
+
+    get_method_sensor_info resolves the sensor key to an entity and reads that
+    entity, so before the split was applied there it showed the *net* register
+    for both halves — Charging Power -4876 W while the battery discharges,
+    which is the symptom the reporter screenshotted (#120)."""
+
+    def test_charge_power_reports_zero_while_discharging(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["status"] == "ok"
+        assert float(info["current_value"]) == 0.0
+
+    def test_discharge_power_reports_the_magnitude(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-4876"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_discharge_power")
+        assert info["status"] == "ok"
+        assert float(info["current_value"]) == 4876.0
+
+    def test_separate_entities_report_their_state_verbatim(self, ctrl):
+        """Platforms with two real entities must keep showing the raw state,
+        formatting included — the split applies to shared entities only."""
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2000"})
+        )
+        info = ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["current_value"] == "2000"
+
+
+# ── Phase current discovery (issue #120) ─────────────────────────────────────
+
+
+def _current_state(entity_id: str) -> dict:
+    """A minimal /api/states entry for a current-measuring sensor."""
+    return {"entity_id": entity_id, "attributes": {"device_class": "current"}}
+
+
+class TestPhaseCurrentDiscovery:
+    def setup_method(self):
+        self.ctrl = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123", token="test-token"
+        )
+
+    def test_current_l1_naming_is_discovered(self):
+        """Tibber Pulse / Shelly 3EM style naming — the pre-existing case."""
+        states = [
+            _current_state("sensor.tibber_pulse_current_l1"),
+            _current_state("sensor.tibber_pulse_current_l2"),
+            _current_state("sensor.tibber_pulse_current_l3"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.tibber_pulse_current_l1",
+            "current_l2": "sensor.tibber_pulse_current_l2",
+            "current_l3": "sensor.tibber_pulse_current_l3",
+        }
+
+    def test_power_meter_phase_abc_naming_is_discovered(self):
+        """issue #120: huawei_solar names the three-phase meter's currents
+        'Phase A/B/C current' (register keys active_grid_a/b/c_current), so
+        they land as sensor.power_meter_phase_a_current — never matching the
+        current_l1/l2/l3 substrings the discovery used to require."""
+        states = [
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_inverter_phase_currents_are_not_discovered(self):
+        """huawei_solar gives the *inverter's* own AC output currents the same
+        display name ('Phase A current') as the meter's, so they differ only
+        by device prefix. Binding fuse protection to the inverter's output
+        instead of the house feed would silently protect the wrong circuit."""
+        states = [
+            _current_state("sensor.inverter_phase_a_current"),
+            _current_state("sensor.inverter_phase_b_current"),
+            _current_state("sensor.inverter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+    def test_meter_phases_win_when_both_devices_are_present(self):
+        """The realistic Huawei install: inverter and power meter both expose
+        'Phase A/B/C current'. Only the meter's may be selected."""
+        states = [
+            _current_state("sensor.inverter_phase_a_current"),
+            _current_state("sensor.inverter_phase_b_current"),
+            _current_state("sensor.inverter_phase_c_current"),
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_non_current_device_class_is_ignored(self):
+        states = [
+            {
+                "entity_id": "sensor.power_meter_phase_a_voltage",
+                "attributes": {"device_class": "voltage"},
+            }
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+    def test_all_three_phases_come_from_one_device(self):
+        """A sub-circuit meter must not supply some phases and the grid meter
+        the rest. "meter" is a bare substring, so a heat-pump or EV submeter
+        also passes the gate; per-phase first-match-wins would then blend two
+        devices into one reading set and compute a house current that exists
+        nowhere. Fuse protection is only meaningful measured at one point.
+        """
+        states = [
+            _current_state("sensor.heatpump_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        result = self.ctrl.discover_current_sensors(states)
+        assert result == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_selection_does_not_depend_on_state_ordering(self):
+        """/api/states order is arbitrary and changes between HA restarts;
+        which meter backs fuse protection must not."""
+        entities = [
+            "sensor.heatpump_meter_phase_a_current",
+            "sensor.heatpump_meter_phase_b_current",
+            "sensor.heatpump_meter_phase_c_current",
+            "sensor.power_meter_phase_a_current",
+            "sensor.power_meter_phase_b_current",
+            "sensor.power_meter_phase_c_current",
+        ]
+        forward = self.ctrl.discover_current_sensors(
+            [_current_state(e) for e in entities]
+        )
+        reverse = self.ctrl.discover_current_sensors(
+            [_current_state(e) for e in reversed(entities)]
+        )
+        assert forward == reverse
+        assert len(forward) == 3
+        # One device supplies all three, whichever one wins.
+        prefixes = {v.rsplit("phase_", 1)[0] for v in forward.values()}
+        assert len(prefixes) == 1
+
+    def test_explicit_l1_l2_l3_naming_wins_over_meter_phase_naming(self):
+        """An install with both a dedicated household clamp meter and a
+        Huawei smart meter keeps the explicit current_l1/l2/l3 set, so
+        upgrading does not silently repoint fuse protection."""
+        states = [
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+            _current_state("sensor.tibber_pulse_current_l1"),
+            _current_state("sensor.tibber_pulse_current_l2"),
+            _current_state("sensor.tibber_pulse_current_l3"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.tibber_pulse_current_l1",
+            "current_l2": "sensor.tibber_pulse_current_l2",
+            "current_l3": "sensor.tibber_pulse_current_l3",
+        }
+
+    def test_single_phase_install_still_discovers_its_one_phase(self):
+        states = [_current_state("sensor.pulse_current_l1")]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.pulse_current_l1"
+        }
+
+
 # ── set_* / grid_charge ─────────────────────────────────────────────────────
 
 

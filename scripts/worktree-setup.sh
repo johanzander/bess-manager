@@ -10,6 +10,21 @@
 # Usage: run once, from the root of the worktree:
 #
 #     ./scripts/worktree-setup.sh
+#
+# What sharing costs: .venv and (when the lockfiles agree) node_modules are
+# symlinks into the main checkout, so they are READ-shared but not write-isolated.
+# Anything that installs — `npm install`, `pip install` — resolves through the
+# link and mutates the main checkout's tree, changing dependencies underneath
+# every other worktree at once. Read-only use (pytest, npm run build, playwright)
+# is safe; when a branch genuinely needs its own dependency set, give it a real
+# install rather than writing through the link:
+#
+#     rm .venv && python -m venv .venv && .venv/bin/pip install -r requirements.txt
+#     rm frontend/node_modules && (cd frontend && npm install)
+#
+# For node this is also automatic: change `package-lock.json`, re-run this
+# script, and the diverged package root gets its own install. There is no such
+# check for .venv — requirements.txt drift is on you to notice.
 
 set -euo pipefail
 
@@ -58,13 +73,33 @@ for pkg in frontend e2e; do
         rm "$pkg/node_modules"
     fi
 
-    if [ -e "$pkg/node_modules" ]; then
+    if [ -d "$MAIN_CHECKOUT/$pkg/node_modules" ] &&
+        cmp -s "$pkg/package-lock.json" "$MAIN_CHECKOUT/$pkg/package-lock.json"; then
+        lockfiles_agree=true
+    else
+        lockfiles_agree=false
+    fi
+
+    if [ -L "$pkg/node_modules" ]; then
+        # An existing share has to be re-checked, not trusted: the lockfiles
+        # agreed when it was made, but this branch has since had every chance
+        # to change dependencies or merge main. Skipping the check here is how
+        # a worktree keeps testing against a tree that no longer matches it,
+        # while re-running this script reports success.
+        if [ "$lockfiles_agree" = true ]; then
+            echo "   $pkg/node_modules already shared"
+            continue
+        fi
+        echo "   $pkg/node_modules is shared but the lockfile has since diverged"
+        echo "   from the main checkout — replacing the link with a real install"
+        rm "$pkg/node_modules"
+    elif [ -e "$pkg/node_modules" ]; then
+        # A real directory is this worktree's own install — leave it alone.
         echo "   $pkg/node_modules already present"
         continue
     fi
 
-    if [ -d "$MAIN_CHECKOUT/$pkg/node_modules" ] &&
-        cmp -s "$pkg/package-lock.json" "$MAIN_CHECKOUT/$pkg/package-lock.json"; then
+    if [ "$lockfiles_agree" = true ]; then
         ln -s "$MAIN_CHECKOUT/$pkg/node_modules" "$pkg/node_modules"
         echo "   $pkg/node_modules → $MAIN_CHECKOUT/$pkg/node_modules"
     else
@@ -76,6 +111,14 @@ done
 
 # --- Playwright browsers -----------------------------------------------------
 #
+# Everything below needs e2e/, both to run the install from and to be worth
+# doing at all. Without that guard the subshell below fails under `set -e` with
+# no diagnostic, immediately after reporting that all the sharing succeeded.
+if [ ! -d e2e ]; then
+    echo "✅ Worktree ready (no e2e/ — skipped Playwright browsers)"
+    exit 0
+fi
+
 # Browsers live in a shared user-level cache, so they are never per-worktree.
 # This does exactly one thing Playwright cannot do for itself: delete a
 # directory that LIES. An interrupted `playwright install` leaves an empty

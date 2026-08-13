@@ -154,6 +154,70 @@ def test_installs_instead_of_linking_when_the_lockfile_diverges(tmp_path):
     assert (wt / "e2e" / "node_modules").is_symlink()
 
 
+def test_replaces_a_share_whose_lockfile_diverged_after_it_was_made(tmp_path):
+    """The lockfiles agreed when the link was made — that says nothing about
+    now. A branch adds a dependency (or merges main), the maintainer re-runs
+    this script to fix exactly that, and a check that only looks at whether
+    node_modules exists reports success while the worktree keeps building
+    against the main checkout's stale tree."""
+    _, wt, env, log, _ = _setup(tmp_path)
+    assert _invoke(wt, env).returncode == 0
+    assert (wt / "frontend" / "node_modules").is_symlink()
+
+    (wt / "frontend" / "package-lock.json").write_text('{"name": "now-diverged"}\n')
+    log.unlink(missing_ok=True)
+    result = _invoke(wt, env)
+
+    assert result.returncode == 0, result.stderr
+    assert not (
+        wt / "frontend" / "node_modules"
+    ).is_symlink(), (
+        "a share must be re-validated on every run, not trusted because it exists"
+    )
+    assert "npm install" in "\n".join(_shim_calls(log))
+    # The package root whose lockfile still agrees stays shared.
+    assert (wt / "e2e" / "node_modules").is_symlink()
+
+
+def test_leaves_a_real_node_modules_install_alone(tmp_path):
+    """A real directory is the worktree's own install, made because its
+    lockfile diverged. Re-running must not replace it with a share."""
+    _, wt, env, log, _ = _setup(tmp_path)
+    (wt / "frontend" / "node_modules" / "branch-only-dep").mkdir(parents=True)
+
+    result = _invoke(wt, env)
+
+    assert result.returncode == 0, result.stderr
+    assert not (wt / "frontend" / "node_modules").is_symlink()
+    assert (wt / "frontend" / "node_modules" / "branch-only-dep").is_dir()
+    assert not any(c.startswith("npm install") for c in _shim_calls(log))
+
+
+def test_succeeds_on_a_worktree_with_no_e2e_directory(tmp_path):
+    """Every other step guards on the package root existing; the Playwright
+    install did not. On a branch predating e2e/ the subshell fails under
+    `set -e`, so the script aborts with no diagnostic immediately after
+    reporting that all the sharing succeeded."""
+    main = _make_main_checkout(tmp_path)
+    _run(["git", "rm", "-r", "--quiet", "e2e"], cwd=main)
+    _run(["git", "commit", "-m", "drop e2e"], cwd=main)
+    wt = _make_worktree(main)
+    bindir, log = _make_shims(tmp_path)
+    env = {
+        **os.environ,
+        "PATH": f"{bindir}:{os.environ['PATH']}",
+        "SHIM_LOG": str(log),
+        "PLAYWRIGHT_BROWSERS_PATH": str(_healthy_browser_cache(tmp_path)),
+    }
+
+    result = _invoke(wt, env)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (wt / ".venv").is_symlink()
+    assert (wt / "frontend" / "node_modules").is_symlink()
+    assert not any(c.startswith("npx") for c in _shim_calls(log))
+
+
 def test_repairs_a_browser_cache_whose_marker_lies(tmp_path):
     """The trap from #556: an empty browser directory next to an
     INSTALLATION_COMPLETE marker makes every later `playwright install` a

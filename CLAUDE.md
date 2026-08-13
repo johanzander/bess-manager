@@ -200,6 +200,15 @@ checkout (falling back to a real `npm install` only for a package root whose
 lockfile actually diverged) and repairs a Playwright browser cache left
 unusable by an interrupted install.
 
+Those shared trees are symlinks, so they are read-shared but **not**
+write-isolated: `npm install` or `pip install` inside a worktree writes through
+the link and changes dependencies for the main checkout and every other
+worktree at once. Running tests and builds is safe; when a branch needs its own
+dependency set, replace the symlink with a real install (`rm .venv` / `rm
+frontend/node_modules` first) rather than installing through it. Re-running
+`worktree-setup.sh` handles the node case automatically once
+`package-lock.json` diverges — `requirements.txt` drift is not detected.
+
 ## Home Assistant Integration
 
 - **Sensors**: battery SOC/power, solar production, grid import/export, pricing

@@ -33,8 +33,12 @@ SCENARIO=ci-normal-day BESS_PORT=18180 MOCK_HA_PORT=18123 \
 ```
 
 Add `--build` only when you changed something baked into the image
-(`backend/Dockerfile.dev`, `requirements*.txt`) — the compose file bind-mounts
-the source, so an unnecessary rebuild costs minutes and changes nothing.
+(`backend/Dockerfile.dev`, `requirements*.txt`, or anything under
+`scripts/mock_ha/` other than `scenarios/`) — the compose file bind-mounts the
+backend source, so an unnecessary rebuild costs minutes and changes nothing.
+Note that mock-HA is the opposite case: its Dockerfile does `COPY . .` and only
+`scenarios/` is bind-mounted, so an edit to `server.py` without `--build` runs
+the stale baked copy and silently invalidates the whole observation.
 
 Wait for both containers healthy (`podman ps --filter name=<unique-name>`),
 then hit the real API:

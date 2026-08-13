@@ -3713,7 +3713,7 @@ class HomeAssistantAPIController:
         entities: list[dict],
         platforms: list[str],
         suffix_map: dict[str, str],
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Map entity registry entries to BESS sensor keys using unique_id.
 
         Filters entities belonging to the given platforms, then matches

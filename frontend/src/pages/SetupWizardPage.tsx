@@ -449,12 +449,23 @@ const SetupWizardPage: React.FC = () => {
   // Follow the selected inverter tab, not the auto-detected platform — a
   // user with both a cloud and a modbus integration can switch between
   // them, and each has its own set of disabled entities.
+  // platformDisabledSensors only has entries for platforms that were actually
+  // detected, so a miss means "this platform has no disabled entities" — never
+  // fall back to another platform's dict, or the tab would list entity IDs
+  // that belong to a different integration.
   const activeDisabledSensors =
-    discovery?.platformDisabledSensors?.[activeInverterIntegrationId]
-    ?? discovery?.disabledSensors
+    (discovery?.platformDisabledSensors
+      ? discovery.platformDisabledSensors[activeInverterIntegrationId]
+      : discovery?.disabledSensors)
     ?? {};
+  // Compare against the entity ID, not mere presence: a user upgrading from an
+  // older wizard run already has the disabled entity persisted, and handleScan
+  // restores it from the saved settings. Presence alone would suppress the
+  // warning and re-persist the same 404-ing mapping (#549).
   const disabledRequiredEntities = Object.entries(activeDisabledSensors)
-    .filter(([key]) => requiredSensorKeys.has(key) && !activeSensorsFlat[key]);
+    .filter(([key, entityId]) =>
+      requiredSensorKeys.has(key)
+      && (!activeSensorsFlat[key] || activeSensorsFlat[key] === entityId));
 
   const pricingRequiredField = PROVIDER_REQUIRED_FIELD[pricingForm.provider];
   const pricingReady = !pricingRequiredField || !!pricingForm[pricingRequiredField];

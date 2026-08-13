@@ -17,6 +17,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Finer battery optimization grid** — the DP's state/action resolution is halved (0.1 kW / 0.025 kWh), recovering 2.43 SEK/day of savings across the benchmark corpus while reducing solve time. ([#512](https://github.com/johanzander/bess-manager/issues/512))
+- **Debug bundles are several times smaller** — prediction snapshots now record only the periods whose plan changed, in a compact encoding, instead of rewriting the whole forecast each run. ([#555](https://github.com/johanzander/bess-manager/issues/555))
 
 ### Fixed
 

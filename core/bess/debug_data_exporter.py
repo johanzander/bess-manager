@@ -316,22 +316,56 @@ _COMPACT_LOG_TAIL = 50  # Always include this many trailing lines for recent con
 _PREVIOUS_DAYS_TO_INCLUDE = 2
 
 
-def _periods_signature(predicted_periods: list) -> dict[int, tuple]:
-    """Map period -> (intent, rounded battery_action) for change detection.
+def _periods_signature(predicted_periods: list) -> dict[int, dict]:
+    """Map period -> its full serialized payload, for change detection.
 
-    Two snapshots covering the same period "agree" if the DP's decision for
-    it -- what it planned to do, not the exact float noise of the
-    surrounding forecast -- is the same. Rounding to 3dp (gram-scale on a
-    kWh quantity) avoids treating floating-point summation jitter as a real
-    schedule change.
+    Two snapshots "agree" about a period only if EVERYTHING they say about
+    it matches -- not just the DP's decision. Keying on
+    (strategic_intent, battery_action) alone, as this did before #555, is
+    not enough to call a period unchanged: a period keeps its decision while
+    its SOE trajectory and economics shift underneath it, because those
+    depend on what the DP decided for *other* periods. Measured over a
+    96-run day, 2,588 period payloads moved while only 292 decisions did --
+    so a decision-keyed delta would silently drop the input changes that
+    `bess-analyst` is documented to diff when explaining a flip.
+
+    The comparison is exact, with no float tolerance. A tolerance was tried
+    (6dp) and rejected: it saved 26 of 2,614 period objects on that same
+    96-run day -- under 1% -- while making the reconstruction only
+    approximate, which is not worth giving up "replay the deltas and you have
+    byte-identical forecasts" as a property a reader can rely on.
     """
-    return {
-        p.period: (
-            p.decision.strategic_intent,
-            round(p.decision.battery_action or 0.0, 3),
-        )
-        for p in predicted_periods
-    }
+    return {p.period: asdict(p) for p in predicted_periods}
+
+
+def _period_delta(current: dict, previous: dict | None) -> dict:
+    """The fields of `current` that differ from `previous`, keyed by period.
+
+    Emitting whole period objects for every period that moved is still
+    wasteful: what usually moves is two or three of ~37 fields (the SOE
+    trajectory and a derived cost), while the other 34 are re-serialized
+    unchanged. Measured over a 96-run day, whole-object deltas cost 3.06 MB
+    against 0.51 MB for field-level ones -- same information, six times the
+    bytes.
+
+    Returns `{}` when nothing changed, and the complete payload when the
+    period has no predecessor (its first appearance is its baseline).
+    """
+    if previous is None:
+        return current
+
+    delta: dict = {"period": current["period"]}
+    for key, value in current.items():
+        if key == "period":
+            continue
+        prior = previous.get(key)
+        if isinstance(value, dict) and isinstance(prior, dict):
+            nested = {k: v for k, v in value.items() if prior.get(k) != v}
+            if nested:
+                delta[key] = nested
+        elif prior != value:
+            delta[key] = value
+    return delta if len(delta) > 1 else {}
 
 
 @dataclass
@@ -969,8 +1003,8 @@ class DebugDataAggregator:
                 summary fields (timestamp, period, predicted_savings,
                 actual_count, predicted_count) for the full-day evolution
                 table, PLUS that run's own forward-looking forecast
-                (`predicted_periods`: every period with data_source ==
-                "predicted", i.e. every period NOT already realized at that
+                (`predicted_periods_delta`, drawn from the periods with
+                data_source == "predicted", i.e. every period NOT already realized at that
                 run's own decision time -- exact buy/sell/solar/consumption/
                 SOE/shadow_price/intent, not the rounded box-table version).
                 Already-realized periods are deliberately excluded: they're
@@ -984,20 +1018,32 @@ class DebugDataAggregator:
                 diffable: `optimize_battery_schedule()`'s own forward
                 horizon input, not a log line.
 
-                `predicted_periods` is further omitted (empty list) whenever
-                it's unchanged from the immediately preceding snapshot for
-                every period they both cover (same intent + battery_action,
-                see `_periods_signature`) -- most 15-min optimization cycles
-                genuinely change nothing (the real log shows this directly:
-                "DECISION: Keep current schedule" dominates; "Apply schedule"
-                is the rare event). Naively including every snapshot's full
-                remaining-day forecast measured ~6 MB/day; deduping against
-                only-if-changed bounds it to roughly the number of times the
-                plan actually moved, while still capturing every real change
-                -- including the flip investigated in #466 -- at full
-                fidelity, unlike a fixed lookback/lookahead window (which
-                would have silently excluded that exact flip). The evolution
-                table's summary fields are never deduped -- every run still
+                The forecast is emitted as `predicted_periods_delta`: for each
+                period that moved, only the FIELDS that moved (plus `period`
+                to key it) -- see `_period_delta`. Alongside it,
+                `predicted_periods_dropped` lists the period indices that left
+                the forecast entirely (they realized into actuals). A period's
+                first appearance carries its complete payload, so there is
+                always a baseline to replay onto. A reader reconstructs any
+                snapshot's complete forecast by deep-merging each delta over
+                the accumulated state, keyed by period index, and deleting the
+                dropped indices. An empty delta means the plan didn't move
+                that cycle. Both halves are needed: the forecast window shrinks
+                every cycle, and a departure has no delta entry to carry it,
+                so deltas alone reconstruct a forecast that never shrinks.
+
+                Deduping per snapshot instead of per period (what this did
+                before #555) was nearly useless in practice: a single
+                marginal period flips on most cycles, and one flip
+                re-serialized the entire remaining forecast. On the reference
+                bundle that wrote 4,275 period objects to carry 314 periods'
+                worth of actual change -- 6.78 MB of a 9.04 MB export. The
+                key is deliberately NOT named `predicted_periods`: bundles
+                already attached to issues use that name for a *whole*
+                forecast, and they are regression fixtures, so the two
+                encodings must stay distinguishable by key rather than
+                silently redefining one. The evolution
+                table's summary fields are never deltaed -- every run still
                 gets its own row there regardless.
                 If False, return full snapshot data (all periods, actual and
                 predicted) for all snapshots, no deduplication.
@@ -1011,13 +1057,13 @@ class DebugDataAggregator:
                 return []
             if not compact:
                 return [asdict(snapshot) for snapshot in snapshots]
-            # Compact: summary fields (evolution table) + that run's own
-            # forward-looking forecast periods (cross-run diffing), deduped
-            # against the previous snapshot -- see docstring.
+            # Compact: summary fields (evolution table) + the periods of that
+            # run's forward-looking forecast that actually moved since the
+            # previous snapshot (cross-run diffing) -- see docstring.
             # Use grid_only_cost - hourly_cost to match the dashboard total
             # savings definition (includes both solar and battery benefit).
             result = []
-            prev_signature: dict[int, tuple] = {}
+            prev_signature: dict[int, dict] = {}
             for snapshot in snapshots:
                 total_savings = sum(
                     p.economic.grid_only_cost - p.economic.hourly_cost
@@ -1030,19 +1076,29 @@ class DebugDataAggregator:
                     if p.data_source == "predicted"
                 ]
                 signature = _periods_signature(predicted)
-                # Compare only the periods both snapshots cover -- the window
-                # rolls forward each cycle, so a brand-new period at the far
-                # end (never seen by prev_signature) is not a "change" to an
-                # existing decision, it's just newly visible. Excluding it
-                # from the comparison (rather than treating its absence from
-                # prev_signature as a mismatch) is what makes dedup actually
-                # fire on the common case of "nothing changed, window just
-                # advanced by one period."
-                overlap = signature.keys() & prev_signature.keys()
-                unchanged = bool(overlap) and all(
-                    prev_signature[p] == signature[p] for p in overlap
-                )
-                predicted_periods = [] if unchanged else [asdict(p) for p in predicted]
+                # A period is worth emitting if its payload differs (any
+                # field, not just the decision) from what the previous
+                # snapshot said about it. `prev_signature.get()` covers the
+                # two cases together: a payload that changed, and a period
+                # the previous snapshot never covered at all (new
+                # information, not an unchanged payload). The first snapshot
+                # of the day sees an empty prev_signature, so it emits the
+                # full forecast as the baseline the deltas replay onto.
+                delta = [
+                    d
+                    for d in (
+                        _period_delta(signature[p.period], prev_signature.get(p.period))
+                        for p in predicted
+                    )
+                    if d
+                ]
+                # Periods that left the forecast since the previous snapshot,
+                # normally because they realized into actuals as the day moved
+                # on. A departure is invisible in the delta -- there is no
+                # entry to carry it -- so without this a reader replaying
+                # deltas keeps every realized period forever and reports a
+                # forecast that never shrinks.
+                dropped = sorted(prev_signature.keys() - signature.keys())
                 prev_signature = signature
                 result.append(
                     {
@@ -1051,8 +1107,8 @@ class DebugDataAggregator:
                         "total_savings": total_savings,
                         "actual_count": snapshot.daily_view.actual_count,
                         "predicted_count": snapshot.daily_view.predicted_count,
-                        "predicted_periods": predicted_periods,
-                        "predicted_periods_unchanged": bool(unchanged),
+                        "predicted_periods_delta": delta,
+                        "predicted_periods_dropped": dropped,
                     }
                 )
             return result

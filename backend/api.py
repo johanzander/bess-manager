@@ -43,6 +43,16 @@ from core.bess.time_utils import get_period_count
 
 router = APIRouter()
 
+#: The wizard payload field each energy provider cannot work without.
+#: Mirrors BatterySystemManager._create_price_source, which needs exactly
+#: these to construct a usable PriceSource (#549).
+_PROVIDER_REQUIRED_FIELD: dict[str, str] = {
+    "nordpool_official": "nordpoolConfigEntryId",
+    "nordpool_hacs": "nordpoolEntity",
+    "octopus": "octopusImportTodayEntity",
+    "entsoe": "entsoeEntity",
+}
+
 
 def _get_hourly_settings_from_periods(schedule_manager, hour: int) -> dict:
     """Build hourly settings from period-level data.
@@ -403,12 +413,13 @@ async def patch_settings(updates: dict):
                 bess_controller.system.set_demo_mode(enabled)
 
         # Any of the sections above (sensors directly, or growatt/inverter via
-        # a platform switch) can change service_domain/grid_power_polarity —
-        # refresh those unconditionally rather than only on a key match.
+        # a platform switch) can change service_domain and the grid/battery
+        # signed-sensor polarities — refresh those unconditionally rather
+        # than only on a key match.
         # ha_controller.sensors is a live settings_store view (#334) and
         # needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarities()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -2837,9 +2848,13 @@ async def run_setup_discovery():
 
         # Registry-based discovery (robust against entity renaming)
         registry = ha.fetch_entity_registry()
-        platform_sensors, detected_platform = ha.discover_sensors_from_registry(
-            registry
-        )
+        (
+            platform_sensors,
+            detected_platform,
+            platform_disabled,
+        ) = ha.discover_sensors_from_registry(registry)
+        disabled_sensors: dict[str, str] = {}
+        platform_disabled_sensors: dict[str, dict[str, str]] = platform_disabled
         if platform_sensors:
             # When local modbus is detected alongside cloud, use modbus as
             # the primary sensor source (it provides TOU control entities).
@@ -2857,6 +2872,7 @@ async def run_setup_discovery():
             ):
                 effective_platform = "solax_modbus_growatt_sph"
             sensors = dict(platform_sensors.get(effective_platform, {}))
+            disabled_sensors = dict(platform_disabled.get(effective_platform, {}))
             _suffix_maps = {
                 "growatt_server_min": ha.GROWATT_MIN_SUFFIX_MAP,
                 "growatt_server_sph": ha.GROWATT_SPH_SUFFIX_MAP,
@@ -2873,7 +2889,14 @@ async def run_setup_discovery():
                     for k in all_bess_keys
                     if not (k.startswith("tou_time_") and k[9:10] in "23456789")
                 ]
-            missing_sensors = [k for k in all_bess_keys if k not in sensors]
+            # A disabled sensor is not "missing" — the entity exists and the
+            # user only has to switch it on.  Keep the two conditions apart
+            # so the wizard can give the actionable message (#549).
+            missing_sensors = [
+                k
+                for k in all_bess_keys
+                if k not in sensors and k not in disabled_sensors
+            ]
 
         current_sensors = ha.discover_current_sensors(states)
         for phase_key, entity_id in current_sensors.items():
@@ -2929,6 +2952,14 @@ async def run_setup_discovery():
         # Attach sensor dicts without key conversion
         result["sensors"] = sensors
         result["platformSensors"] = platform_sensors
+        # Sensor keys left unmapped because their only registry match is
+        # disabled in HA — the wizard blocks on these and names the entity
+        # to enable, rather than persisting a mapping that 404s (#549).
+        # Per-platform like platformSensors, because the user can switch the
+        # inverter tab away from the auto-detected platform and the gate has
+        # to follow that choice.
+        result["disabledSensors"] = disabled_sensors
+        result["platformDisabledSensors"] = platform_disabled_sensors
         # Suggested spot-multiplier defaults for the auto-detected provider —
         # already camelCase, attach after conversion to avoid double-conversion.
         result["pricingDefaults"] = _pricing_defaults_for_discovery(integrations)
@@ -2952,6 +2983,24 @@ async def setup_complete(payload: APISetupCompletePayload):
     from app import bess_controller
 
     try:
+        # A provider without its own required configuration can never fetch
+        # a price, so the whole optimizer aborts every cycle with "No price
+        # data available".  Reject it here rather than persisting a config
+        # that is guaranteed to fail (#549).  This runs before
+        # apply_discovered_config below, which persists on its own.
+        if payload.provider is not None:
+            required_field = _PROVIDER_REQUIRED_FIELD.get(payload.provider)
+            if required_field and not getattr(payload, required_field, None):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Energy provider '{payload.provider}' requires "
+                        f"'{required_field}', which is empty. Select the "
+                        f"provider you actually have configured in Home "
+                        f"Assistant, or install the integration first."
+                    ),
+                )
+
         sections: dict = {}
 
         # --- sensors & discovery ---
@@ -3122,10 +3171,10 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Apply settings to live system so BESS starts immediately without
         # requiring a restart. Unconditional, not gated on payload.sensors:
         # an inverter platform switch above also changes service_domain and
-        # grid_power_polarity. ha_controller.sensors is a live settings_store
+        # the power polarities. ha_controller.sensors is a live settings_store
         # view (#334) and needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarities()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:

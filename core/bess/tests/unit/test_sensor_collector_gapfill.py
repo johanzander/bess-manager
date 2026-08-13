@@ -118,3 +118,64 @@ class TestHistoricalBackfillGapFill:
             collector.collect_energy_data(10)  # period=10, runtime branch
 
         mock_influxdb_power_batch.assert_not_called()
+
+
+class TestSharedSignedPowerEntitiesExcluded:
+    """A signed sensor backing two flow keys cannot be gap-filled from InfluxDB.
+
+    Native SolaX / Huawei battery power (#542) and Solis / Huawei grid power
+    (#475/#438) each publish ONE signed entity that backs two BESS keys.
+    InfluxDB returns a period *mean* of that entity, which has already summed
+    charge and discharge (or import and export) into a single number — the
+    direction is gone and no split can recover it. Worse, entity_to_flow is
+    keyed by entity_id, so a shared entity silently resolves to whichever
+    flow the map iterates last: charging energy would be recorded as
+    battery_discharged. Such entities must be excluded from the InfluxDB
+    power path entirely; the live PowerSampleBuffer path (#387) still covers
+    them because it reads through the sign-splitting getters.
+    """
+
+    @staticmethod
+    def _shared_battery_controller():
+        entity_map = _entity_map()
+        # Both battery keys resolve to the one signed entity, exactly as
+        # discover_sensors_from_registry pairs them for solax_modbus_native.
+        entity_map["battery_charge_power"] = "solax_battery_power_charge"
+        entity_map["battery_discharge_power"] = "solax_battery_power_charge"
+        ha = MagicMock()
+        ha.resolve_sensor_for_influxdb.side_effect = lambda key: entity_map.get(key)
+        ha._resolve_entity_id.return_value = ("soc_entity", None)
+        return ha
+
+    def test_shared_signed_entity_excluded_from_power_sensors(self):
+        collector = SensorCollector(
+            self._shared_battery_controller(), BatterySettings(total_capacity=30.0)
+        )
+        assert "solax_battery_power_charge" not in collector.power_sensors
+        # The unshared ones are untouched.
+        assert "pv_power_entity" in collector.power_sensors
+        assert "import_power_entity" in collector.power_sensors
+
+    def test_shared_signed_entity_maps_to_no_flow(self):
+        collector = SensorCollector(
+            self._shared_battery_controller(), BatterySettings(total_capacity=30.0)
+        )
+        entity_to_flow = collector._build_power_entity_to_flow_map()
+        assert "sensor.solax_battery_power_charge" not in entity_to_flow
+        assert entity_to_flow["sensor.pv_power_entity"] == "solar_production"
+
+    def test_shared_signed_grid_entity_also_excluded(self):
+        """Same collision, pre-existing on Solis/Huawei grid power."""
+        entity_map = _entity_map()
+        entity_map["import_power"] = "solis_grid_power_net"
+        entity_map["export_power"] = "solis_grid_power_net"
+        ha = MagicMock()
+        ha.resolve_sensor_for_influxdb.side_effect = lambda key: entity_map.get(key)
+        ha._resolve_entity_id.return_value = ("soc_entity", None)
+
+        collector = SensorCollector(ha, BatterySettings(total_capacity=30.0))
+        assert "solis_grid_power_net" not in collector.power_sensors
+        assert (
+            "sensor.solis_grid_power_net"
+            not in collector._build_power_entity_to_flow_map()
+        )

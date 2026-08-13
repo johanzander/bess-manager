@@ -906,6 +906,17 @@ class HomeAssistantAPIController:
         "grid_accumulated_energy": "lifetime_import_from_grid",
         "input_power": "pv_power",
         "power_meter_active_power": "import_power",
+        # TOU period readback (#431). The integration publishes the configured
+        # periods as extra state attributes of this sensor, in the same text
+        # format set_tou_periods accepts (sensor.py:2487-2513) — so BESS can
+        # start from what the battery actually holds instead of assuming
+        # nothing. EMMA's equivalent register (emma_tou_periods) is
+        # deliberately absent: its entity is disabled by default upstream
+        # (sensor.py:1789), and mapping a disabled entity would hand those
+        # installs a startup read of an entity with no state.
+        "storage_huawei_luna2000_time_of_use_charging_and_discharging_periods": (
+            "huawei_tou_periods"
+        ),
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -1630,6 +1641,47 @@ class HomeAssistantAPIController:
             device_id=self.huawei_device_id,
             periods=periods_text,
         )
+
+    def read_huawei_tou_periods(self) -> list[str]:
+        """Read the TOU period list currently programmed on the battery.
+
+        The huawei_solar integration has no read_tou_periods service, but
+        HuaweiSolarTOUSensorEntity publishes the periods as "Period N" extra
+        state attributes in the same text format set_tou_periods accepts
+        (wlcrs/huawei_solar sensor.py:2487-2513), so this is a public entity
+        read, not coordinator internals.
+
+        Returns:
+            Period lines "HH:MM-HH:MM/<days>/<+|->", ordered by period number.
+            Empty when the battery holds no periods.
+
+        Raises:
+            ValueError: If the TOU period sensor isn't configured.
+            SystemConfigurationError: If the entity can't be read. An
+                unreadable entity must not be reported as "no periods
+                programmed" — that would let BESS skip a needed write (the
+                distinction #552 drew for Growatt MIN).
+        """
+        entity_id = self._get_entity_for_service("huawei_tou_periods")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read Huawei TOU periods",
+            category="sensor_read",
+        )
+        if not response or response.get("state") in ("unavailable", "unknown", None):
+            raise SystemConfigurationError(
+                f"Huawei TOU period sensor '{entity_id}' is unreadable "
+                f"(state={response.get('state') if response else None})"
+            )
+
+        attributes = response.get("attributes", {})
+        numbered = [
+            (int(key.removeprefix("Period ")), str(value))
+            for key, value in attributes.items()
+            if key.startswith("Period ") and key.removeprefix("Period ").isdigit()
+        ]
+        return [text for _, text in sorted(numbered)]
 
     def set_inverter_time_segment(
         self,

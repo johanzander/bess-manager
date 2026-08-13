@@ -126,6 +126,23 @@ mask a wrong value there.
 | `ci-wizard-growatt-modbus` | Nordpool Official | MIN (Cloud) — auto-selects Growatt Cloud even though SolaX Modbus is also detected | - | - | - | - | - |
 | `ci-wizard-solis` | Nordpool Official | Solis | - | - | - | - | - |
 | `ci-wizard-growatt-vpp` | Nordpool Official | SPH (SolaX Modbus, GEN3, VPP) — experimental, see [platform maturity](memory/project_platform_maturity.md) | 3 | - | - | - | - |
+| `ci-wizard-huawei-luna2000` | Nordpool Official | Huawei LUNA2000 — experimental, see [platform maturity](memory/project_platform_maturity.md) | - | - | - | - | YES |
+
+`ci-wizard-huawei-luna2000` is the only fixture that drives a full backend
+schedule cycle on Huawei. It carries two TOU periods on the battery so the
+#431 readback has something to read, 96 quarterly prices and a solar forecast
+so the DP actually solves. Run it end to end with:
+
+```bash
+SCENARIO=ci-wizard-huawei-luna2000 BESS_SETTINGS=./e2e/ci-bess-settings-huawei.json \
+  BESS_FAKETIME_PRELOAD=/usr/local/lib/libfaketime.so.1 \
+  BESS_FAKETIME="2026-05-21 17:17:48" \
+  podman-compose -f docker-compose.ci.yml up -d
+```
+
+The faketime pin is required: the fixture's prices are keyed to its
+`mock_time` date, so without it the scheduler aborts with "No price data
+available" (see the `verify` skill's gotchas).
 
 **Not in this table — backend-discovery-only, not Playwright-runnable:**
 `ci-wizard-growatt-modbus-gen3.json` was meant to test a GEN3-via-SolaX-Modbus

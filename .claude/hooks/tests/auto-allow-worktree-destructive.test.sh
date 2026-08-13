@@ -34,6 +34,9 @@ WT="$TMP/wt"
 git init -q "$MAIN"
 git -C "$MAIN" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$MAIN" worktree add -q -b testwt "$WT"
+# A second linked worktree, to prove sibling worktrees count as contained
+# while the main checkout does not.
+git -C "$MAIN" worktree add -q -b siblingwt "$TMP/sibling-wt"
 
 failures=0
 
@@ -220,6 +223,32 @@ run allow "cat $MAIN/x.json | jq .a"
 run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
 run ask "sed -i '' s/a/b/ $MAIN/app.py"
 run ask "cat x.json > $MAIN/out.json"
+
+echo "== shapes that reached the user as false prompts =="
+# Each of these blocked real work. They are pinned because every one was
+# introduced by a *fix* to the containment check, not by the original code.
+# A worktree must not be judged foreign to itself: `;` is a separator, so
+# `cd <own worktree>; cmd` must not yield the token "<worktree>;".
+run allow "cd $WT; .venv/bin/pytest -m 'not slow' -q 2>&1 | tail -8"
+run allow "cd $WT; python3 - <<'PY'
+open('config.yaml','w').write(s)
+PY"
+run allow "cd $WT; git add -A; git commit -m 'merge: reconcile beta/main'"
+# A literal \$( inside a quoted search pattern is not command substitution.
+run allow "grep -n 'main_root=\$(printf' .claude/hooks/x.sh"
+run allow "grep -n 'session_root\"/\*) ;;' .claude/hooks/x.sh"
+# Read-only work plus a discarded stderr redirect.
+run allow "git show origin/main:x.sh 2>/dev/null | grep -n 'case \"\$command\"'"
+# A SIBLING worktree is disposable too; only the main checkout is protected.
+run allow "cp report.md $TMP/sibling-wt/report.md"
+
+echo "== ...while the main checkout is still protected =="
+run ask "rm -rf $MAIN/core"
+run ask "sed -i '' s/a/b/ $MAIN/backend/app.py"
+run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
+run ask "echo x > $MAIN/README.md"
+run ask "rm -rf \$HOME/GitHub/bess-manager"
+run ask "rm -rf ../../../bess-manager"
 
 echo "== the main checkout keeps its own rules =="
 # In the main checkout the hook must stay silent so settings.json applies

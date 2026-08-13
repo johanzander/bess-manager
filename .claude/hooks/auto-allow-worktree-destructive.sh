@@ -21,9 +21,18 @@
 # prompted, and every new command shape needed another entry. Inverting it
 # removes that whole class of stall.
 #
-# Every check below therefore fails CLOSED: where a pattern list is
-# unavoidable it enumerates what is SAFE, so a shape nobody thought of
-# costs one prompt rather than a silent auto-allow.
+# Most checks below fail CLOSED: where a pattern list is unavoidable it
+# enumerates what is SAFE, so a shape nobody thought of costs one prompt
+# rather than a silent auto-allow. That holds for the `gh` list, the
+# read-only list and the containment check.
+#
+# `mutates_shared_state` is the exception and cannot be inverted: git's
+# subcommand surface is open-ended, so a safe-list would prompt on most
+# ordinary git use. It is a BLOCKLIST, which means a ref-mutating shape not
+# named there is allowed -- that is how `git branch -f main HEAD`,
+# `update-ref` and `symbolic-ref` were missed once already. Treat it as the
+# weakest link here and add to it whenever a new shared-state write shows
+# up, rather than assuming its absence implies safety.
 #
 # Three exceptions never get auto-allowed:
 #
@@ -99,8 +108,11 @@ is_hard_denied() {
 # reaches GitHub, or a push that can move a shared ref.
 #
 # These get an explicit "ask" rather than a fall-through, because
-# settings.json ALLOWS `Bash(git push *)` and `Bash(gh *)` -- falling
-# through would let them run unprompted rather than prompt.
+# settings.json ALLOWS `Bash(git push *)` outright -- falling through would
+# let a shared-ref push run unprompted rather than prompt. (There is no
+# blanket `Bash(gh *)` entry, only eight narrow `gh issue`/`gh pr`
+# patterns; the safe list below must stay a superset of those, or a hook
+# decision silently revokes a permission the user granted.)
 is_globally_scoped() {
   printf '%s' "$1" | grep -qE "${CMD_START}sudo[[:space:]]" && return 0
 
@@ -127,7 +139,7 @@ is_globally_scoped() {
   # counter, so both stayed 0 and the command was allowed. Anchor on
   # ([[:space:]]|$) so the totals cannot silently agree at zero.
   gh_all=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]|$)" | wc -l | tr -d ' ' || true)
-  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready|checkout)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+(view|clone)|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status|--version|--help|-h)|([[:space:]]|$))([[:space:]]|$)" | wc -l | tr -d ' ' || true)
+  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready|checkout|review)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+(view|clone)|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status|--version|--help|-h)|([[:space:]]|$))([[:space:]]|$)" | wc -l | tr -d ' ' || true)
   [ "$gh_all" -ne "$gh_safe" ] && return 0
 
   # Any push that can move a shared ref. The ref has to be matched in every
@@ -146,22 +158,58 @@ is_globally_scoped() {
   # turn a safe push into a prompt -- including `git push -u origin feat/x &&
   # gh pr create --base main ...`, which is implement-issue's closing step,
   # i.e. exactly the stall this hook exists to remove.
-  local norm push_args
+  # EVERY push is examined, not just the first. Stripping only up to the
+  # first occurrence let a second push ride along unchecked --
+  # `git push origin feat/x && git push origin main` was allowed, defeating
+  # the guard this comment describes.
+  local norm rest push_args
   norm=$(normalise_git "$1")
-  if printf '%s' "$norm" | grep -qE "${CMD_START}git[[:space:]]+push([[:space:]]|$)"; then
-    push_args=${norm#*git push}
-    push_args=${push_args%%&&*}
+  rest=$norm
+  while printf '%s' "$rest" | grep -qE "${CMD_START}git[[:space:]]+push([[:space:]]|$)"; do
+    rest=${rest#*git push}
+    push_args=${rest%%&&*}
     push_args=${push_args%%||*}
     push_args=${push_args%%;*}
     push_args=${push_args%%|*}
+    push_touches_shared_ref "$push_args" && return 0
+  done
+  return 1
+}
 
-    if ! printf '%s' "$push_args" | grep -qE '\-\-force-with-lease'; then
-      printf '%s' "$push_args" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
-    fi
-    printf '%s' "$push_args" | grep -qE "(--all|--mirror|--tags)" && return 0
-    printf '%s' "$push_args" | grep -qE "(^|[[:space:]:+])(refs/heads/)?(main|beta)([[:space:]]|:|$)" && return 0
-    printf '%s' "$push_args" | grep -qE "(^|[[:space:]:+])(refs/tags/)?v[0-9]" && return 0
+# Decides whether one push's argument list names a ref shared with other
+# checkouts. Works on the refspec TOKENS rather than scanning the string:
+# a substring test cannot tell `main` from `feat/main-ish`, and widening it
+# to catch `beta-release-*` would have swallowed the latter.
+push_touches_shared_ref() {
+  local args="$1" tok dst
+
+  if ! printf '%s' "$args" | grep -qE '\-\-force-with-lease'; then
+    printf '%s' "$args" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
   fi
+  printf '%s' "$args" | grep -qE "(--all|--mirror|--tags)" && return 0
+
+  set -f
+  for tok in $args; do
+    case "$tok" in -*) continue ;; esac
+    # `src:dst` pushes to dst; a bare token is its own destination. Strip the
+    # force marker and any fully-qualified prefix so every spelling of the
+    # same ref -- main, HEAD:main, br:refs/heads/main, +main -- reduces to
+    # the same name.
+    dst=${tok##*:}
+    dst=${dst#+}
+    dst=${dst#refs/heads/}
+    dst=${dst#refs/tags/}
+    case "$dst" in
+      # beta-release-* are shared release refs per the Release Workflow
+      # section, and were missed while `beta` itself was caught.
+      main | beta | beta-release* | release-* | v[0-9]*)
+        set +f
+        return 0
+        ;;
+    esac
+  done
+  set +f
+
   return 1
 }
 
@@ -198,6 +246,16 @@ mutates_shared_state() {
   # removing `origin` changes where every checkout pushes.
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+config[[:space:]]+(.*[[:space:]])?(--global|--system)([[:space:]]|$)" && return 0
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+remote[[:space:]]+(set-url|remove|rm|rename|add)([[:space:]]|$)" && return 0
+
+  # Direct writes to the shared ref namespace. `git branch -D` is allowed
+  # because git refuses the dangerous case, but nothing refuses these: they
+  # MOVE a ref rather than delete it, so `git branch -f main HEAD` rewrites
+  # main for every checkout at once, and `update-ref`/`symbolic-ref` do the
+  # same one layer down. `update-ref` has no read form. `symbolic-ref` does
+  # (`--short HEAD`), so only the two-argument writing form matches.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+branch[[:space:]]+(.*[[:space:]])?(-f|--force|-M|-m|--move)([[:space:]]|$)" && return 0
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+update-ref([[:space:]]|$)" && return 0
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+symbolic-ref[[:space:]]+[^-][^[:space:]]*[[:space:]]+[^[:space:]]" && return 0
   # Same upstream-protection argument as `git branch -D`: plain `git worktree
   # remove` REFUSES a worktree holding uncommitted or untracked files
   # (verified: "contains modified or untracked files, use --force to delete
@@ -227,6 +285,37 @@ fi
 # say no, and the hook would auto-allow everything IN THE MAIN CHECKOUT.
 worktree_list=$(git worktree list --porcelain)
 main_root=$(printf '%s\n' "$worktree_list" | awk '/^worktree /{sub(/^worktree /, ""); print; exit}')
+
+# Every LINKED worktree of this repo, i.e. all of them except the main
+# checkout. These count as contained: a linked worktree is disposable by
+# exactly the argument that justifies auto-allowing commands inside this
+# one, and agents legitimately reach across them (cutting a release from a
+# changelog worktree, comparing two branches' output). Treating them as
+# foreign made ordinary cross-worktree work prompt, while protecting
+# nothing -- the checkout this guard exists for is the MAIN one, which is
+# shared, long-lived, and the only place a stale path does lasting damage.
+linked_roots=$(printf '%s\n' "$worktree_list" | awk '/^worktree /{sub(/^worktree /, ""); print}' | tail -n +2)
+
+is_contained_path() {
+  local candidate="$1" root
+  case "$candidate" in
+    "$session_root" | "$session_root"/*) return 0 ;;
+    /tmp/* | /private/tmp/* | /private/var/folders/* | /dev/null) return 0 ;;
+  esac
+  # Never the main checkout, even though it is in the same repo.
+  case "$candidate" in
+    "$main_root" | "$main_root"/*) return 1 ;;
+  esac
+  while IFS= read -r root; do
+    [ -n "$root" ] || continue
+    case "$candidate" in
+      "$root" | "$root"/*) return 0 ;;
+    esac
+  done <<EOF
+$linked_roots
+EOF
+  return 1
+}
 
 # Everything below applies ONLY inside a linked worktree. In the main
 # checkout the hook stays completely silent, so that shared checkout keeps
@@ -278,13 +367,29 @@ fi
 # The verb list survives only for the indirection case -- `rm -rf $HOME/x`
 # names no literal path but still resolves to one.
 needs_scrutiny() {
-  # Any absolute path, any `..` traversal, any `~`.
-  printf '%s' "$1" | grep -qE '(^|[[:space:]"'\''=:(])(/|~|\.\.(/|[[:space:]]|$))' && return 0
-  printf '%s' "$1" | grep -qE "${CMD_START}(rm|mv|cp|ln|dd|tee|shred|install|truncate|chmod|chown|rsync|find|xargs|sed|touch|mkdir)([[:space:]]|$)" && return 0
+  # Trigger on the ability to WRITE, not on merely naming a path.
+  #
+  # The previous trigger was "any absolute path, any `..`, any `~`", which
+  # made the containment check run over nearly every command -- and since
+  # that check cannot parse shell quoting, each unparseable-but-harmless
+  # shape became a prompt. Four distinct false positives reached the user:
+  # `cmd 2>/dev/null` plus any `$var`; a `cd` into a SIBLING worktree; a
+  # read-only `grep` whose literal pattern contained `$(` and `;;`; and
+  # inspection of files under $HOME. All were read-only or worktree-local.
+  #
+  # A command that cannot write cannot commit the accident this guards, so
+  # the write verbs ARE the right trigger. The cost is a known miss: an
+  # arbitrary-write shape not on this list is auto-allowed. Interpreters are
+  # therefore included wholesale (`python3 -c "shutil.rmtree(...)"` was the
+  # motivating miss), and `is_contained_path` -- not this list -- is what
+  # decides whether the path is actually foreign.
+  printf '%s' "$1" | grep -qE "${CMD_START}(rm|mv|cp|ln|dd|tee|shred|install|truncate|chmod|chown|rsync|find|xargs|sed|touch|mkdir|tar|unzip|python|python3|perl|ruby|node|osascript)([[:space:]]|$)" && return 0
   printf '%s' "$1" | grep -qE "(^|[[:space:]])(-C|--git-dir|--work-tree)([[:space:]]|=)" && return 0
-  # Any redirect, not just one to an absolute path: `> ../../repo/README.md`
-  # leaves the worktree just as surely, and is the likelier accident.
-  printf '%s' "$1" | grep -qE '>' && return 0
+  # A redirect that creates or truncates a file. `2>/dev/null` and `2>&1`
+  # are stripped first -- they write nothing and appear on ordinary reads.
+  printf '%s' "$1" |
+    sed -E 's/2>&1//g; s/[0-9]?>[[:space:]]*\/dev\/null//g' |
+    grep -qE '>' && return 0
   return 1
 }
 
@@ -325,13 +430,21 @@ escapes_worktree() {
   # before we ever inspect it.
   local token
   set -f
-  for token in $(printf '%s' "$cmd" | tr "\"'(),=" "      "); do
+  # Shell separators must be separators HERE too, not just quotes and
+  # parens. Without `;`, `cd /path/to/wt; cmd` yielded the token
+  # "/path/to/wt;" -- trailing semicolon attached -- which matches neither
+  # "$session_root" nor "$session_root"/*, so a worktree was judged foreign
+  # to ITSELF and every `cd <own worktree>; ...` prompted.
+  for token in $(printf '%s' "$cmd" | tr "\"'(),=;&|<>" "           "); do
     case "$token" in
       /*)
         case "$token" in
-          "$session_root" | "$session_root"/*) ;;
-          /tmp/* | /private/tmp/* | /private/var/folders/* | /dev/null) ;;
-          *) set +f; return 0 ;;
+          *)
+            if ! is_contained_path "$token"; then
+              set +f
+              return 0
+            fi
+            ;;
         esac
         ;;
     esac

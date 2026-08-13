@@ -168,8 +168,14 @@ if [ -f "$HOOK_TEST" ]; then
     fi
     rm -f /tmp/hook-test-out.txt
 else
-    echo "⚠️  $HOOK_TEST not found"
-    WARNINGS=$((WARNINGS + 1))
+    # An ERROR, not a warning. #562 converted every other unavailable tool in
+    # this script from WARNING to ERROR on the principle that a pre-commit
+    # gate which cannot run its checks must not report success, and
+    # rules.md requires explicit failure over silent degradation. This gate
+    # exists specifically to protect the permission-decision matrix, so a
+    # checkout missing it is the case that most needs to fail loudly.
+    echo "❌ $HOOK_TEST not found -- the permission-decision matrix is unguarded"
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""

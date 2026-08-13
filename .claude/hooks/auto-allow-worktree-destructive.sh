@@ -59,7 +59,28 @@ fi
 # Anchored at command-word position: start of string, or after a shell
 # separator (; & | && || newline). A bare substring match would treat
 # `grep "sudo " docs/` as running sudo and reintroduce the prompt.
-CMD_START='(^|[;&|(]|&&|\|\||\n)[[:space:]]*'
+#
+# The anchor must also step over anything that sits BEFORE the command word
+# without being it. Without this, one env assignment defeated every guard in
+# this file at once -- `PODMAN=1 podman machine rm` was auto-allowed,
+# silently upgrading a settings.json `deny` to an unprompted allow. Env
+# prefixes are ordinary generated-command shape (`PYTHONPATH=. ...`,
+# `TZ=UTC ...`), so that was an accident-class miss, not just an
+# adversarial one.
+CMD_PREFIX='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+|(nohup|time|command|exec|env)[[:space:]]+)*'
+CMD_START="(^|[;&|(]|&&|\\|\\||\\n)[[:space:]]*${CMD_PREFIX}"
+
+# `git` accepts global options between the program name and the subcommand,
+# so a literal `git`+space+`push` match is trivially sidestepped by
+# `git -C sub push origin main` or `git --git-dir=... push origin main`.
+# Strip those options once, up front, and match against the normalised
+# string. Spaces are squeezed too so `git   push` matches the same way.
+# This is for MATCHING only -- the command that runs is untouched.
+normalise_git() {
+  printf '%s' "$1" | sed -E \
+    -e 's/(^|[[:space:]])git([[:space:]]+(-c[[:space:]]+[^[:space:]]+|-C[[:space:]]+[^[:space:]]+|--git-dir=[^[:space:]]+|--work-tree=[^[:space:]]+|--exec-path=[^[:space:]]*|--no-pager|--paginate|--bare|--literal-pathspecs))+/\1git/g' \
+    | tr -s ' '
+}
 
 # --- Hard denials -------------------------------------------------------
 #
@@ -102,8 +123,11 @@ is_globally_scoped() {
   local gh_all gh_safe
   # `grep -c` counts LINES, and a command is normally one line, so both
   # counts would be 1 for that compound. Count occurrences with -o | wc -l.
-  gh_all=$(printf '%s' "$1" | grep -oE "${CMD_START}gh[[:space:]]" | wc -l | tr -d ' ' || true)
-  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh[[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+view|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status)([[:space:]]|$)" | wc -l | tr -d ' ' || true)
+  # `gh[[:space:]]` missed a bare `gh` at end of string -- it matched neither
+  # counter, so both stayed 0 and the command was allowed. Anchor on
+  # ([[:space:]]|$) so the totals cannot silently agree at zero.
+  gh_all=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]|$)" | wc -l | tr -d ' ' || true)
+  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready|checkout)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+(view|clone)|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status|--version|--help|-h)|([[:space:]]|$))([[:space:]]|$)" | wc -l | tr -d ' ' || true)
   [ "$gh_all" -ne "$gh_safe" ] && return 0
 
   # Any push that can move a shared ref. The ref has to be matched in every
@@ -117,13 +141,26 @@ is_globally_scoped() {
   # Step 4 merge, so asking costs a stall on every run. Bare `--force`/`-f`
   # keeps asking -- that one overwrites unconditionally. Order matters
   # below: test the lease form first, or `--force` matches its prefix.
-  if printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+push([[:space:]]|$)"; then
-    if ! printf '%s' "$1" | grep -qE '\-\-force-with-lease'; then
-      printf '%s' "$1" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
+  # Both tests are scoped to the push's OWN arguments, not the whole command
+  # string. Scanning the whole string made any `main` anywhere in a compound
+  # turn a safe push into a prompt -- including `git push -u origin feat/x &&
+  # gh pr create --base main ...`, which is implement-issue's closing step,
+  # i.e. exactly the stall this hook exists to remove.
+  local norm push_args
+  norm=$(normalise_git "$1")
+  if printf '%s' "$norm" | grep -qE "${CMD_START}git[[:space:]]+push([[:space:]]|$)"; then
+    push_args=${norm#*git push}
+    push_args=${push_args%%&&*}
+    push_args=${push_args%%||*}
+    push_args=${push_args%%;*}
+    push_args=${push_args%%|*}
+
+    if ! printf '%s' "$push_args" | grep -qE '\-\-force-with-lease'; then
+      printf '%s' "$push_args" | grep -qE "(--force|[[:space:]]-f([[:space:]]|$))" && return 0
     fi
-    printf '%s' "$1" | grep -qE "(--all|--mirror|--tags)" && return 0
-    printf '%s' "$1" | grep -qE "(^|[[:space:]:+])(refs/heads/)?(main|beta)([[:space:]]|:|$)" && return 0
-    printf '%s' "$1" | grep -qE "(^|[[:space:]:+])(refs/tags/)?v[0-9]" && return 0
+    printf '%s' "$push_args" | grep -qE "(--all|--mirror|--tags)" && return 0
+    printf '%s' "$push_args" | grep -qE "(^|[[:space:]:+])(refs/heads/)?(main|beta)([[:space:]]|:|$)" && return 0
+    printf '%s' "$push_args" | grep -qE "(^|[[:space:]:+])(refs/tags/)?v[0-9]" && return 0
   fi
   return 1
 }
@@ -148,6 +185,19 @@ mutates_shared_state() {
   # a release is addressed, and nothing refuses to delete one.
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+tag[[:space:]]+(.*[[:space:]])?(-d|--delete)([[:space:]]|$)" && return 0
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+(gc|prune|reflog[[:space:]]+expire|update-ref[[:space:]]+-d|filter-branch)([[:space:]]|$)" && return 0
+
+  # The stash is ONE `refs/stash` shared by every worktree, so these discard
+  # work stashed from the main checkout or another agent's session. Same
+  # class as the reflog/gc cases above, and this project leans on `git stash`
+  # for branch isolation, which makes the shared stack a live hazard rather
+  # than a theoretical one.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash[[:space:]]+(clear|drop|pop)([[:space:]]|$)" && return 0
+
+  # A linked worktree shares `.git/config` with the main checkout, and
+  # `--global` reaches `~/.gitconfig`, outside every worktree. Repointing or
+  # removing `origin` changes where every checkout pushes.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+config[[:space:]]+(.*[[:space:]])?(--global|--system)([[:space:]]|$)" && return 0
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+remote[[:space:]]+(set-url|remove|rm|rename|add)([[:space:]]|$)" && return 0
   # Same upstream-protection argument as `git branch -D`: plain `git worktree
   # remove` REFUSES a worktree holding uncommitted or untracked files
   # (verified: "contains modified or untracked files, use --force to delete
@@ -300,12 +350,56 @@ escapes_worktree() {
 # worktree holding uncommitted or untracked files, so this cannot discard
 # work; `rm -rf <other worktree>` gets no such exemption, because nothing
 # protects it.
+# --- Read-only inspection -----------------------------------------------
+#
+# needs_scrutiny fires on any absolute path or `~`, whether or not the
+# command can write. That made ordinary inspection outside the worktree
+# prompt -- `cat ~/Downloads/bess-debug.json` is the first step of
+# visualize-debug-log, and `head $MAIN/CHANGELOG.md` is routine -- trading
+# one stall class for another. The containment guard is about WRITES, so a
+# command that cannot write is exempt from it.
+#
+# This is an allowlist, so it fails closed: an unrecognised program (or
+# `python3 -c ...`, or `sed -i`) is not read-only and stays scrutinised.
+READ_ONLY_CMDS='cat|head|tail|less|more|grep|egrep|fgrep|rg|ag|ls|stat|file|wc|diff|jq|yq|sort|uniq|cut|tr|column|basename|dirname|realpath|readlink|echo|printf|pwd|date|which|type|shasum|md5sum|true|test'
+READ_ONLY_GIT='log|show|diff|status|rev-parse|ls-files|describe|blame|shortlog|cat-file|for-each-ref|check-ignore'
+
+is_read_only() {
+  local cleaned seg first sub
+  # Discard the harmless redirects first; any OTHER redirect writes a file,
+  # so the command is not read-only.
+  cleaned=$(printf '%s' "$1" | sed -E 's/2>&1//g; s/[0-9]?>[[:space:]]*\/dev\/null//g')
+  printf '%s' "$cleaned" | grep -q '>' && return 1
+
+  while IFS= read -r seg; do
+    seg=$(printf '%s' "$seg" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+    [ -z "$seg" ] && continue
+    # Step over the same prefixes CMD_START skips.
+    seg=$(printf '%s' "$seg" | sed -E "s/^${CMD_PREFIX}//")
+    first=${seg%% *}
+    case "$first" in
+      git)
+        sub=$(printf '%s' "$seg" | awk '{print $2}')
+        printf '%s' "$sub" | grep -qE "^(${READ_ONLY_GIT})$" || return 1
+        ;;
+      *)
+        printf '%s' "$first" | grep -qE "^(${READ_ONLY_CMDS})$" || return 1
+        ;;
+    esac
+  done <<EOF
+$(printf '%s' "$cleaned" | tr ';|&' '\n')
+EOF
+  return 0
+}
+
 is_lone_worktree_removal() {
   printf '%s' "$1" | grep -qE '^[[:space:]]*git[[:space:]]+worktree[[:space:]]+remove[[:space:]]+[^;&|]+$' &&
     ! printf '%s' "$1" | grep -qE '(--force|[[:space:]]-f([[:space:]]|$))'
 }
 
-if ! is_lone_worktree_removal "$command" && needs_scrutiny "$command" && escapes_worktree "$command"; then
+if ! is_read_only "$command" &&
+   ! is_lone_worktree_removal "$command" &&
+   needs_scrutiny "$command" && escapes_worktree "$command"; then
   reason="Not auto-allowed: this command can write outside '${session_root}' -- it names an absolute path beyond the worktree, or hides its target behind '..', '~', a variable, or a command substitution. This is the Bash-side counterpart of the cross-checkout path confusion check-worktree-path.sh blocks for Edit/Write. Re-derive the path from \`pwd\` if that was unintended."
   jq -n --arg reason "$reason" '{
     hookSpecificOutput: {

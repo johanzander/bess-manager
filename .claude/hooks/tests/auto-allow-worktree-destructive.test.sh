@@ -21,6 +21,10 @@ HOOK=$(cd "$(dirname "$0")/.." && pwd)/auto-allow-worktree-destructive.sh
 # and the "reaches the main checkout" cases could not be expressed at all.
 # `pwd -P` because `git rev-parse --show-toplevel` reports a resolved path
 # and the hook compares the two as strings.
+# ~/.cache is absent on a fresh macOS install and on most CI runners, where
+# mktemp would fail with only its own stderr -- indistinguishable from a
+# real test failure.
+mkdir -p "${HOME}/.cache" || exit 1
 TMP=$(mktemp -d "${HOME}/.cache/bess-hook-test-XXXXXX") || exit 1
 TMP=$(cd "$TMP" && pwd -P)
 trap 'rm -rf "$TMP"' EXIT
@@ -164,6 +168,58 @@ run allow "sed -i '' s/a/b/ backend/app.py"
 run allow "mkdir -p docs/newdir"
 run allow "echo hi > out.txt"
 run allow "rm -rf /tmp/scratch"
+
+echo "== a command prefix must not shift the command word out of the guards =="
+# One env assignment used to defeat EVERY anchored guard at once, turning a
+# settings.json deny into a silent allow.
+run deny "PODMAN=1 podman machine rm"
+run deny "env podman system reset"
+run ask  "GIT_SSH_COMMAND=ssh git push origin main"
+run ask  "nohup gh pr merge 561"
+run ask  "time sudo rm -rf /"
+run ask  "PYTHONPATH=. sudo rm -rf /"
+# ...while an env prefix on ordinary work stays allowed.
+run allow "PYTHONPATH=. .venv/bin/pytest -q"
+run allow "TZ=UTC .venv/bin/pytest -q"
+
+echo "== git global options must not slip past the push guard =="
+run ask "git -C sub push origin main"
+run ask "git --git-dir=sub/.git push origin main"
+run ask "git -c push.default=matching push origin main"
+run allow "git -C sub push origin feat/x"
+
+echo "== the refspec scan is scoped to the push's own arguments =="
+# A `main` elsewhere in a compound must not turn a safe push into a prompt.
+run allow "git push -u origin feat/x && gh pr create --draft --base main --title x"
+run allow "git commit -m 'fix main crash' && git push origin feat/x"
+run ask   "git commit -m 'x' && git push origin main"
+
+echo "== state shared across worktrees: stash, config, remotes =="
+# ONE refs/stash for every worktree; this project leans on stash for
+# branch isolation, so the shared stack is a live hazard.
+run ask "git stash clear"
+run ask "git stash drop"
+run ask "git stash pop"
+run allow "git stash list"
+run allow "git stash push -u -m wip"
+run ask "git config --global user.email x@y.z"
+run ask "git remote set-url origin git@github.com:other/repo.git"
+run ask "git remote remove origin"
+run allow "git config --get user.email"
+
+echo "== reading outside the worktree is not a write =="
+# visualize-debug-log opens a user's bundle from ~/Downloads; the
+# containment guard is about writes, so reads must not prompt.
+run allow "cat $TMP/outside.json"
+run allow "head -50 $MAIN/CHANGELOG.md"
+run allow "ls ~/Downloads"
+run allow "grep -rn foo /usr/local/lib"
+run allow "git log --oneline -5"
+run allow "cat $MAIN/x.json | jq .a"
+# ...but anything that can write is still scrutinised.
+run ask "python3 -c \"import shutil; shutil.rmtree('$MAIN')\""
+run ask "sed -i '' s/a/b/ $MAIN/app.py"
+run ask "cat x.json > $MAIN/out.json"
 
 echo "== the main checkout keeps its own rules =="
 # In the main checkout the hook must stay silent so settings.json applies

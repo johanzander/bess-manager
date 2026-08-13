@@ -253,7 +253,11 @@ main checkout. A session that enters a worktree silently loses every rule and
 mode set there while the tracked `ask:` list keeps applying — that asymmetry is
 why an autonomous run in the main checkout starts prompting mid-worktree.
 `.claude/hooks/link-worktree-local-settings.sh` symlinks it into every linked
-worktree. The same doesn't-travel problem applies to `.venv` and
+worktree. Note what that does **not** buy you: a hook decision supersedes a
+settings rule, so a Bash `deny`/`ask` you add to local settings is overridden
+inside a worktree by the auto-allow. `defaultMode` and non-Bash rules survive
+the trip; a Bash restriction has to go in the hook's own escape lists to have
+any effect there. The same doesn't-travel problem applies to `.venv` and
 `frontend/node_modules` (see `scripts/worktree-setup.sh`, issue #556).
 
 ## Home Assistant Integration

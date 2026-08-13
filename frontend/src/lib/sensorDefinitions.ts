@@ -473,6 +473,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Battery Control',
         sensors: [
           { key: 'huawei_working_mode', label: 'Working Mode (select)', required: true },
+          { key: 'huawei_tou_periods', label: 'TOU Charging/Discharging Periods (readback)', required: false },
           { key: 'battery_charging_power_rate', label: 'Maximum Charging Power', required: false },
           { key: 'battery_discharging_power_rate', label: 'Maximum Discharging Power', required: false },
           { key: 'battery_charge_stop_soc', label: 'Charging Cutoff Capacity', required: true },

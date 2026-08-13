@@ -1,0 +1,82 @@
+{
+  "home": {
+    "default_hourly": 1.5,
+    "currency": "SEK",
+    "max_fuse_current": 25,
+    "voltage": 230,
+    "safety_margin": 1.0,
+    "phase_count": 3,
+    "consumption_strategy": "fixed",
+    "power_monitoring_enabled": false
+  },
+  "battery": {
+    "total_capacity": 10,
+    "min_soc": 10,
+    "max_soc": 100,
+    "max_charge_power_kw": 5,
+    "max_discharge_power_kw": 5,
+    "cycle_cost_per_kwh": 0.4,
+    "charging_power_rate": 40,
+    "efficiency_charge": 0.97,
+    "efficiency_discharge": 0.95,
+    "temperature_derating": {
+      "enabled": false,
+      "weather_entity": ""
+    },
+    "inverter_max_ac_power_kw": 0.0,
+    "inverter_ac_power_margin": 0.05
+  },
+  "electricity_price": {
+    "area": "SE3",
+    "markup_rate": 0.08,
+    "vat_multiplier": 1.25,
+    "additional_costs": 1.03,
+    "tax_reduction": 0.0,
+    "spot_multiplier": 1.0,
+    "export_spot_multiplier": 1.0,
+    "use_actual_price": false
+  },
+  "energy_provider": {
+    "provider": "nordpool_official",
+    "nordpool_official": {
+      "config_entry_id": "mock_config_entry"
+    }
+  },
+  "inverter": {
+    "platform": "huawei_solar_luna2000",
+    "control_mode": "tou",
+    "device_id": "dev-huawei-battery-001"
+  },
+  "growatt": {
+    "inverter_type": "",
+    "device_id": ""
+  },
+  "sensors": {
+    "platform": "huawei_solar_luna2000",
+    "huawei_solar_luna2000": {
+      "battery_soc": "sensor.batteries_state_of_capacity",
+      "battery_charge_power": "sensor.batteries_charge_discharge_power",
+      "huawei_working_mode": "select.batteries_working_mode",
+      "huawei_tou_periods": "sensor.batteries_tou_charging_and_discharging_periods",
+      "grid_charge": "switch.batteries_charge_from_grid",
+      "battery_charging_power_rate": "number.batteries_maximum_charging_power",
+      "battery_discharging_power_rate": "number.batteries_maximum_discharging_power",
+      "battery_charge_stop_soc": "number.batteries_charging_cutoff_capacity",
+      "battery_discharge_stop_soc": "number.batteries_grid_charge_cutoff_soc",
+      "local_load_power": "sensor.inverter_active_power",
+      "pv_power": "sensor.inverter_input_power",
+      "import_power": "sensor.power_meter_active_power",
+      "export_power": "sensor.power_meter_active_power",
+      "lifetime_solar_energy": "sensor.inverter_total_yield",
+      "lifetime_battery_charged": "sensor.batteries_total_charge",
+      "lifetime_battery_discharged": "sensor.batteries_total_discharge",
+      "lifetime_export_to_grid": "sensor.power_meter_exported",
+      "lifetime_import_from_grid": "sensor.power_meter_consumption",
+      "solar_forecast_today": "sensor.solcast_pv_forecast_forecast_today",
+      "solar_forecast_tomorrow": "sensor.solcast_pv_forecast_forecast_tomorrow"
+    }
+  },
+  "demo_mode": {
+    "enabled": false
+  }
+}

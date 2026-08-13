@@ -523,7 +523,7 @@ immediately and the context's shape is dictated by a real requirement.
 
 - `lifetime_system_production` (mapped from `total_yield`) — derived as `solar_production` when missing
 - `lifetime_self_consumption` — derived as `load - import` when missing
-- `lifetime_load_consumption` — derived as `solar + import - export` when missing
+- `lifetime_load_consumption` — derived as `solar + import + discharged - charged - export` when missing (issue #528)
 
 These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, `GROWATT_SPH_SUFFIX_MAP`, etc.), get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
 

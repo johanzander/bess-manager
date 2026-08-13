@@ -21,6 +21,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Reported lifetime house consumption is now correct on SolaX, Solis and Huawei**, which have no load register — it previously overstated load by the battery's lifetime net charge. ([#528](https://github.com/johanzander/bess-manager/issues/528))
 - **A missing consumption sensor no longer leaves the dashboard stuck on "Initializing"** — with the `sensor` strategy selected and no `48h_avg_grid_import` entity, the health check now reports a critical error, that strategy can't be selected without its sensor, and new installs default to `fixed`. ([#558](https://github.com/johanzander/bess-manager/issues/558))
 - **The setup wizard no longer completes with a configuration that cannot work** — it now blocks on inverter sensors whose Home Assistant entity is disabled (naming them so you can enable them) and on a price provider that isn't configured, instead of reporting "SYSTEM DEGRADED" afterwards. ([#549](https://github.com/johanzander/bess-manager/issues/549))
 - **Growatt MIN TOU segments are now written against the inverter's real state**, ending repeated "500 Server Error" write failures and leaving no unplanned segments running on the battery. ([#551](https://github.com/johanzander/bess-manager/issues/551))

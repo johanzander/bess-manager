@@ -170,10 +170,11 @@ that mode. Writes only occur on mode transitions, not every period.
 - Grid charge: `switch.turn_on` / `switch.turn_off` on charger_switch entity
 - Charge/discharge rate: `number.set_value` on EMS rate entities
 
-**Lifetime energy notes (GEN4):** GEN4 has no native load consumption
-register (`total_load` is GEN3, `home_consumption_energy` is SPF). BESS
-derives `lifetime_load_consumption` as `solar + grid_import − grid_export`.
-`total_yield` maps to `lifetime_system_production`.
+**Lifetime energy notes (GEN4):** GEN4 *does* have a native load consumption
+register — `total_yield` (register 3077, "Total Load Energy") maps to
+`lifetime_load_consumption`, and `total_power_generation` (register 3051) maps
+to `lifetime_system_production`. GEN4 therefore never takes the derived-load
+path. (`total_load` is GEN3, `home_consumption_energy` is SPF.)
 
 ### Export-limit curtailment (GEN2/GEN3/GEN4) — *(optional, opt-in)*
 
@@ -568,6 +569,25 @@ for design rationale and open items.
 
 ## Required Entities by Platform
 
+### Derived load consumption
+
+**SolaX native, Solis and Huawei LUNA2000** expose no lifetime load-consumption
+register. For those three, BESS derives it from the energy balance:
+
+```
+load = solar + grid_import + battery_discharged − battery_charged − grid_export
+```
+
+All three map both battery counters, so the derivation is always computable
+where it is used. If any of the five inputs is unmapped, BESS returns *no
+value* rather than a partial one — dropping the battery terms would report
+load plus net battery charge, a kWh-scale error on every period the battery is
+active (issue #528). The identity lives in one place,
+`core/bess/energy_balance.py`, and is shared by the lifetime-sensor path
+(`ha_api_controller`) and the per-period flow path (`energy_flow_calculator`).
+
+Every Growatt variant maps a native load register and never takes this path.
+
 ### Growatt MIN (Cloud) — `growatt_server` integration
 
 | BESS Sensor Key | Entity Type | Growatt Server Suffix | Purpose |
@@ -677,8 +697,8 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_solar_energy` | `total_solar_energy` | |
 | `lifetime_import_from_grid` | `total_grid_import` | |
 | `lifetime_export_to_grid` | `total_grid_export` | |
-| `lifetime_system_production` | `total_yield` | GEN4 register 3077 |
-| `lifetime_load_consumption` | — | **No native register.** BESS derives: solar + grid_import − grid_export |
+| `lifetime_system_production` | `total_power_generation` | GEN4 register 3051 |
+| `lifetime_load_consumption` | `total_yield` | GEN4 register 3077, "Total Load Energy" |
 
 **Export-limit curtailment (GEN4, optional):**
 
@@ -745,7 +765,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | `lifetime_import_from_grid` | `grid_import_total` | |
 | `lifetime_export_to_grid` | `grid_export_total` | |
 | `lifetime_system_production` | `total_yield` | Register 0x52, "Total Yield" (production) |
-| `lifetime_load_consumption` | — | **No native register.** Derived from other sensors |
+| `lifetime_load_consumption` | — | **No native register.** BESS derives it — see [Derived load consumption](#derived-load-consumption) |
 
 **VPP control (required for SolaX):**
 

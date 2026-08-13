@@ -61,20 +61,24 @@ echo ""
 echo "📋 Checking Python code quality..."
 echo "-----------------------------------"
 
+# Black and Ruff violations are ERRORs, not warnings: both are hard CI
+# failures, so a gate that reports them as warnings and still exits 0 sends
+# code to CI that is already known to fail.
+#
 # Check if Python files exist
 if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path "./frontend/node_modules/*" | grep -q .; then
     # Run Black formatting check
     if BLACK=$(py_tool black); then
         echo "🔸 Checking Black formatting..."
         if ! "$BLACK" --check . --exclude="/(build|\.venv|node_modules)/" >/dev/null 2>&1; then
-            echo "⚠️  Black formatting issues found. Run: $BLACK ."
-            WARNINGS=$((WARNINGS + 1))
+            echo "❌ Black formatting issues found. Run: $BLACK ."
+            ERRORS=$((ERRORS + 1))
         else
             echo "✅ Black formatting OK"
         fi
     else
         echo "❌ Black not found in .venv/bin or on PATH — cannot verify formatting."
-        echo "   Install with: .venv/bin/pip install -r requirements-dev.txt"
+        echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
         ERRORS=$((ERRORS + 1))
     fi
 
@@ -82,14 +86,14 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
     if RUFF=$(py_tool ruff); then
         echo "🔸 Checking Ruff linting..."
         if ! "$RUFF" check . --exclude="build,.venv,node_modules" >/dev/null 2>&1; then
-            echo "⚠️  Ruff linting issues found. Run: $RUFF check --fix ."
-            WARNINGS=$((WARNINGS + 1))
+            echo "❌ Ruff linting issues found. Run: $RUFF check --fix ."
+            ERRORS=$((ERRORS + 1))
         else
             echo "✅ Ruff linting OK"
         fi
     else
         echo "❌ Ruff not found in .venv/bin or on PATH — cannot verify linting."
-        echo "   Install with: .venv/bin/pip install -r requirements-dev.txt"
+        echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
         ERRORS=$((ERRORS + 1))
     fi
 else

@@ -3334,7 +3334,9 @@ class HomeAssistantAPIController:
         result: dict[str, str] = {}
 
         if entity_registry is not None:
-            solcast = self._map_registry_entities(
+            # Solcast forecast sensors are optional — a disabled one is
+            # simply left unconfigured, nothing to report to the wizard.
+            solcast, _solcast_disabled = self._map_registry_entities(
                 entity_registry, ["solcast_solar"], self.SOLCAST_SUFFIX_MAP
             )
             result.update(solcast)
@@ -3458,7 +3460,7 @@ class HomeAssistantAPIController:
 
     def _match_solis_dict_embedded_entities(
         self, entities: list[dict]
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Map Solis monitoring entities affected by the dict-embedded unique_id bug.
 
         Scoped to the ``solis_modbus`` platform only — never touches
@@ -3473,8 +3475,13 @@ class HomeAssistantAPIController:
         the key appearing as a fragment of some other field's value.
 
         Enabled entities are preferred over disabled ones, mirroring
-        ``_map_registry_entities``'s deferral behavior — a disabled match is
-        only used if no enabled entity matches the same key.
+        ``_map_registry_entities``: a disabled entity is never mapped (it
+        has no state, so reading it 404s), and keys whose only match is
+        disabled are returned separately for the caller to report (#549).
+
+        Returns:
+            Tuple of (mapped, disabled), each mapping
+            bess_sensor_key -> entity_id.  The two never share a key.
         """
         result: dict[str, str] = {}
         disabled_matches: dict[str, str] = {}
@@ -3499,18 +3506,22 @@ class HomeAssistantAPIController:
                 result[bess_key] = entity_id
                 break
 
-        for bess_key, entity_id in disabled_matches.items():
-            if bess_key not in result:
-                result[bess_key] = entity_id
-                logger.warning(
-                    "Solis dict-embedded sensor %s only matched a disabled "
-                    "entity %s",
-                    bess_key,
-                    entity_id,
-                )
+        disabled_only = {
+            bess_key: entity_id
+            for bess_key, entity_id in disabled_matches.items()
+            if bess_key not in result
+        }
+        for bess_key, entity_id in disabled_only.items():
+            logger.warning(
+                "Solis dict-embedded sensor %s not mapped: its only match "
+                "%s is disabled in Home Assistant — enable it, then re-run "
+                "discovery",
+                bess_key,
+                entity_id,
+            )
 
         logger.info("Mapped %d Solis dict-embedded monitoring entities", len(result))
-        return result
+        return result, disabled_only
 
     def _has_solax_entity_suffix(
         self,
@@ -3593,7 +3604,7 @@ class HomeAssistantAPIController:
 
     def discover_sensors_from_registry(
         self, entities: list[dict] | None = None
-    ) -> tuple[dict[str, dict[str, str]], str | None]:
+    ) -> tuple[dict[str, dict[str, str]], str | None, dict[str, dict[str, str]]]:
         """Discover sensor entity IDs for all detected inverter platforms.
 
         Uses the ``platform`` field to identify integration entities, then maps
@@ -3605,34 +3616,42 @@ class HomeAssistantAPIController:
             entities: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
-            Tuple of (platform_sensors, detected_platform) where
-            platform_sensors maps platform name to its sensor dict
-            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``)
-            and detected_platform is ``"growatt"``, ``"solax"``, or None.
-            Growatt takes priority when both are present.
+            Tuple of (platform_sensors, detected_platform, platform_disabled)
+            where platform_sensors maps platform name to its sensor dict
+            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``),
+            detected_platform is ``"growatt"``, ``"solax"``, or None (Growatt
+            takes priority when both are present), and platform_disabled maps
+            platform name to the sensor keys left unmapped because their only
+            registry match is disabled in Home Assistant (#549).
         """
         if entities is None:
             entities = self.fetch_entity_registry()
 
         inverter_detected = self.detect_inverter_integrations(entities)
         platform_sensors: dict[str, dict[str, str]] = {}
+        platform_disabled: dict[str, dict[str, str]] = {}
         detected_platform: str | None = None
 
         if inverter_detected.get("growatt"):
-            min_sensors = self._map_registry_entities(
+            min_sensors, min_disabled = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.GROWATT_MIN_SUFFIX_MAP,
             )
-            sph_sensors = self._map_registry_entities(
+            sph_sensors, sph_disabled = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.GROWATT_SPH_SUFFIX_MAP,
             )
-            if min_sensors:
+            # Include a platform whose every match is disabled: its sensor
+            # dict is empty, but dropping it would hide the "enable these
+            # entities" report that is the only way out of that state.
+            if min_sensors or min_disabled:
                 platform_sensors["growatt_server_min"] = min_sensors
-            if sph_sensors:
+                platform_disabled["growatt_server_min"] = min_disabled
+            if sph_sensors or sph_disabled:
                 platform_sensors["growatt_server_sph"] = sph_sensors
+                platform_disabled["growatt_server_sph"] = sph_disabled
             # Pick the platform that matched more sensors
             if len(min_sensors) >= len(sph_sensors):
                 detected_platform = "growatt_server_min"
@@ -3643,44 +3662,47 @@ class HomeAssistantAPIController:
             solax_platforms = ["solax_modbus", "solax"]
             if self._has_growatt_tou_entities(entities):
                 # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_GROWATT_MIN_SUFFIX_MAP
                 )
                 platform_sensors["solax_modbus_growatt_min"] = solax_sensors
+                platform_disabled["solax_modbus_growatt_min"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_min"
             elif self._has_growatt_gen3_entities(entities):
                 # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_GROWATT_SPH_SUFFIX_MAP
                 )
                 platform_sensors["solax_modbus_growatt_sph"] = solax_sensors
+                platform_disabled["solax_modbus_growatt_sph"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_sph"
             else:
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
                 )
                 platform_sensors["solax_modbus_native"] = solax_sensors
+                platform_disabled["solax_modbus_native"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_native"
 
         if inverter_detected.get("solis"):
             solis_platforms = ["solis_modbus"]
-            solis_sensors = self._map_registry_entities(
+            solis_sensors, solis_disabled = self._map_registry_entities(
                 entities, solis_platforms, self.SOLIS_SUFFIX_MAP
             )
             # Dict-embedded-unique_id monitoring entities need a separate,
             # Solis-scoped matcher (see SOLIS_DICT_EMBEDDED_SUFFIX_MAP) —
             # merge them in without touching _map_registry_entities.
+            embedded, embedded_disabled = self._match_solis_dict_embedded_entities(
+                entities
+            )
             solis_sensors.update(
-                {
-                    k: v
-                    for k, v in self._match_solis_dict_embedded_entities(
-                        entities
-                    ).items()
-                    if k not in solis_sensors
-                }
+                {k: v for k, v in embedded.items() if k not in solis_sensors}
+            )
+            solis_disabled.update(
+                {k: v for k, v in embedded_disabled.items() if k not in solis_disabled}
             )
             # Solis has no separate export_power entity — grid_power_net is
             # a single signed sensor (see SOLIS_SUFFIX_MAP comment). Point
@@ -3695,6 +3717,7 @@ class HomeAssistantAPIController:
             # Solis install must not be silently promoted to "detected"
             # like a fully-controllable one.
             platform_sensors["solis_modbus"] = solis_sensors
+            platform_disabled["solis_modbus"] = solis_disabled
             if self._has_solis_tou_v2_entities(entities):
                 if not detected_platform:
                     detected_platform = "solis_modbus"
@@ -3707,7 +3730,7 @@ class HomeAssistantAPIController:
                 )
 
         if inverter_detected.get("huawei"):
-            huawei_sensors = self._map_registry_entities(
+            huawei_sensors, huawei_disabled = self._map_registry_entities(
                 entities, ["huawei_solar"], self.HUAWEI_SUFFIX_MAP
             )
             # power_meter_active_power is a single signed register — Huawei
@@ -3721,17 +3744,28 @@ class HomeAssistantAPIController:
             ):
                 huawei_sensors["export_power"] = huawei_sensors["import_power"]
             platform_sensors["huawei_solar_luna2000"] = huawei_sensors
+            platform_disabled["huawei_solar_luna2000"] = huawei_disabled
             if not detected_platform:
                 detected_platform = "huawei_solar_luna2000"
 
-        return platform_sensors, detected_platform
+        # A key that some other path did map (a derived alias, the Solis
+        # signed-sensor aliasing above) is configured, not disabled — the
+        # two dicts must never overlap, or the wizard would block on a
+        # sensor it actually has.
+        for platform, disabled in platform_disabled.items():
+            mapped = platform_sensors.get(platform, {})
+            for bess_key in list(disabled):
+                if bess_key in mapped:
+                    del disabled[bess_key]
+
+        return platform_sensors, detected_platform, platform_disabled
 
     def _map_registry_entities(
         self,
         entities: list[dict],
         platforms: list[str],
         suffix_map: dict[str, str],
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Map entity registry entries to BESS sensor keys using unique_id.
 
         Filters entities belonging to the given platforms, then matches
@@ -3739,9 +3773,11 @@ class HomeAssistantAPIController:
         is assigned by the integration and never changes regardless of
         user entity renaming — this is the only reliable matching strategy.
 
-        Enabled entities are preferred over disabled ones.  If the only
-        match for a sensor key is a disabled entity, it is still returned
-        (the caller can read its state) but a warning is logged.
+        Enabled entities are preferred over disabled ones.  A disabled
+        entity is never mapped: it has no state in Home Assistant, so any
+        read of it 404s.  Keys whose only match is disabled are returned
+        separately so the caller can tell the user which entities to
+        enable, instead of persisting a mapping that cannot work (#549).
 
         Args:
             entities: Full entity registry list.
@@ -3749,7 +3785,8 @@ class HomeAssistantAPIController:
             suffix_map: Maps entity suffix -> BESS sensor key.
 
         Returns:
-            dict mapping bess_sensor_key -> entity_id.
+            Tuple of (mapped, disabled), each mapping
+            bess_sensor_key -> entity_id.  The two never share a key.
         """
         result: dict[str, str] = {}
         disabled_matches: dict[str, str] = {}
@@ -3786,20 +3823,26 @@ class HomeAssistantAPIController:
                             result[bess_key] = entity_id
                     break
 
-        # Fill gaps with disabled entities and warn
-        for bess_key, entity_id in disabled_matches.items():
-            if bess_key not in result:
-                result[bess_key] = entity_id
-                logger.warning(
-                    "Sensor '%s' mapped to disabled entity %s — "
-                    "enable it in Home Assistant for reliable operation",
-                    bess_key,
-                    entity_id,
-                )
+        # Keys whose only match is disabled stay unmapped — reading a
+        # disabled entity 404s, so mapping one just defers the failure to
+        # runtime.  Report them instead (#549).
+        disabled_only = {
+            bess_key: entity_id
+            for bess_key, entity_id in disabled_matches.items()
+            if bess_key not in result
+        }
+        for bess_key, entity_id in disabled_only.items():
+            logger.warning(
+                "Sensor '%s' not mapped: its only match %s is disabled in "
+                "Home Assistant — enable it, then re-run discovery",
+                bess_key,
+                entity_id,
+            )
 
         logger.info(
-            "Mapped %d entities from registry (platforms=%s)",
+            "Mapped %d entities from registry (platforms=%s, %d disabled)",
             len(result),
             platforms,
+            len(disabled_only),
         )
-        return result
+        return result, disabled_only

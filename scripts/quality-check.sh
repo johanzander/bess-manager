@@ -18,55 +18,83 @@ fi
 ERRORS=0
 WARNINGS=0
 
+# Resolve a Python tool: the project venv first, then PATH. Prints nothing and
+# returns 1 when the tool is available in neither.
+#
+# The venv lookup matters because the documented way to run anything here is
+# `.venv/bin/<tool>` (see CLAUDE.md) — a fresh git worktree has a .venv but
+# usually no activated shell, so a bare `command -v pytest` finds nothing.
+#
+# A missing tool is an ERROR, not a warning: this script is the pre-commit
+# gate, and skipping its three most important checks while printing
+# "Errors: 0" reports success for a run that verified nothing. That is exactly
+# how Black violations reached CI from a fresh worktree.
+py_tool() {
+    if [ -x ".venv/bin/$1" ]; then
+        echo ".venv/bin/$1"
+    elif command -v "$1" >/dev/null 2>&1; then
+        echo "$1"
+    else
+        return 1
+    fi
+}
+
 echo ""
 echo "📋 Running Python tests..."
 echo "---------------------------"
 
-if command -v pytest >/dev/null 2>&1; then
-    echo "🔸 Running fast tests (use 'pytest' directly to include slow algorithm tests)..."
-    if ! pytest -m "not slow" --tb=short -q; then
+if PYTEST=$(py_tool pytest); then
+    echo "🔸 Running fast tests (use '$PYTEST' directly to include slow algorithm tests)..."
+    if ! "$PYTEST" -m "not slow" --tb=short -q; then
         echo "❌ Tests failed"
         ERRORS=$((ERRORS + 1))
     else
         echo "✅ Fast tests passed"
     fi
 else
-    echo "⚠️  pytest not installed. Install with: pip install pytest"
-    WARNINGS=$((WARNINGS + 1))
+    echo "❌ pytest not found in .venv/bin or on PATH — cannot verify tests."
+    echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""
 echo "📋 Checking Python code quality..."
 echo "-----------------------------------"
 
+# Black and Ruff violations are ERRORs, not warnings: both are hard CI
+# failures, so a gate that reports them as warnings and still exits 0 sends
+# code to CI that is already known to fail.
+#
 # Check if Python files exist
 if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path "./frontend/node_modules/*" | grep -q .; then
     # Run Black formatting check
-    if command -v black >/dev/null 2>&1; then
+    if BLACK=$(py_tool black); then
         echo "🔸 Checking Black formatting..."
-        if ! black --check . --exclude="/(build|\.venv|node_modules)/" >/dev/null 2>&1; then
-            echo "⚠️  Black formatting issues found. Run: black ."
-            WARNINGS=$((WARNINGS + 1))
+        if ! "$BLACK" --check . --exclude="/(build|\.venv|node_modules)/" >/dev/null 2>&1; then
+            echo "❌ Black formatting issues found. Run: $BLACK ."
+            ERRORS=$((ERRORS + 1))
         else
             echo "✅ Black formatting OK"
         fi
     else
-        echo "⚠️  Black not installed. Install with: pip install black"
-        WARNINGS=$((WARNINGS + 1))
+        echo "❌ Black not found in .venv/bin or on PATH — cannot verify formatting."
+        echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
+        ERRORS=$((ERRORS + 1))
     fi
 
     # Run Ruff linting check
-    if command -v ruff >/dev/null 2>&1; then
+    if RUFF=$(py_tool ruff); then
         echo "🔸 Checking Ruff linting..."
-        if ! ruff check . --exclude="build,.venv,node_modules" >/dev/null 2>&1; then
-            echo "⚠️  Ruff linting issues found. Run: ruff check --fix ."
-            WARNINGS=$((WARNINGS + 1))
+        if ! "$RUFF" check . --exclude="build,.venv,node_modules" >/dev/null 2>&1; then
+            echo "❌ Ruff linting issues found. Run: $RUFF check --fix ."
+            ERRORS=$((ERRORS + 1))
         else
             echo "✅ Ruff linting OK"
         fi
     else
-        echo "⚠️  Ruff not installed. Install with: pip install ruff"
-        WARNINGS=$((WARNINGS + 1))
+        echo "❌ Ruff not found in .venv/bin or on PATH — cannot verify linting."
+        echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
+        ERRORS=$((ERRORS + 1))
     fi
 else
     echo "ℹ️  No Python files found to check"

@@ -12,17 +12,10 @@
       }
     },
     "sensor.solax_battery_power_charge": {
-      "state": "0",
+      "state": "-800",
       "attributes": {
         "unit_of_measurement": "W",
-        "friendly_name": "SolaX Battery Charge Power"
-      }
-    },
-    "sensor.solax_battery_power_discharge": {
-      "state": "800",
-      "attributes": {
-        "unit_of_measurement": "W",
-        "friendly_name": "SolaX Battery Discharge Power"
+        "friendly_name": "SolaX Battery Power Charge"
       }
     },
     "sensor.solax_measured_power": {
@@ -201,12 +194,6 @@
       "platform": "solax_modbus",
       "config_entry_id": "mock_solax_config_entry",
       "unique_id": "solax_battery_power_charge"
-    },
-    {
-      "entity_id": "sensor.solax_battery_power_discharge",
-      "platform": "solax_modbus",
-      "config_entry_id": "mock_solax_config_entry",
-      "unique_id": "solax_battery_power_discharge"
     },
     {
       "entity_id": "sensor.solax_measured_power",

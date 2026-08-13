@@ -79,6 +79,7 @@ class HomeAssistantAPIController:
         huawei_device_id: str | None = None,
         service_domain: str | None = None,
         grid_power_polarity: str | None = None,
+        battery_power_polarity: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -99,6 +100,11 @@ class HomeAssistantAPIController:
                 import_power/export_power share one signed entity
                 (SettingsStore.get_grid_power_polarity() — "import_positive"
                 or "" when the platform has separate entities)
+            battery_power_polarity: Sign convention for a platform whose
+                battery_charge_power/battery_discharge_power share one signed
+                entity (SettingsStore.get_battery_power_polarity() —
+                "charge_positive" or "" when the platform has separate
+                entities)
 
         """
         self.base_url = ha_url
@@ -128,6 +134,11 @@ class HomeAssistantAPIController:
         # Sign convention for a platform whose import_power/export_power
         # share one signed entity (see get_import_power/get_export_power).
         self.grid_power_polarity = grid_power_polarity or ""
+
+        # Sign convention for a platform whose battery charge/discharge power
+        # share one signed entity (see get_battery_charge_power/
+        # get_battery_discharge_power).
+        self.battery_power_polarity = battery_power_polarity or ""
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -379,7 +390,7 @@ class HomeAssistantAPIController:
     # ─────────────────────────────  ─────────────────────────────────  ─────────────────────────────────
     # battery_soc                    state_of_charge_soc                solax_battery_capacity / solax_battery_soc
     # battery_charge_power           battery_1_charging_w               solax_battery_power_charge / solax_battery_charge_power
-    # battery_discharge_power        battery_1_discharging_w            solax_battery_power_discharge / solax_battery_discharge_power
+    # battery_discharge_power        battery_1_discharging_w            solax_battery_discharge_power (Growatt only; native SolaX has no discharge entity — see #542)
     # import_power                   import_power                       solax_measured_power / solax_total_forward_power / solax_ac_power_to_user
     # export_power                   export_power                       solax_grid_export / solax_total_reverse_power / solax_ac_power_to_grid
     # local_load_power               local_load_power                   solax_house_load / solax_total_load_power
@@ -701,8 +712,12 @@ class HomeAssistantAPIController:
     SOLAX_NATIVE_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # Real-time power
         "battery_capacity": "battery_soc",
+        # One signed register (REGISTER_S16, 0x16), positive = charging. The
+        # integration publishes no discharge counterpart, so
+        # discover_sensors_from_registry points battery_discharge_power at
+        # this same entity and HAApiController splits it by sign — see
+        # PLATFORM_BATTERY_POWER_POLARITY["solax_modbus_native"] (#542).
         "battery_power_charge": "battery_charge_power",
-        "battery_power_discharge": "battery_discharge_power",
         "measured_power": "import_power",
         "grid_import": "import_power",  # alternative suffix
         "grid_export": "export_power",
@@ -1430,12 +1445,39 @@ class HomeAssistantAPIController:
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
         self._set_number_like(entity_id, rate, "Set discharging power rate")
 
+    def _is_shared_signed_battery_power(self) -> bool:
+        """True when battery charge/discharge power resolve to one signed entity.
+
+        Native SolaX and Huawei LUNA2000 expose battery power as a single
+        signed register instead of separate charge/discharge entities.
+        get_battery_charge_power/get_battery_discharge_power detect this case
+        and split the one raw reading by sign instead of reading the entity
+        twice unmodified.
+        """
+        charge_entity = self.sensors.get("battery_charge_power")
+        discharge_entity = self.sensors.get("battery_discharge_power")
+        return bool(
+            self.battery_power_polarity
+            and charge_entity
+            and charge_entity == discharge_entity
+        )
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return max(0.0, raw)  # charge_positive
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return max(0.0, -raw)  # charge_positive
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -3609,6 +3651,18 @@ class HomeAssistantAPIController:
                 solax_sensors = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
                 )
+                # battery_power_charge is a single signed register — native
+                # SolaX has no separate discharge entity (#542, same shape as
+                # the grid case below). Point battery_discharge_power at the
+                # same entity so HAApiController's signed split
+                # (battery_power_polarity) can derive both readings from it.
+                if (
+                    "battery_charge_power" in solax_sensors
+                    and "battery_discharge_power" not in solax_sensors
+                ):
+                    solax_sensors["battery_discharge_power"] = solax_sensors[
+                        "battery_charge_power"
+                    ]
                 platform_sensors["solax_modbus_native"] = solax_sensors
                 if not detected_platform:
                     detected_platform = "solax_modbus_native"
@@ -3668,6 +3722,17 @@ class HomeAssistantAPIController:
                 and "export_power" not in huawei_sensors
             ):
                 huawei_sensors["export_power"] = huawei_sensors["import_power"]
+            # storage_charge_discharge_power is likewise a single signed
+            # register (reg 37765, positive = charging) with no discharge
+            # counterpart — same pairing, one layer down (#542). See
+            # PLATFORM_BATTERY_POWER_POLARITY["huawei_solar_luna2000"].
+            if (
+                "battery_charge_power" in huawei_sensors
+                and "battery_discharge_power" not in huawei_sensors
+            ):
+                huawei_sensors["battery_discharge_power"] = huawei_sensors[
+                    "battery_charge_power"
+                ]
             platform_sensors["huawei_solar_luna2000"] = huawei_sensors
             if not detected_platform:
                 detected_platform = "huawei_solar_luna2000"

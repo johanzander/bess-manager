@@ -392,6 +392,113 @@ class TestSignedGridPowerSplit:
         assert ctrl.get_export_power() == 42.0
 
 
+# ── Signed battery power split (issue #542) ───────────────────────────────────
+#
+# Native SolaX (solax_modbus) and Huawei LUNA2000 (huawei_solar) expose battery
+# power as ONE signed register, positive = charging:
+#   SolaX:  battery_power_charge            — REGISTER_S16, reg 0x16
+#   Huawei: storage_charge_discharge_power  — I32Register, reg 37765
+# Neither integration has a discharge counterpart, so battery_charge_power and
+# battery_discharge_power both resolve to that single entity and the raw
+# reading must be split by sign — same mechanism as the grid split above.
+
+
+@pytest.fixture
+def signed_battery_ctrl():
+    """Controller with battery charge/discharge sharing one signed entity."""
+    c = HomeAssistantAPIController(
+        ha_url="http://ha.local:8123",
+        token="test-token",
+        settings_store=_settings_store(
+            {
+                "battery_charge_power": "sensor.solax_battery_power_charge",
+                "battery_discharge_power": "sensor.solax_battery_power_charge",
+            }
+        ),
+        battery_power_polarity="charge_positive",
+    )
+    c.max_attempts = 1
+    c.retry_base_delay = 0
+    return c
+
+
+class TestSignedBatteryPowerSplit:
+    def test_positive_raw_is_charge_only(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2400"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() == 2400.0
+        assert signed_battery_ctrl.get_battery_discharge_power() == 0.0
+
+    def test_negative_raw_is_discharge_only(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-2400"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() == 0.0
+        assert signed_battery_ctrl.get_battery_discharge_power() == 2400.0
+
+    def test_idle_raw_is_neither(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "0"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() == 0.0
+        assert signed_battery_ctrl.get_battery_discharge_power() == 0.0
+
+    def test_unavailable_raw_returns_none(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "unavailable"})
+        )
+        assert signed_battery_ctrl.get_battery_charge_power() is None
+        assert signed_battery_ctrl.get_battery_discharge_power() is None
+
+    def test_net_battery_power_follows_the_split(self, signed_battery_ctrl):
+        """get_net_battery_power derives from the two getters, so a discharging
+        signed sensor must yield a negative net — not charge-minus-charge = 0."""
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-2400"})
+        )
+        assert signed_battery_ctrl.get_net_battery_power() == -2400.0
+
+    def test_separate_entities_unaffected_by_polarity(self, ctrl):
+        """Platforms with two real entities (Growatt, Solis) must keep reading
+        them independently even if battery_power_polarity is somehow set."""
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "battery_charge_power": "sensor.charge",
+            "battery_discharge_power": "sensor.discharge",
+        }
+        ctrl.battery_power_polarity = "charge_positive"
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "42"})
+        )
+        assert ctrl.get_battery_charge_power() == 42.0
+        assert ctrl.get_battery_discharge_power() == 42.0
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected"),
+    [
+        ("solax_modbus_native", "charge_positive"),
+        ("huawei_solar_luna2000", "charge_positive"),
+        ("growatt_server_min", ""),
+        ("growatt_server_sph", ""),
+        ("solax_modbus_growatt_min", ""),
+        ("solax_modbus_growatt_sph", ""),
+        ("solis_modbus", ""),
+        ("", ""),
+    ],
+)
+def test_battery_power_polarity_per_platform(platform: str, expected: str) -> None:
+    """Only the two one-signed-register platforms carry a polarity (#542).
+
+    Growatt (both cloud and via solax_modbus) and Solis publish two real
+    entities, so they must resolve to "" and keep reading them independently.
+    """
+    store = SettingsStore()
+    store.data["inverter"] = {"platform": platform}
+    assert store.get_battery_power_polarity() == expected
+
+
 # ── set_* / grid_charge ─────────────────────────────────────────────────────
 
 

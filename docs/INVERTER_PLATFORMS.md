@@ -687,8 +687,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `battery_capacity` | Current battery level |
-| `battery_charge_power` | sensor | `battery_power_charge` | Charge power (W) |
-| `battery_discharge_power` | sensor | `battery_power_discharge` | Discharge power (W) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `battery_power_charge` (signed) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `import_power` | sensor | `measured_power` | Grid import (W) |
 | `export_power` | sensor | `grid_export` | Grid export (W) |
 | `pv_power` | sensor | `pv_power_1` | Solar production (W) |
@@ -761,7 +760,7 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
-| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `storage_charge_discharge_power` (signed, reg 37765) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
 | `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
 | `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |

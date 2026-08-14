@@ -8,8 +8,14 @@
 # Worktree Conventions) is disposable by construction: blow it away, make
 # another. Prompting there protects nothing and stalls otherwise autonomous
 # work, so this hook auto-allows Bash commands whose cwd is a linked
-# worktree. In the main checkout it stays silent and every ask/deny rule in
-# settings.json applies unchanged.
+# worktree.
+#
+# In the main checkout it stays silent -- every ask/deny rule in settings.json
+# applies unchanged -- with ONE exception: `git stash` is denied there too,
+# because refs/stash is shared repo-wide rather than worktree-scoped, so the
+# main checkout is one of the checkouts racing for it. That check sits above
+# the worktree gate for exactly that reason. In a repository that is not this
+# one, the hook is silent throughout, stash included.
 #
 # What it still refuses is a short, closed list of effects no worktree can
 # contain, and which no amount of `git checkout` gets back:
@@ -56,7 +62,12 @@ fi
 # running sudo; without the prefix step, one env assignment
 # (`PODMAN=1 podman machine rm`) shifted the command word out of every
 # guard at once and turned a deny into a silent allow.
-CMD_PREFIX='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+|(nohup|time|command|exec|env)[[:space:]]+)*'
+# Shell keywords are in the prefix list beside the wrappers because a
+# separator followed by a keyword is still a command-word position:
+# `for d in */; do git stash; done` and `if true; then git stash; fi` put
+# `do`/`then` exactly where `nohup` would sit, and a loop over worktrees is
+# the shape the stash guard exists for.
+CMD_PREFIX='([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+|(nohup|time|command|exec|env|eval|do|then|else|elif|if|while|until)[[:space:]]+)*'
 CMD_START="(^|[;&|(]|&&|\\|\\||\\n)[[:space:]]*${CMD_PREFIX}"
 
 # The mirror of CMD_START at the far end of a match. Every guard needs one --
@@ -109,9 +120,18 @@ is_hard_denied() {
 #     git reset --soft HEAD~1                        # pick it back up
 #
 # `git stash list` and `git stash show` only read, so they stay allowed.
+#
+# KNOWN LIMIT: a stash inside a quoted string -- `bash -c "git stash pop"`,
+# `sh -c '...'` -- is not matched, because the anchor would have to treat a
+# quote as a command separator. It cannot: `grep -rn 'git stash' docs/` is a
+# pinned allow, and quote-permissive anchoring turns that into a deny. This
+# guard classifies by command shape (see the header); an explicit shell
+# wrapper defeats shape matching by construction, and chasing it is the
+# regex-parses-shell mistake the header records.
 uses_shared_stash() {
   # Bare `git stash` (implicit push), and every mutating subcommand.
-  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash([[:space:]]+(push|save|pop|apply|drop|clear|branch|create|store)${CMD_END}|[[:space:]]*[;&|)<>]|[[:space:]]*$)" && return 0
+  # `import` is git >= 2.50 and rewrites refs/stash wholesale.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash([[:space:]]+(push|save|pop|apply|drop|clear|branch|create|store|import)${CMD_END}|[[:space:]]*[;&|)<>]|[[:space:]]*$)" && return 0
   # The bare-`git stash` branch spells its terminator out instead of reusing
   # CMD_END: CMD_END accepts a SPACE, which here would swallow the space
   # before a subcommand and deny the read-only `git stash list`. Only a
@@ -253,13 +273,6 @@ decide() {
 # pop` is the same bypass aimed at the one guard that is a hard deny.
 normalised=$(normalise_git "$command")
 
-# Checked before the worktree gate on purpose: refs/stash is shared by the
-# main checkout and every worktree alike, so this must hold everywhere.
-if uses_shared_stash "$normalised"; then
-  decide deny "Denied: there is ONE refs/stash for this whole repository, shared by the main checkout and all ~20 worktrees, and the stack has no owner -- another agent's \`git stash pop\` will take your entry with no way to tell it was not theirs. Use a temporary WIP commit instead, which stays on this branch and is recoverable by SHA: \`git add -A && git commit -m \"wip: ...\"\`, then \`git reset --soft HEAD~1\` to resume. (\`git stash list\`/\`show\` are read-only and still allowed.)"
-  exit 0
-fi
-
 session_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -z "$session_root" ]; then
   echo '{"continue": true}'
@@ -274,9 +287,35 @@ fi
 worktree_list=$(git worktree list --porcelain)
 main_root=$(printf '%s\n' "$worktree_list" | awk '/^worktree /{sub(/^worktree /, ""); print; exit}')
 
+# Which repository is the command aimed at? Everything this hook knows about
+# -- ~20 worktrees sharing one refs/stash, a podman VM, shared refs -- is true
+# of THIS repository. A command run from a clone somewhere else is governed by
+# nothing here, so the hook must be silent there, stash included: a hard deny
+# with no override in an unrelated repo is a wall, not a guard.
+#
+# Identified the way check-worktree-path.sh does it -- two `git` results
+# compared as strings, parsing nothing. The hook file is tracked, so a copy of
+# it exists in every worktree; resolving from its own directory yields this
+# repository's main root either way.
+hook_main_root=$(git -C "$(dirname -- "$0")" worktree list --porcelain 2>/dev/null |
+  awk '/^worktree /{sub(/^worktree /, ""); print; exit}')
+
+if [ -z "$main_root" ] || [ -z "$hook_main_root" ] || [ "$main_root" != "$hook_main_root" ]; then
+  echo '{"continue": true}'
+  exit 0
+fi
+
+# Above the worktree gate on purpose, and below the repo check for the same
+# reason: refs/stash is shared by this repository's main checkout and every
+# worktree alike, so it must hold in all of them -- and only in them.
+if uses_shared_stash "$normalised"; then
+  decide deny "Denied: there is ONE refs/stash for this whole repository, shared by the main checkout and all ~20 worktrees, and the stack has no owner -- another agent's \`git stash pop\` will take your entry with no way to tell it was not theirs. To set work aside on this branch, use a WIP commit, recoverable by SHA: \`git add -A && git commit -m \"wip: ...\"\`, then \`git reset --soft HEAD~1\` to resume. To move one file's changes into a worktree, pipe a patch across: \`git diff -- <file> | git -C <worktree> apply\` (see docs/agents/rules.md). (\`git stash list\`/\`show\` are read-only and still allowed.)"
+  exit 0
+fi
+
 # Everything below applies ONLY inside a linked worktree. In the main
 # checkout this hook stays silent so settings.json governs it entirely.
-if [ -z "$main_root" ] || [ "$session_root" = "$main_root" ]; then
+if [ "$session_root" = "$main_root" ]; then
   echo '{"continue": true}'
   exit 0
 fi

@@ -32,6 +32,13 @@ trap 'rm -rf "$TMP"' EXIT
 MAIN="$TMP/main"
 WT="$TMP/wt"
 git init -q "$MAIN"
+# The hook identifies its own repository from its own location, and is silent
+# in any other -- so the fixture has to OWN the copy under test, or every case
+# below would fall through as "not this repo". This mirrors production, where
+# the hook file is tracked and a copy sits in every worktree.
+mkdir -p "$MAIN/.claude/hooks"
+cp "$HOOK" "$MAIN/.claude/hooks/"
+HOOK="$MAIN/.claude/hooks/$(basename "$HOOK")"
 git -C "$MAIN" -c user.email=t@t -c user.name=t commit -q --allow-empty -m init
 git -C "$MAIN" worktree add -q -b testwt "$WT"
 # A second linked worktree, to prove sibling worktrees count as contained
@@ -165,6 +172,15 @@ run deny "git -C sub stash pop"
 run deny "git -C sub stash"
 run deny "git -c core.x=1 stash drop"
 run deny "git --no-pager stash apply"
+# `import` (git >= 2.50) rewrites refs/stash wholesale.
+run deny "git stash import https://example.com/bundle"
+# A shell keyword sits exactly where `nohup` sits, and a loop over worktrees
+# is the shape this guard exists for. Without keywords in the prefix these
+# produced no decision at all -- which inside a worktree means allow.
+run deny "for d in */; do git stash; done"
+run deny "if true; then git stash; fi"
+run deny "while read -r d; do git stash pop; done"
+run deny "eval git stash"
 # Reads are fine, and so is the WIP-commit alternative it points people to.
 run allow "git stash list"
 run allow "git stash show -p"
@@ -280,6 +296,25 @@ run ask "git status;git -C sub gc"
 run allow "git -C sub status --short"
 run allow "git -C sub stash list"
 
+echo "== another repository is governed by none of this =="
+# Everything the hook knows -- one shared refs/stash, ~20 worktrees, a shared
+# podman VM -- is true of THIS repository. In an unrelated clone it must be
+# silent, stash included: a hard deny with no override there is a wall, not a
+# guard. (Verified in review by cloning a third-party repo and running
+# `git stash` in it.)
+FOREIGN="$TMP/foreign"
+git init -q "$FOREIGN"
+for foreign_cmd in "git stash" "git stash pop" "rm -rf .venv" "podman machine rm"; do
+  foreign_decision=$(printf '%s' "$foreign_cmd" | jq -Rn '{tool_input: {command: input}}' \
+    | (cd "$FOREIGN" && bash "$HOOK") | jq -r 'if .continue then "fallthrough" else "DECIDED" end')
+  if [ "$foreign_decision" = "fallthrough" ]; then
+    printf 'ok    %-5s %s\n' "none" "$foreign_cmd (from an unrelated repo)"
+  else
+    printf 'FAIL  got=%-12s want=%-6s %s\n' "$foreign_decision" "none" "$foreign_cmd (from an unrelated repo)"
+    failures=$((failures + 1))
+  fi
+done
+
 echo "== the main checkout keeps its own rules =="
 # In the main checkout the hook must stay silent so settings.json applies
 # unchanged -- an allow there would be the worst possible failure.
@@ -289,6 +324,18 @@ if [ "$main_decision" = "fallthrough" ]; then
   printf 'ok    %-5s %s\n' "none" "rm -rf .venv (from the main checkout)"
 else
   printf 'FAIL  got=%-12s want=%-6s %s\n' "$main_decision" "none" "rm -rf .venv (from the main checkout)"
+  failures=$((failures + 1))
+fi
+
+# ...with exactly one exception, and it is the reason the stash check sits
+# above the worktree gate: refs/stash is shared repo-wide, so the main
+# checkout is one of the checkouts racing for it.
+main_stash=$(printf '%s' "git stash pop" | jq -Rn '{tool_input: {command: input}}' \
+  | (cd "$MAIN" && bash "$HOOK") | jq -r '.hookSpecificOutput.permissionDecision // "fallthrough"')
+if [ "$main_stash" = "deny" ]; then
+  printf 'ok    %-5s %s\n' "deny" "git stash pop (from the main checkout)"
+else
+  printf 'FAIL  got=%-12s want=%-6s %s\n' "$main_stash" "deny" "git stash pop (from the main checkout)"
   failures=$((failures + 1))
 fi
 

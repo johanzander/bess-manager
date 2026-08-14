@@ -9,6 +9,7 @@ import logging
 from datetime import date, timedelta
 
 from . import time_utils
+from .exceptions import PriceDataUnavailableError, SystemConfigurationError
 from .price_manager import PriceSource
 
 logger = logging.getLogger(__name__)
@@ -51,12 +52,22 @@ class OfficialNordpoolSource(PriceSource):
             List of hourly prices per kWh (VAT-exclusive)
 
         Raises:
-            ValueError: If prices cannot be fetched
+            ValueError: If target_date is neither today nor tomorrow. This is a
+                caller error, raised before the fetch is attempted, and is
+                deliberately left untyped — ``price_manager.get_price_data``
+                wraps it as PriceDataUnavailableError, which mislabels a
+                programming error as an availability problem, so callers should
+                not rely on that path.
+            SystemConfigurationError: If the integration is not configured
+            PriceDataUnavailableError: If prices cannot be fetched right now
         """
         if not self.config_entry_id:
-            raise ValueError(
-                "Nordpool integration not configured: config_entry_id is missing. "
-                "Run the setup wizard to configure the Nordpool integration."
+            raise SystemConfigurationError(
+                component="Nordpool",
+                message=(
+                    "Nordpool integration not configured: config_entry_id is missing. "
+                    "Run the setup wizard to configure the Nordpool integration."
+                ),
             )
 
         logger.info(
@@ -96,8 +107,9 @@ class OfficialNordpoolSource(PriceSource):
             )
 
             if not response or "service_response" not in response:
-                raise ValueError(
-                    f"No response from nordpool.get_prices_for_date for {target_date}"
+                raise PriceDataUnavailableError(
+                    date=target_date,
+                    message=f"No response from nordpool.get_prices_for_date for {target_date}",
                 )
 
             service_response = response["service_response"]
@@ -121,8 +133,12 @@ class OfficialNordpoolSource(PriceSource):
                         break
 
             if not price_entries:
-                raise ValueError(
-                    f"No price entries returned for {target_date}. Available keys: {list(service_response.keys())}"
+                raise PriceDataUnavailableError(
+                    date=target_date,
+                    message=(
+                        f"No price entries returned for {target_date}. "
+                        f"Available keys: {list(service_response.keys())}"
+                    ),
                 )
 
             # Convert price entries to hourly list
@@ -141,11 +157,18 @@ class OfficialNordpoolSource(PriceSource):
 
             return prices
 
+        except (PriceDataUnavailableError, SystemConfigurationError):
+            raise
         except Exception as e:
-            if isinstance(e, ValueError):
-                raise
-            raise ValueError(
-                f"Failed to get prices from official integration for {target_date}: {e}"
+            # Service-call and transport failures are classified as availability
+            # problems: they are usually transient and the next fetch succeeds
+            # (issue #583). Note this cannot be a certain classification — HA
+            # answers a stale config_entry with the same 500 and the same body
+            # as an upstream outage, so perform_health_check words its message
+            # to cover both.
+            raise PriceDataUnavailableError(
+                date=target_date,
+                message=f"Failed to get prices from official integration for {target_date}: {e}",
             ) from e
 
     def perform_health_check(self):
@@ -197,6 +220,27 @@ class OfficialNordpoolSource(PriceSource):
             service_check.update(
                 {"status": "OK", "value": f"{len(prices)} hourly prices available"}
             )
+        except PriceDataUnavailableError as e:
+            # Still ERROR — without prices the system genuinely cannot optimize.
+            # What changes is the explanation. The failure is usually transient
+            # (#583), but Home Assistant answers a stale config_entry with the
+            # same 500 and the same body as an upstream outage — verified
+            # against a live HA — so this text must not assert either cause.
+            # It states what is known, and names the thing to check if the
+            # failure persists.
+            service_check.update(
+                {
+                    "status": "ERROR",
+                    "error": (
+                        f"Nordpool price fetch failed, will retry on the next "
+                        f"fetch. If this persists, check that the Nordpool "
+                        f"integration is still loaded in Home Assistant and "
+                        f"re-run the setup wizard if it was re-added: {e!s}"
+                    ),
+                    "value": "Unavailable",
+                }
+            )
+            health_check["status"] = "ERROR"
         except Exception as e:
             service_check.update(
                 {

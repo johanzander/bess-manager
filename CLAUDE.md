@@ -311,10 +311,20 @@ after each edit rather than trusting the change landed.
 Both break `implement-issue`, and neither has the cause its old remedy text
 guessed. Do not re-diagnose from scratch:
 
-- **`gh` — the macOS keychain, not the network.** `gh auth status` returns *"The
-  token in keyring is invalid"*: gh reads its token from the keychain and the
-  sandbox blocks that. `enableWeakerNetworkIsolation` addresses TLS/`trustd` and
-  would not have helped. Blocks `gh pr create`, the closing step of Step 9.
+- **`gh` fails twice over.** First the macOS keychain: `gh auth status` returns
+  *"The token in keyring is invalid"* because gh reads its token from the
+  keychain and the sandbox blocks that. Then, once a call reaches the network,
+  `gh pr edit` returns *"tls: failed to verify certificate: x509: OSStatus
+  -26276"* — gh is a Go binary and cannot reach `trustd` to verify TLS. Only
+  the second is what `enableWeakerNetworkIsolation` is documented for, so that
+  knob alone would not fix `gh`. Blocks `gh pr create`, the closing step of
+  Step 9. The same keychain block makes `git push` emit `failed to store:
+  100001` — the credential helper cannot cache the credential, though the push
+  itself still lands.
+- **The per-call escape hatch works**: the Bash tool's
+  `dangerouslyDisableSandbox: true` runs one command unsandboxed, and it was
+  used to reach GitHub while the sandbox was live. That is a workaround for a
+  one-off, not a fix — an autonomous Step 9 cannot rely on it.
 - **`podman` — a local TCP port, not a unix socket.** `podman info` returns
   *"dial tcp 127.0.0.1:64752: connect: operation not permitted"*, so
   `filesystem.allowRead` and `network.allowUnixSockets` are both wrong knobs.

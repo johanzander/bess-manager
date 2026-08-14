@@ -21,8 +21,8 @@ docs/agents/testing.md's plan-faithfulness requirement for control/rate-
 mapping changes.
 """
 
-from core.bess.battery_system_manager import intra_period_discharge_gate
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.execution_model import intra_period_discharge_gate
 from core.bess.simulation.inverter_simulator import (
     ControlCommand,
     derive_control_command,

@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **SolaX, Solis, Huawei and Growatt SPH no longer get a plan their hardware can't deliver** — the optimizer's exact-load-cover action assumes a discharge rate the firmware treats as a ceiling, which only Growatt MIN-style TOU control does; it is now offered only on platforms that actually load-follow. ([#580](https://github.com/johanzander/bess-manager/issues/580))
 - **Reported lifetime house consumption is now correct on SolaX, Solis and Huawei**, which have no load register — it previously overstated load by the battery's lifetime net charge. ([#528](https://github.com/johanzander/bess-manager/issues/528))
 - **A missing consumption sensor no longer leaves the dashboard stuck on "Initializing"** — with the `sensor` strategy selected and no `48h_avg_grid_import` entity, the health check now reports a critical error, that strategy can't be selected without its sensor, and new installs default to `fixed`. ([#558](https://github.com/johanzander/bess-manager/issues/558))
 - **The setup wizard no longer completes with a configuration that cannot work** — it now blocks on inverter sensors whose Home Assistant entity is disabled (naming them so you can enable them) and on a price provider that isn't configured, instead of reporting "SYSTEM DEGRADED" afterwards. ([#549](https://github.com/johanzander/bess-manager/issues/549))

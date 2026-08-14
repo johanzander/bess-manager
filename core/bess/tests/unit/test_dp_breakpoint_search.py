@@ -38,6 +38,7 @@ from core.bess.dp_battery_algorithm import (
     _run_dynamic_programming,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
+from core.bess.execution_model import PlatformCapabilities
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
@@ -507,7 +508,9 @@ def test_discharge_candidates_use_injected_resolution():
         dt=1.0,
         home_consumption=1.234,
         solar_production=0.0,
-        discharge_resolution_kw=settings.max_discharge_power_kw / 200,
+        capabilities=PlatformCapabilities(
+            discharge_resolution_kw=settings.max_discharge_power_kw / 200
+        ),
     )
     assert len(finer_candidates) > len(default_candidates)
     # every finer-grid candidate must still be an exact multiple of the

@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
+from .execution_model import INTENT_TO_MODE
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -57,14 +58,10 @@ class InverterController(ABC):
     }
 
     # Map strategic intents to battery modes (shared across Growatt MIN and SPH).
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "load_first",
-        "LOAD_SUPPORT": "load_first",
-        "BATTERY_EXPORT": "grid_first",
-        "SOLAR_EXPORT": "load_first",
-        "IDLE": "load_first",
-    }
+    # Defined in `execution_model` -- the same vocabulary the optimizer scores
+    # commands against (Phase 4a, D1) -- and referenced here so the controllers
+    # and the execution model cannot drift apart.
+    INTENT_TO_MODE: ClassVar[dict[str, str]] = INTENT_TO_MODE
 
     # Human-readable descriptions of strategic intents.
     INTENT_DESCRIPTIONS: ClassVar[dict[str, str]] = {

@@ -291,7 +291,7 @@ a public function, and touches the simulator's import surface.**
 
 | PR | Scope | Depends on | Status |
 |---|---|---|---|
-| **4a** | `PlatformCapabilities` + the `execution_model` leaf: per-platform lattice, modes, minimum gear, load-following semantics; gate relocated. No candidate changes. | D1, D2 | **startable** |
+| **4a** | `PlatformCapabilities` + the `execution_model` leaf: per-platform lattice, modes, minimum gear, load-following semantics; gate relocated. No candidate changes. | D1, D2 | **BUILT** — see "4a as built" below |
 | **4b** | Discharge candidates become executable commands. **Closes #352 Shape B via the exact-cover candidate** (§2), gated on 4a's load-following capability; D3 optional cleanup afterwards. Folds #511/#517 tests in as regression cover. | 4a, the beta | blocked on 4a + beta |
 | **4c** | Charge candidates become executable commands — the 6 `rate_throughput` sites collapse to the configured rate. This is where the measured R≠P divergence closes. | 4a, the beta | blocked on 4a |
 
@@ -365,6 +365,58 @@ a ceiling here", so an honest tri-state is better than overloading the boolean.
 Keep 4a behaviour-neutral: the goldens stay bit-identical, as in Phases 1–3.
 The plan-moving work is 4b's, and keeping the two apart is what makes 4b's
 measured delta readable.
+
+## 4c. 4a as built
+
+**What shipped.** `core/bess/execution_model.py` (D1's leaf: imports only
+`settings` and `dp_constants`, pinned by a test that parses its import
+graph) holds:
+
+- `PlatformCapabilities` (D2) — `discharge_resolution_kw`,
+  `discharge_rate_semantics`, `control_model`, `intent_to_mode`, plus
+  `discharge_rate_step_kw` / `min_discharge_gear_index` /
+  `min_discharge_gear_kw`. The min-gear derivation
+  (`floor(POWER_CLASSIFICATION_THRESHOLD_KW / step) + 1`, the #282 rule) was
+  restated in three places before; it now has one home.
+- `intra_period_discharge_gate`, relocated out of `battery_system_manager`.
+  Both the orchestrator and `simulation/inverter_simulator` now import it
+  from here, so the simulator no longer imports the orchestrator at all.
+- `INTENT_TO_MODE`, with `InverterController.INTENT_TO_MODE` referencing
+  the same object rather than a second copy.
+
+**The tri-state, as the design asked.** `discharge_rate_semantics` is
+`ceiling` / `target` / `absent`, derived in `from_controller` from
+`CONTROL_MODEL` and `discharge_rate_is_load_following`:
+`period_list` → `absent` (there is no per-period rate to interpret),
+otherwise load-following → `ceiling`, else `target`.
+`discharge_rate_is_load_following` survives as a property meaning exactly
+"is it a ceiling", which is the only question the candidate space asks.
+
+**Plumbing.** `capabilities` replaces `discharge_resolution_kw` along the
+whole path — `battery_system_manager` → `optimize_battery_schedule` →
+`_run_dynamic_programming` / `_best_action_at_continuous_state` /
+`PeriodInputs` → `_discharge_candidates`, and the PWL window's mirror of
+the same. One object, one construction site, per the plan's warning.
+
+**Behaviour.** The 36-fixture corpus and every golden are bit-identical
+(`pytest -m slow`: 538 passed, 5 skipped). The one intended change is #580:
+`_residual_cover_p` returns `None` where the rate is not a ceiling, so
+SolaX native / solax-modbus VPP / SPH / Solis / Huawei no longer plan an
+off-lattice delivery they cannot produce. Pinned by a plan-level test
+(the action and the resulting grid import, not a candidate list) that was
+watched fail with the gate removed.
+
+**What 4a did NOT absorb, deliberately: #579 and #571.** The parent plan
+asks 4a to take `_value_slope_below` and the new public
+`has_value_cell_below` with it. Neither exists on `main` — #579 is open and
+unmerged — and both live in `dp_battery_algorithm._record_marginal_value`,
+which D1 does not relocate: 4a moves the *gate*, and the gate is the
+two-line ceiling function, not the value estimator that decides its input.
+Pulling #579 in would also have flipped 142 of 2168 golden gate booleans
+inside the phase that is required to be behaviour-neutral, which is exactly
+the confounding the sequencing exists to prevent. The queue is unchanged in
+substance: land #579 (and then #571) next, on `execution_model.py` if the
+estimator moves there, and measure its golden delta on its own.
 
 ## 5. Decisions
 

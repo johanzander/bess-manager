@@ -52,13 +52,7 @@
       "Bash(git stash store *)"
     ],
     "ask": [
-      "Bash(git reset *)",
-      "Bash(git rebase *)",
-      "Bash(git merge *)",
-      "Bash(rm *)",
-      "Bash(rm -rf *)",
       "Bash(git push --force *)",
-      "Bash(git reset --hard *)",
       "Bash(sudo *)"
     ]
   },
@@ -79,6 +73,10 @@
       {
         "matcher": "Edit|Write|NotebookEdit",
         "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/check-worktree-path.sh\""
+          },
           {
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/optimizer_core_principles.py\"",

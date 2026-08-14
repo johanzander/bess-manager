@@ -211,15 +211,35 @@ frontend/node_modules` first) rather than installing through it. Re-running
 
 ### Permissions
 
-**Permissions are plain `allow`/`ask`/`deny` rules in
-`.claude/settings.json`. There are no permission hooks.** The three that used to
-exist — `auto-allow-worktree-destructive.sh`, `check-worktree-path.sh`,
-`link-worktree-local-settings.sh` — are gone. They existed to express what
-settings could not (a cwd-conditional auto-allow inside worktrees) and cost more
-than they bought: six false positives in a single day, *every one introduced by
-the fix to the previous one*. Do not reintroduce a hook to route around a
-prompt. Narrow the `ask` pattern instead, and remember `deny` beats `ask` beats
-`allow` — adding an `allow` never cancels an `ask`.
+**An agent should run end-to-end without approving anything.** Prompts are the
+cost, not the safety: a stalled autonomous run is a guaranteed loss, while the
+commands that used to prompt are recoverable. Only two shapes still ask, and
+both reach past the repository where nothing local can contain them:
+`git push --force` and `sudo`. Two are denied outright: the shared podman VM
+(`machine rm`, `system reset`) and `git stash`. **That is the entire list.**
+Everything else — `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`,
+`git worktree remove` — runs unattended. Do not add to the list because a
+command *looks* dangerous; add to it only when the effect escapes the repo and
+git cannot undo it.
+
+The two `Bash` permission hooks that used to shape this are gone:
+`auto-allow-worktree-destructive.sh` (a cwd-conditional auto-allow) and
+`link-worktree-local-settings.sh` (a SessionStart symlink undoing the asymmetry
+the first one created). They existed to express what settings.json could not,
+and cost six false positives in a single day, *every one introduced by the fix
+to the previous one*, including blocking a live beta release. With nothing left
+to auto-allow around, the plain rules say it directly. Do not reintroduce a hook
+to route around a prompt — delete the `ask` entry instead, and remember `deny`
+beats `ask` beats `allow`, so adding an `allow` never cancels an `ask`.
+
+`check-worktree-path.sh` stays. It guards Edit/Write, not Bash, and it is the
+one thing here that has never produced a false positive: it compares two `git
+rev-parse` results as strings and refuses an edit aimed at a different checkout
+than the session's cwd. That is the failure this repo actually hits — a stale
+absolute path from an earlier turn writing into the main checkout while ~20
+worktrees are live — and unlike the Bash guards it never has to parse a command.
+Anything added here must be that shape: compare resolved paths, never guess at
+what a command string will touch.
 
 **Never `git stash` — it is denied, everywhere in this repo.** There is exactly
 one `refs/stash` per repository, shared by the main checkout and every worktree,
@@ -267,12 +287,9 @@ git checkout -- <file>                           # only then
 The full procedure, including the staged-changes variant, is in
 `docs/agents/rules.md` under Working Location.
 
-**The rules apply identically in the main checkout and in every worktree.**
+**The Bash rules apply identically in the main checkout and in every worktree.**
 There is no cwd-conditional behaviour left, so nothing changes when a session
-enters a worktree. `git reset`, `git rebase`, `git merge`, `rm`, `git push
---force` and `sudo` prompt wherever you are; the shared podman VM (`machine rm`,
-`system reset`) and `git stash` are denied outright. That is the whole list —
-what is not on it runs unattended.
+enters a worktree.
 
 **Don't add a prompt where git already refuses.** `git branch -D`, plain `git
 worktree remove` and `git push --force-with-lease` are deliberately not in the
@@ -281,6 +298,15 @@ checked out in another worktree, won't remove a worktree holding uncommitted or
 untracked files, and `--force-with-lease` won't clobber an update it hasn't
 seen). A second prompt there buys nothing and costs a stall on every run —
 `implement-issue` Step 4's prune loop alone would have hit ~24 of them.
+
+**What the unattended set actually risks is uncommitted work**, since the
+sandbox that would have contained it is unavailable (below). Tracked content
+survives anything on the list — `git reset --hard` and `rm` on a tracked file
+are both recoverable from the object database, and a discarded commit is
+recoverable by SHA from the reflog. Uncommitted, untracked work is not. That is
+the argument for the WIP-commit habit below, and it is why `git stash` is denied
+rather than merely prompted: it is the one command that destroys another agent's
+uncommitted work rather than your own.
 
 **Only tracked files travel into a worktree**, and the permission setup is now
 entirely tracked: `.claude/settings.json` and `.claude/hooks/*` follow every

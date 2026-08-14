@@ -20,11 +20,10 @@ venv/
 # scripts/worktree-setup.sh these are symlinks to the main checkout, and a
 # trailing slash matches a directory but not a symlink to one)
 node_modules
-# A worktree gets this as a symlink to the main checkout (see
-# .claude/hooks/link-worktree-local-settings.sh). Ignoring it only via a
-# personal ~/.config/git/ignore means another clone -- or CI -- would see an
-# untracked symlink holding an absolute path from one machine, and `git add
-# -A` would commit it.
+# Personal permission overrides, main checkout only -- worktrees deliberately
+# do not get a copy, so anything that must hold everywhere belongs in the
+# tracked .claude/settings.json instead. Ignored here rather than in a personal
+# ~/.config/git/ignore so another clone -- or CI -- cannot pick it up.
 .claude/settings.local.json
 
 # Logs

@@ -209,25 +209,41 @@ frontend/node_modules` first) rather than installing through it. Re-running
 `worktree-setup.sh` handles the node case automatically once
 `package-lock.json` diverges — `requirements.txt` drift is not detected.
 
-### Permissions inside a worktree
+### Permissions
 
-**The worktree is the safety boundary.** A linked worktree is disposable by
-construction, so `.claude/hooks/auto-allow-worktree-destructive.sh` auto-allows
-Bash commands whose cwd is a linked worktree, and falls through everywhere else
-so the shared main checkout keeps its `ask`/`deny` rules. Do not "fix" a prompt
-by adding the offending command to an allowlist — an `ask` rule beats an `allow`
-rule, so that never works, and enumerating command shapes is what the inverted
-hook exists to replace.
+**Permissions are plain `allow`/`ask`/`deny` rules in
+`.claude/settings.json`. There are no permission hooks.** The three that used to
+exist — `auto-allow-worktree-destructive.sh`, `check-worktree-path.sh`,
+`link-worktree-local-settings.sh` — are gone. They existed to express what
+settings could not (a cwd-conditional auto-allow inside worktrees) and cost more
+than they bought: six false positives in a single day, *every one introduced by
+the fix to the previous one*. Do not reintroduce a hook to route around a
+prompt. Narrow the `ask` pattern instead, and remember `deny` beats `ask` beats
+`allow` — adding an `allow` never cancels an `ask`.
 
-**Never `git stash` — it is blocked, everywhere in this repo.** There is exactly
+**Never `git stash` — it is denied, everywhere in this repo.** There is exactly
 one `refs/stash` per repository, shared by the main checkout and every worktree,
 and the stack has no owner: one agent's `git stash` pushes an entry that another
 agent's `git stash pop` will take, with no way to tell it was not theirs. With
 ~20 worktrees active that silently destroys work, and once popped and discarded
-git offers no recovery. The hook denies every mutating form (`push`, `save`,
-bare `git stash`, `pop`, `apply`, `drop`, `clear`, `branch`, `import`) in the
-main checkout as well as in worktrees; `git stash list`/`show` still work. The
-deny is scoped to this repository — in an unrelated clone the hook is silent.
+git offers no recovery. `permissions.deny` lists every mutating form (bare `git
+stash`, `push`, `save`, `pop`, `apply`, `drop`, `clear`, `branch`, `create`,
+`store`); `git stash list`/`show` still work. The rules match the command as
+written, so a prefixed form such as `git -C <dir> stash pop` slips past — don't
+reach for one.
+
+**The OS sandbox is not an option here, and this has been settled — do not
+re-investigate.** Claude Code's write policy is `allowOnly` minus
+`denyWithinAllow`, with no allow-within-deny primitive for writes (reads have
+one, which is why `allowRead` behaves differently). Its default `denyWrite` list
+covers `${repo}/.claude`, `${repo}/scripts`, `${repo}/.github`,
+`${repo}/.git/config`, `${repo}/.git/worktrees`, `package.json` and
+`package-lock.json`, so an `allowWrite` entry structurally cannot re-open any of
+them. With the sandbox on, Bash cannot `git worktree add`, cannot complete a
+branch switch (`.claude/**` is tracked here), and cannot `npm install`.
+sandbox-runtime has a `filesystem.allowGitConfig` knob that would fix it, but
+Claude Code never passes it through. Re-check only if a release note says the
+write policy or that passthrough changed.
 
 To set work aside on the branch you are on, use a temporary WIP commit — it
 lives on the branch, so it is per-worktree, private to that agent, and
@@ -251,61 +267,30 @@ git checkout -- <file>                           # only then
 The full procedure, including the staged-changes variant, is in
 `docs/agents/rules.md` under Working Location.
 
-Inside a worktree the rule is: **do anything to the repo, except destroy the
-repo or its history.** What still prompts is a short, closed list of effects no
-worktree can contain — the shared podman VM (a `deny`, re-emitted so it can't be
-downgraded to one keystroke), elevated privileges, anything reaching GitHub,
-pushes that move a shared ref (`main`, `beta`, `beta-release-*`, tags), and
-writes to state shared across every checkout: the single object database, ref
-namespace, stash, and `.git/config`.
-
-**What it deliberately does not do is infer which files a command will touch.**
-An earlier version tried, using absolute paths, `..`, `~`, variables and
-substitutions to decide whether a command wrote outside the worktree. That is
-shell parsing by regex, and it does not work — quoting, globs, heredocs and `cd`
-all defeat it. It produced six distinct false positives in a single day, *every
-one introduced by the fix to the previous one*, including blocking a live beta
-release and judging a worktree foreign to itself because `;` wasn't treated as a
-separator. It was removed rather than patched again. The accepted cost: a stale
-absolute path in a Bash command can reach the main checkout unprompted; tracked
-content there is recoverable from git, uncommitted work isn't.
-
-If you want real containment, the mechanism is the sandbox
-(`sandbox.filesystem.allowWrite`/`denyWrite`), which the OS enforces — not more
-regex. **Anything added to this hook must classify by command shape, never by
-guessing at paths.** The Edit/Write guard `check-worktree-path.sh` is the shape
-to copy: it compares two `git rev-parse` results as strings and has never
-produced a false positive.
+**The rules apply identically in the main checkout and in every worktree.**
+There is no cwd-conditional behaviour left, so nothing changes when a session
+enters a worktree. `git reset`, `git rebase`, `git merge`, `rm`, `git push
+--force` and `sudo` prompt wherever you are; the shared podman VM (`machine rm`,
+`system reset`) and `git stash` are denied outright. That is the whole list —
+what is not on it runs unattended.
 
 **Don't add a prompt where git already refuses.** `git branch -D`, plain `git
-worktree remove` and `git push --force-with-lease` are auto-allowed on purpose:
-git itself blocks the dangerous case (it won't delete a branch checked out in
-another worktree, won't remove a worktree holding uncommitted or untracked
-files, and `--force-with-lease` won't clobber an update it hasn't seen). A
-second prompt there buys nothing and costs a stall on every run — Step 4's
-prune loop alone would have hit ~24 of them. The forcing variants (`--force`,
-`-f`, `git tag -d`, `reflog expire`, `gc`) still ask, because those are the
-ones that actually discard recoverable state. Likewise `gh` allows *authoring*
-(`pr create`/`edit`/`comment`, `issue comment`) — that's the work product, and
-`gh pr create` is the closing step of `implement-issue` — while publishing and
-reconfiguring (`pr merge`, `release`, `repo edit`, `secret`, `workflow run`,
-non-GET `gh api`) still ask. The `gh` safe list must also stay a superset of
-settings.json's `gh` allow patterns, or a hook decision silently revokes a
-permission you granted.
+worktree remove` and `git push --force-with-lease` are deliberately not in the
+`ask` list: git itself blocks the dangerous case (it won't delete a branch
+checked out in another worktree, won't remove a worktree holding uncommitted or
+untracked files, and `--force-with-lease` won't clobber an update it hasn't
+seen). A second prompt there buys nothing and costs a stall on every run —
+`implement-issue` Step 4's prune loop alone would have hit ~24 of them.
 
-**Only tracked files travel into a worktree.** `.claude/settings.json` and
-`.claude/hooks/*` are tracked and follow automatically;
-`.claude/settings.local.json` is gitignored and therefore exists only in the
-main checkout. A session that enters a worktree silently loses every rule and
-mode set there while the tracked `ask:` list keeps applying — that asymmetry is
-why an autonomous run in the main checkout starts prompting mid-worktree.
-`.claude/hooks/link-worktree-local-settings.sh` symlinks it into every linked
-worktree. Note what that does **not** buy you: a hook decision supersedes a
-settings rule, so a Bash `deny`/`ask` you add to local settings is overridden
-inside a worktree by the auto-allow. `defaultMode` and non-Bash rules survive
-the trip; a Bash restriction has to go in the hook's own escape lists to have
-any effect there. The same doesn't-travel problem applies to `.venv` and
-`frontend/node_modules` (see `scripts/worktree-setup.sh`, issue #556).
+**Only tracked files travel into a worktree**, and the permission setup is now
+entirely tracked: `.claude/settings.json` and `.claude/hooks/*` follow every
+worktree automatically, so a session behaves the same wherever it runs. Keep it
+that way. `.claude/settings.local.json` is gitignored and exists only in the
+main checkout; the previous design leaned on it and then needed a SessionStart
+hook to symlink it into each worktree to undo the asymmetry. Anything that has
+to hold in a worktree belongs in the tracked settings. The doesn't-travel
+problem still applies to `.venv` and `frontend/node_modules` (see
+`scripts/worktree-setup.sh`, issue #556).
 
 ## Home Assistant Integration
 

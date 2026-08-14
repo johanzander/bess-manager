@@ -684,6 +684,32 @@ from Phase 4** and becomes its own phase; see below.
 - **4a — capability model.** Per-platform lattice / mode vocabulary /
   minimum gear / load-following semantics, in a **new `PlatformCapabilities`**
   rather than folded into `BatterySettings` (D2). No candidate changes yet.
+
+  **Two gate fixes are queued behind 4a and should move with it** — both sit in
+  the value-estimator code D1 relocates, so landing either first means measuring
+  its delta twice:
+
+  - **#579 (open, `blocked`)** — `_record_marginal_value` snapped with `round()`
+    while `_interpolate_value` floors, so a SoE in the lower half of a cell was
+    priced off the cell below. Fixed and green; 142 of 2168 golden gate booleans
+    flip (141 opening). It introduces `_value_slope_below` as a **third** peer
+    dV/dSoE estimator — the behaviour change the "as-built" note above defers —
+    and a **new public `has_value_cell_below`** on `dp_battery_algorithm.py`
+    that the gate tests call so they stop mirroring the DP's index rule.
+    **4a should absorb both into `execution_model.py` rather than inherit them
+    at their current home.**
+  - **#571 (open, `blocked`, not yet fixed)** — a *different* defect at the same
+    seam: `np.round` snapping makes `V` locally non-concave and the gate reads
+    the corrupted cell. #579 does **not** fix it — at the reported state
+    `idx = 324.0` is exactly on a grid point, so `round()` and `ceil()-1` select
+    the same cell. Candidate fix is to read the slope off the upper concave
+    envelope; scored against a 0.005 kWh reference it roughly halves the error
+    on the 217 concavity-violating states without regressing the 1642 clean
+    ones. Reproduce from **period 58** of the bundle (horizon 134,
+    `initial_soe` 9.9), not period 59.
+
+  Neither *depends* on 4a technically — this is sequencing, and 4a's
+  behaviour-neutrality requirement is the reason.
 - **4b — discharge commands.** Candidates become executable discharge
   commands; folds in #511/#517's tests as regression cover. Closes #352
   **Shape B** with the exact-cover candidate, gated on 4a's load-following

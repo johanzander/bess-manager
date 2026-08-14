@@ -726,6 +726,29 @@ class BatterySystemManager:
                 # every per-period hardware write, even on a not-apply cycle
                 # where the DP re-optimized battery-action magnitudes without
                 # changing which TOU/VPP mode is active.
+                # Nothing in the plan changed, but the inverter may still have
+                # lost a segment we programmed or restored one we did not
+                # (issue #551). Since #554 the write path is skipped on cycles
+                # like this one, so without re-asserting here nothing would
+                # look at the inverter again until the plan itself changed.
+                # A no-op on platforms that rewrite everything anyway, and a
+                # no-op here too when the inverter already agrees.
+                if self._controller is not None and not prepare_next_day:
+                    try:
+                        self._inverter_controller.reconcile_hardware(
+                            self._controller, current_period
+                        )
+                    except Exception as e:
+                        # Same handling as a failed apply: record it so the
+                        # next cycle retries, and let the optimization stand —
+                        # it needs no inverter at all.
+                        self._hardware_write_pending = True
+                        logger.error(
+                            "Could not re-assert the schedule on the inverter: "
+                            "%s — will retry next cycle",
+                            e,
+                        )
+
                 self._current_schedule = temp_schedule
                 self._inverter_controller.strategic_intents = (
                     temp_schedule.strategic_intents

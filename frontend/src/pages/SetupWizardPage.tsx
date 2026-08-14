@@ -27,6 +27,18 @@ const CYCLE_COST_BY_CURRENCY: Record<string, number> = { SEK: 0.40, EUR: 0.035, 
 // "not yet user-configured" so a detected currency can safely replace them.
 const UNSET_CYCLE_COST_DEFAULTS = new Set([0.40, 0.50]);
 
+// The pricing field each provider cannot fetch a price without. Mirrors
+// backend/api.py's _PROVIDER_REQUIRED_FIELD, which rejects the same gap
+// server-side (#549). Without this gate the wizard completes with
+// provider=nordpool_official and an empty config entry whenever HA has no
+// Nord Pool integration, and every optimizer cycle then aborts.
+const PROVIDER_REQUIRED_FIELD: Record<string, keyof PricingForm> = {
+  nordpool_official: 'nordpoolConfigEntryId',
+  nordpool_hacs: 'nordpoolEntity',
+  octopus: 'octopusImportTodayEntity',
+  entsoe: 'entsoeEntity',
+};
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -70,7 +82,7 @@ const SetupWizardPage: React.FC = () => {
 
   const [homeForm, setHomeForm] = useState<HomeForm>({
     consumption: 3.5,
-    consumptionStrategy: 'sensor',
+    consumptionStrategy: 'fixed',
     maxFuseCurrent: 25,
     voltage: 230,
     safetyMarginFactor: 1.0,
@@ -422,6 +434,42 @@ const SetupWizardPage: React.FC = () => {
     );
   });
 
+  // Required sensors whose only HA entity is disabled (#549). The entity
+  // exists but has no state, so BESS cannot read it — the wizard must say
+  // "enable it", not "it's missing", and must not let setup complete with
+  // a mapping that is guaranteed to 404.
+  const requiredSensorKeys = new Set(
+    INTEGRATIONS.flatMap(integration => {
+      if (inverterIntegrationIds.has(integration.id) && integration.id !== activeInverterIntegrationId) return [];
+      return integration.sensorGroups.flatMap(group =>
+        group.sensors.filter(s => s.required).map(s => s.key),
+      );
+    }),
+  );
+  // Follow the selected inverter tab, not the auto-detected platform — a
+  // user with both a cloud and a modbus integration can switch between
+  // them, and each has its own set of disabled entities.
+  // platformDisabledSensors only has entries for platforms that were actually
+  // detected, so a miss means "this platform has no disabled entities" — never
+  // fall back to another platform's dict, or the tab would list entity IDs
+  // that belong to a different integration.
+  const activeDisabledSensors =
+    (discovery?.platformDisabledSensors
+      ? discovery.platformDisabledSensors[activeInverterIntegrationId]
+      : discovery?.disabledSensors)
+    ?? {};
+  // Compare against the entity ID, not mere presence: a user upgrading from an
+  // older wizard run already has the disabled entity persisted, and handleScan
+  // restores it from the saved settings. Presence alone would suppress the
+  // warning and re-persist the same 404-ing mapping (#549).
+  const disabledRequiredEntities = Object.entries(activeDisabledSensors)
+    .filter(([key, entityId]) =>
+      requiredSensorKeys.has(key)
+      && (!activeSensorsFlat[key] || activeSensorsFlat[key] === entityId));
+
+  const pricingRequiredField = PROVIDER_REQUIRED_FIELD[pricingForm.provider];
+  const pricingReady = !pricingRequiredField || !!pricingForm[pricingRequiredField];
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex flex-col items-center justify-center p-6">
       <div className="w-full max-w-3xl">
@@ -506,7 +554,28 @@ const SetupWizardPage: React.FC = () => {
               discovery={discovery}
             />
 
-            {!allRequiredFilled && (
+            {disabledRequiredEntities.length > 0 && (
+              <div
+                data-testid="disabled-entities-warning"
+                className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+              >
+                <p className="font-semibold">
+                  These entities exist in Home Assistant but are disabled:
+                </p>
+                <ul className="mt-1 ml-4 list-disc font-mono text-xs">
+                  {disabledRequiredEntities.map(([key, entityId]) => (
+                    <li key={key}>{entityId}</li>
+                  ))}
+                </ul>
+                <p className="mt-2">
+                  Enable them on the device page in Home Assistant, then press
+                  Re-scan. BESS cannot read a disabled entity, so leaving them
+                  off would report the system as degraded after setup.
+                </p>
+              </div>
+            )}
+
+            {!allRequiredFilled && disabledRequiredEntities.length === 0 && (
               <div className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300">
                 Some required sensors (marked with <span className="font-semibold">*</span>) are missing. Expand the integration to configure them manually.
               </div>
@@ -522,7 +591,7 @@ const SetupWizardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={!allRequiredFilled}
+                disabled={!allRequiredFilled || disabledRequiredEntities.length > 0}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 <span>Next: Electricity Pricing</span>
@@ -550,13 +619,26 @@ const SetupWizardPage: React.FC = () => {
 
             <PricingFormSection form={pricingForm} onChange={setPricingForm} />
 
+            {!pricingReady && (
+              <div
+                data-testid="pricing-incomplete-warning"
+                className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+              >
+                This provider is selected but not configured, so BESS cannot
+                fetch any prices and the optimizer will not run. Fill in the
+                field above, or pick the provider you actually have installed
+                in Home Assistant.
+              </div>
+            )}
+
             <div className="flex justify-between pt-2">
               <button onClick={() => setStep(1)}
                 className="flex items-center space-x-1 px-4 py-2 text-gray-600 dark:text-gray-300 border border-gray-300 dark:border-gray-600 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-700">
                 <ChevronLeft className="h-4 w-4" /><span>Back</span>
               </button>
               <button onClick={() => setStep(3)}
-                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium">
+                disabled={!pricingReady}
+                className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-40 disabled:cursor-not-allowed">
                 <span>Next: Battery</span><ChevronRight className="h-4 w-4" />
               </button>
             </div>

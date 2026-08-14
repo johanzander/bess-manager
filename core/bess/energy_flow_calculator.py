@@ -7,6 +7,7 @@ while separating it from sensor collection and predictions.
 
 import logging
 
+from .energy_balance import derive_load_consumption
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -146,18 +147,22 @@ class EnergyFlowCalculator:
         import_from_grid = flows.get("import_from_grid", 0)
 
         # Derive load_consumption when no direct sensor is available.
-        # GEN4 Growatt Modbus and SolaX Native lack a native register.
-        # Energy balance: load = solar + import + battery_out - battery_in - export
+        # SolaX Native, Solis and Huawei lack a native register.
+        # These are per-period deltas, so cross-sensor noise can push the
+        # balance slightly negative; clamp here rather than in the shared
+        # identity, which stays unclamped for lifetime totals (issue #528).
         if load_consumption == 0 and (
             solar_production > 0 or import_from_grid > 0 or battery_discharged > 0
         ):
             load_consumption = max(
                 0,
-                solar_production
-                + import_from_grid
-                + battery_discharged
-                - battery_charged
-                - export_to_grid,
+                derive_load_consumption(
+                    solar_production=solar_production,
+                    import_from_grid=import_from_grid,
+                    export_to_grid=export_to_grid,
+                    battery_charged=battery_charged,
+                    battery_discharged=battery_discharged,
+                ),
             )
             flows["load_consumption"] = load_consumption
 

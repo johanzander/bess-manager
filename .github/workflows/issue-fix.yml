@@ -39,6 +39,13 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      # quality-check.sh now fails when pytest/black/ruff are missing, so the
+      # fix agent needs the dev toolchain installed before it runs the gate.
+      - name: Install Python dependencies
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
+
       - uses: actions/setup-node@v4
         with:
           node-version: "20"

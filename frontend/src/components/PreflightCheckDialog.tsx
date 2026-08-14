@@ -15,12 +15,21 @@ interface PreflightCheck {
  * from a healthy one — `check_historical_data_access()` reports
  * `required: false` with `status: "ERROR"` when InfluxDB is misconfigured, and
  * that used to render as a green check.
+ *
+ * A required component reporting WARNING does not block: `determine_health_status`
+ * returns ERROR whenever any required method is not working, so WARNING on a
+ * required component can only mean an *optional* member of it failed. Blocking
+ * on that would stop a user leaving demo mode over e.g. a NaN solar forecast
+ * (#558, where "Energy Prediction" became required under the sensor strategy
+ * while its solar-forecast member stayed optional).
  */
 function toRowStatus(status: string, required?: boolean): 'ok' | 'warning' | 'error' {
   if (status === 'OK') return 'ok';
-  // Not configuring an optional component is a deliberate choice, not a fault.
-  if (required === false && status === 'NOT_CONFIGURED') return 'ok';
-  return required === false ? 'warning' : 'error';
+  if (required === false) {
+    // Not configuring an optional component is a deliberate choice, not a fault.
+    return status === 'NOT_CONFIGURED' ? 'ok' : 'warning';
+  }
+  return status === 'ERROR' ? 'error' : 'warning';
 }
 
 interface PreflightCheckDialogProps {

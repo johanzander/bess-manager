@@ -415,9 +415,14 @@ This is what lets an integration that exposes the same services under its own do
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
-#### Signed grid power sensors
+#### Signed power sensors
 
-A platform-fixed sibling of the service-domain pattern above: some platforms (Solis) expose grid power as one signed sensor instead of separate import/export entities. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `""` elsewhere) — not user-overridable, since polarity is a hardware fact, not configuration. Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign whenever both keys resolve to the same entity_id.
+A platform-fixed sibling of the service-domain pattern above: some platforms expose a power flow as one signed sensor instead of two directional entities. Two independent cases, same mechanism:
+
+- **Grid.** Solis (`grid_power_net`) and Huawei (`power_meter_active_power`) publish one signed grid sensor. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `"export_positive"` for `huawei_solar_luna2000`, `""` elsewhere). Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign.
+- **Battery.** Native SolaX (`battery_power_charge`, REGISTER_S16) and Huawei (`storage_charge_discharge_power`, reg 37765) publish one signed battery sensor and no discharge counterpart. `SettingsStore.get_battery_power_polarity()` resolves `PLATFORM_BATTERY_POWER_POLARITY` (`"charge_positive"` for both, `""` elsewhere). Held on `HomeAssistantAPIController.battery_power_polarity`; `get_battery_charge_power()`/`get_battery_discharge_power()` split the single reading by sign (issue #542).
+
+Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
 
 ### Platform Capabilities
 
@@ -542,6 +547,8 @@ The mapping uses two layers of filtering:
 
 The result maps each BESS sensor key (e.g. `battery_soc`) to the corresponding HA `entity_id` (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). This entity_id is what the REST API uses to read state values at runtime.
 
+**Disabled entities are never mapped.** An entity with `disabled_by` set exists in the registry but has no state, so any REST read of it returns 404. Enabled matches always win; when a sensor key's *only* match is disabled, the key is left unmapped and returned in a second dict (`platform_disabled`, surfaced by `/api/setup/discover` as `disabledSensors` / `platformDisabledSensors`). The wizard blocks on those and names the entity to enable, rather than persisting a mapping that is guaranteed to fail at runtime. This matters because integrations ship useful entities disabled by default — `solax_modbus` disables all of its `Total *` lifetime energy counters, which is what made issue #549 present as "Sensor not found (404) … SYSTEM DEGRADED" after a wizard run that appeared to succeed.
+
 Renaming entities in the HA UI (friendly name/label) does not affect discovery. However, if a user changes the actual entity_id and removes the original suffix, the `unique_id` still matches — so discovery still works. Only if the integration itself changes its `unique_id` scheme (across versions) would manual remapping via the wizard be needed.
 
 #### Derived Hints
@@ -573,13 +580,13 @@ The setup wizard is a 6-step flow for first-time configuration. It is triggered 
 | `GET /api/setup/status` | Returns `wizard_needed` flag based on whether sensors are configured |
 | `POST /api/setup/discover` | Runs full auto-discovery, returns sensors map, missing sensors, platform hints |
 | `POST /api/setup/confirm` | Persists discovered sensor config to `/data/bess_discovered_config.json` and applies to live controller |
-| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections |
+| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections. Rejects (400) an energy provider whose own required configuration is empty — `nordpool_official` needs `nordpoolConfigEntryId`, `nordpool_hacs`/`entsoe` need their entity, `octopus` needs `octopusImportTodayEntity` — since such a config can never fetch a price |
 
 #### Wizard Steps (Frontend: `SetupWizardPage.tsx`)
 
 1. **Scan** — Calls `/api/setup/discover` to auto-detect integrations and sensors
-2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform
-3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints)
+2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform. Blocked while a required sensor is unmapped, or while a required sensor's only entity is disabled in HA (the entities to enable are listed by name)
+3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints). Blocked until the selected provider's required configuration is filled in, mirroring the server-side check on `/api/setup/complete`
 4. **Battery** — Set capacity, SOC limits, power rating, cycle cost
 5. **Home** — Set consumption, fuse current, voltage, phase count (pre-filled from detected phase count)
 6. **Complete** — Calls `/api/setup/complete` for atomic save

@@ -523,7 +523,7 @@ immediately and the context's shape is dictated by a real requirement.
 
 - `lifetime_system_production` (mapped from `total_yield`) — derived as `solar_production` when missing
 - `lifetime_self_consumption` — derived as `load - import` when missing
-- `lifetime_load_consumption` — derived as `solar + import - export` when missing
+- `lifetime_load_consumption` — derived as `solar + import + discharged - charged - export` when missing (issue #528)
 
 These sensors remain in the per-platform suffix maps (`GROWATT_MIN_SUFFIX_MAP`, `GROWATT_SPH_SUFFIX_MAP`, etc.), get discovered, appear in the wizard sensor list, and are saved to config, but nothing reads them at runtime. Remove them from the suffix maps and `sensorDefinitions.ts` to reduce wizard clutter and avoid confusion about which sensors actually matter.
 
@@ -754,3 +754,38 @@ the reviewer with executed repros where noted; none are addressed in that PR.
 3. **`models.py:527` hand-lists all 9 `EnergyData` init fields** instead of `dataclasses.replace(energy, grid_exported=..., clipped_solar=...)`; any future init field silently reverts to default in the curtailment-adjusted copy.
 4. **`SystemStatusCard.tsx:293` "Curtailed (No Export)" label** is wrong at hourly display resolution where `curtailed = any(quarter)` can cover an hour that mostly exports; soften the copy or derive from the current quarter.
 5. **`backend/api.py:1326` (PLAUSIBLE, latent)**: tomorrow-schedule pd-is-None branch appends to `soc_values`/`curtailed` but not `intents`/`actions`; a future mid-anchored schedule would shift SOC/curtailed onto wrong rows. Cheap hardening: append symmetrically.
+
+---
+
+## From #542 (signed battery power) review — not addressed in that PR
+
+1. **Existing installs only pick up a signed-sensor pairing when discovery is
+   re-run.** `discover_sensors_from_registry` is reachable only from
+   `POST /api/setup/discover` (`backend/api.py:2841`); nothing re-runs it at
+   startup. So an install that already has `battery_charge_power` mapped and
+   `battery_discharge_power` unmapped stays broken (health check ERROR, net
+   battery power `None`) until the user re-runs the setup wizard. Same is true
+   of the grid pairings shipped in #475/#438 — it is a property of the
+   mechanism, not of #542. Deliberately not "fixed" by widening
+   `_is_shared_signed_battery_power()` to also fire when the discharge key is
+   merely absent: that predicate would silently paper over an unconfigured
+   install rather than the platform fact it is supposed to encode. If we want
+   upgrades to self-heal, the honest fix is a re-discovery pass at startup for
+   platforms whose sensor set is fully integration-derived.
+2. **The health panel shows the raw signed value on both battery rows.**
+   `get_method_sensor_info` (`core/bess/ha_api_controller.py:1031`) reads
+   `/api/states/{entity_id}` directly instead of going through the getters, so
+   a native SolaX install discharging at 800 W displays −800 W for both
+   "Battery Charging Power" and "Battery Discharging Power". Diagnostic
+   display only — the optimizer and all flow accounting read the getters.
+   Pre-existing for the Solis/Huawei grid pairing; #542 just makes it visible
+   in the mock scenario.
+3. **The battery split hardcodes its one legal polarity.**
+   `get_battery_charge_power`/`get_battery_discharge_power` apply
+   `max(0.0, ±raw)` with a trailing `# charge_positive` comment rather than
+   branching on `battery_power_polarity`. Fine while `charge_positive` is the
+   only value in `PLATFORM_BATTERY_POWER_POLARITY`, and the grid getters are
+   no stricter (anything that isn't `"import_positive"` is treated as
+   `"export_positive"`), but a future typo'd entry would silently invert every
+   battery reading instead of failing. Worth an explicit branch + raise if a
+   second polarity is ever added.

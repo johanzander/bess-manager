@@ -141,6 +141,7 @@ def perform_health_check(
     is_required: bool,
     controller,
     all_methods: list[str],
+    required_methods: list[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
 
@@ -156,11 +157,32 @@ def perform_health_check(
             optional components show WARNING.
         controller: The controller instance with validate_methods_sensors method
         all_methods: List of all method names this component uses
+        required_methods: Subset of ``all_methods`` that is required, for
+            components where only some methods are load-bearing. Only
+            meaningful with ``is_required=True``; defaults to all of them.
+            Energy Prediction uses this: under the ``sensor`` consumption
+            strategy the consumption sensor is mandatory while the solar
+            forecast stays genuinely optional (#558).
 
     Returns:
         Health check result dictionary
     """
-    required_methods = all_methods if is_required else []
+    if is_required:
+        required_methods = (
+            all_methods if required_methods is None else list(required_methods)
+        )
+        # A required method that is not also checked is never returned by
+        # validate_methods_sensors, so required_total stays 0 and the
+        # "specified but none configured" branch below reports ERROR for
+        # something that was never looked at.
+        unchecked = set(required_methods) - set(all_methods)
+        if unchecked:
+            raise ValueError(
+                f"required_methods {sorted(unchecked)} are not in all_methods "
+                f"for component '{component_name}'"
+            )
+    else:
+        required_methods = []
     health_check = {
         "name": component_name,
         "description": description,

@@ -58,6 +58,16 @@ class SolisModbusController(InverterController):
     # window per slot, same limitation as SPH.
     supports_charge_rate_control: ClassVar[bool] = False
 
+    # Both False for the same reason as SPH and Huawei: a Solis discharge
+    # slot is a time window, with no per-period rate to interpret as a
+    # ceiling and none to deliver a partial load cover with. Previously left
+    # to inherit the base class's True, which disagreed with this
+    # platform's own `period_list` control model -- caught in review of
+    # Phase 4a, where the optimizer and the hardware-write path would
+    # otherwise have read the same platform two different ways.
+    discharge_rate_is_load_following: ClassVar[bool] = False
+    load_support_delivers_exact_cover: ClassVar[bool] = False
+
     CONTROL_MODEL: ClassVar[str] = "period_list"
 
     MAX_CHARGE_PERIODS = 6

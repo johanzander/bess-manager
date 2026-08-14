@@ -681,9 +681,23 @@ Two things gate it now, neither a code dependency:
 Confirmed by the design doc and approved 2026-08-11. **4d has been removed
 from Phase 4** and becomes its own phase; see below.
 
-- **4a — capability model.** Per-platform lattice / mode vocabulary /
-  minimum gear / load-following semantics, in a **new `PlatformCapabilities`**
-  rather than folded into `BatterySettings` (D2). No candidate changes yet.
+- **4a — capability model. BUILT** (`core/bess/execution_model.py`;
+  as-built notes in the design doc §4c). Per-platform lattice / mode
+  vocabulary / minimum gear / load-following semantics in a **new
+  `PlatformCapabilities`** rather than folded into `BatterySettings` (D2),
+  built by BSM from the live controller and threaded to the candidate space
+  in place of `discharge_resolution_kw`. `intra_period_discharge_gate`
+  relocated out of `battery_system_manager` (D1), so the simulator no longer
+  imports the orchestrator. Semantics are the tri-state the design asked for
+  (`ceiling` / `target` / `absent`). Goldens and the 36-fixture corpus are
+  bit-identical; the one intended behaviour change is **#580** — the
+  off-lattice residual-cover candidate is now offered only where a
+  LOAD_SUPPORT discharge is actually delivered as `min(plan, actual load)`
+  (native SolaX / SPH / Solis / Huawei lose it; Growatt keeps it in both
+  control modes, because #413 makes VPP LOAD_SUPPORT natively
+  load-following even though its rate register is a forced power — that
+  distinction is a separate declared capability, see design doc §4c). No
+  candidate-space changes beyond that gate.
 
   **Two gate fixes are queued behind 4a and should move with it** — both sit in
   the value-estimator code D1 relocates, so landing either first means measuring
@@ -710,6 +724,14 @@ from Phase 4** and becomes its own phase; see below.
 
   Neither *depends* on 4a technically — this is sequencing, and 4a's
   behaviour-neutrality requirement is the reason.
+
+  **Status after 4a landed: still queued, and 4a did not absorb them.**
+  #579 is unmerged, so there was no code to move; and both fixes live in
+  `dp_battery_algorithm._record_marginal_value`, which D1 does not relocate
+  — 4a moved the gate itself (the two-line ceiling function), not the value
+  estimator that decides its input. Absorbing #579 would additionally have
+  flipped 142 golden gate booleans inside the phase required to be
+  behaviour-neutral. Land them next, each measuring its own delta.
 - **4b — discharge commands.** Candidates become executable discharge
   commands; folds in #511/#517's tests as regression cover. Closes #352
   **Shape B** with the exact-cover candidate, gated on 4a's load-following

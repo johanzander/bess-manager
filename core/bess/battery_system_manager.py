@@ -26,6 +26,7 @@ from .exceptions import (
     HistoricalDataUnavailableError,
     SystemConfigurationError,
 )
+from .execution_model import PlatformCapabilities, intra_period_discharge_gate
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
@@ -69,30 +70,6 @@ from .time_utils import (
 from .weather import fetch_temperature_forecast
 
 logger = logging.getLogger(__name__)
-
-
-def intra_period_discharge_gate(allowed: bool) -> int:
-    """Intra-period discharge ceiling for a SOLAR_EXPORT, SOLAR_STORAGE, or
-    LOAD_SUPPORT period.
-
-    All three intents map to load_first; SOLAR_EXPORT/SOLAR_STORAGE plan
-    discharge_rate=0, LOAD_SUPPORT plans a nonzero plan-scaled rate. In every
-    case the battery can additionally cover an actual (sub-period) solar/load
-    deficit beyond whatever was planned. Whether it SHOULD is economic: cover
-    from battery only when the stored energy is worth less than buying from
-    grid now.
-
-    That comparison is made by the DP (`_record_marginal_value`), which owns
-    the value function the marginal value comes from, and arrives here as
-    ``decision.intra_period_discharge_allowed``. This function does not
-    re-derive it: doing so from a ``shadow_price`` scalar could not tell a
-    computed zero from a never-computed one, and opened the ceiling on absent
-    data (#526).
-
-    Returns 100 (allow discharge) or 0 (hold the reserve, buy the dip from
-    grid).
-    """
-    return 100 if allowed else 0
 
 
 class BatterySystemManager:
@@ -310,6 +287,23 @@ class BatterySystemManager:
         if not self._inverter_controller:
             return False
         return self._inverter_controller.supports_charge_rate_control
+
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """What the active platform can express (Phase 4a, D2).
+
+        The single place these facts are read off the controller, so the
+        planner and the hardware-write path cannot answer the same question
+        two different ways -- the drift shape #282/#497/#511/#537 are all
+        instances of. Without a controller the defaults describe the
+        TOU-register platform the DP has always assumed, which is what the
+        pre-4a `discharge_resolution_kw=None` meant.
+        """
+        if self._inverter_controller is None:
+            return PlatformCapabilities()
+        return PlatformCapabilities.from_controller(
+            self._inverter_controller, self.battery_settings
+        )
 
     @property
     def export_curtailment_active(self) -> bool:
@@ -2153,13 +2147,6 @@ class BatterySystemManager:
             )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
-            discharge_resolution_kw = (
-                self._inverter_controller.discharge_resolution_kw(
-                    self.battery_settings.max_discharge_power_kw
-                )
-                if self._inverter_controller is not None
-                else None
-            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2172,7 +2159,7 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
-                discharge_resolution_kw=discharge_resolution_kw,
+                capabilities=self.platform_capabilities,
                 export_curtailment_active=self.export_curtailment_active,
                 home_settings=self.home_settings,
             )
@@ -2698,9 +2685,16 @@ class BatterySystemManager:
         # periods and raises the ceiling above the plan-scaled rate in 427 of
         # them -- this is a broad behaviour by design, and the argument above
         # is why that breadth is correct rather than alarming.)
+        # Read through the capability object, not off the controller
+        # directly: it is the one place the platform is interpreted, and for
+        # Solis the two used to disagree -- it declares `period_list` (no
+        # per-period rate) while inheriting the base class's load-following
+        # True, so the planner and this write path read the same hardware two
+        # different ways. Solis now declares both explicitly; routing through
+        # the capability is what keeps a future platform from re-opening it.
         if (
             strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT")
-            and self._inverter_controller.discharge_rate_is_load_following
+            and self.platform_capabilities.discharge_rate_is_load_following
         ):
             # Resolved by exact timestamp (not positional index -
             # optimization_period) so the standalone next-day schedule

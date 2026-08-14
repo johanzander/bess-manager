@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# WorktreeCreate hook.
+# SessionStart hook.
 #
 # `.claude/settings.local.json` is gitignored (globally, via
 # `**/.claude/settings.local.json`), so it exists ONLY in the main checkout.
@@ -21,15 +21,19 @@
 # assumption about the hook's stdin shape, and self-heals worktrees that
 # predate this hook.
 #
-# Registered on two events, because there are two ways a worktree appears:
-#   WorktreeCreate -- native creation (EnterWorktree / --worktree). Fires
-#     before the session enters, so the link is in place when settings load.
-#   SessionStart   -- covers `git worktree add`, the git fallback path in
-#     superpowers:using-git-worktrees, which fires no WorktreeCreate at all.
-#     Settings are already loaded by the time SessionStart runs, so a
-#     fallback-created worktree picks its link up on its NEXT session; the
-#     fleet-wide sweep is what makes that self-correcting rather than
-#     permanent.
+# Registered on SessionStart ONLY, and deliberately not on WorktreeCreate.
+# WorktreeCreate looked like the better event -- it fires before the session
+# enters, so the link would be in place when settings load -- but that event
+# expects the hook to RETURN the worktree path on stdout, and a hook that
+# prints nothing breaks worktree creation outright: EnterWorktree fails with
+# "hook succeeded but returned no worktree path". A sweeping hook has no such
+# path to return.
+#
+# SessionStart also covers the case WorktreeCreate never did: `git worktree
+# add`, the fallback path in superpowers:using-git-worktrees, fires no
+# WorktreeCreate at all. Settings are already loaded by the time SessionStart
+# runs, so a new worktree picks its link up on its NEXT session; the
+# fleet-wide sweep is what makes that self-correcting rather than permanent.
 #
 # Scope note: .venv and frontend/node_modules have the same
 # doesn't-travel problem, but they are scripts/worktree-setup.sh's job

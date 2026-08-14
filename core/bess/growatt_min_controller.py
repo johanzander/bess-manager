@@ -141,9 +141,9 @@ class GrowattMinController(InverterController):
     # written on the first of them and the rest are no-ops while the plan and
     # the inverter agree. A write that raises is retried via
     # _hardware_write_pending; one that vanishes without raising is caught by
-    # needs_hardware_reconciliation, which is what makes the remaining cycles
-    # worth having. Lowering this shrinks the window for both, so do not
-    # lower it without re-checking those two paths.
+    # reconcile_hardware, which re-runs the sync on every quiet cycle and is
+    # what makes the remaining cycles worth having. Lowering this shrinks the
+    # window for both, so do not lower it without re-checking those two paths.
     #
     # It also caps how many segments can be eligible at once, floor(45/15) + 1
     # = 4, comfortably under the 9 hardware slots.
@@ -841,47 +841,24 @@ class GrowattMinController(InverterController):
 
         return self._diff_tou_intervals(current_tou, new_tou, from_period)
 
-    def needs_hardware_reconciliation(
-        self, controller, current_period: int
-    ) -> tuple[bool, str]:
-        """Is a segment this controller believes it programmed missing?
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Put the inverter back in line with the committed plan.
 
         Differential update means a segment is written once and then never
-        looked at again while the plan holds steady, so a write the inverter
-        silently dropped — or a table it cleared on its own, which issue #551
-        showed really happens — would run wrong until the window ended.
+        looked at again while the plan holds steady. That leaves both halves
+        of issue #551 uncovered on a quiet cycle: a write the inverter
+        silently dropped, and a slot it restored that the plan does not
+        contain — the second of which runs the battery on a window nobody
+        planned.
 
-        Only *missing* segments count. An unwritten far-future segment is
-        absent from the inverter by design (issue #554), so this compares
-        against the hardware-eligible set rather than the whole plan;
-        comparing against the plan would report deferral as drift and rewrite
-        on every cycle.
+        This is sync_to_hardware itself rather than a separate drift check,
+        because sync already reads the inverter once and diffs both
+        directions against that read. A bespoke check would need its own read
+        (doubling the load on the endpoint this change exists to relieve) and
+        its own comparison, which would then be a second place for the two to
+        disagree. Deferral still applies, so a quiet cycle writes nothing.
         """
-        effective_minute = current_period * 15
-
-        def live(segments: list[dict]) -> set[tuple]:
-            return {
-                (s["start_time"], s["end_time"], s["batt_mode"])
-                for s in segments
-                if s.get("enabled", True)
-                and self._time_to_minutes(s["end_time"]) >= effective_minute
-            }
-
-        missing = live(self.active_tou_intervals) - live(
-            self._read_segments_from_hardware(controller)
-        )
-        if not missing:
-            return False, ""
-
-        summary = ", ".join(
-            f"{start}-{end} {mode}" for start, end, mode in sorted(missing)
-        )
-        logger.warning(
-            "Inverter is missing %d segment(s) this controller programmed: %s",
-            len(missing),
-            summary,
-        )
-        return True, f"Hardware missing {len(missing)} programmed segment(s): {summary}"
+        return self.sync_to_hardware(controller, effective_period)
 
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):
         """Initialize GrowattMinController with TOU intervals from the inverter."""

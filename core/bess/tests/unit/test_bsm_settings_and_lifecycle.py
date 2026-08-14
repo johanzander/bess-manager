@@ -878,31 +878,6 @@ class TestShouldApplySchedule:
         assert result is True
         assert "Retry" in reason
 
-    def test_unreadable_inverter_does_not_abort_the_cycle(self, system):
-        """A drift check that cannot run must not take the optimization with it.
-
-        The check reads the inverter, which raises on an install whose device
-        is not configured yet. It runs before the schedule comparison and
-        outside _apply_schedule's error handling, so an unguarded raise ends
-        the whole update — the optimization needs no inverter at all, and the
-        real problem already surfaces through the write path and health checks
-        (issue #554).
-        """
-        with patch.object(
-            system._inverter_controller,
-            "needs_hardware_reconciliation",
-            side_effect=Exception("Growatt device_id not configured"),
-        ):
-            result, _reason = system._should_apply_schedule(
-                is_first_run=False,
-                period=10,
-                prepare_next_day=False,
-                optimization_period=10,
-                temp_schedule=None,
-            )
-
-        assert isinstance(result, bool), "Cycle should complete, not raise"
-
 
 class TestSetDemoMode:
     """set_demo_mode delegates hardware initialization to the inverter controller."""
@@ -1265,3 +1240,45 @@ class TestBackfillSkipsDiskSeededPeriods:
         collected_periods = [call.args[0] for call in mock_collect.call_args_list]
         assert 0 not in collected_periods
         assert 1 in collected_periods
+
+
+class TestQuietCycleReconcilesHardware:
+    """A cycle that changes nothing must still re-assert the plan.
+
+    Since #554 the write path is skipped when the plan is unchanged, so this
+    is the only thing that looks at the inverter on a quiet cycle. Issue #551
+    established that the segment table drifts on its own.
+    """
+
+    def test_quiet_cycle_reconciles(self, system):
+        system._current_schedule = MagicMock()
+        with patch.object(
+            system._inverter_controller, "reconcile_hardware", return_value=(0, 0)
+        ) as reconcile:
+            system.update_battery_schedule(current_period=10)
+            system.update_battery_schedule(current_period=10)
+
+        assert (
+            reconcile.called
+        ), "Nothing looked at the inverter on a cycle that changed nothing"
+
+    def test_failed_reconciliation_is_retried_not_fatal(self, system):
+        """The optimization needs no inverter — a failed re-assert must not
+        end the cycle, and must not be forgotten either.
+
+        Checked immediately after the failing cycle: leave it any longer and
+        the next cycle has already retried and cleared the flag, which is the
+        mechanism working rather than the failure being lost.
+        """
+        system.update_battery_schedule(current_period=10)  # first cycle applies
+
+        with patch.object(
+            system._inverter_controller,
+            "reconcile_hardware",
+            side_effect=Exception("Growatt device_id not configured"),
+        ):
+            system.update_battery_schedule(current_period=10)  # quiet cycle
+
+        assert (
+            system._hardware_write_pending is True
+        ), "A failed re-assert was swallowed with nothing scheduled to retry it"

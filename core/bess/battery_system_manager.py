@@ -726,6 +726,29 @@ class BatterySystemManager:
                 # every per-period hardware write, even on a not-apply cycle
                 # where the DP re-optimized battery-action magnitudes without
                 # changing which TOU/VPP mode is active.
+                # Nothing in the plan changed, but the inverter may still have
+                # lost a segment we programmed or restored one we did not
+                # (issue #551). Since #554 the write path is skipped on cycles
+                # like this one, so without re-asserting here nothing would
+                # look at the inverter again until the plan itself changed.
+                # A no-op on platforms that rewrite everything anyway, and a
+                # no-op here too when the inverter already agrees.
+                if self._controller is not None and not prepare_next_day:
+                    try:
+                        self._inverter_controller.reconcile_hardware(
+                            self._controller, current_period
+                        )
+                    except Exception as e:
+                        # Same handling as a failed apply: record it so the
+                        # next cycle retries, and let the optimization stand —
+                        # it needs no inverter at all.
+                        self._hardware_write_pending = True
+                        logger.error(
+                            "Could not re-assert the schedule on the inverter: "
+                            "%s — will retry next cycle",
+                            e,
+                        )
+
                 self._current_schedule = temp_schedule
                 self._inverter_controller.strategic_intents = (
                     temp_schedule.strategic_intents
@@ -2504,30 +2527,6 @@ class BatterySystemManager:
                 "DECISION: Apply schedule - retrying previously failed hardware write"
             )
             return True, "Retry failed hardware write"
-
-        # A write that raised is covered above. This covers the write that did
-        # not raise and still is not there: the schedule comparison below only
-        # ever compares plan against plan, so on a platform that skips the
-        # write while the plan holds steady, nothing would look at the inverter
-        # again until the plan changed (issues #551, #554).
-        if self._controller is not None and not prepare_next_day:
-            try:
-                drifted, drift_reason = (
-                    self._inverter_controller.needs_hardware_reconciliation(
-                        self._controller, period
-                    )
-                )
-            except Exception as e:
-                # Not being able to look is not a reason to abandon the cycle.
-                # An unconfigured or unreachable inverter surfaces through the
-                # write path below, which records it as a pending write, and
-                # through the health checks — whereas raising here would kill
-                # the optimization itself, which needs no inverter at all.
-                logger.warning("Could not check the inverter for drift: %s", e)
-                drifted, drift_reason = False, ""
-            if drifted:
-                logger.warning("DECISION: Apply schedule - %s", drift_reason)
-                return True, drift_reason
 
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:

@@ -497,8 +497,8 @@ class TestNoGrowattCloudReadOnThisPlatform:
             battery_settings, control_mode=control_mode
         )
 
-        drifted, reason = controller.needs_hardware_reconciliation(
-            self._ExplodingReader(), current_period=34
+        writes, disables = controller.reconcile_hardware(
+            self._ExplodingReader(), effective_period=34
         )
 
-        assert not drifted, f"Reported drift it cannot actually observe: {reason!r}"
+        assert (writes, disables) == (0, 0), "Wrote through a path it cannot use"

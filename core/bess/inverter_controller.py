@@ -912,20 +912,18 @@ class InverterController(ABC):
         as an accepted diagnostic side effect on platforms that support it.
         """
 
-    def needs_hardware_reconciliation(
-        self, controller, current_period: int
-    ) -> tuple[bool, str]:
-        """Has the inverter drifted from what this controller last committed?
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Re-assert the committed plan on a cycle that changed nothing.
 
-        Default: no. A platform that rewrites its whole control state every
-        cycle cannot drift undetected — the next cycle overwrites whatever it
-        finds. Only a platform that skips the write when its plan is unchanged
-        needs to look, and it must do so through ``controller``, not from its
-        own model.
+        Default: do nothing. A platform that rewrites its whole control state
+        whenever it runs cannot drift undetected — the next cycle overwrites
+        whatever it finds. Only a platform that *skips* the write while its
+        plan holds steady has a window in which the inverter can lose a
+        segment, or restore one, without anybody looking.
 
-        Returns (needs_sync, reason).
+        Returns (writes, disables).
         """
-        return False, ""
+        return 0, 0
 
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:

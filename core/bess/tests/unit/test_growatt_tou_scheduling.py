@@ -1882,35 +1882,87 @@ class TestFarFutureSegmentsAreDeferred:
         scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
 
-        in_sync, _ = scheduler.needs_hardware_reconciliation(controller, 13)
-        assert not in_sync, "Reported drift while hardware matches the plan"
+        controller.calls.clear()
+        scheduler.reconcile_hardware(controller, 13)
+        assert controller.calls == [], "Wrote while hardware already matched the plan"
 
         controller.slots.clear()  # inverter loses the table mid-window
+        scheduler.reconcile_hardware(controller, 14)
 
-        drifted, reason = scheduler.needs_hardware_reconciliation(controller, 14)
-        assert drifted, (
-            "Lost segment went unnoticed — the window would run load_first "
-            "for the rest of its life with nothing in the logs"
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert ("03:00", "04:59") in programmed, (
+            "Lost segment stayed lost — the window would run load_first for "
+            f"the rest of its life with nothing in the logs. Got {programmed}"
         )
-        assert "03:00" in reason, f"Reason should name the missing window: {reason!r}"
 
-    def test_deferred_segment_is_not_mistaken_for_drift(self, scheduler):
-        """Reconciliation must not fire for segments deliberately not written.
+    def test_orphan_segment_is_cleared_on_a_quiet_cycle(self, scheduler):
+        """An unplanned segment the inverter holds must be turned off.
 
-        A planned-but-deferred segment is absent from hardware by design. If
-        that reads as drift the gate fires every cycle and the churn this
-        change removes comes straight back.
+        Detecting only *missing* segments covers half of #551. The other half
+        is the inverter restoring a slot the plan does not contain — and with
+        writes now deferred, the cycle that would have disabled it may not run
+        for hours, so the battery follows a window nobody planned.
+        """
+        controller = self._seeded_controller("18:00", "19:59", "grid_first")
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+
+        scheduler.reconcile_hardware(controller, 13)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert (
+            "18:00",
+            "19:59",
+        ) not in programmed, (
+            f"Unplanned window left running on the battery: {sorted(programmed)}"
+        )
+
+    def test_reconciliation_reads_the_inverter_once(self, scheduler):
+        """One read per cycle, and it is the one the writes are diffed against.
+
+        A separate drift check with its own read doubles the load on the
+        endpoint that #554 exists to relieve — the same endpoint the issue
+        reports returning 500s under load.
+        """
+        controller = _SimulatingController()
+        controller.reads = 0
+        inner = controller.read_inverter_time_segments
+
+        def counting():
+            controller.reads += 1
+            return inner()
+
+        controller.read_inverter_time_segments = counting
+
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+        scheduler.reconcile_hardware(controller, 12)
+
+        assert controller.reads == 1, f"Read the inverter {controller.reads} times"
+
+    def test_reconciliation_leaves_a_deferred_segment_alone(self, scheduler):
+        """A quiet cycle must stay quiet.
+
+        Reconciliation runs on every cycle, so if it treated a deliberately
+        unwritten far-future segment as something to repair it would rewrite
+        on every cycle and undo the whole change.
         """
         controller = _SimulatingController()
         scheduler.strategic_intents = _grid_charging_at([48, 49, 50, 51, 80, 81])
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=48)
         scheduler.sync_to_hardware(controller, effective_period=48)
 
-        drifted, reason = scheduler.needs_hardware_reconciliation(controller, 48)
+        controller.calls.clear()
+        scheduler.reconcile_hardware(controller, 48)
 
-        assert (
-            not drifted
-        ), f"Deferred 20:00 window reported as hardware drift: {reason!r}"
+        assert controller.calls == [], (
+            "Reconciliation rewrote on a quiet cycle: "
+            f"{[(c['start_time'], c['end_time']) for c in controller.calls]}"
+        )
 
     def test_deferred_planned_segment_keeps_its_hardware_slot(self, scheduler):
         """A planned segment spared by the disable diff must keep its slot.

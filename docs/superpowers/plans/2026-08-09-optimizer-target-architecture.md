@@ -92,7 +92,7 @@ confirm the criterion *could* have returned non-zero.
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
 | 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | **MERGED — PR #534** (re-scoped 2026-08-10). Closeable: all five follow-ups below are non-blocking, and #536 is explicitly "does not block a release" |
-| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; 4a startable. #352 reproduction landed and D3 decided (2026-08-13/14); 4b/4c behind the beta |
+| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; **4a is now the prerequisite for the #352 fix** (the cover candidate needs the load-following capability, which never reaches the DP); 4b/4c behind the beta |
 | 5 | intent-as-input (was Phase 4d — split out 2026-08-11; 25 backend modules + 10 frontend files + the goldens) | 2, 3 | after 4b/4c |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
@@ -682,10 +682,9 @@ from Phase 4** and becomes its own phase; see below.
   minimum gear / load-following semantics, in a **new `PlatformCapabilities`**
   rather than folded into `BatterySettings` (D2). No candidate changes yet.
 - **4b — discharge commands.** Candidates become executable discharge
-  commands, with D3's admissibility rule as the export filter; folds in
-  #511/#517's tests as regression cover. Closes #352 **Shape B**. Both
-  non-code preconditions are met (fixture 2026-08-13, D3 2026-08-14); the
-  beta is the only remaining gate.
+  commands; folds in #511/#517's tests as regression cover. Closes #352
+  **Shape B** with the exact-cover candidate, gated on 4a's load-following
+  capability. Gated on 4a and the beta.
 - **4c — charge commands.** The six hardcoded `rate_throughput` sites above
   collapse to the configured rate; this is where the measured R≠P divergence
   closes.
@@ -709,24 +708,25 @@ constraints above *is* the `rules.md` new-class approval:
   `BatterySettings`. The latter is 17 fields of physical-battery facts with a
   different lifetime and source; `discharge_rate_is_load_following` already
   living on the controller is evidence the split is real.
-- **D3 — the materiality predicate is DECIDED (2026-08-14).** A `grid_first`
-  export command is admissible iff the period is *mostly about exporting*
-  (`battery_to_grid > battery_to_home`) — or the battery is already flat out
-  (headroom ≤ one rate step), where there is no load-following capacity left
-  to protect. The question it answers: is the export the point of the period,
-  or a by-product of covering the house? The #352 repro (0.125 kWh to grid vs
-  0.700 to the house) is a by-product and is refused; a genuine arbitrage
-  remainder (4.5 vs 0.5) is not. No invented constants — "mostly" is the 50/50
-  split, "flat out" is the platform's own lattice top. Measured as a real
-  candidate filter with the DP re-optimising: **+3.67 SEK on the corpus, 0.14%
-  of savings**, removing 44% of worst-case `grid_first` exposure. The
-  full-rate exemption is load-bearing: without it the same rule costs +15.24
-  SEK, because 8 full-rate periods carrying 31.5 SEK have no headroom to
-  protect and lose revenue for nothing. Five alternatives were measured and
-  rejected, including a parameter-free "top gear only" rule **refuted by a
-  constructed arbitrage-remainder case** the corpus average had hidden (−0.095%
-  corpus-wide, −7% on the case). Both cases are now acceptance criteria. Full
-  table and reasoning in the design doc §5–6.
+- **D3 — decided 2026-08-14, SUPERSEDED the same day.** The share rule
+  (`battery_to_grid > battery_to_home`, or already flat out) was decided on
+  measured evidence and then demoted within hours by a `bess-analyst` second
+  opinion sought before amending P7. **#352's root cause is a missing
+  candidate, not a bad one:** at the field-evidenced period the action space
+  offers 2.70 kW (under-covers the house, plans an import at buy 3.92) or
+  3.30 kW (over-covers, exports at sell 2.63) — exact cover at 2.80 kW is off
+  the percent lattice, the near-cover steps are removed by #497's band, and
+  `_residual_cover_p` only fires *below* the smallest lattice step. The export
+  is the least-bad option, not a choice; it is what makes the period a
+  `BATTERY_EXPORT` and puts the inverter in the committing mode. Adding the
+  exact-cover candidate measures **−3.12 SEK** (cheaper), takes committing
+  exports from 52 to 19 and fixes the field case, against D3's **+3.67 SEK**
+  which also leaves a phantom planned import. **No P7 amendment: with cover
+  present the p99 margin collapses from 0.0388 SEK to 0.0067, inside its own
+  epsilon — the decisiveness that motivated the amendment was an artifact of
+  the missing candidate.** D3 survives only as optional cleanup for the 19,
+  to be re-measured post-4a. Design doc §2 ("The root cause is a missing
+  candidate") is normative here; §5 is history.
 
 - [x] Design doc —
       `docs/superpowers/specs/2026-08-11-phase4-executable-candidates-design.md`.

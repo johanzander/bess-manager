@@ -1,15 +1,22 @@
 # Phase 4: Executable-command candidates (P3) — design
 
-**Status: all four decisions settled — D1, D2, D4 approved 2026-08-11; D3
-decided 2026-08-14.** Phase 4's plan entry requires a design doc before code
-and says `rules.md`'s new-class approval applies — the modules named in D1 and
-D2 below carry that approval.
+**Status: D1, D2, D4 approved 2026-08-11. D3 decided 2026-08-14 and
+superseded the same day** — #352's root cause turned out to be a *missing*
+candidate, not a bad one (§2, "The root cause is a missing candidate"). D3
+survives only as optional cleanup. Phase 4's plan entry requires a design doc
+before code and says `rules.md`'s new-class approval applies — the modules
+named in D1 and D2 carry that approval.
 
-**4a is startable and 4b is unblocked on design.** Its non-code preconditions
-— the #352 reproduction fixture and the 22/16 reconciliation — landed
-2026-08-13 (§2), and D3's predicate is chosen and measured (§5). Both now wait
-only on the beta shipping (§7). 4d has been removed from Phase 4 entirely and
-is now Phase 5 in the parent plan.
+**4a is the prerequisite for everything else, including the #352 fix.** The
+fix is an exact-cover candidate gated on the platform's load-following
+capability, and that capability does not currently reach the optimizer at all —
+which is 4a's job. The #352 reproduction fixture and the 22/16 reconciliation
+landed 2026-08-13 (§2). 4d has been removed from Phase 4 entirely and is now
+Phase 5 in the parent plan.
+
+**Reading order for anyone picking this up:** §2's root-cause subsection first,
+then §5 for the history of how the wrong answer was reached and measured — the
+D3 numbers are not valid on the post-4a action space.
 
 Parent: `docs/superpowers/plans/2026-08-09-optimizer-target-architecture.md`
 → Phase 4. Normative: `docs/agents/optimizer-architecture.md` (P1–P7).
@@ -104,6 +111,105 @@ cost of 2.925 kWh of forfeited headroom** — a 22% rate command, the same gear
 as the live period 78. `expected_results` is pinned PRE-fix on purpose; 4b
 moves it and states the delta.
 
+### The root cause is a missing candidate, not a bad candidate (2026-08-14)
+
+**This subsection supersedes D3 as the answer to #352.** It came out of a
+`bess-analyst` second opinion sought before amending a normative principle, and
+it inverts the diagnosis: the export is not a bad action the DP chooses, it is
+the *least-bad* action available because the right one is absent.
+
+At the field-evidenced period the action space offers **2.70 kW** or
+**3.30 kW**, and nothing between:
+
+- the house needs **2.80 kW** (0.700 kWh over the period, no solar);
+- 2.80 is off the percent lattice (15 kW battery, 1% = 0.15 kW);
+- 2.85 / 3.00 / 3.15 are removed by #497's unexecutable band;
+- `_residual_cover_p` offers exact cover **only below the smallest lattice
+  step**, so it does not fire here.
+
+So the DP chooses between under-covering (2.70, planning a 0.025 kWh import at
+buy 3.917) and over-covering (3.30, exporting 0.125 kWh at sell 2.634).
+Over-covering is the cheaper error, and **that is what makes the period a
+`BATTERY_EXPORT` and puts the inverter in the committing mode**. The export was
+never the goal.
+
+Exact cover is executable on load-following hardware: `load_first` is a
+ceiling, so commanding the step above (19% = 2.85 kW) delivers
+`min(2.85, 2.80) = 2.80` exactly. That is the same delivery-planning argument
+`_residual_cover_p` already makes below the lattice, simply not applied above
+it — a P3 gap, not a robustness problem.
+
+**Measured, all four worlds, DP re-optimising over the 37-fixture corpus:**
+
+| world | corpus cost | vs baseline | committing exports | repro p99 |
+|---|---|---|---|---|
+| baseline | 1796.11 | — | 52 | exports 0.125 kWh |
+| **+ exact-cover candidate** | **1792.99** | **−3.12** | **19** | LOAD_SUPPORT, exact cover |
+| + cover + within-epsilon preference | 1793.47 | −2.64 | 8 | fixed |
+| + cover + D3 | 1794.47 | −1.64 | 0 | fixed |
+| D3 alone (the §5 rule) | 1799.78 | **+3.67** | 0 | fixed, but plans a 0.025 kWh phantom import |
+
+Adding the missing candidate fixes the field case, removes 33 of the 52
+committing exports, and makes the corpus **cheaper**. D3 alone costs 3.67 SEK
+and leaves a planned import that execution erases — an R≠P of exactly the shape
+Phase 4 exists to end.
+
+**Consequences, in order of how much they change:**
+
+1. **No principle needs amending.** The earlier proposal to amend P7 rested on
+   "Shape B is decisively better under a point forecast, so P2 cannot reach
+   it". That decisiveness is ~85% an artifact of the missing candidate: with
+   exact cover injected the p99 margin collapses from 0.0388 SEK to 0.0067,
+   *inside* the period's epsilon of 0.0069. P3 already claims #352; the
+   architecture was right and the code was not implementing it. **Do not
+   record P7 as falsified.**
+2. **Every D3 measurement in §5 was taken on the impoverished action space**,
+   where each non-committing alternative carries a forced sub-lattice import at
+   buy price — the very tariff asymmetry #352 is about. It systematically
+   overstates export margins. The +3.67 SEK and the 26/65 preference-firing
+   count both need re-deriving once cover exists.
+3. **4a becomes a prerequisite, not a parallel track** — see below.
+
+### Ceiling semantics are per-platform, and the DP cannot see which (2026-08-14)
+
+The exact-cover candidate is only sound where a discharge rate is a *ceiling*.
+Measured across the controllers:
+
+| platform | what a discharge number means |
+|---|---|
+| Growatt MIN (`tou_register`) | ceiling — delivers `min(number, actual load)` |
+| solax-modbus Growatt TOU | ceiling |
+| Growatt VPP | no rate for load support since #413 — natively load-following |
+| **SolaX native** (`vpp_power`) | **target** — `LOAD_SUPPORT → -(rate% × max_discharge)` |
+| Huawei, Growatt SPH (`period_list`) | no per-period rate at all |
+
+`discharge_rate_is_load_following` exists as a controller `ClassVar`, but it
+reaches only `battery_system_manager`'s gate and the controllers. **It is never
+passed into the DP** (grepped 2026-08-14: no occurrence in
+`dp_battery_algorithm.py`, `pwl_window_dp.py` or `action_selector.py`).
+
+Two consequences:
+
+- **A pre-existing gap, filed separately:** `_residual_cover_p`'s below-lattice
+  cover candidate is added unconditionally, so on SolaX native / Huawei / SPH
+  the DP already plans a delivery those platforms will not produce. Minor today
+  (all three are experimental per the platform-maturity note) but real, and
+  generalising cover without a capability gate would widen it from rare
+  sub-step residuals to most periods.
+- **Sequencing:** the #352 fix is "add the cover candidate *where the hardware
+  load-follows*", which needs the capability in the optimizer. That is 4a. So
+  **4a is now a prerequisite for the #352 fix**, not an independent track.
+
+### What is left after the real fix
+
+19 committing exports survive exact cover. Two optional cleanups, both measured
+above: the within-epsilon preference (−0.48 SEK, leaves 8) and D3 (a further
+~1.5 SEK, leaves 0). The 8 that survive both cover and the preference are
+decisively profitable under the forecast — being paid for the commitment, in
+the issue's own terms. **Neither cleanup should be built before 4a and the
+cover candidate land and the numbers are re-measured on the honest action
+space.**
+
 ### #352 is two bugs; only one is Phase 4's
 
 Split recorded on the issue 2026-08-11. **Shape A** (LOAD_SUPPORT throttled
@@ -153,7 +259,7 @@ a public function, and touches the simulator's import surface.**
 | PR | Scope | Depends on | Status |
 |---|---|---|---|
 | **4a** | `PlatformCapabilities` + the `execution_model` leaf: per-platform lattice, modes, minimum gear, load-following semantics; gate relocated. No candidate changes. | D1, D2 | **startable** |
-| **4b** | Discharge candidates become executable commands, with D3's admissibility rule as the export filter. Closes #352 Shape B. Folds #511/#517 tests in as regression cover. | 4a, the beta (D3 decided, fixture landed) | blocked on 4a + beta |
+| **4b** | Discharge candidates become executable commands. **Closes #352 Shape B via the exact-cover candidate** (§2), gated on 4a's load-following capability; D3 optional cleanup afterwards. Folds #511/#517 tests in as regression cover. | 4a, the beta | blocked on 4a + beta |
 | **4c** | Charge candidates become executable commands — the 6 `rate_throughput` sites collapse to the configured rate. This is where the measured R≠P divergence closes. | 4a, the beta | blocked on 4a |
 
 4b and 4c are independent of each other and can run in parallel after 4a.
@@ -187,8 +293,19 @@ already living on the controller is evidence the split is real rather than
 tidy-minded. Folding them in would also overload an object passed through
 almost every function in the optimizer.
 
-**D3 — What is "dominance OR forfeited headroom", concretely? ✅ DECIDED
-2026-08-14** (owner's criterion, chosen from six measured alternatives).
+**D3 — What is "dominance OR forfeited headroom", concretely? 🟠 SUPERSEDED
+AS THE PRIMARY FIX, 2026-08-14** — see "The root cause is a missing candidate"
+below, added the same day after a `bess-analyst` second opinion. D3 was decided
+on the reasoning in this section and then demoted within hours; the reasoning
+is kept in full because the demotion is the interesting part. **Read the
+root-cause subsection first — the measurements below were taken on an action
+space now known to be impoverished, and the +3.67 SEK headline becomes
+−1.64 SEK once the missing candidate is present.**
+
+The rule stays on the table as *optional* cleanup for the residual (§"What is
+left after the real fix"), not as the answer to #352.
+
+The reasoning as it stood when decided:
 
 **The rule.** A `grid_first` export command is admissible iff the period is
 *mostly about exporting* — or the battery is already flat out, where there is

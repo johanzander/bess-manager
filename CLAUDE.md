@@ -264,18 +264,42 @@ stash`, `push`, `save`, `pop`, `apply`, `drop`, `clear`, `branch`, `create`,
 written, so a prefixed form such as `git -C <dir> stash pop` slips past — don't
 reach for one.
 
-**The OS sandbox is not an option here, and this has been settled — do not
-re-investigate.** Claude Code's write policy is `allowOnly` minus
-`denyWithinAllow`, with no allow-within-deny primitive for writes (reads have
-one, which is why `allowRead` behaves differently). Its default `denyWrite` list
-covers `${repo}/.claude`, `${repo}/scripts`, `${repo}/.github`,
-`${repo}/.git/config`, `${repo}/.git/worktrees`, `package.json` and
-`package-lock.json`, so an `allowWrite` entry structurally cannot re-open any of
-them. With the sandbox on, Bash cannot `git worktree add`, cannot complete a
-branch switch (`.claude/**` is tracked here), and cannot `npm install`.
-sandbox-runtime has a `filesystem.allowGitConfig` knob that would fix it, but
-Claude Code never passes it through. Re-check only if a release note says the
-write policy or that passthrough changed.
+**The OS sandbox is what makes the unattended list safe, and it is on.**
+`sandbox.enabled` confines every Bash write to the repository, decided by the OS
+from the actual syscall rather than guessed from a command string. That is why
+`rm -rf` needs no prompt: outside the repo it cannot create *or* unlink — the
+macOS profile denies `file-write-create` and `file-write-unlink` in one rule.
+
+**`allowWrite` must name the repo root, and that is the whole trick.** Writes
+are `allowOnly` minus `denyWithinAllow`, and the built-in `allowOnly` is only
+`/dev/*`, `/tmp/claude`, `~/.npm/_logs` and `~/.claude/debug` — **the repository
+is not in it**. So `allowWrite: ["."]` is what opens the repo at all. An earlier
+attempt set `allowWrite: [".claude", ".git", "scripts"]`, three paths that are
+all on the deny list, never opened the repo root, and concluded from the
+resulting breakage that the sandbox was unusable. It isn't; that config was.
+
+**What stays denied cannot be re-opened.** There is no allow-within-deny
+primitive for writes (reads have one, which is why `allowRead` differs), so no
+`allowWrite` entry overrides the built-in `denyWrite` list: `${repo}/.claude`,
+`${repo}/scripts`, `${repo}/.github`, `${repo}/.git/config`,
+`${repo}/.git/worktrees`, `package.json`, `package-lock.json`. In practice:
+
+- **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
+  the harness is not sandboxed; the Bash form writes `.git/config`.
+- **Edit `.claude/**`, `scripts/**` and `.github/**` with the Edit/Write tools**,
+  which the sandbox does not govern. Bash writes there fail.
+- `npm install` fails (lockfile). `worktree-setup.sh` symlinks `node_modules`,
+  so this bites only when a branch genuinely needs its own dependency set.
+- A `git merge origin/main` that touches `.claude/` or `scripts/` fails; finish
+  it with Edit/Write.
+- `.git/objects`, refs and the index are **not** denied, so commit, branch,
+  reset and reflog all work normally.
+
+**Verify with `bash scripts/verify-sandbox.sh` in a FRESH session** after any
+change to `sandbox.*`. Policy is read once at session start, and a `claude -p`
+child inherits the parent's policy instead of loading the file, so a session
+that edited the config cannot test it — not directly and not through a subagent.
+Every such attempt measures the stale policy and reports confident nonsense.
 
 To set work aside on the branch you are on, use a temporary WIP commit — it
 lives on the branch, so it is per-worktree, private to that agent, and

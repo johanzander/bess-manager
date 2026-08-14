@@ -1,4 +1,16 @@
 {
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "excludedCommands": [
+      "gh"
+    ],
+    "filesystem": {
+      "allowWrite": [
+        "."
+      ]
+    }
+  },
   "permissions": {
     "defaultMode": "auto",
     "allow": [

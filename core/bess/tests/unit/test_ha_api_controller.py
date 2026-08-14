@@ -499,40 +499,6 @@ def test_battery_power_polarity_per_platform(platform: str, expected: str) -> No
     assert store.get_battery_power_polarity() == expected
 
 
-class TestSignedPowerInSensorHealthPanel:
-    """The health panel reports what BESS reads, not the raw entity state.
-
-    get_method_sensor_info resolves the sensor key to an entity and reads that
-    entity, so before the split was applied there it showed the *net* register
-    for both halves — Charging Power -4876 W while the battery discharges,
-    which is the symptom the reporter screenshotted (#120)."""
-
-    def test_charge_power_reports_zero_while_discharging(self, signed_battery_ctrl):
-        signed_battery_ctrl.session.get = _session_method_mock(
-            "get", return_value=_mock_response({"state": "-4876"})
-        )
-        info = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
-        assert info["status"] == "ok"
-        assert float(info["current_value"]) == 0.0
-
-    def test_discharge_power_reports_the_magnitude(self, signed_battery_ctrl):
-        signed_battery_ctrl.session.get = _session_method_mock(
-            "get", return_value=_mock_response({"state": "-4876"})
-        )
-        info = signed_battery_ctrl.get_method_sensor_info("get_battery_discharge_power")
-        assert info["status"] == "ok"
-        assert float(info["current_value"]) == 4876.0
-
-    def test_separate_entities_report_their_state_verbatim(self, ctrl):
-        """Platforms with two real entities must keep showing the raw state,
-        formatting included — the split applies to shared entities only."""
-        ctrl.session.get = _session_method_mock(
-            "get", return_value=_mock_response({"state": "2000"})
-        )
-        info = ctrl.get_method_sensor_info("get_battery_charge_power")
-        assert info["current_value"] == "2000"
-
-
 # ── Phase current discovery (issue #120) ─────────────────────────────────────
 
 
@@ -651,11 +617,60 @@ class TestPhaseCurrentDiscovery:
         reverse = self.ctrl.discover_current_sensors(
             [_current_state(e) for e in reversed(entities)]
         )
-        assert forward == reverse
-        assert len(forward) == 3
-        # One device supplies all three, whichever one wins.
-        prefixes = {v.rsplit("phase_", 1)[0] for v in forward.values()}
-        assert len(prefixes) == 1
+        expected = {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+        assert forward == expected
+        assert reverse == expected
+
+    def test_grid_meter_wins_over_an_equally_complete_submeter(self):
+        """Between two complete meter groups the house feed must win.
+
+        Both pass the "meter" gate and carry all three phases, so only the
+        name separates them. Sorting on the id alone would pick
+        ``easee_meter`` (lexicographically first) — an EV-charger clamp
+        carrying a fraction of the house current, so the main fuse trips
+        without BESS ever throttling.
+        """
+        entities = [
+            "sensor.easee_meter_phase_a_current",
+            "sensor.easee_meter_phase_b_current",
+            "sensor.easee_meter_phase_c_current",
+            "sensor.power_meter_phase_a_current",
+            "sensor.power_meter_phase_b_current",
+            "sensor.power_meter_phase_c_current",
+        ]
+        assert self.ctrl.discover_current_sensors(
+            [_current_state(e) for e in entities]
+        ) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_complete_meter_group_beats_a_single_phase_clamp(self):
+        """Phase count outranks the naming convention.
+
+        A lone ``current_l1`` clamp on an EV charger uses the explicitly
+        preferred convention, but returning it alone makes the wizard derive
+        detected_phase_count = 1 and configure single-phase fuse protection
+        on a three-phase house.
+        """
+        entities = [
+            "sensor.wallbox_current_l1",
+            "sensor.power_meter_phase_a_current",
+            "sensor.power_meter_phase_b_current",
+            "sensor.power_meter_phase_c_current",
+        ]
+        assert self.ctrl.discover_current_sensors(
+            [_current_state(e) for e in entities]
+        ) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
 
     def test_explicit_l1_l2_l3_naming_wins_over_meter_phase_naming(self):
         """An install with both a dedicated household clamp meter and a

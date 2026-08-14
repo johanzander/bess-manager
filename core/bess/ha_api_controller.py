@@ -1040,14 +1040,7 @@ class HomeAssistantAPIController:
                     }
                 )
             else:
-                result.update(
-                    {
-                        "status": "ok",
-                        "current_value": self._displayed_sensor_value(
-                            sensor_key, response.get("state")
-                        ),
-                    }
-                )
+                result.update({"status": "ok", "current_value": response.get("state")})
         except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
@@ -1056,33 +1049,6 @@ class HomeAssistantAPIController:
                 }
             )
         return result
-
-    def _displayed_sensor_value(self, sensor_key: str, state):
-        """Return the value BESS reads for ``sensor_key``, not the raw state.
-
-        Two sensor keys can share one signed entity (Huawei's and native
-        SolaX's battery register, Solis' and Huawei's grid register), in which
-        case the entity's own state is the *net* value and belongs to neither
-        key alone: the health panel showed Charging Power as -4876 W while the
-        battery discharged, the symptom the #120 reporter screenshotted — the
-        getters' split never reached this path. Every other key reports its
-        state through unchanged, formatting included.
-        """
-        if not self._is_shared_signed_key(sensor_key):
-            return state
-        try:
-            raw = float(state)
-        except (TypeError, ValueError):
-            return state
-        return str(self.split_signed_power(sensor_key, raw))
-
-    def _is_shared_signed_key(self, sensor_key: str) -> bool:
-        """True when ``sensor_key`` is one half of a shared signed entity."""
-        if sensor_key in ("battery_charge_power", "battery_discharge_power"):
-            return self._is_shared_signed_battery_power()
-        if sensor_key in ("import_power", "export_power"):
-            return self._is_shared_signed_grid_power()
-        return False
 
     def validate_methods_sensors(self, method_list: list) -> list:
         """Validate sensors for multiple methods at once."""
@@ -1508,41 +1474,13 @@ class HomeAssistantAPIController:
             and charge_entity == discharge_entity
         )
 
-    def split_signed_power(self, sensor_key: str, raw: float) -> float:
-        """Return the half of a shared signed power reading ``sensor_key`` owns.
-
-        The live getters split at read time, but a caller that resolves a
-        sensor key to an entity ID and reads that entity itself — the health
-        panel's raw state read — holds a value the split has never been
-        applied to. Both signed conventions live here so one place decides
-        which key takes which sign.
-
-        Returns ``raw`` unchanged for keys that are not half of a shared
-        signed pair, and for installs where the pair resolves to two entities.
-        """
-        if not self._is_shared_signed_key(sensor_key):
-            return raw
-
-        if sensor_key in ("battery_charge_power", "battery_discharge_power"):
-            # charge_positive is the only battery convention — see
-            # PLATFORM_BATTERY_POWER_POLARITY.
-            positive_key = "battery_charge_power"
-        else:
-            positive_key = (
-                "import_power"
-                if self.grid_power_polarity == "import_positive"
-                else "export_power"
-            )
-
-        return max(0.0, raw if sensor_key == positive_key else -raw)
-
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
         if self._is_shared_signed_battery_power():
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return self.split_signed_power("battery_charge_power", raw)
+            return max(0.0, raw)  # charge_positive
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
@@ -1551,7 +1489,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return self.split_signed_power("battery_discharge_power", raw)
+            return max(0.0, -raw)  # charge_positive
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -3345,13 +3283,29 @@ class HomeAssistantAPIController:
         one group supplies every phase. ``meter`` is a bare substring, so a
         sub-circuit meter (heat pump, EV charger) passes the gate too;
         selecting per phase independently would mix two devices into a reading
-        set describing no real circuit. Preference is: the explicit
-        ``current_lN`` convention over inferred ``phase_a/b/c`` naming, then
-        the most phases, then lowest group id — never ``/api/states`` order,
-        which is arbitrary and varies across restarts. A lone sub-circuit
-        meter can still win when it is the only complete set; the wizard lets
-        the user correct that, and grid-side entities cannot be told apart by
-        name alone on a discovery path with no unique_id suffix map.
+        set describing no real circuit. Preference, in order:
+
+        1. The most phases. A one-phase EV-charger clamp must never beat a
+           complete three-phase meter — the wizard derives the install's
+           phase count from this result, so a short group silently configures
+           single-phase fuse protection on a three-phase house.
+        2. The explicit ``current_lN`` convention over inferred ``phase_a/b/c``
+           naming. This matters on upgrade: an install with a dedicated clamp
+           meter keeps it rather than repointing at a newly-discovered smart
+           meter.
+        3. A grid-side name (``GRID_ID_MARKERS``). Between two equally
+           complete meters, ``power_meter`` is the house feed and
+           ``easee_meter``/``heatpump_meter`` a sub-circuit carrying a
+           fraction of it — binding to the latter under-protects the main
+           fuse, which then trips without BESS ever throttling.
+        4. Lowest group id, purely so the result is reproducible — never
+           ``/api/states`` order, which is arbitrary and varies across
+           restarts.
+
+        A lone sub-circuit meter can still win when it is the only complete
+        set and its name carries no grid marker; the wizard lets the user
+        correct that, and such entities cannot be told apart by name alone on
+        a discovery path with no unique_id suffix map.
 
         Args:
             states: List of state dicts from /api/states
@@ -3384,7 +3338,12 @@ class HomeAssistantAPIController:
 
         group_id, (_, result) = min(
             groups.items(),
-            key=lambda kv: (kv[1][0], -len(kv[1][1]), kv[0]),
+            key=lambda kv: (
+                -len(kv[1][1]),
+                kv[1][0],
+                self._grid_side_rank(kv[0]),
+                kv[0],
+            ),
         )
         if len(groups) > 1:
             logger.info(
@@ -3413,6 +3372,15 @@ class HomeAssistantAPIController:
     # Entity-id marker identifying a metering device, used to keep the
     # phase_a/b/c form off the inverter's own output currents.
     METER_ID_MARKER: ClassVar[str] = "meter"
+
+    # Entity-id markers naming the *house feed* rather than a sub-circuit.
+    # Only used to break a tie between equally complete candidate groups; see
+    # discover_current_sensors.
+    GRID_ID_MARKERS: ClassVar[tuple[str, ...]] = ("power_meter", "grid")
+
+    def _grid_side_rank(self, group_id: str) -> int:
+        """0 when a candidate group's id names the house feed, else 1."""
+        return 0 if any(m in group_id for m in self.GRID_ID_MARKERS) else 1
 
     def _match_phase_current_key(self, lower_id: str) -> tuple[str, str, int] | None:
         """Match a current sensor's entity_id to a phase.

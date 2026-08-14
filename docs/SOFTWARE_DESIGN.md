@@ -424,7 +424,7 @@ A platform-fixed sibling of the service-domain pattern above: some platforms exp
 
 Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
 
-The sign rule itself lives in one public method, `HAApiController.split_signed_power(sensor_key, raw)`, which the getters call. Any path that resolves a sensor key to an entity and reads that entity *directly* bypasses the getters and therefore holds the net value: the sensor health panel did exactly that and showed Charging Power as −4876 W while the battery discharged (#120). It now reports through `split_signed_power`; installs with two real entities keep showing their raw state verbatim, formatting included.
+The split lives in the getters, so any caller that resolves a sensor key to an entity ID and reads that entity *directly* holds the net value instead. The sensor health panel resolves entities that way in `get_method_sensor_info`, but renders `displayValue` from calling the getter, so it reports the split value.
 
 ### Platform Capabilities
 
@@ -511,7 +511,7 @@ The HA REST API `/api/states` provides all entity IDs and current values. BESS e
 
 - **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
 - **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
-- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; huawei_solar gives the meter's `active_grid_{A,B,C}_current` and the inverter's own `phase_{A,B,C}_current` the same "Phase A/B/C current" display name, so the phase_a/b/c form is meter-gated). Candidates are grouped by owning device and one group supplies every phase, preferring the explicit `current_lN` convention, then the most phases, then the lowest group id — never `/api/states` order, which is arbitrary. This keeps a sub-circuit meter from supplying some phases and the grid meter the rest
+- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; huawei_solar gives the meter's `active_grid_{A,B,C}_current` and the inverter's own `phase_{A,B,C}_current` the same "Phase A/B/C current" display name, so the phase_a/b/c form is meter-gated). Candidates are grouped by owning device and one group supplies every phase, preferring the most phases, then the explicit `current_lN` convention, then a grid-side name (`power_meter`/`grid`) over a sub-circuit one, then the lowest group id — never `/api/states` order, which is arbitrary. This keeps a sub-circuit meter from supplying some phases and the grid meter the rest, and keeps an EV-charger or heat-pump submeter from winning outright
 
 #### Stage 3 — WebSocket Metadata Query
 

@@ -74,17 +74,24 @@ class TestHealthCheckStatus:
             c for c in result["checks"] if c["name"] == "Nordpool Service Call"
         )
         assert service_check["status"] == "ERROR"
-        assert "temporarily unavailable" in service_check["error"].lower()
-        assert "retry" in service_check["error"].lower()
-        assert "not configured" not in service_check["error"].lower()
+        error = service_check["error"].lower()
+        # Says it will retry (the #583 case) ...
+        assert "retry" in error
+        # ... and names what to check if it does not heal, because HA answers a
+        # stale config entry with an identical 500 and we cannot tell them apart.
+        assert "setup wizard" in error
+        # But claims neither cause as fact.
+        assert "temporarily unavailable" not in error
 
     def test_missing_config_entry_error_names_the_configuration_problem(self):
-        """The two failures must be distinguishable by their text, since they now
-        share a status."""
+        """The two failures share a status, so the text is the only thing that
+        distinguishes them — assert what it says, not what it omits."""
         result = _source(config_entry_id="").perform_health_check()
 
         config_check = result["checks"][0]
-        assert "temporarily unavailable" not in (config_check["error"] or "").lower()
+        assert config_check["status"] == "ERROR"
+        assert "config entry" in config_check["error"].lower()
+        assert config_check["value"] == "Missing"
 
     def test_missing_config_entry_still_reports_error(self):
         """The real misconfiguration must keep its ERROR status — the fix must

@@ -431,7 +431,9 @@ A platform-fixed sibling of the service-domain pattern above: some platforms exp
 
 Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
 
-The split lives in the getters, so any caller that resolves a sensor key to an entity ID and reads that entity *directly* holds the net value instead. The sensor health panel resolves entities that way in `get_method_sensor_info`, but renders `displayValue` from calling the getter, so it reports the split value.
+The split lives in the getters, so any caller that resolves a sensor key to an entity ID and reads that entity *directly* holds the net value instead. The sensor health panel resolves entities that way in `get_method_sensor_info`, but renders `displayValue` from calling the getter, so it reports the split value; `get_method_sensor_info` additionally routes its own `current_value` through `_signed_split_state()`, which reuses the same two predicates so the diagnostic field agrees with the getters rather than showing one net value on both directional rows.
+
+Both split helpers are pure and take the direction as a keyword, so the getters and the diagnostic path share one implementation. The battery helper branches on `battery_power_polarity` explicitly and raises `ValueError` on any unrecognised value — a typo'd or unimplemented entry in `PLATFORM_BATTERY_POWER_POLARITY` must fail loudly rather than silently invert every reading. The grid helper is deliberately laxer, treating anything that is not `"import_positive"` as `"export_positive"`.
 
 ### Platform Capabilities
 

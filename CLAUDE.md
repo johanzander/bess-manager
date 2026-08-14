@@ -222,6 +222,18 @@ Everything else — `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`
 command *looks* dangerous; add to it only when the effect escapes the repo and
 git cannot undo it.
 
+**`defaultMode` is `auto`, and it is what makes the list above short enough to
+work.** The `allow` list cannot enumerate what an issue actually needs — a
+single `implement-issue` run reaches for compose, npm, python3, mkdir, cp and
+a dozen one-off shapes nobody predicted — so under the plain `default` mode
+everything unlisted prompts and the run stalls dozens of times. `auto` sends
+those to a classifier instead, which decides without involving you; `deny` and
+`ask` still bind on top of it. This lives in the **tracked** settings on
+purpose: `defaultMode` is not a Bash rule, so it travels into every worktree by
+itself. Putting it in the gitignored `settings.local.json` is what made an
+autonomous run in the main checkout start prompting the moment it entered a
+worktree, and what the deleted symlink hook existed to paper over.
+
 The two `Bash` permission hooks that used to shape this are gone:
 `auto-allow-worktree-destructive.sh` (a cwd-conditional auto-allow) and
 `link-worktree-local-settings.sh` (a SessionStart symlink undoing the asymmetry

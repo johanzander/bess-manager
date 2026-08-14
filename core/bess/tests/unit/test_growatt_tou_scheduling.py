@@ -932,7 +932,11 @@ class TestHardwareSlotCascading:
             for i in range(1, 13)
         ]
 
-        selected = scheduler._select_hardware_intervals(eligible, current_period=0)
+        selected = scheduler._select_hardware_intervals(
+            eligible,
+            current_period=0,
+            previously_programmed=scheduler._programmed_baseline(0),
+        )
 
         assert len(selected) == scheduler.max_intervals
 
@@ -1835,9 +1839,15 @@ class TestFarFutureSegmentsAreDeferred:
         write path but not by the display path, so it lands back in the amber
         "Pending Write" state this change exists to clear.
 
-        Only reachable for a segment whose start is off the 15-minute grid —
-        one read back from hardware rather than produced by the optimizer,
-        since _period_to_time only ever yields :00/:15/:30/:45.
+        Stated as the invariant rather than one segment's outcome: whatever
+        the write path holds back must never be what the display calls
+        pending. Pinning a particular segment's deferral instead would pin the
+        gate's boundary, which #589 deliberately moved — from the segment's
+        start minute to the period its first divergence lands in.
+
+        The off-grid start is the case that made the two disagree: a segment
+        read back from hardware rather than produced by the optimizer, since
+        _period_to_time only ever yields :00/:15/:30/:45.
         """
         scheduler.active_tou_intervals = []
         scheduler.tou_intervals = [
@@ -1847,26 +1857,46 @@ class TestFarFutureSegmentsAreDeferred:
                 "end_time": "09:59",
                 "batt_mode": "battery_first",
                 "enabled": True,
-            }
+            },
+            {
+                "segment_id": 2,
+                "start_time": "20:00",
+                "end_time": "20:59",
+                "batt_mode": "battery_first",
+                "enabled": True,
+            },
         ]
 
-        # 08:14 — period 32 (08:00). Write path: 539 > 480 + 45, deferred.
+        # 08:14 falls inside period 32 (08:00) — the band where an unfloored
+        # wall clock and the period floor used to disagree.
         real_now = time_utils.now
         try:
             time_utils.now = lambda: real_now().replace(
                 hour=8, minute=14, second=0, microsecond=0
             )
-            flagged = [
+            flagged = {
                 s["start_time"]
                 for s in scheduler.get_all_tou_segments()
                 if not s.get("is_default") and s.get("pending_write")
-            ]
+            }
         finally:
             time_utils.now = real_now
 
-        assert flagged == [], (
-            "Segment the write path defers was flagged pending by the display "
-            f"path: {flagged}"
+        written = {
+            i["start_time"]
+            for i in scheduler._select_hardware_intervals(
+                scheduler.tou_intervals, 32, scheduler._programmed_baseline(32 * 15)
+            )
+        }
+        held_back = {i["start_time"] for i in scheduler.tou_intervals} - written
+
+        assert not (flagged & held_back), (
+            "Segment(s) the write path defers were flagged pending by the "
+            f"display path: {sorted(flagged & held_back)}"
+        )
+        assert held_back, (
+            "Nothing was deferred, so this asserts nothing — the 20:00 "
+            "segment should be well past the horizon at 08:00."
         )
 
     def test_lost_segment_on_hardware_is_detected(self, scheduler):
@@ -2038,5 +2068,226 @@ class TestFarFutureSegmentsAreDeferred:
         )
         assert window(60) in programmed, (
             "Nearest far-future window (15:00) should have been kept. "
+            f"Programmed: {sorted(programmed)}"
+        )
+
+
+# ── Issue #589: gate on when a change takes effect, not on when it starts ─────
+#
+# #554 gates eligibility on a segment's *start*, so a window that is already
+# running is eligible on every cycle forever. The DP keeps nudging its *end* as
+# it re-solves — 02:00-05:59, then 06:59, then back — and each nudge is written
+# at once even though it cannot take effect for hours. That is the residual
+# overhead measured on #554: +8 writes against a floor of 4 on a four-window
+# day, all of it end-boundary churn.
+#
+# The rule below generalises #554's rather than replacing it: write when the
+# earliest period at which the programmed table and the plan would execute
+# different modes falls within the horizon. A not-yet-started segment first
+# diverges at its start, so #554's behaviour is unchanged by construction.
+
+
+class TestWritesAreGatedOnWhenAChangeTakesEffect:
+    """Regression for issue #589."""
+
+    def _cycle(self, scheduler, controller, periods, at_period):
+        """One optimization cycle: rebuild the plan, then sync it to hardware."""
+        scheduler.strategic_intents = _grid_charging_at(periods)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=at_period
+        )
+        scheduler.sync_to_hardware(controller, effective_period=at_period)
+
+    def test_moving_the_end_of_a_running_window_issues_no_writes(self, scheduler):
+        """The end moves hours ahead of where it can matter, so it can wait.
+
+        02:00-05:59 is running from 02:00. The marginal 06:00-06:59 hour flips
+        in and out of the plan across the 02:15-03:45 cycles. Every one of
+        those flips first takes effect at 06:00, more than two hours out.
+        """
+        controller = _SimulatingController()
+        short = list(range(8, 24))  # 02:00-05:59
+        long = list(range(8, 28))  # 02:00-06:59
+
+        # 02:00 — the window is running and gets programmed.
+        self._cycle(scheduler, controller, short, 8)
+        writes_after_start = len(controller.calls)
+        assert writes_after_start >= 1, "The running window should be programmed"
+
+        # 02:15 -> 03:45 — the end flips back and forth, always hours away.
+        for at_period, periods in [
+            (9, long),
+            (10, short),
+            (11, long),
+            (12, short),
+            (13, long),
+            (14, short),
+            (15, long),
+        ]:
+            self._cycle(scheduler, controller, periods, at_period)
+
+        assert len(controller.calls) == writes_after_start, (
+            "Rewrote a running window for an end change that cannot take "
+            "effect for hours:\n"
+            + "\n".join(
+                f"  {c['start_time']}-{c['end_time']} {c['batt_mode']} "
+                f"enabled={c['enabled']}"
+                for c in controller.calls[writes_after_start:]
+            )
+        )
+
+    def test_moved_end_reaches_hardware_before_it_takes_effect(self, scheduler):
+        """Deferral must delay the write, never lose it.
+
+        The outcome that matters is the inverter's table at the moment the
+        extension would start running, not which cycle wrote it.
+        """
+        controller = _SimulatingController()
+        long = list(range(8, 28))  # 02:00-06:59
+
+        # 02:00 committed short, then extended and left extended. Cycles run
+        # up to 05:30, half an hour before the extension takes effect.
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+        for at_period in range(9, 23):  # 02:15 -> 05:30
+            self._cycle(scheduler, controller, long, at_period)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert ("02:00", "06:59", "battery_first") in programmed, (
+            "The extended window is not on hardware at 05:30, 30 minutes "
+            f"before its new end must take effect. Programmed: "
+            f"{sorted(programmed)}"
+        )
+
+    def test_a_deferred_end_change_leaves_the_running_window_programmed(
+        self, scheduler
+    ):
+        """Deferring the update must not clear what is already running.
+
+        The plan wants 02:00-06:59 while hardware holds 02:00-05:59. The
+        disable side sees a programmed segment the plan no longer contains
+        verbatim — it must recognise it as the version deferral chose to keep,
+        not clear it and leave the battery unmanaged for the rest of the hour.
+        """
+        controller = _SimulatingController()
+
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+        self._cycle(scheduler, controller, list(range(8, 28)), 9)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert ("02:00", "05:59", "battery_first") in programmed, (
+            "Disabled the running window while deferring its end change. "
+            f"Programmed: {sorted(programmed)}"
+        )
+
+    def test_disabled_hardware_slots_are_not_carried_over_as_programmed(
+        self, scheduler
+    ):
+        """The inverter's empty slots must not become the plan.
+
+        initialize_from_tou_segments seeds active_tou_intervals straight from
+        a hardware read, and a real MIN reports its unused slots as disabled
+        entries rather than omitting them (issue #551). Counted as programmed,
+        one of those is carried over in place of a planned interval whenever
+        that interval's write is deferred — and because the carry-over lands
+        back in active_tou_intervals, it is then its own evidence on the next
+        cycle and never washes out.
+        """
+        scheduler.tou_intervals = []
+        # A disabled 20:00 slot, exactly as the inverter reports an unused one.
+        scheduler.active_tou_intervals = [
+            {
+                "segment_id": 1,
+                "start_time": "20:00",
+                "end_time": "20:59",
+                "batt_mode": "battery_first",
+                "enabled": False,
+            }
+        ]
+        planned = [
+            {
+                "segment_id": 1,
+                "start_time": "20:00",
+                "end_time": "20:59",
+                "batt_mode": "grid_first",
+                "enabled": True,
+            }
+        ]
+
+        # 08:00 — the 20:00 window is far past the horizon, so its write is
+        # deferred and the carry-over path runs.
+        target = scheduler._select_hardware_intervals(
+            planned, 32, scheduler._programmed_baseline(32 * 15)
+        )
+
+        assert not any(not s.get("enabled", True) for s in target), (
+            "A disabled hardware slot was carried into the hardware target: "
+            f"{target}"
+        )
+
+    def test_carried_over_segment_does_not_alias_the_plan(self, scheduler):
+        """A carried-over segment must be this cycle's own dict.
+
+        The carry-over takes segments out of the previous cycle's
+        active_tou_intervals, which at startup are the very dicts in
+        tou_intervals. _assign_hardware_slots then stamps segment_id into
+        whatever the hardware target holds, so an aliased entry rewrites the
+        plan — and anything still holding the old list, such as the debug
+        exporter's TOU snapshot, sees it change underneath.
+
+        Asserted as object identity rather than as a behavioural outcome
+        because the corruption is only observable once a later cycle happens
+        to assign a *different* slot; ownership is the property that has to
+        hold on every cycle, not just those.
+        """
+        controller = _SimulatingController()
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)  # 02:00-05:59
+        previous = scheduler.active_tou_intervals
+
+        # 02:15 — the end moves to 06:59, deferred, so the running version is
+        # carried over into this cycle's target.
+        self._cycle(scheduler, controller, list(range(8, 28)), 9)
+
+        carried = [
+            s for s in scheduler.active_tou_intervals if s["end_time"] == "05:59"
+        ]
+        assert carried, "Expected the running 02:00-05:59 window to be carried over"
+        for segment in carried:
+            assert not any(segment is other for other in previous), (
+                "Carried-over segment is the previous cycle's dict, so slot "
+                "assignment mutates state this cycle does not own"
+            )
+            assert not any(
+                segment is other for other in scheduler.tou_intervals
+            ), "Carried-over segment aliases the plan"
+
+    def test_a_mode_change_inside_a_running_window_is_written_at_once(self, scheduler):
+        """Over-gating guard: divergence *now* is not deferrable.
+
+        A running window whose mode the plan changes diverges at the current
+        period, so the horizon is satisfied immediately and the write must go
+        out on this cycle.
+        """
+        controller = _SimulatingController()
+
+        # 02:00-05:59 battery_first, running.
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+
+        # 02:15 — the plan drops charging from here on. The remaining window
+        # is gone from the plan, so the programmed segment now disagrees with
+        # the plan at 02:15 itself.
+        self._cycle(scheduler, controller, [], 9)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert not programmed, (
+            "A window the plan abandoned mid-run stayed on hardware. "
             f"Programmed: {sorted(programmed)}"
         )

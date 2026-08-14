@@ -76,6 +76,11 @@ from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
 
+# TOU segment times are capped at 23:59 (_groups_to_tou_intervals), so a mode
+# timeline over the segment table is exactly this long on every day, including
+# the DST ones where the schedule itself is not.
+TOU_PERIODS = time_utils.PERIODS_PER_DAY_NORMAL
+
 
 class GrowattMinController(InverterController):
     """Creates Growatt MIN inverter schedules using strategic intents from DP algorithm.
@@ -344,56 +349,216 @@ class GrowattMinController(InverterController):
 
         return intervals
 
+    def _periods_of(self, interval: dict) -> range:
+        """The 15-minute periods an interval covers, end inclusive."""
+        return range(
+            self._time_to_minutes(interval["start_time"]) // 15,
+            self._time_to_minutes(interval["end_time"]) // 15 + 1,
+        )
+
+    def _programmed_baseline(self, current_minutes: int) -> list[dict]:
+        """The segments we believe the inverter is currently running.
+
+        Disabled entries are dropped, not carried: the inverter reports its
+        unused slots as disabled ones, and initialize_from_tou_segments seeds
+        active_tou_intervals straight from that read. Treating them as
+        programmed would let a stale slot's mode be carried over in place of
+        the plan's whenever a write is deferred — and since the carried entry
+        lands back in active_tou_intervals, it would then be its own evidence
+        on the next cycle and never wash out.
+
+        Reading our own committed set rather than the hardware is deliberate:
+        the write path already diffs against a real read (#552) and
+        reconcile_hardware repairs a genuine divergence (#554), so a second
+        read would only add load to the endpoint this gate exists to relieve.
+
+        The write path and the dashboard both need this, and must not compute
+        it two ways — a fix applied to one copy would silently put a segment
+        back in the amber "Pending Write" state (#589).
+        """
+        return [
+            segment
+            for segment in self.active_tou_intervals
+            if segment.get("enabled", True)
+            and self._time_to_minutes(segment["end_time"]) >= current_minutes
+        ]
+
+    def _modes_by_period(self, intervals: list[dict]) -> list[str]:
+        """Which mode each period of the day would execute under `intervals`.
+
+        Periods no interval covers run the inverter default, which is what an
+        absent TOU segment means — so this is directly comparable between the
+        plan and what is programmed, including where one has a segment and the
+        other has none.
+        """
+        modes = ["load_first"] * TOU_PERIODS
+        for interval in intervals:
+            if not interval.get("enabled", True):
+                continue
+            for period in self._periods_of(interval):
+                if 0 <= period < TOU_PERIODS:
+                    modes[period] = interval["batt_mode"]
+        return modes
+
+    def _first_divergence_period(
+        self,
+        interval: dict,
+        plan_modes: list[str],
+        programmed_modes: list[str],
+        overlapping: list[dict],
+        from_period: int,
+    ) -> int | None:
+        """The earliest period at or after `from_period` where the programmed
+        table and the plan would execute different modes, over the stretch of
+        day this interval is responsible for.
+
+        That stretch is the interval's own span plus the span of every
+        programmed segment it overlaps — because the disagreement an interval
+        has to fix is not always inside it. A window whose end moved back from
+        06:59 to 05:59 is identical to what is programmed everywhere it
+        covers; the disagreement is the hour beyond it that the inverter still
+        holds.
+
+        None means the plan and the inverter already agree over that stretch,
+        so there is nothing this interval needs to write.
+        """
+        periods = set(self._periods_of(interval))
+        for segment in overlapping:
+            periods |= set(self._periods_of(segment))
+
+        for period in sorted(periods):
+            if period < from_period or period >= TOU_PERIODS:
+                continue
+            if plan_modes[period] != programmed_modes[period]:
+                return period
+        return None
+
+    def _write_is_due(
+        self,
+        interval: dict,
+        plan_modes: list[str],
+        programmed: list[dict],
+        programmed_modes: list[str],
+        current_period: int,
+    ) -> tuple[bool, list[dict]]:
+        """Is this planned interval's write due on this cycle?
+
+        Due means the plan and the programmed table first disagree, over the
+        stretch this interval is responsible for, no more than
+        WRITE_HORIZON_MINUTES from now — or they do not disagree at all, in
+        which case writing it is a no-op and there is nothing to postpone.
+
+        Also returns the programmed segments this interval overlaps, which is
+        what stays on the inverter while its write waits.
+
+        The write path and the dashboard both ask this question, and they have
+        to answer it the same way: a segment the write path deferred but the
+        dashboard called pending is painted amber with a "Pending Write"
+        warning for a segment that is simply not due yet.
+        """
+        covered = set(self._periods_of(interval))
+        overlapping = [
+            segment
+            for segment in programmed
+            if covered & set(self._periods_of(segment))
+        ]
+        divergence = self._first_divergence_period(
+            interval, plan_modes, programmed_modes, overlapping, current_period
+        )
+        horizon_periods = self.WRITE_HORIZON_MINUTES // 15
+        due = divergence is None or divergence <= current_period + horizon_periods
+        return due, overlapping
+
     def _select_hardware_intervals(
-        self, intervals: list[dict], current_period: int
+        self,
+        intervals: list[dict],
+        current_period: int,
+        previously_programmed: list[dict],
     ) -> list[dict]:
-        """Select the imminent, non-expired intervals for hardware programming.
+        """Select what the inverter's segment table should hold right now.
 
-        Instead of dropping segments permanently, this keeps ALL intervals in
-        tou_intervals but selects only the ones eligible to be programmed right
-        now for writing to the inverter. Two things make an interval ineligible:
+        This returns the *hardware target*: what we intend the inverter to be
+        programmed with on this cycle, which is not simply the slice of the
+        plan that fits. Two things keep a planned interval out of it:
 
-        - it starts more than WRITE_HORIZON_MINUTES from now, or
-        - the first 9 eligible intervals already fill the hardware slots.
+        - the earliest period where the programmed table and the plan would
+          execute different modes is more than WRITE_HORIZON_MINUTES away, or
+        - the first 9 entries already fill the hardware slots.
 
-        As time passes, segments expire and later segments come within the
-        horizon, so ineligible intervals get programmed on a later cycle.
+        Gating on when a change takes *effect* rather than on when a segment
+        *starts* (issue #589) strictly generalises #554's rule. A not-yet-
+        started segment first diverges from an inverter that does not hold it
+        at its own start, so far-future segments defer exactly as before. What
+        it adds is the running window: the DP keeps nudging a live segment's
+        end as it re-solves, and under the start-based rule each nudge was
+        written at once even though it could not take effect for hours. On the
+        four-window day measured for #589 that churn was the whole residual —
+        12 writes against a floor of 4.
 
-        Deferring far-future segments is what stops a marginal period flipping
-        in and out of the plan from rewriting a segment hours before it starts
-        (issue #554). A segment has no effect on the inverter until it starts,
-        so delaying its write cannot change behaviour — while every rewrite
+        Deferring an *update* means the previous version stays on the inverter,
+        so that version is what this returns in its place. active_tou_intervals
+        therefore keeps describing what hardware is meant to hold, which is
+        what the disable path and reconciliation both read it as.
+
+        Writing later than this would break correctness; writing earlier is
+        only ever a bet that the plan will not change again. Every rewrite
         costs a cloud API call, and Growatt 500s on this endpoint under load.
 
         Args:
             intervals: All TOU intervals (may exceed max_intervals).
             current_period: Current 15-minute period (0-95).
+            previously_programmed: What the inverter is believed to hold, from
+                _programmed_baseline. Normally this function's own output from
+                an earlier cycle, so the selection is a recurrence rather than
+                a pure function of the plan — passed in rather than read off
+                self so that is visible at the call site.
 
         Returns:
-            List of up to 9 imminent, non-expired intervals for hardware.
+            List of up to 9 intervals for hardware, each either planned or the
+            already-programmed version of a planned interval.
         """
         # Calculate current time in minutes from the period
         current_hour = current_period // 4
         current_minute = (current_period % 4) * 15
         current_minutes = current_hour * 60 + current_minute
-        horizon_minutes = current_minutes + self.WRITE_HORIZON_MINUTES
 
-        # An already-active interval has start_time <= now, so it is always
-        # inside the horizon and can never be deferred.
+        plan_modes = self._modes_by_period(intervals)
+        programmed_modes = self._modes_by_period(previously_programmed)
+
         non_expired: list[dict] = []
         deferred: list[dict] = []
         for interval in intervals:
             if self._time_to_minutes(interval["end_time"]) < current_minutes:
                 continue
-            if self._time_to_minutes(interval["start_time"]) <= horizon_minutes:
+
+            due, overlapping = self._write_is_due(
+                interval,
+                plan_modes,
+                previously_programmed,
+                programmed_modes,
+                current_period,
+            )
+            if due:
                 non_expired.append(interval)
             else:
                 deferred.append(interval)
+                # Keep what the inverter already holds over this stretch, so
+                # the disable path does not read it as unplanned and clear a
+                # window that is running correctly.
+                #
+                # Copied, not aliased: _assign_hardware_slots stamps
+                # segment_id into whatever this returns, and these dicts are
+                # still owned by the previous cycle's active_tou_intervals —
+                # and, at startup, by tou_intervals as well.
+                for segment in overlapping:
+                    if segment not in non_expired:
+                        non_expired.append(segment.copy())
 
         if deferred:
             logger.info(
-                "TOU DEFERRED: %d interval(s) start more than %d minutes out; "
-                "each is written on the cycle that brings it within range",
+                "TOU DEFERRED: %d interval(s) whose first difference from the "
+                "programmed table is more than %d minutes out; each is written "
+                "on the cycle that brings that difference within range",
                 len(deferred),
                 self.WRITE_HORIZON_MINUTES,
             )
@@ -628,7 +793,11 @@ class GrowattMinController(InverterController):
         for i, interval in enumerate(new_intervals, 1):
             interval["segment_id"] = i
 
-        active = self._select_hardware_intervals(new_intervals, current_period)
+        active = self._select_hardware_intervals(
+            new_intervals,
+            current_period,
+            self._programmed_baseline(current_period * 15),
+        )
 
         logger.info(
             "TOU conversion complete: %d total intervals, %d selected for hardware",
@@ -968,6 +1137,12 @@ class GrowattMinController(InverterController):
         # Sort by start time
         active_intervals.sort(key=lambda x: self._time_to_minutes(x["start_time"]))
 
+        # The same two timelines the write path gates on, built once for the
+        # whole loop rather than per segment.
+        programmed = self._programmed_baseline(current_minutes)
+        plan_modes = self._modes_by_period(self.tou_intervals)
+        programmed_modes = self._modes_by_period(programmed)
+
         result = []
         current_time_minutes = 0  # Start at midnight (00:00)
 
@@ -995,18 +1170,24 @@ class GrowattMinController(InverterController):
                 segment["segment_id"] = len(result) + 1
             is_expired = interval_end_minutes < current_minutes
             segment["is_expired"] = is_expired
-            # A segment past the write horizon is not "pending" — it is simply
-            # not due yet, and will be written on the cycle that brings it
-            # within range (issue #554). Only a segment that should already be
-            # on hardware and is not — the 9-slot overflow this flag was added
-            # for — is worth surfacing, since the dashboard paints it amber and
-            # replaces the mode badge with a "Pending Write" warning.
-            is_deferred = (
-                interval_start_minutes > current_minutes + self.WRITE_HORIZON_MINUTES
+            # A segment whose write is not due is not "pending" — it will be
+            # written on the cycle that brings its first difference from the
+            # programmed table within range (issues #554, #589). Only a segment
+            # that should already be on hardware and is not — the 9-slot
+            # overflow this flag was added for — is worth surfacing, since the
+            # dashboard paints it amber and replaces the mode badge with a
+            # "Pending Write" warning. Asked through the same helper the write
+            # path uses, so the two cannot answer it differently.
+            is_due, _overlapping = self._write_is_due(
+                interval,
+                plan_modes,
+                programmed,
+                programmed_modes,
+                current_minutes // 15,
             )
             segment["pending_write"] = (
                 not is_expired
-                and not is_deferred
+                and is_due
                 and not any(
                     a["start_time"] == interval["start_time"]
                     and a["end_time"] == interval["end_time"]
@@ -1367,9 +1548,15 @@ class GrowattMinController(InverterController):
         # clear it, then write it back once it came within range. Deferral
         # applies to updates only; disables stay prompt, so an unplanned
         # segment is still cleared immediately (issue #551).
+        #
+        # The hardware target is part of that, not merely a subset of the plan:
+        # since #589 a deferred *update* keeps the previously-programmed
+        # version of a planned interval, which the plan no longer contains
+        # verbatim. Diffing against the plan alone would disable a window that
+        # is running correctly, mid-run, to avoid rewriting it.
         planned_tou = [
             interval
-            for interval in self.tou_intervals
+            for interval in [*self.tou_intervals, *self.active_tou_intervals]
             if end_minute(interval) >= effective_minute
         ]
 

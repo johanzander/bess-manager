@@ -691,8 +691,13 @@ from Phase 4** and becomes its own phase; see below.
   imports the orchestrator. Semantics are the tri-state the design asked for
   (`ceiling` / `target` / `absent`). Goldens and the 36-fixture corpus are
   bit-identical; the one intended behaviour change is **#580** — the
-  off-lattice residual-cover candidate is now offered only where a discharge
-  rate is a ceiling. No candidate-space changes beyond that gate.
+  off-lattice residual-cover candidate is now offered only where a
+  LOAD_SUPPORT discharge is actually delivered as `min(plan, actual load)`
+  (native SolaX / SPH / Solis / Huawei lose it; Growatt keeps it in both
+  control modes, because #413 makes VPP LOAD_SUPPORT natively
+  load-following even though its rate register is a forced power — that
+  distinction is a separate declared capability, see design doc §4c). No
+  candidate-space changes beyond that gate.
 
   **Two gate fixes are queued behind 4a and should move with it** — both sit in
   the value-estimator code D1 relocates, so landing either first means measuring

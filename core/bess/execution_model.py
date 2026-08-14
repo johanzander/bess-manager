@@ -25,7 +25,9 @@ work and lands here too; 4a deliberately moves no candidate logic.
 """
 
 import math
+from collections.abc import Mapping
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Any
 
 from .dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
@@ -56,14 +58,22 @@ charge/discharge time slots. Growatt SPH, Solis, Huawei (`period_list`)."""
 # Canonical intent -> battery mode map, shared by every TOU-register platform.
 # `InverterController.INTENT_TO_MODE` is this object (see inverter_controller),
 # so the controllers and the execution model cannot drift apart.
-INTENT_TO_MODE: dict[str, str] = {
-    "GRID_CHARGING": "battery_first",
-    "SOLAR_STORAGE": "load_first",
-    "LOAD_SUPPORT": "load_first",
-    "BATTERY_EXPORT": "grid_first",
-    "SOLAR_EXPORT": "load_first",
-    "IDLE": "load_first",
-}
+#
+# Read-only on purpose. One dict is now shared by the module constant, the
+# controller class attribute and every `PlatformCapabilities` default, so a
+# single in-place write anywhere would silently rewrite the mode vocabulary
+# for every platform at once. A `PlatformCapabilities` carrying a *different*
+# vocabulary passes its own mapping instead of mutating this one.
+INTENT_TO_MODE: Mapping[str, str] = MappingProxyType(
+    {
+        "GRID_CHARGING": "battery_first",
+        "SOLAR_STORAGE": "load_first",
+        "LOAD_SUPPORT": "load_first",
+        "BATTERY_EXPORT": "grid_first",
+        "SOLAR_EXPORT": "load_first",
+        "IDLE": "load_first",
+    }
+)
 
 
 def intra_period_discharge_gate(allowed: bool) -> int:
@@ -116,16 +126,34 @@ class PlatformCapabilities:
         This is the value `InverterController.discharge_resolution_kw()`
         returns; None is kept distinct from a computed value so the DP's
         default and a platform's explicit declaration stay distinguishable.
-      `discharge_rate_semantics` -- one of the three constants above.
+      `discharge_rate_semantics` -- one of the three constants above. This is
+        about the *rate register*: what a number written into it does.
+      `load_support_delivers_exact_cover` -- a different question, with a
+        different answer on one platform: is a planned LOAD_SUPPORT discharge
+        delivered as `min(plan, actual load)`? That is what the off-lattice
+        exact-cover candidate needs (`action_selector._residual_cover_p`).
+        On solax-modbus Growatt in VPP mode the rate register is a forced
+        power -- so `discharge_rate_is_load_following` is False -- but
+        LOAD_SUPPORT never writes a rate there: #413 disables remote control
+        for that intent and hands the period back to the inverter's own
+        load-following self-use (`_intent_to_vpp`). A cover plan is delivered
+        exactly, so this stays True. Native SolaX never received #413 (gap
+        note in `solax_controller._vpp_display_state`), so its LOAD_SUPPORT
+        really is a forced `-(rate% x max_discharge)` and it is False.
       `control_model` -- the controller's `CONTROL_MODEL`, carried so 4b can
         derive the command without reaching back to a controller class.
-      `intent_to_mode` -- the mode vocabulary.
+      `intent_to_mode` -- the mode vocabulary (read-only).
+
+    Instances are not hashable: `intent_to_mode` is a mapping view, so the
+    frozen dataclass's generated `__hash__` raises. Nothing keys on a
+    capability object today; if something needs to, hash the scalars.
     """
 
     discharge_resolution_kw: float | None = None
     discharge_rate_semantics: str = DISCHARGE_RATE_CEILING
+    load_support_delivers_exact_cover: bool = True
     control_model: str = "tou_register"
-    intent_to_mode: dict[str, str] = field(default_factory=lambda: INTENT_TO_MODE)
+    intent_to_mode: Mapping[str, str] = field(default_factory=lambda: INTENT_TO_MODE)
 
     def __post_init__(self) -> None:
         if self.discharge_rate_semantics not in (
@@ -142,10 +170,15 @@ class PlatformCapabilities:
     def discharge_rate_is_load_following(self) -> bool:
         """Does a written discharge rate act as a ceiling on this platform?
 
-        The one question the candidate space asks: an action whose delivery
-        is `min(command, actual load)` is executable exactly as planned, an
-        identical number on a target platform is not. `absent` answers no --
+        This is the question the *rate register* asks, and the one the
+        intra-period discharge gate needs: raising a ceiling to 100 is safe
+        where the firmware throttles it back to the real deficit and forces a
+        full-power discharge where it does not (#324). `absent` answers no --
         there is no rate to interpret as either.
+
+        It is **not** the question the exact-cover candidate asks; see
+        `load_support_delivers_exact_cover`. The two differ on solax-modbus
+        Growatt in VPP mode, and conflating them was caught in review.
         """
         return self.discharge_rate_semantics == DISCHARGE_RATE_CEILING
 
@@ -205,6 +238,9 @@ class PlatformCapabilities:
                 battery_settings.max_discharge_power_kw
             ),
             discharge_rate_semantics=semantics,
+            load_support_delivers_exact_cover=(
+                controller.load_support_delivers_exact_cover
+            ),
             control_model=controller.CONTROL_MODEL,
             intent_to_mode=controller.INTENT_TO_MODE,
         )

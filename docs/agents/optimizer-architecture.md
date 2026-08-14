@@ -157,7 +157,19 @@ object from the live controller and passes it to
 place of the old `discharge_resolution_kw` kwarg. Candidates are **not yet**
 commands — that is 4b (discharge) and 4c (charge). The first thing the
 capability buys: the off-lattice residual-cover candidate is now offered
-only where a rate is a ceiling (#580).
+only where a planned LOAD_SUPPORT discharge is actually delivered as
+`min(plan, actual load)` (#580).
+
+**Two questions, not one — do not collapse them.** "Is the rate register a
+ceiling" (`discharge_rate_is_load_following`, what the intra-period gate
+needs, since it writes a rate) and "is a load-support discharge delivered
+load-following" (`load_support_delivers_exact_cover`, what the cover
+candidate needs) have different answers on solax-modbus Growatt in VPP
+mode: the register is a forced power, but #413 makes LOAD_SUPPORT write no
+rate at all and release the period to the inverter's own self-use. Each is
+declared per controller and read through `PlatformCapabilities`; a caller
+reading either fact off a controller directly is the drift this phase
+removed.
 
 Consequences:
 

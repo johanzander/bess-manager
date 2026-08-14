@@ -55,6 +55,10 @@ class HuaweiController(InverterController):
     supports_charge_rate_control: ClassVar[bool] = False
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    # A discharge period is a time slot, not a rate -- there is no per-period
+    # control that could deliver a partial load cover as planned.
+    load_support_delivers_exact_cover: ClassVar[bool] = False
+
     CONTROL_MODEL: ClassVar[str] = "period_list"
 
     MAX_TOU_PERIODS = 14

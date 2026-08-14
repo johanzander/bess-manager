@@ -112,6 +112,22 @@ class InverterController(ABC):
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
 
+    # Whether a planned LOAD_SUPPORT discharge is delivered as
+    # min(plan, actual load). Related to the flag above but NOT the same
+    # question, and the answers differ on solax_modbus VPP mode: there the
+    # rate register is a forced power (flag above False), yet LOAD_SUPPORT
+    # writes no rate at all -- #413 disables remote control for that intent
+    # and lets the inverter's own load-following self-use run the period, so
+    # a cover plan is delivered exactly (this flag True). True by default
+    # (TOU-register control, where the rate is a ceiling); False on native
+    # SolaX, which never received #413, and on the period-list platforms,
+    # which have no per-period control to deliver a partial cover with.
+    # Read by the optimizer through
+    # execution_model.PlatformCapabilities.load_support_delivers_exact_cover
+    # to decide whether the off-lattice exact-cover candidate (#466) is
+    # executable here (#580).
+    load_support_delivers_exact_cover: ClassVar[bool] = True
+
     # Whether the default _write_period_to_hardware() should skip re-sending
     # a register (grid_charge/discharge_rate) that already matches the last
     # value it successfully wrote (#402: unguarded resends from the 15-min

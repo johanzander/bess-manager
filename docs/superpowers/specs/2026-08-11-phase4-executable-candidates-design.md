@@ -373,11 +373,11 @@ measured delta readable.
 graph) holds:
 
 - `PlatformCapabilities` (D2) — `discharge_resolution_kw`,
-  `discharge_rate_semantics`, `control_model`, `intent_to_mode`, plus
-  `discharge_rate_step_kw` / `min_discharge_gear_index` /
-  `min_discharge_gear_kw`. The min-gear derivation
-  (`floor(POWER_CLASSIFICATION_THRESHOLD_KW / step) + 1`, the #282 rule) was
-  restated in three places before; it now has one home.
+  `discharge_rate_semantics`, `load_support_delivers_exact_cover`,
+  `control_model`, `intent_to_mode`, plus `discharge_rate_step_kw` /
+  `min_discharge_gear_index` / `min_discharge_gear_kw`. The min-gear
+  derivation (`floor(POWER_CLASSIFICATION_THRESHOLD_KW / step) + 1`, the
+  #282 rule) was restated in three places before; it now has one home.
 - `intra_period_discharge_gate`, relocated out of `battery_system_manager`.
   Both the orchestrator and `simulation/inverter_simulator` now import it
   from here, so the simulator no longer imports the orchestrator at all.
@@ -390,7 +390,31 @@ graph) holds:
 `period_list` → `absent` (there is no per-period rate to interpret),
 otherwise load-following → `ceiling`, else `target`.
 `discharge_rate_is_load_following` survives as a property meaning exactly
-"is it a ceiling", which is the only question the candidate space asks.
+"is it a ceiling" — the question the *intra-period gate* asks, since that
+gate writes a rate.
+
+**But that is not the question the cover candidate asks, and the design's
+own platform table said so.** "Growatt VPP — no rate for load support since
+#413, natively load-following" is the row that breaks the equivalence: on
+solax-modbus Growatt in VPP mode the rate register is a forced power
+(`ceiling` is False), yet LOAD_SUPPORT writes no rate at all — #413 disables
+remote control for that intent and hands the period to the inverter's own
+self-use, so a planned partial cover *is* delivered exactly. Gating the
+cover candidate on the register's semantics (the first implementation of
+4a, caught in review) would have withdrawn #466's sunrise-crossover saving
+from that platform for no fidelity gain. So the capability carries a second,
+separately-declared fact — `load_support_delivers_exact_cover`, declared on
+the controllers next to `discharge_rate_is_load_following` — and
+`_residual_cover_p` gates on that. True on TOU-register platforms and on
+solax-modbus in both modes; False on native SolaX (never received #413) and
+on the period-list platforms.
+
+The same review found Solis declaring `CONTROL_MODEL = "period_list"` while
+inheriting the base class's `discharge_rate_is_load_following = True` — the
+planner and the hardware-write path reading one platform two ways, which is
+precisely what this phase exists to end. Solis now declares both explicitly,
+and `BatterySystemManager` reads *both* its planning and its apply-time gate
+through one `platform_capabilities` property.
 
 **Plumbing.** `capabilities` replaces `discharge_resolution_kw` along the
 whole path — `battery_system_manager` → `optimize_battery_schedule` →
@@ -400,11 +424,14 @@ the same. One object, one construction site, per the plan's warning.
 
 **Behaviour.** The 36-fixture corpus and every golden are bit-identical
 (`pytest -m slow`: 538 passed, 5 skipped). The one intended change is #580:
-`_residual_cover_p` returns `None` where the rate is not a ceiling, so
-SolaX native / solax-modbus VPP / SPH / Solis / Huawei no longer plan an
-off-lattice delivery they cannot produce. Pinned by a plan-level test
-(the action and the resulting grid import, not a candidate list) that was
-watched fail with the gate removed.
+`_residual_cover_p` returns `None` where a LOAD_SUPPORT discharge is not
+delivered as `min(plan, actual load)`, so **SolaX native / SPH / Solis /
+Huawei** no longer plan an off-lattice delivery they cannot produce.
+solax-modbus Growatt keeps the candidate in both modes, per the #413
+argument above. Pinned by plan-level tests (the action and the resulting
+grid import, not a candidate list), each watched fail — the #580 pair with
+the gate removed, the VPP-mode pin with the gate keyed on the register's
+semantics instead.
 
 **What 4a did NOT absorb, deliberately: #579 and #571.** The parent plan
 asks 4a to take `_value_slope_below` and the new public

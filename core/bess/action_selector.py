@@ -164,20 +164,26 @@ def _residual_cover_p(
     there, and this helper must not widen #466's scope beyond the
     unrepresentable gap.
 
-    **Only on platforms where a discharge rate is a ceiling** (#580, Phase
-    4a). The paragraph above is the whole argument for this candidate: the
-    plan is the *delivery*, and it is exact because the firmware delivers
-    `min(actual load, commanded ceiling)`. Where the rate is a target
-    (SolaX native, solax-modbus VPP mode) the hardware discharges the
-    commanded power whatever the load does, so a cover plan is a delivery
-    that platform will not produce -- the #282 shape. Where there is no
-    per-period rate at all (Growatt SPH, Solis, Huawei) there is nothing to
-    command. Before 4a this candidate was added unconditionally, which is
-    what #580 records; the capability now reaches the DP, so the candidate
-    is gated on it here -- once, where the candidate is defined, rather than
-    at each of the four call sites.
+    **Only where a LOAD_SUPPORT discharge is actually delivered as
+    `min(plan, actual load)`** (#580, Phase 4a). The paragraph above is the
+    whole argument for this candidate: the plan is the *delivery*, and it is
+    exact only if the hardware throttles to the real load. On native SolaX
+    LOAD_SUPPORT is a forced `-(rate% x max_discharge)`, and on the
+    period-list platforms (Growatt SPH, Solis, Huawei) there is no
+    per-period control at all -- planning a partial cover there is planning
+    a delivery that will not happen, the #282 shape. Before 4a the candidate
+    was added unconditionally, which is what #580 records.
+
+    Note this is `load_support_delivers_exact_cover`, **not**
+    `discharge_rate_is_load_following`: on solax-modbus Growatt in VPP mode
+    the rate register is a forced power, but LOAD_SUPPORT writes no rate --
+    #413 releases the period to the inverter's own load-following self-use,
+    so the cover is delivered exactly and the candidate belongs there.
+    Gating on the register's semantics would have silently withdrawn #466's
+    sunrise-crossover saving from that platform. Gated once, where the
+    candidate is defined, rather than at each of the four call sites.
     """
-    if not capabilities.discharge_rate_is_load_following:
+    if not capabilities.load_support_delivers_exact_cover:
         return None
     rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     residual_p = (home_consumption - solar_production) / dt

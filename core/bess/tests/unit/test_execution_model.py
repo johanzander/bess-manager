@@ -141,18 +141,24 @@ class TestGateRelocation:
         from core.bess import execution_model
 
         source = pathlib.Path(execution_model.__file__).read_text()
-        imported: set[str] = set()
+        # Only in-package imports matter -- stdlib cannot create a cycle.
+        in_package: set[str] = set()
         for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.ImportFrom) and node.module:
-                imported.add(node.module)
+            if isinstance(node, ast.ImportFrom):
+                if node.level:  # relative: `from .settings import ...`
+                    in_package.add(node.module or "")
+                elif node.module and node.module.startswith("core.bess"):
+                    in_package.add(node.module.removeprefix("core.bess."))
             elif isinstance(node, ast.Import):
-                imported.update(alias.name for alias in node.names)
-        bess_imports = {m for m in imported if m in ("settings", "dp_constants")}
-        assert imported - bess_imports <= {
-            "math",
-            "dataclasses",
-            "typing",
-        }, f"execution_model must stay a leaf; it imports {imported}"
+                in_package.update(
+                    alias.name.removeprefix("core.bess.")
+                    for alias in node.names
+                    if alias.name.startswith("core.bess")
+                )
+        assert in_package <= {"settings", "dp_constants"}, (
+            "execution_model must stay a leaf (D1) -- it may only import the "
+            f"two leaf modules, but imports {sorted(in_package)}"
+        )
 
 
 # ── What the capability changes in the plan (#580) ───────────────────────────
@@ -193,14 +199,19 @@ def test_cover_candidate_is_planned_where_the_rate_is_a_ceiling():
 
 
 @pytest.mark.parametrize("semantics", [DISCHARGE_RATE_TARGET, DISCHARGE_RATE_ABSENT])
-def test_cover_candidate_is_not_planned_where_the_rate_is_not_a_ceiling(semantics):
-    """#580: on SolaX native / solax-modbus VPP the number is a forced power,
-    and on SPH / Solis / Huawei there is no per-period rate at all. Planning
-    an off-lattice delivery there is planning something the hardware will not
-    do -- the #282 shape. Before 4a the candidate was added unconditionally,
-    so this scenario planned the identical cover discharge on every platform.
+def test_cover_candidate_is_not_planned_where_the_cover_is_not_delivered(semantics):
+    """#580: on SolaX native the number is a forced power, and on SPH / Solis
+    / Huawei there is no per-period rate at all. Planning an off-lattice
+    delivery there is planning something the hardware will not do -- the #282
+    shape. Before 4a the candidate was added unconditionally, so this scenario
+    planned the identical cover discharge on every platform.
     """
-    plan = _plan_with(PlatformCapabilities(discharge_rate_semantics=semantics))
+    plan = _plan_with(
+        PlatformCapabilities(
+            discharge_rate_semantics=semantics,
+            load_support_delivers_exact_cover=False,
+        )
+    )
     first = plan.period_data[0]
     assert first.decision.battery_action == pytest.approx(0.0, abs=1e-9), (
         f"platform cannot execute an off-lattice cover, but the plan chose "
@@ -209,3 +220,48 @@ def test_cover_candidate_is_not_planned_where_the_rate_is_not_a_ceiling(semantic
     assert (
         first.energy.grid_imported > 0.0
     ), "with no executable cover the house deficit must be imported"
+
+
+def test_cover_candidate_survives_where_load_support_load_follows_without_a_ceiling():
+    """solax-modbus Growatt in VPP mode: the rate register is a forced power,
+    but LOAD_SUPPORT writes no rate at all -- #413 disables remote control for
+    that intent and hands the period to the inverter's own load-following
+    self-use, so the cover IS delivered exactly.
+
+    Gating the candidate on the *register's* semantics would silently withdraw
+    #466's sunrise-crossover saving from that platform for no fidelity gain,
+    which is why the two questions are separate capabilities.
+    """
+    caps = PlatformCapabilities(
+        discharge_rate_semantics=DISCHARGE_RATE_TARGET,
+        load_support_delivers_exact_cover=True,
+        control_model="vpp_power",
+    )
+    assert caps.discharge_rate_is_load_following is False
+
+    plan = _plan_with(caps)
+    first = plan.period_data[0]
+    assert first.decision.battery_action < 0, (
+        "VPP-mode LOAD_SUPPORT load-follows natively (#413) -- the cover "
+        f"candidate must survive, got {first.decision.battery_action} kW"
+    )
+    assert first.energy.grid_imported == pytest.approx(0.0, abs=1e-9)
+
+
+def test_solax_modbus_vpp_declares_the_two_capabilities_differently():
+    """The platform that makes the distinction load-bearing, read off the real
+    controller rather than constructed by hand."""
+    caps = PlatformCapabilities.from_controller(
+        SolaxModbusGrowattController(_settings(), control_mode="vpp"), _settings()
+    )
+    assert caps.discharge_rate_is_load_following is False  # forced vpp_power
+    assert caps.load_support_delivers_exact_cover is True  # #413 release
+
+
+def test_intent_to_mode_cannot_be_mutated_through_a_capability():
+    """One dict is shared by the module constant, InverterController and every
+    capability default -- an in-place write anywhere would rewrite the mode
+    vocabulary for every platform at once."""
+    caps = PlatformCapabilities()
+    with pytest.raises(TypeError):
+        caps.intent_to_mode["IDLE"] = "grid_first"  # type: ignore[index]

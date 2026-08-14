@@ -7,12 +7,13 @@ survives only as optional cleanup. Phase 4's plan entry requires a design doc
 before code and says `rules.md`'s new-class approval applies — the modules
 named in D1 and D2 carry that approval.
 
-**4a is the prerequisite for everything else, including the #352 fix.** The
-fix is an exact-cover candidate gated on the platform's load-following
-capability, and that capability does not currently reach the optimizer at all —
-which is 4a's job. The #352 reproduction fixture and the 22/16 reconciliation
-landed 2026-08-13 (§2). 4d has been removed from Phase 4 entirely and is now
-Phase 5 in the parent plan.
+**4a is the prerequisite for everything else, including the #352 fix**, and
+**the beta gate is cleared (2026-08-14, §7)** — so the sequence is 4a then 4b,
+with nothing else to wait for. The #352 fix is not a separate patch: it is 4b's
+discharge half, gated on the load-following capability that does not currently
+reach the optimizer at all, which is 4a's job. The reproduction fixture and the
+22/16 reconciliation landed 2026-08-13 (§2). 4d has been removed from Phase 4
+entirely and is now Phase 5 in the parent plan.
 
 **Reading order for anyone picking this up:** §2's root-cause subsection first,
 then §5 for the history of how the wrong answer was reached and measured — the
@@ -138,6 +139,36 @@ ceiling, so commanding the step above (19% = 2.85 kW) delivers
 `min(2.85, 2.80) = 2.80` exactly. That is the same delivery-planning argument
 `_residual_cover_p` already makes below the lattice, simply not applied above
 it — a P3 gap, not a robustness problem.
+
+**How to express that — owner's formulation, 2026-08-14, and it is the better
+one.** The first draft added an off-lattice candidate at the deficit (2.80 kW)
+and planned the *delivery*. Keep the candidates on the hardware lattice
+instead — 2.85 kW **is** a real command, 19% — and make the candidate's
+**flows** honour what that command does: under a ceiling it delivers
+`min(2.85, deficit)` and exports nothing. Same delivered energy, same command
+written, but two properties the off-lattice version does not have:
+
+- **No conversion step, so no rounding failure.** An off-lattice planned power
+  must be scaled back to an integer percent by `_scale_to_percent`, which
+  rounds to *nearest* — and measured over the corpus, **39% of house deficits
+  (539 of 1377) round DOWN**, where the commanded ceiling under-delivers the
+  plan. The off-lattice version therefore needs a second fix (round ceilings
+  up, safe because a ceiling never delivers more than the load) and only works
+  for the other 61% without it. In the lattice-preserving version the plan *is*
+  the percent: the failure mode does not exist. Measured: off-lattice cover
+  under today's nearest-rounding reaches 1793.26 / 25 committing; with
+  round-up, or with the lattice-preserving form, 1792.99 / 19.
+- **It explains #497's band rather than working around it.** 2.85/3.00/3.15 are
+  excluded today because the flow model assumes each dribbles a sub-resolution
+  export. They only do that if the number is a *target*. With mode-aware flows
+  they are "cover the house exactly" and the exclusion is unnecessary **on
+  ceiling platforms** (it still earns its keep on target platforms, where the
+  sub-resolution export is real).
+
+This is P3 as written — "candidate value is computed by simulating that
+command's response to the forecast" — so the #352 fix and 4b's discharge half
+are the same piece of work, not a patch now and a rewrite later. It still
+requires the platform capability (below), so it still sits behind 4a.
 
 **Measured, all four worlds, DP re-optimising over the 37-fixture corpus:**
 
@@ -453,13 +484,23 @@ body; a phase that cannot regenerate them has not measured its delta.
 
 ## 7. Sequencing
 
-**After the beta, not before.** Phases 1–3 were parity-preserving: the goldens
-were captured at Phase 1 and every later change left all 36 fixtures'
-actions and SoE bit-identical. 4b/4c deliberately break that. The beta's job is
-proving 25 closed reporter fixes on real hardware; a candidate-space change
-that moves most plans would make any report from those reporters ambiguous
-between "the audited refactor regressed something" and "the new candidate space
-chose differently".
+**Beta gate CLEARED 2026-08-14 (owner).** The beta has been running without
+reported issues, so its job — proving 25 closed reporter fixes on real
+hardware — is done, and the owner is releasing it to `main`. Phase 4 no longer
+waits on it.
+
+The original reasoning, kept because it is the right test to re-apply if this
+ever recurs: Phases 1–3 were parity-preserving, with all fixtures' actions and
+SoE bit-identical from Phase 1's goldens onward. 4b/4c deliberately break that,
+and a candidate-space change that moves most plans would have made any report
+from those reporters ambiguous between "the audited refactor regressed
+something" and "the new candidate space chose differently". That ambiguity is
+what the gate existed to prevent; with the beta clean and released, there is
+nothing left to confound.
+
+One thing the clearing does not change: 4b still moves plans, so it re-pins
+goldens and `expected_results` deliberately, stating measured deltas (see
+"Expected golden churn").
 
 Work that can proceed now, all non-behavioural: 4a (whose two decisions are
 approved). The #352 reproduction fixture and the 22/16 reconciliation are

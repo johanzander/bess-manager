@@ -92,7 +92,7 @@ confirm the criterion *could* have returned non-zero.
 | 1 | the mirrored-selector bug class (#236-shape, `DISCHARGE_LATTICE_PCT_EPS`-shape) | 3 | **MERGED — PR #521** |
 | 2 | #466 evening near-ties, #393; makes #485 trivial; subsumes #466/#510 tie-break code (crossover moved to Phase 4 — #517) | 1, 3 | **MERGED — PR #525** (P6 rider *not* included — moved to deferred, see below) |
 | 3 | #459-class; collapses the duplicated planning-side flow derivations into one record ("six" was unmeasured — census in the Phase 3 section). **No longer closes #497** — #511 already did | 2 | **MERGED — PR #534** (re-scoped 2026-08-10). Closeable: all five follow-ups below are non-blocking, and #536 is explicitly "does not block a release" |
-| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; **4a is now the prerequisite for the #352 fix** (the cover candidate needs the load-following capability, which never reaches the DP); 4b/4c behind the beta |
+| 4 | #352 **Shape B only** (see Phase 4 section — Shape A was #520/#524), #354 (parked — right problem, wrong layer), #466 crossover regression cover, #511-class recurrence, #320 regression cover | 2 | **#520/#524 gate CLEARED. D1/D2/D4 approved 2026-08-11**; **4a is now the prerequisite for the #352 fix** (the fix needs the load-following capability, which never reaches the DP). **Beta gate cleared 2026-08-14** — beta ran clean and is being released to main; 4b/4c wait only on 4a |
 | 5 | intent-as-input (was Phase 4d — split out 2026-08-11; 25 backend modules + 10 frontend files + the goldens) | 2, 3 | after 4b/4c |
 | prerequisite | #526 (live latent defect; blocked #520 → #524 → Phase 4's R==P claim) | 2 | **MERGED — PR #530** |
 | parallel | #487 (input quality — premise check first, independent) | 1 input | **PARKED** — premise not confirmed, no fix built |
@@ -666,7 +666,10 @@ Two things gate it now, neither a code dependency:
    worked around; adding a second is what `rules.md`'s workaround check
    forbids. The remedy is a leaf execution module both sides depend on, which
    means relocating the gate — hence approval.
-2. **Sequencing behind the beta.** Phases 1–3 were parity-preserving: the
+2. **Sequencing behind the beta — CLEARED 2026-08-14 (owner).** The beta ran
+   without reported issues and is being released to `main`, so this gate is
+   spent; 4b/4c wait only on 4a. Original reasoning, kept as the test to
+   re-apply if it recurs: Phases 1–3 were parity-preserving: the
    goldens were captured at Phase 1 and every later change left all 36
    fixtures' actions and SoE bit-identical. 4b/4c deliberately break that. The
    beta exists to prove 25 closed reporter fixes on real hardware, and a

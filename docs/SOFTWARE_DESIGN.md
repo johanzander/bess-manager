@@ -365,6 +365,11 @@ for the full VPP-mode design (issue #355).
 3. Enforce hardware constraints: max 9 TOU segments, chronological order, no overlaps
 4. Preserve past intervals to minimize unnecessary inverter writes
 5. Diff against segments read fresh from the inverter on every write cycle, never against an in-memory model — a model seeded once at startup drifts from hardware, producing writes that duplicate live segments (rejected by the vendor API) and leaving dropped segments enabled on the battery ([#551](https://github.com/johanzander/bess-manager/issues/551))
+6. Only write a segment once its start is within `GrowattMinController.WRITE_HORIZON_MINUTES` (45 min). A segment has no effect until it starts, so writing it earlier is pure churn: a marginal period crossing the economic boundary back and forth rewrote the same far-future segment on every cycle. Deferral applies to *updates* only — an unplanned segment is still disabled promptly, and a pending write is retried each cycle, so a segment is eligible on four cycles with three attempts landing strictly before it takes effect ([#554](https://github.com/johanzander/bess-manager/issues/554))
+
+Because at most `floor(45/15) + 1 = 4` segments can be within the horizon at once, no realistic plan now reaches the 9-slot limit. The cap in step 3 remains enforced as the inverter's hard contract (`segment_id` must be 1..9), but the horizon is what binds first.
+
+The other half of the churn came from segments already running. The plan is rebuilt from the current period each cycle, which used to truncate an in-progress segment's `start_time` forward to "now" — renaming it every 15 minutes, so the differential update disabled and re-wrote it each time. `_group_periods_by_mode` now reports the group covering `current_period` from its *true* start, keeping a running segment byte-identical across cycles. A stable two-hour window costs 2 writes (one to program, one to clear on expiry) rather than 16.
 
 ## Configuration and Settings
 

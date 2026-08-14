@@ -36,8 +36,8 @@ from core.bess.tests.helpers import _scenario_inputs  # noqa: E402
 from core.bess.tests.unit.golden_capture import DATA_DIR, fixture_names  # noqa: E402
 
 BAND = (0.1, 0.5)  # the export band #511's executability filter does not reach
-D_REF_KW = 2.0  # D3's proposed reference load excursion
 REPRO = ("regression_2026_08_12_202906", 99)  # the #352 reproduction period
+LATTICE_STEP_FRACTION = 0.01  # one percent-lattice gear -- "already flat out"
 
 
 def collect() -> list[dict]:
@@ -66,6 +66,7 @@ def collect() -> list[dict]:
                     "home": e.home_consumption,
                     "deficit": max(0.0, e.home_consumption - e.solar_production),
                     "headroom": max(0.0, max_discharge_kwh - e.battery_discharged),
+                    "max_discharge": max_discharge_kwh,
                     "benefit": sell[i] * e.battery_to_grid,
                     "buy": buy[i],
                     "sell": sell[i],
@@ -74,17 +75,20 @@ def collect() -> list[dict]:
     return rows
 
 
-def admits(row: dict, d_ref_kw: float) -> bool:
-    """D3: the export revenue must cover the import the commitment exposes the
-    house to at a reference load excursion of `d_ref_kw`.
+def admits(row: dict) -> bool:
+    """D3 as decided 2026-08-14: is the period MOSTLY ABOUT EXPORTING?
 
-    `headroom == 0` (a full-rate export) gives harm 0 and is always admitted --
-    there is no load-following behaviour left to protect, so demoting it would
-    forgo revenue for nothing. That is #354's live-E2E finding, arriving as
-    arithmetic rather than as a special case.
+    An export command commits the inverter for the whole period, so it is
+    admissible only when the export is the point of the period rather than a
+    by-product of covering the house -- or when the battery is already flat
+    out, where there is no load-following capacity left to protect and
+    demoting would forgo revenue for nothing (#354's live-E2E lesson).
+
+    No invented constants: "mostly" is the 50/50 split, and "flat out" is the
+    top of the platform's own percent lattice.
     """
-    harm = row["buy"] * min(d_ref_kw * row["dt"], row["headroom"])
-    return row["benefit"] >= harm
+    flat_out = row["headroom"] <= LATTICE_STEP_FRACTION * row["max_discharge"]
+    return row["export"] > row["battery_to_home"] or flat_out
 
 
 def main() -> None:
@@ -119,35 +123,37 @@ def main() -> None:
     print("  min(discharged, home - solar), so any export requires discharge")
     print("  above the deficit. A zero there measures an identity.")
 
-    print(f"\n=== section 5: D3 predicate sweep (proposed D_ref = {D_REF_KW} kW) ===")
+    print("\n=== section 5: D3, the decided rule ===")
+    rejected = [r for r in rows if not admits(r)]
     total_rev = sum(r["benefit"] for r in rows)
+    total_headroom = sum(r["headroom"] for r in rows)
+    print(f"  refused {len(rejected)} of {n} grid_first commands")
     print(
-        f"{'D_ref':<26} {'rejected':>9} {'revenue given up':>18} {'headroom kept':>15}"
+        f"  export revenue refused : {sum(r['benefit'] for r in rejected):7.2f} SEK "
+        f"of {total_rev:.2f} ({sum(r['benefit'] for r in rejected) / total_rev:.1%})"
     )
-    for d_ref in (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 25 * 230 * 3 / 1000):
-        rejected = [r for r in rows if not admits(r, d_ref)]
-        given_up = sum(r["benefit"] for r in rejected)
-        label = f"{d_ref:.1f} kW" + (" (house fuse)" if d_ref > 10 else "")
-        print(
-            f"{label:<26} {len(rejected):>4} /{n:<4} "
-            f"{given_up:>10.2f} SEK ({given_up / total_rev:>4.1%}) "
-            f"{sum(r['headroom'] for r in rejected):>12.1f} kWh"
-        )
-
-    # #354's rule, for the subsumption claim
-    rejects_354 = {
-        (r["fixture"], r["period"])
-        for r in rows
-        if not (
-            r["export"] > 0.1
-            and (r["export"] > r["battery_to_home"] or r["export"] > r["headroom"])
-        )
-    }
-    rejects_d3 = {(r["fixture"], r["period"]) for r in rows if not admits(r, D_REF_KW)}
     print(
-        f"\n#354 two-sided rejects {len(rejects_354)}; D3 rejects {len(rejects_d3)}; "
-        f"#354-only {len(rejects_354 - rejects_d3)} "
-        f"(0 means D3 strictly subsumes it)"
+        f"  headroom no longer committed: "
+        f"{sum(r['headroom'] for r in rejected):7.1f} kWh of {total_headroom:.1f}"
+    )
+    print("\n  NOTE: revenue refused is an UPPER BOUND counted on today's plan.")
+    print("  Under 4b the DP re-optimises and recovers most of it -- measured")
+    print("  +3.67 SEK corpus-wide (0.14% of savings) in the spike behind D3,")
+    print("  which is the figure the design doc records. Re-measure that")
+    print("  properly once the filter exists in the selector.")
+
+    # The exemption is load-bearing: quantify what bare dominance would cost.
+    bare = [r for r in rows if not (r["export"] > r["battery_to_home"])]
+    full_rate = [
+        r for r in bare if r["headroom"] <= LATTICE_STEP_FRACTION * r["max_discharge"]
+    ]
+    print(
+        f"\n  without the flat-out exemption it would also refuse "
+        f"{len(full_rate)} full-rate periods"
+    )
+    print(
+        f"  carrying {sum(r['benefit'] for r in full_rate):.1f} SEK -- pure loss, "
+        f"since a full-rate command has no headroom to protect"
     )
 
     repro = [r for r in rows if (r["fixture"], r["period"]) == REPRO]
@@ -157,16 +163,13 @@ def main() -> None:
             "period -- the acceptance criterion it anchors needs re-deriving"
         )
     r = repro[0]
-    harm = r["buy"] * min(D_REF_KW * r["dt"], r["headroom"])
+    share = r["export"] / (r["export"] + r["battery_to_home"])
     print(f"\n=== #352 reproduction: {REPRO[0]} p{REPRO[1]} ===")
     print(
-        f"  export {r['export']:.3f} kWh, home take {r['battery_to_home']:.3f} kWh, "
-        f"headroom {r['headroom']:.3f} kWh"
+        f"  {r['export']:.3f} kWh to the grid vs {r['battery_to_home']:.3f} kWh to "
+        f"the house -- export share {share:.0%}, headroom {r['headroom']:.3f} kWh"
     )
-    print(
-        f"  benefit {r['benefit']:.3f} SEK vs harm {harm:.3f} SEK -> "
-        f"{'ADMIT' if admits(r, D_REF_KW) else 'REJECT'}"
-    )
+    print(f"  -> {'ADMIT' if admits(r) else 'REJECT'} (must be REJECT)")
 
 
 if __name__ == "__main__":

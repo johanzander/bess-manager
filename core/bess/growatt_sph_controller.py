@@ -45,6 +45,10 @@ class GrowattSphController(InverterController):
     # they don't silently reproduce #324's forced-discharge failure mode.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    # Same reason as the flag above, one level up: a discharge period is a
+    # time slot with no rate, so a partial load cover cannot be commanded.
+    load_support_delivers_exact_cover: ClassVar[bool] = False
+
     CONTROL_MODEL: ClassVar[str] = "period_list"
 
     MAX_CHARGE_PERIODS = 3

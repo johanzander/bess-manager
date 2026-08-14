@@ -17,9 +17,10 @@ and `pwl_window_dp._pwl_candidate_values_at` -- keep their own numpy
 evaluators for speed (P1 permits this explicitly: they estimate V over a
 whole state grid at once and never emit an action). They consume this
 module's candidate-space definitions -- `_residual_cover_p`,
-`_discharge_is_unexecutable`, `_discharge_rate_step_kw` -- rather than
-restating them, so the action space itself has one definition even where
-the evaluation loop does not.
+`_discharge_is_unexecutable` -- and the platform lattice from
+`execution_model.PlatformCapabilities` rather than restating them, so the
+action space itself has one definition even where the evaluation loop does
+not.
 """
 
 from collections.abc import Callable
@@ -40,24 +41,12 @@ from core.bess.dp_constants import (
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
+from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.settings import BatterySettings
 from core.bess.strategic_intent import FLOW_NOISE_FLOOR_KWH
 from core.bess.tie_detection import epsilon_for_period
 from core.bess.tie_policy import TieContext, apply_tie_policy
-
-
-def _discharge_rate_step_kw(
-    discharge_resolution_kw: float | None, battery_settings: BatterySettings
-) -> float:
-    """Discharge percent-grid step (kW): the hardware executes discharge as an
-    integer percent of max_discharge_power_kw unless a finer resolution is
-    configured -- the lattice _discharge_candidates enumerates."""
-    return (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
 
 
 def _discharge_is_unexecutable(
@@ -127,7 +116,8 @@ def _residual_cover_p(
     home_consumption: float,
     solar_production: float,
     dt: float,
-    rate_step: float,
+    capabilities: PlatformCapabilities,
+    battery_settings: BatterySettings,
 ) -> float | None:
     """Exact net-load residual as a discharge power (kW, positive), when the
     percent lattice cannot represent covering it -- else None (#466
@@ -173,11 +163,31 @@ def _residual_cover_p(
     percent grid already contains candidates at or below the residual
     there, and this helper must not widen #466's scope beyond the
     unrepresentable gap.
+
+    **Only where a LOAD_SUPPORT discharge is actually delivered as
+    `min(plan, actual load)`** (#580, Phase 4a). The paragraph above is the
+    whole argument for this candidate: the plan is the *delivery*, and it is
+    exact only if the hardware throttles to the real load. On native SolaX
+    LOAD_SUPPORT is a forced `-(rate% x max_discharge)`, and on the
+    period-list platforms (Growatt SPH, Solis, Huawei) there is no
+    per-period control at all -- planning a partial cover there is planning
+    a delivery that will not happen, the #282 shape. Before 4a the candidate
+    was added unconditionally, which is what #580 records.
+
+    Note this is `load_support_delivers_exact_cover`, **not**
+    `discharge_rate_is_load_following`: on solax-modbus Growatt in VPP mode
+    the rate register is a forced power, but LOAD_SUPPORT writes no rate --
+    #413 releases the period to the inverter's own load-following self-use,
+    so the cover is delivered exactly and the candidate belongs there.
+    Gating on the register's semantics would have silently withdrawn #466's
+    sunrise-crossover saving from that platform. Gated once, where the
+    candidate is defined, rather than at each of the four call sites.
     """
+    if not capabilities.load_support_delivers_exact_cover:
+        return None
+    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     residual_p = (home_consumption - solar_production) / dt
-    min_lattice_p = (
-        int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
-    ) * rate_step
+    min_lattice_p = capabilities.min_discharge_gear_kw(battery_settings)
     if residual_p >= min_lattice_p:
         return None
     if residual_p * dt <= FLOW_NOISE_FLOOR_KWH:
@@ -193,7 +203,7 @@ def _discharge_candidates(
     dt: float,
     home_consumption: float,
     solar_production: float,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     ac_cap_kwh: float | None = None,
 ) -> list[float]:
     """Candidate discharge magnitudes (kW, positive) to evaluate for the
@@ -238,16 +248,18 @@ def _discharge_candidates(
     if p_max <= POWER_TOLERANCE_KW:
         return []
 
-    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
+    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     max_pct = int(np.floor(p_max / rate_step + 1e-9))
-    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    min_pct = capabilities.min_discharge_gear_index(battery_settings)
     if min_pct > max_pct:
         # No lattice candidate fits, but the off-lattice residual-cover
         # candidate (#466 follow-up, below) may still: it sits under the
         # smallest lattice power by construction, so a nearly-empty battery
         # can be able to cover a small net load while unable to sustain any
         # percent-grid discharge.
-        cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
+        cover_p = _residual_cover_p(
+            home_consumption, solar_production, dt, capabilities, battery_settings
+        )
         if cover_p is not None and cover_p <= p_max:
             return [cover_p]
         return []
@@ -282,7 +294,9 @@ def _discharge_candidates(
     # `min(actual load, ceiling)`, so commanding one rate step at a sub-step
     # deficit delivers exactly the deficit -- which is why R == P holds
     # exactly. See _residual_cover_p for the classify/round-to-percent gates.
-    cover_p = _residual_cover_p(home_consumption, solar_production, dt, rate_step)
+    cover_p = _residual_cover_p(
+        home_consumption, solar_production, dt, capabilities, battery_settings
+    )
     if cover_p is not None and cover_p <= p_max:
         executable.append(cover_p)
 
@@ -458,7 +472,7 @@ class PeriodInputs:
     dt: float
     max_charge_power_per_period: list[float] | None = None
     import_cap_kwh: float | None = None
-    discharge_resolution_kw: float | None = None
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES
     sell_price_floored: list[bool] | None = None
 
 
@@ -600,7 +614,7 @@ def select_action(
         dt,
         home,
         solar,
-        discharge_resolution_kw=period_inputs.discharge_resolution_kw,
+        capabilities=period_inputs.capabilities,
         ac_cap_kwh=ac_cap_kwh,
     ):
         consider(-p)

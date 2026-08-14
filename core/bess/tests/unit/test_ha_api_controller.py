@@ -696,6 +696,65 @@ class TestPhaseCurrentDiscovery:
             "current_l1": "sensor.pulse_current_l1"
         }
 
+    def test_ha_collision_suffix_does_not_split_one_meter(self):
+        """HA appends _2 to an entity id that collides with an existing one,
+        per entity — so one phase of an otherwise uniform set can carry it.
+        Grouping on the raw id would split the meter in two and return the
+        larger half, leaving a phase unmapped on a three-phase house."""
+        states = [
+            _current_state("sensor.tibber_pulse_current_l1"),
+            _current_state("sensor.tibber_pulse_current_l2"),
+            _current_state("sensor.tibber_pulse_current_l3_2"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.tibber_pulse_current_l1",
+            "current_l2": "sensor.tibber_pulse_current_l2",
+            "current_l3": "sensor.tibber_pulse_current_l3_2",
+        }
+
+    def test_a_group_without_l1_is_not_returned(self):
+        """PowerMonitor reads current_l1 unconditionally, so a set missing it
+        raises on every quarter. Reporting nothing found leaves the user with
+        an unconfigured sensor to map, not throttling that always fails."""
+        states = [
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+    def test_a_two_phase_group_is_not_returned(self):
+        """The wizard accepts a detected phase count of 1 or 3 only."""
+        states = [
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
+    def test_a_complete_group_wins_over_an_unusable_one(self):
+        states = [
+            _current_state("sensor.heatpump_meter_phase_b_current"),
+            _current_state("sensor.heatpump_meter_phase_c_current"),
+            _current_state("sensor.power_meter_phase_a_current"),
+            _current_state("sensor.power_meter_phase_b_current"),
+            _current_state("sensor.power_meter_phase_c_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {
+            "current_l1": "sensor.power_meter_phase_a_current",
+            "current_l2": "sensor.power_meter_phase_b_current",
+            "current_l3": "sensor.power_meter_phase_c_current",
+        }
+
+    def test_line_to_line_currents_are_not_read_as_a_phase(self):
+        """A meter exposing phase-to-phase currents names them phase_ab. As a
+        bare substring that matches phase_a, and a line-to-line current fed
+        into fuse protection is not the phase load at all."""
+        states = [
+            _current_state("sensor.power_meter_phase_ab_current"),
+            _current_state("sensor.power_meter_phase_bc_current"),
+            _current_state("sensor.power_meter_phase_ca_current"),
+        ]
+        assert self.ctrl.discover_current_sensors(states) == {}
+
 
 # ── set_* / grid_charge ─────────────────────────────────────────────────────
 

@@ -3279,8 +3279,13 @@ class HomeAssistantAPIController:
           inverter's output instead of the house feed would silently protect
           the wrong circuit.
 
-        Candidates are grouped by the device their entity_id belongs to, and
-        one group supplies every phase. ``meter`` is a bare substring, so a
+        Candidates are grouped by the device their entity_id belongs to (the
+        entity id with its phase token blanked, see
+        ``_phase_current_group_id``), and one group supplies every phase. Only
+        groups exposing a set the rest of the system can act on —
+        ``USABLE_PHASE_SETS`` — are eligible; the alternative is handing the
+        wizard a two-phase count it rejects, or a set without L1 that makes
+        PowerMonitor raise on every quarter. ``meter`` is a bare substring, so a
         sub-circuit meter (heat pump, EV charger) passes the gate too;
         selecting per phase independently would mix two devices into a reading
         set describing no real circuit. Preference, in order:
@@ -3305,7 +3310,12 @@ class HomeAssistantAPIController:
         A lone sub-circuit meter can still win when it is the only complete
         set and its name carries no grid marker; the wizard lets the user
         correct that, and such entities cannot be told apart by name alone on
-        a discovery path with no unique_id suffix map.
+        a discovery path with no unique_id suffix map. Phase count is
+        deliberately ranked above the grid-side name, so a grid-named
+        *single-phase* clamp loses to a complete three-phase sub-circuit set:
+        the two orderings cannot both hold, and the alternative reinstates the
+        worse failure — a one-phase group setting the wizard's phase count on
+        a three-phase house.
 
         Args:
             states: List of state dicts from /api/states
@@ -3328,16 +3338,28 @@ class HomeAssistantAPIController:
             if not matched:
                 continue
             key, pattern, rank = matched
-            group_id = lower_id.replace(pattern, "*")
+            group_id = self._phase_current_group_id(lower_id, pattern)
             _, phases = groups.setdefault(group_id, (rank, {}))
             phases.setdefault(key, entity_id)
 
-        if not groups:
+        usable = {
+            gid: value
+            for gid, value in groups.items()
+            if set(value[1]) in self.USABLE_PHASE_SETS
+        }
+        if not usable:
+            if groups:
+                logger.info(
+                    "Phase currents: %d candidate device(s), none exposing a "
+                    "usable phase set (L1, or L1+L2+L3): %s",
+                    len(groups),
+                    ", ".join(sorted(groups)),
+                )
             logger.info("Discovered 0 phase current sensor(s)")
             return {}
 
         group_id, (_, result) = min(
-            groups.items(),
+            usable.items(),
             key=lambda kv: (
                 -len(kv[1][1]),
                 kv[1][0],
@@ -3345,10 +3367,10 @@ class HomeAssistantAPIController:
                 kv[0],
             ),
         )
-        if len(groups) > 1:
+        if len(usable) > 1:
             logger.info(
                 "Phase currents: %d candidate device(s), selected %s",
-                len(groups),
+                len(usable),
                 group_id,
             )
         logger.info("Discovered %d phase current sensor(s)", len(result))
@@ -3378,9 +3400,30 @@ class HomeAssistantAPIController:
     # discover_current_sensors.
     GRID_ID_MARKERS: ClassVar[tuple[str, ...]] = ("power_meter", "grid")
 
+    # The only phase sets the rest of the system can act on: the wizard
+    # accepts a detected phase count of 1 or 3 and nothing else, and
+    # PowerMonitor reads current_l1 unconditionally. A group missing L1, or
+    # holding exactly two phases, would configure fuse protection that raises
+    # on every quarter — reporting nothing found is the honest outcome.
+    USABLE_PHASE_SETS: ClassVar[tuple[frozenset[str], ...]] = (
+        frozenset({"current_l1"}),
+        frozenset({"current_l1", "current_l2", "current_l3"}),
+    )
+
     def _grid_side_rank(self, group_id: str) -> int:
         """0 when a candidate group's id names the house feed, else 1."""
         return 0 if any(m in group_id for m in self.GRID_ID_MARKERS) else 1
+
+    def _phase_current_group_id(self, lower_id: str, pattern: str) -> str:
+        """Identify the device a phase-current entity belongs to.
+
+        The entity id with its phase token blanked out. HA appends ``_2`` to
+        an entity id that collides with an existing one, which happens per
+        entity and so can hit a single phase of an otherwise uniform set
+        (``..._current_l3_2``); that suffix is stripped, or the meter would
+        split into two groups and lose the phases it really has.
+        """
+        return re.sub(r"_\d+$", "", lower_id.replace(pattern, "*"))
 
     def _match_phase_current_key(self, lower_id: str) -> tuple[str, str, int] | None:
         """Match a current sensor's entity_id to a phase.
@@ -3388,10 +3431,16 @@ class HomeAssistantAPIController:
         Returns (phase_key, matched_pattern, convention_rank), or None. The
         pattern is returned so the caller can derive the owning device's group
         id by blanking it out of the entity_id.
+
+        Patterns match on token boundaries, not bare substrings: a meter that
+        exposes line-to-line currents names them ``phase_ab``, which must not
+        be read as phase A.
         """
         is_meter = self.METER_ID_MARKER in lower_id
         for pattern, key, meter_only, rank in self.PHASE_CURRENT_PATTERNS:
-            if pattern not in lower_id:
+            if not re.search(
+                rf"(?<![a-z0-9]){re.escape(pattern)}(?![a-z0-9])", lower_id
+            ):
                 continue
             if meter_only and not is_meter:
                 continue

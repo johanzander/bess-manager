@@ -56,7 +56,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import sys,json; d=json.load(sys.stdin); cmd=d.get('tool_input',{}).get('command',''); is_commit='git commit' in cmd; sys.exit(0) if not is_commit else None; import subprocess; r=subprocess.run(['.venv/bin/python','-m','pytest','core/bess/tests/unit/test_scenario_discovery.py','-q','--tb=short'],capture_output=True,text=True); print(r.stdout); print(r.stderr) if r.returncode else None; sys.exit(r.returncode)\""
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/pretest-on-commit.sh\""
           },
           {
             "type": "command",
@@ -106,7 +106,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 -c \"import sys,json,subprocess; d=json.load(sys.stdin); f=d.get('tool_response',{}).get('filePath') or d.get('tool_input',{}).get('file_path',''); sys.exit(0) if not f.endswith('.py') else None; r=subprocess.run(['ruff','check',f]); sys.exit(r.returncode)\""
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/lint-edited-python.sh\""
           }
         ]
       }

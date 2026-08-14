@@ -494,6 +494,146 @@ class TestSignedBatteryPowerSplit:
         assert ctrl.get_battery_discharge_power() == 42.0
 
 
+class TestUnknownBatteryPolarityRaises:
+    """An unrecognised polarity must fail loudly, not silently invert.
+
+    ``charge_positive`` is the only value ``PLATFORM_BATTERY_POWER_POLARITY``
+    can hold today, so this branch is unreachable from any shipped platform —
+    it exists so that a future typo'd or unimplemented entry surfaces as an
+    error instead of reporting every charge as a discharge and vice versa.
+    """
+
+    def _ctrl(self, polarity: str):
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=_settings_store(
+                {
+                    "battery_charge_power": "sensor.signed_battery_power",
+                    "battery_discharge_power": "sensor.signed_battery_power",
+                }
+            ),
+            battery_power_polarity=polarity,
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-2400"})
+        )
+        return c
+
+    def test_charge_getter_raises_on_unknown_polarity(self):
+        ctrl = self._ctrl("discharge_positive")
+        with pytest.raises(ValueError, match="discharge_positive"):
+            ctrl.get_battery_charge_power()
+
+    def test_discharge_getter_raises_on_unknown_polarity(self):
+        ctrl = self._ctrl("discharge_positive")
+        with pytest.raises(ValueError, match="discharge_positive"):
+            ctrl.get_battery_discharge_power()
+
+
+class TestSignedSplitInSensorDiagnostics:
+    """``get_method_sensor_info`` must report what the getters return.
+
+    It reads ``/api/states/{entity_id}`` directly, so on a platform whose
+    charge and discharge (or import and export) keys resolve to one signed
+    entity it would otherwise report the same raw signed value on both rows —
+    e.g. -800 for both "Battery Charging Power" and "Battery Discharging
+    Power" on a native SolaX discharging at 800 W.
+    """
+
+    def test_battery_rows_report_the_split_not_the_raw_value(self, signed_battery_ctrl):
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-800"})
+        )
+        charge = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
+        discharge = signed_battery_ctrl.get_method_sensor_info(
+            "get_battery_discharge_power"
+        )
+        assert charge["status"] == "ok"
+        assert discharge["status"] == "ok"
+        assert charge["current_value"] == "0"
+        assert discharge["current_value"] == "800"
+
+    def test_grid_rows_report_the_split_not_the_raw_value(self, signed_grid_ctrl):
+        signed_grid_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-1500"})
+        )
+        imp = signed_grid_ctrl.get_method_sensor_info("get_import_power")
+        exp = signed_grid_ctrl.get_method_sensor_info("get_export_power")
+        assert imp["current_value"] == "0"
+        assert exp["current_value"] == "1500"
+
+    def test_separate_entities_still_report_the_raw_state(self, ctrl):
+        """Two real entities must pass the state through untouched — including
+        its original string form, which callers have always received."""
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "battery_charge_power": "sensor.charge",
+            "battery_discharge_power": "sensor.discharge",
+        }
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-800"})
+        )
+        info = ctrl.get_method_sensor_info("get_battery_discharge_power")
+        assert info["current_value"] == "-800"
+
+    def test_precision_is_not_degraded(self, signed_battery_ctrl):
+        """The split must not round or reformat a legitimate reading — the
+        default %g would turn 12345.678 into 12345.7, and anything above 1e6
+        into scientific notation."""
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "12345.678"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["current_value"] == "12345.678"
+
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2000000"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_charge_power")
+        assert info["current_value"] == "2000000"
+
+    def test_unknown_polarity_reports_the_real_reason(self):
+        """The ValueError must not be swallowed by the surrounding handler and
+        reported as a connectivity failure — that would hide precisely the loud
+        failure the raise exists to produce."""
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=_settings_store(
+                {
+                    "battery_charge_power": "sensor.signed_battery_power",
+                    "battery_discharge_power": "sensor.signed_battery_power",
+                }
+            ),
+            battery_power_polarity="discharge_positive",
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-800"})
+        )
+        info = c.get_method_sensor_info("get_battery_charge_power")
+        assert info["status"] == "error"
+        assert "discharge_positive" in info["error"]
+        assert "Failed to check entity" not in info["error"]
+
+    def test_unrelated_method_is_untouched(self, signed_battery_ctrl):
+        """Only the four split getters are rewritten; every other row keeps
+        reporting the entity's own state."""
+        signed_battery_ctrl.sensors = {
+            **signed_battery_ctrl.sensors,
+            "battery_soc": "sensor.soc",
+        }
+        signed_battery_ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "47.5"})
+        )
+        info = signed_battery_ctrl.get_method_sensor_info("get_battery_soc")
+        assert info["current_value"] == "47.5"
+
+
 @pytest.mark.parametrize(
     ("platform", "expected"),
     [

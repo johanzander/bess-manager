@@ -772,20 +772,21 @@ the reviewer with executed repros where noted; none are addressed in that PR.
    install rather than the platform fact it is supposed to encode. If we want
    upgrades to self-heal, the honest fix is a re-discovery pass at startup for
    platforms whose sensor set is fully integration-derived.
-2. **The health panel shows the raw signed value on both battery rows.**
-   `get_method_sensor_info` (`core/bess/ha_api_controller.py:1031`) reads
-   `/api/states/{entity_id}` directly instead of going through the getters, so
-   a native SolaX install discharging at 800 W displays −800 W for both
-   "Battery Charging Power" and "Battery Discharging Power". Diagnostic
-   display only — the optimizer and all flow accounting read the getters.
-   Pre-existing for the Solis/Huawei grid pairing; #542 just makes it visible
-   in the mock scenario.
-3. **The battery split hardcodes its one legal polarity.**
-   `get_battery_charge_power`/`get_battery_discharge_power` apply
-   `max(0.0, ±raw)` with a trailing `# charge_positive` comment rather than
-   branching on `battery_power_polarity`. Fine while `charge_positive` is the
-   only value in `PLATFORM_BATTERY_POWER_POLARITY`, and the grid getters are
-   no stricter (anything that isn't `"import_positive"` is treated as
-   `"export_positive"`), but a future typo'd entry would silently invert every
-   battery reading instead of failing. Worth an explicit branch + raise if a
-   second polarity is ever added.
+Items 2 and 3 below are **fixed** (PR for #542 follow-up). Kept here with the
+correction, because item 2 as originally written was wrong about where the
+value surfaced and that matters for how the next reader reads this list:
+
+2. ~~**The health panel shows the raw signed value on both battery rows.**~~
+   **Corrected and fixed.** The health panel was never wrong:
+   `perform_health_check` calls the getter (`method()`) for `rawValue`/
+   `displayValue`, so a native SolaX discharging at 800 W has always rendered
+   `0 W` / `800 W` — verified by running it. What *was* wrong is
+   `get_method_sensor_info`'s own `current_value` field, which reported the
+   raw signed state on both rows; no consumer reads that field today, so this
+   was latent, not user-visible. Now routed through `_signed_split_state()`,
+   for the grid pairing as well as the battery one.
+3. ~~**The battery split hardcodes its one legal polarity.**~~ **Fixed.**
+   The split moved into `_split_signed_battery_power()`, which branches on
+   `battery_power_polarity` and raises `ValueError` on anything other than
+   `charge_positive`. The grid helper stays deliberately lax (anything that
+   isn't `"import_positive"` is treated as `"export_positive"`).

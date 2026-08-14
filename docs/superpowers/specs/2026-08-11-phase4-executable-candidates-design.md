@@ -298,6 +298,72 @@ a public function, and touches the simulator's import surface.**
 
 ---
 
+## 4b. Starting 4a — concrete entry points
+
+Everything below was established by grep/measurement during the #352 work, so
+4a's first session does not have to rediscover it.
+
+### What 4a must move, and the pattern to follow
+
+`discharge_rate_is_load_following` is the capability the #352 fix turns on, and
+**it does not reach the optimizer at all today**:
+
+- Defined as a controller `ClassVar` — `inverter_controller.py:116` (`True`,
+  the TOU-register default), overridden `False` on `solax_controller.py:56`,
+  `huawei_controller.py:56`, `growatt_sph_controller.py:46`, and as a property
+  on `solax_modbus_growatt_controller.py:163`.
+- Consumed in exactly two places: the intra-period gate in
+  `battery_system_manager.py:~2679`, and the controllers themselves.
+- **Zero occurrences** in `dp_battery_algorithm.py`, `pwl_window_dp.py` and
+  `action_selector.py` (grepped 2026-08-14).
+
+`discharge_resolution_kw` is the same *kind* of fact and is already plumbed
+through — follow its path rather than inventing a second one:
+
+```
+InverterController.discharge_resolution_kw()   inverter_controller.py:142
+  -> battery_system_manager.py:~2156 reads it from the live controller
+  -> passed as a kwarg to optimize_battery_schedule (bsm ~2175)
+  -> dp_battery_algorithm.py:1170 / 1479 / 1807 thread it down
+  -> action_selector._discharge_rate_step_kw() turns it into the lattice step
+```
+
+D2 approved a `PlatformCapabilities` object rather than more loose kwargs, so
+4a's job is to carry both facts (and the mode vocabulary and minimum gear) in
+one object along that same path. Two kwargs where there is now one would be the
+"second construction site" `rules.md` forbids.
+
+### What that immediately fixes
+
+`_residual_cover_p`'s below-lattice exact-cover candidate is added
+unconditionally (`action_selector.py:190`, `pwl_window_dp.py:132` and `:572`,
+`dp_battery_algorithm.py:1372`) and is only sound where a rate is a ceiling. On
+SolaX native / Huawei / SPH the DP can therefore plan a delivery the hardware
+will not produce — the #282 shape. **That is #580, and gating the candidate on
+the capability closes it as a side effect of 4a.**
+
+### The capability's actual values, measured from the controllers
+
+| platform | control model | a discharge number is |
+|---|---|---|
+| Growatt MIN | `tou_register` | ceiling — delivers `min(number, actual load)` |
+| solax-modbus Growatt TOU | `tou_register` | ceiling |
+| Growatt VPP | `vpp_power` | no rate for load support since #413 — natively load-following |
+| SolaX native | `vpp_power` | **target** — `LOAD_SUPPORT → -(rate% × max_discharge)` |
+| Huawei, Growatt SPH | `period_list` | no per-period rate at all |
+
+Note `discharge_rate_is_load_following` is not quite the same question as
+"ceiling or target": the `period_list` platforms have no rate to interpret. 4a
+should decide whether that is a third value or an absent capability, and say
+which in the object's docstring — the #352 fix only needs "is a discharge rate
+a ceiling here", so an honest tri-state is better than overloading the boolean.
+
+### One thing 4a must not change
+
+Keep 4a behaviour-neutral: the goldens stay bit-identical, as in Phases 1–3.
+The plan-moving work is 4b's, and keeping the two apart is what makes 4b's
+measured delta readable.
+
 ## 5. Decisions
 
 **D1 — Where does the execution model live? ✅ APPROVED 2026-08-11: option (a).**

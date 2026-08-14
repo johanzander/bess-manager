@@ -219,6 +219,38 @@ by adding the offending command to an allowlist — an `ask` rule beats an `allo
 rule, so that never works, and enumerating command shapes is what the inverted
 hook exists to replace.
 
+**Never `git stash` — it is blocked, everywhere in this repo.** There is exactly
+one `refs/stash` per repository, shared by the main checkout and every worktree,
+and the stack has no owner: one agent's `git stash` pushes an entry that another
+agent's `git stash pop` will take, with no way to tell it was not theirs. With
+~20 worktrees active that silently destroys work, and once popped and discarded
+git offers no recovery. The hook denies every mutating form (`push`, `save`,
+bare `git stash`, `pop`, `apply`, `drop`, `clear`, `branch`, `import`) in the
+main checkout as well as in worktrees; `git stash list`/`show` still work. The
+deny is scoped to this repository — in an unrelated clone the hook is silent.
+
+To set work aside on the branch you are on, use a temporary WIP commit — it
+lives on the branch, so it is per-worktree, private to that agent, and
+recoverable by SHA even if the branch moves:
+
+```bash
+git add -A && git commit -m "wip: <what>"   # set aside
+git reset --soft HEAD~1                     # pick back up
+```
+
+To move changes *across* checkouts (the case stash used to cover), pipe a patch
+through the shared object database — verify it landed before reverting, since
+`git checkout --` is the destructive step and there is no stash to fall back on:
+
+```bash
+git diff -- <file> | git -C .claude/worktrees/<name> apply
+git -C .claude/worktrees/<name> diff -- <file>   # verify
+git checkout -- <file>                           # only then
+```
+
+The full procedure, including the staged-changes variant, is in
+`docs/agents/rules.md` under Working Location.
+
 Inside a worktree the rule is: **do anything to the repo, except destroy the
 repo or its history.** What still prompts is a short, closed list of effects no
 worktree can contain — the shared podman VM (a `deny`, re-emitted so it can't be

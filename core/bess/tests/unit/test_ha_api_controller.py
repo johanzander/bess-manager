@@ -133,6 +133,25 @@ class TestApiRequest:
         assert len(failures) == 1
         assert "Read SOC" in failures[0].operation
 
+    def test_suppressed_failure_is_not_recorded(self, ctrl):
+        """Issue #583: suppress_retry_warnings marks a failure as expected (the
+        Nordpool tomorrow-price call before the market publishes). A failure not
+        worth a log line is not worth a user-visible runtime-failure entry."""
+        ctrl.max_attempts = 2
+        ctrl.retry_base_delay = 0
+        error = requests.ConnectionError("refused")
+        ctrl.session.get = _session_method_mock("get", side_effect=error)
+        with patch("core.bess.ha_api_controller.time.sleep"):
+            with pytest.raises(requests.ConnectionError):
+                ctrl._api_request(
+                    "get",
+                    "/api/states/sensor.test",
+                    operation="Call nordpool.get_prices_for_date",
+                    category="other",
+                    suppress_retry_warnings=True,
+                )
+        assert ctrl.failure_tracker.get_active_failures() == []
+
     def test_test_mode_does_not_block_at_api_request_level(self, ctrl):
         ctrl.test_mode = True
         ctrl.session.post = _session_method_mock(

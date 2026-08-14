@@ -839,6 +839,31 @@ class TestShouldApplySchedule:
         assert result is True
         assert "Retry" in reason
 
+    def test_unreadable_inverter_does_not_abort_the_cycle(self, system):
+        """A drift check that cannot run must not take the optimization with it.
+
+        The check reads the inverter, which raises on an install whose device
+        is not configured yet. It runs before the schedule comparison and
+        outside _apply_schedule's error handling, so an unguarded raise ends
+        the whole update — the optimization needs no inverter at all, and the
+        real problem already surfaces through the write path and health checks
+        (issue #554).
+        """
+        with patch.object(
+            system._inverter_controller,
+            "needs_hardware_reconciliation",
+            side_effect=Exception("Growatt device_id not configured"),
+        ):
+            result, _reason = system._should_apply_schedule(
+                is_first_run=False,
+                period=10,
+                prepare_next_day=False,
+                optimization_period=10,
+                temp_schedule=None,
+            )
+
+        assert isinstance(result, bool), "Cycle should complete, not raise"
+
 
 class TestSetDemoMode:
     """set_demo_mode delegates hardware initialization to the inverter controller."""

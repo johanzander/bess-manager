@@ -2524,11 +2524,20 @@ class BatterySystemManager:
         # write while the plan holds steady, nothing would look at the inverter
         # again until the plan changed (issues #551, #554).
         if self._controller is not None and not prepare_next_day:
-            drifted, drift_reason = (
-                self._inverter_controller.needs_hardware_reconciliation(
-                    self._controller, period
+            try:
+                drifted, drift_reason = (
+                    self._inverter_controller.needs_hardware_reconciliation(
+                        self._controller, period
+                    )
                 )
-            )
+            except Exception as e:
+                # Not being able to look is not a reason to abandon the cycle.
+                # An unconfigured or unreachable inverter surfaces through the
+                # write path below, which records it as a pending write, and
+                # through the health checks — whereas raising here would kill
+                # the optimization itself, which needs no inverter at all.
+                logger.warning("Could not check the inverter for drift: %s", e)
+                drifted, drift_reason = False, ""
             if drifted:
                 logger.warning("DECISION: Apply schedule - %s", drift_reason)
                 return True, drift_reason

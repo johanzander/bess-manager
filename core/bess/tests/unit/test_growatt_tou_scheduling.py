@@ -14,9 +14,11 @@ Key Principles:
 """
 
 import logging
+from types import SimpleNamespace
 
 import pytest  # type: ignore
 
+from core.bess import time_utils
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import empty_slot_table
@@ -780,6 +782,13 @@ class TestScheduleIntegrity:
         ), "Fragmented schedule must be ordered"
 
 
+# 01:00, the first strategic hour below, as a period. Cycles run from here so
+# that segment is already active: since #554 a segment is only eligible for
+# hardware once its start is within the write horizon, and an active segment
+# (start <= now) qualifies under any horizon. Tests about slot ids, failure
+# propagation and idempotency would otherwise depend on the horizon's value.
+_ACTIVE_SEGMENT_PERIOD = 4
+
 # 10 alternating strategic hours — enough to exceed the 9-slot hardware limit.
 _OVERCAPACITY_INTENTS = hourly_to_quarterly(
     {
@@ -819,25 +828,48 @@ class TestHardwareSlotCascading:
             len(scheduler.active_tou_intervals) <= 9
         ), f"Hardware slot limit exceeded: {len(scheduler.active_tou_intervals)} active intervals"
 
-    def test_overflow_intervals_marked_as_pending_not_dropped(self, scheduler):
-        """Intervals beyond the 9-slot limit are flagged pending, not silently discarded."""
+    def test_intervals_not_yet_on_hardware_are_not_dropped(self, scheduler):
+        """Intervals not yet written are retained in the plan, not discarded."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
         scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
 
         all_segments = scheduler.get_all_tou_segments(current_period=0)
         real_segments = [s for s in all_segments if not s.get("is_default")]
 
-        written = [s for s in real_segments if not s.get("pending_write")]
-        pending = [s for s in real_segments if s.get("pending_write")]
-
-        assert len(written) <= 9, "Written segments must fit within hardware limit"
         assert (
-            len(pending) >= 1
-        ), "Overflow segments must be marked pending, not dropped"
+            len(scheduler.active_tou_intervals) <= 9
+        ), "Hardware-eligible intervals must fit within the slot limit"
         # Total recorded segments must equal all 10 strategic time blocks
         assert (
             len(real_segments) == 10
         ), f"All 10 segments must be retained in memory, got {len(real_segments)}"
+
+    def test_due_but_unwritten_interval_is_flagged_pending(self, scheduler):
+        """pending_write must still fire for a segment that IS due.
+
+        Since #554 a far-future segment is deferred rather than pending, so
+        the flag is set up here directly: an interval inside the write horizon
+        that the hardware-eligible set does not contain.
+        """
+        scheduler.active_tou_intervals = []
+        scheduler.tou_intervals = [
+            {
+                "segment_id": 1,
+                "start_time": "00:15",
+                "end_time": "00:59",
+                "batt_mode": "battery_first",
+                "enabled": True,
+            }
+        ]
+
+        segments = scheduler.get_all_tou_segments(current_period=0)
+        real_segments = [s for s in segments if not s.get("is_default")]
+
+        assert len(real_segments) == 1
+        assert real_segments[0]["pending_write"] is True, (
+            "A segment due within the write horizon but absent from hardware "
+            "must be flagged pending"
+        )
 
     def test_all_strategic_hours_remain_accessible_when_cascading(self, scheduler):
         """All strategic hours are recorded even when some cannot fit on hardware yet."""
@@ -853,33 +885,56 @@ class TestHardwareSlotCascading:
                 hour
             ), f"Hour {hour} must be retained for export even if pending write"
 
-    def test_pending_intervals_become_active_once_slots_free(self, scheduler):
-        """When earlier segments expire, previously-pending segments move to hardware."""
+    def test_deferred_intervals_become_eligible_as_their_start_approaches(
+        self, scheduler
+    ):
+        """Deferred segments must reach hardware, not be stranded.
+
+        Since #554 the binding constraint is the write horizon rather than the
+        9 slots. Asserted on hardware eligibility rather than the pending_write
+        flag, which now covers only segments that are due and still missing.
+        """
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
 
-        # At midnight (period 0): 10 non-expired segments, 9 active + 1 pending.
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
-        initial_pending = sum(
-            1
-            for s in scheduler.get_all_tou_segments(current_period=0)
-            if not s.get("is_default") and s.get("pending_write")
-        )
-        assert (
-            initial_pending >= 1
-        ), "Should have at least one pending segment at start of day"
+        def is_eligible(period, start_time):
+            scheduler._consolidate_and_convert_with_strategic_intents(
+                current_period=period
+            )
+            return any(
+                i["start_time"] == start_time for i in scheduler.active_tou_intervals
+            )
 
-        # At 03:00 (period 12): hour-1 segment (01:00-01:59) is now expired.
-        # The fresh rebuild from period 12 yields only 9 non-expired segments,
-        # so all fit within the hardware limit and nothing is pending.
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
-        later_pending = sum(
-            1
-            for s in scheduler.get_all_tou_segments(current_period=12)
-            if not s.get("is_default") and s.get("pending_write")
-        )
-        assert (
-            later_pending == 0
-        ), "Once a slot freed up, previously-pending segment must now be active"
+        # The 09:00 segment: still deferred at 06:00, eligible by 08:30.
+        assert not is_eligible(
+            24, "09:00"
+        ), "09:00 segment should still be deferred at 06:00"
+        assert is_eligible(
+            34, "09:00"
+        ), "09:00 segment must be eligible by 08:30, before it starts"
+
+    def test_slot_cap_still_applies_when_many_intervals_are_eligible(self, scheduler):
+        """The 9-slot hardware cap must survive independently of the horizon.
+
+        Tested directly on _select_hardware_intervals: since #554 no realistic
+        plan can put more than ~5 intervals inside the write horizon, so the
+        cap is no longer reachable end-to-end. It still guards the inverter
+        contract (segment_id must be 1..9), so it is exercised here rather
+        than deleted.
+        """
+        eligible = [
+            {
+                "segment_id": i,
+                "start_time": "00:00",
+                "end_time": "00:59",
+                "batt_mode": "battery_first",
+                "enabled": True,
+            }
+            for i in range(1, 13)
+        ]
+
+        selected = scheduler._select_hardware_intervals(eligible, current_period=0)
+
+        assert len(selected) == scheduler.max_intervals
 
     def test_pending_write_flag_considers_mode_not_only_time(self, scheduler):
         """pending_write must be True when mode differs, even if time range matches.
@@ -887,6 +942,10 @@ class TestHardwareSlotCascading:
         Regression test: before the batt_mode fix, an interval in tou_intervals whose
         time range matched an active interval with a *different* mode was incorrectly
         marked pending_write=False (i.e., "already on hardware").
+
+        Evaluated at 09:30 so the interval is inside the write horizon: since
+        #554 a deferred interval is never flagged pending, which would make the
+        mode comparison below unreachable.
         """
         # Construct the edge-case state directly:
         #   active hardware has battery_first at 10:00-10:59
@@ -910,7 +969,8 @@ class TestHardwareSlotCascading:
             }
         ]
 
-        segments = scheduler.get_all_tou_segments(current_period=0)
+        # Period 38 = 09:30, inside the write horizon for a 10:00 interval.
+        segments = scheduler.get_all_tou_segments(current_period=38)
         real_segments = [s for s in segments if not s.get("is_default")]
 
         assert len(real_segments) == 1
@@ -960,10 +1020,12 @@ class TestHardwareWriteRespectsSlotLimit:
     def test_no_segment_id_above_nine_is_ever_written(self, scheduler):
         """Even with overcapacity intents, every write uses a segment_id in 1..9."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=_ACTIVE_SEGMENT_PERIOD
+        )
 
         controller = _CapturingController()
-        scheduler.sync_to_hardware(controller, effective_period=0)
+        scheduler.sync_to_hardware(controller, effective_period=_ACTIVE_SEGMENT_PERIOD)
 
         assert controller.calls, "Expected at least one hardware write"
         for call in controller.calls:
@@ -974,11 +1036,14 @@ class TestHardwareWriteRespectsSlotLimit:
     def test_write_count_never_exceeds_hardware_slot_count(self, scheduler):
         """sync_to_hardware must not push more than 9 segments."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=_ACTIVE_SEGMENT_PERIOD
+        )
 
         controller = _CapturingController()
-        scheduler.sync_to_hardware(controller, effective_period=0)
+        scheduler.sync_to_hardware(controller, effective_period=_ACTIVE_SEGMENT_PERIOD)
 
+        assert controller.calls, "Expected at least one hardware write"
         assert (
             len(controller.calls) <= 9
         ), f"Wrote {len(controller.calls)} segments, exceeds hardware limit of 9"
@@ -1022,11 +1087,15 @@ class TestHardwareWriteFailurePropagates:
 
     def test_failed_segment_write_raises(self, scheduler):
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=_ACTIVE_SEGMENT_PERIOD
+        )
 
         controller = _FailingController()
         with pytest.raises(RuntimeError):
-            scheduler.sync_to_hardware(controller, effective_period=0)
+            scheduler.sync_to_hardware(
+                controller, effective_period=_ACTIVE_SEGMENT_PERIOD
+            )
 
 
 class _SimulatingController(_CapturingController):
@@ -1086,57 +1155,60 @@ class TestSlotAssignmentPreservesActiveSegments:
     def test_promoted_pending_segment_does_not_evict_still_needed_segments(
         self, scheduler
     ):
-        scheduler.strategic_intents = _OVERCAPACITY_INTENTS
+        """Segments entering the write horizon must take a free slot.
 
-        # Cycle 1 at start of day: 9 of the 10 strategic segments fit on hardware.
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        Since #554 promotion is driven by a segment's start coming within the
+        horizon rather than by a slot freeing up, so the plan below alternates
+        mode every 15 minutes: each cycle brings a new segment into range while
+        earlier ones are still live and must not be overwritten.
+        """
+        scheduler.strategic_intents = [
+            "GRID_CHARGING" if period % 2 == 0 else "BATTERY_EXPORT"
+            for period in range(96)
+        ]
         controller = _SimulatingController()
-        scheduler.sync_to_hardware(controller, effective_period=0)
 
-        cycle1_hardware = self._content_set(controller.hardware_segments())
-        assert (
-            len(cycle1_hardware) == 9
-        ), f"Cycle 1 must populate all 9 slots, got {len(cycle1_hardware)}"
+        for period in range(0, 12):
+            scheduler._consolidate_and_convert_with_strategic_intents(
+                current_period=period
+            )
+            scheduler.sync_to_hardware(controller, effective_period=period)
 
-        # Cycle 2 at 03:00: the 01:00 segment has expired and the previously
-        # pending 19:00 segment is now part of the active 9.
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
-        scheduler.sync_to_hardware(
-            controller,
-            effective_period=12,
-        )
+            hardware = self._content_set(controller.hardware_segments())
+            wanted = self._content_set(scheduler.active_tou_intervals)
 
-        hardware_after = self._content_set(controller.hardware_segments())
-        wanted = self._content_set(scheduler.active_tou_intervals)
+            # Every interval the scheduler considers active must actually be on
+            # hardware — none silently evicted by a slot collision.
+            missing = wanted - hardware
+            assert not missing, (
+                f"Active intervals missing from hardware at period {period}: "
+                f"{sorted(missing)}"
+            )
 
-        # Every interval the scheduler considers active must actually be on
-        # hardware after cycle 2 — none silently evicted by slot collision.
-        missing = wanted - hardware_after
-        assert not missing, (
-            f"Active intervals missing from hardware after pending promotion: "
-            f"{sorted(missing)}"
-        )
-
-        # And every slot id used is still in the legal 1..9 range.
-        for slot_id in controller.slots:
-            assert 1 <= slot_id <= 9
+            # And every slot id used is still in the legal 1..9 range.
+            for slot_id in controller.slots:
+                assert 1 <= slot_id <= 9
 
     def test_unchanged_segments_are_not_rewritten_across_cycles(self, scheduler):
         """Idempotency: if nothing changes between cycles, no hardware write
         should be emitted in the second cycle."""
         scheduler.strategic_intents = _OVERCAPACITY_INTENTS
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=_ACTIVE_SEGMENT_PERIOD
+        )
 
         controller = _SimulatingController()
-        scheduler.sync_to_hardware(controller, effective_period=0)
+        scheduler.sync_to_hardware(controller, effective_period=_ACTIVE_SEGMENT_PERIOD)
         cycle1_call_count = len(controller.calls)
         assert cycle1_call_count > 0
 
         # Re-run the same conversion at the same period — no state has changed.
-        scheduler._consolidate_and_convert_with_strategic_intents(current_period=0)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=_ACTIVE_SEGMENT_PERIOD
+        )
         scheduler.sync_to_hardware(
             controller,
-            effective_period=0,
+            effective_period=_ACTIVE_SEGMENT_PERIOD,
         )
         assert (
             len(controller.calls) == cycle1_call_count
@@ -1438,3 +1510,533 @@ class TestWriteDiffsAgainstRealHardware:
             "Announced clearing segments while none were enabled:\n" f"{caplog.text}"
         )
         assert not controller.calls, "Nothing to clear means nothing to write"
+
+
+# ── Issue #554: far-future TOU segments must not be rewritten every cycle ─────
+#
+# Every cycle wrote the whole upcoming plan, so a marginal period flipping in
+# and out of the plan rewrote a segment hours before it started. From the
+# 2026-08-12 bundle: the 13:45 battery_first window was rewritten 11 times
+# between 08:16 and 13:45, and the value finally in effect was the one written
+# at 08:16. A segment has no effect on the inverter until it starts, so the
+# write can wait until the segment is imminent.
+#
+# The flip below is that exact one: GRID_CHARGING at period 55 (13:45-13:59)
+# vs periods 55-56 (13:45-14:14), as a marginal 15-minute period crosses the
+# economic boundary back and forth.
+
+
+def _grid_charging_at(periods: list[int]) -> list[str]:
+    """96-period intent list whose only TOU-producing periods are `periods`.
+
+    LOAD_SUPPORT maps to load_first, the inverter default, which produces no
+    TOU segment — so the plan is exactly one battery_first window.
+    """
+    intents = ["LOAD_SUPPORT"] * 96
+    for period in periods:
+        intents[period] = "GRID_CHARGING"
+    return intents
+
+
+def _schedule_with(intents: list[str]) -> SimpleNamespace:
+    """DPSchedule stand-in exposing only what evaluate_intents reads."""
+    return SimpleNamespace(original_dp_results={"strategic_intent": intents})
+
+
+class TestFarFutureSegmentsAreDeferred:
+    """Regression for issue #554."""
+
+    def _cycle(self, scheduler, controller, periods, at_period):
+        """One optimization cycle: rebuild the plan, then sync it to hardware."""
+        scheduler.strategic_intents = _grid_charging_at(periods)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=at_period
+        )
+        scheduler.sync_to_hardware(controller, effective_period=at_period)
+
+    def test_marginal_far_future_flip_issues_no_hardware_writes(self, scheduler):
+        """The 08:16-12:30 flips all target a window starting at 13:45."""
+        controller = _SimulatingController()
+
+        # 08:15 — the plan first settles on the one-period 13:45 window.
+        self._cycle(scheduler, controller, [55], 33)
+
+        # 11:00 -> 12:30: the marginal 14:00 period flips in and out. Every
+        # one of these cycles is more than an hour before 13:45 starts.
+        for at_period, periods in [
+            (44, [55, 56]),
+            (45, [55]),
+            (46, [55]),
+            (47, [55, 56]),
+            (49, [55]),
+            (50, [55, 56]),
+        ]:
+            self._cycle(scheduler, controller, periods, at_period)
+
+        assert (
+            controller.calls == []
+        ), "Wrote a segment that does not start for over an hour:\n" + "\n".join(
+            f"  {c['start_time']}-{c['end_time']} {c['batt_mode']}"
+            for c in controller.calls
+        )
+
+    def test_deferred_segment_reaches_hardware_before_it_starts(self, scheduler):
+        """Deferral must not lose the write — only delay it.
+
+        The outcome that matters is the inverter's segment table at the moment
+        the window becomes active, not which cycle wrote it.
+        """
+        controller = _SimulatingController()
+
+        for at_period in [33, 44, 47, 50, 52, 54]:  # 08:15 -> 13:30
+            self._cycle(scheduler, controller, [55], at_period)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert ("13:45", "13:59", "battery_first") in programmed, (
+            "The 13:45 window is not on hardware at 13:30, 15 minutes before "
+            f"it must take effect. Programmed: {sorted(programmed)}"
+        )
+
+    def test_imminent_segment_is_written_without_delay(self, scheduler):
+        """Over-gating guard: a window starting now must reach hardware now."""
+        controller = _SimulatingController()
+
+        # 13:45 cycle, plan starts charging at 13:45 — already active.
+        self._cycle(scheduler, controller, [55], 55)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert (
+            "13:45",
+            "13:59",
+            "battery_first",
+        ) in programmed, (
+            f"Active window never reached hardware. Programmed: {sorted(programmed)}"
+        )
+
+    def test_short_dst_day_does_not_raise_late_in_the_evening(self, scheduler):
+        """current_period is wall-clock derived and outruns a 92-period day.
+
+        On spring-forward the schedule holds 92 periods, but current_period
+        still reaches 95 from 23:00 onwards. The walk-back that finds a
+        running segment's true start must not index past the end — the raise
+        escapes apply_intents outside _apply_schedule's try, aborting the
+        whole optimization cycle rather than degrading.
+        """
+        spring_forward = ["IDLE"] * 92
+
+        groups = scheduler._group_periods_by_mode(spring_forward, start_period=95)
+
+        assert groups == [], f"Expected no groups past the end of the day: {groups}"
+
+    def test_gate_does_not_fire_merely_because_a_segment_expired(self, scheduler):
+        """Expiry alone must not force a cycle.
+
+        The candidate is built at the current period, with expired intervals
+        already dropped, while the committed set was built one period earlier
+        and still holds the interval that just ended. Comparing them raw makes
+        the gate fire on every segment's expiry, costing a hardware read on
+        the very API this change exists to relieve.
+        """
+        # A window at 10:00 plus a later one, so the plan is not emptied by the
+        # expiry — an empty remaining plan legitimately trips the separate
+        # stale-hardware-cleanup branch, which would mask what is tested here.
+        intents = _grid_charging_at([40, 80])  # 10:00-10:14 and 20:00-20:14
+
+        # 10:00 — the window is active and gets committed.
+        scheduler.strategic_intents = intents
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=40)
+        assert scheduler.active_tou_intervals, "Window should be committed at 10:00"
+
+        # 10:15 — same plan, the window has simply expired.
+        should_apply, reason = scheduler.evaluate_intents(
+            _schedule_with(intents), current_period=41
+        )
+
+        assert (
+            not should_apply
+        ), f"Gate fired for an expired window with an unchanged plan: {reason!r}"
+
+    def test_gate_fires_when_a_deferred_segment_becomes_imminent(self, scheduler):
+        """The write gate must track what actually reaches hardware.
+
+        evaluate_intents decides whether _apply_schedule (and therefore
+        sync_to_hardware) runs at all. It diffs the whole daily plan, which is
+        unchanged here — so without also comparing the hardware-eligible set,
+        a segment deferred at 08:15 is never pushed once the plan stabilises.
+        """
+        intents = _grid_charging_at([55])
+
+        # 08:15 — plan committed, 13:45 window deferred (starts in 5.5 hours).
+        scheduler.strategic_intents = intents
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=33)
+
+        # 13:00 — identical plan, but the 13:45 window is now imminent and has
+        # never been written.
+        should_apply, reason = scheduler.evaluate_intents(
+            _schedule_with(intents), current_period=52
+        )
+
+        assert should_apply, (
+            "Gate reported no change, so the deferred 13:45 window would never "
+            f"be written. Reason given: {reason!r}"
+        )
+
+    def test_running_window_is_not_rewritten_every_cycle(self, scheduler):
+        """A segment that is already running must not be rewritten as it runs.
+
+        The plan is rebuilt from the current period each cycle, which used to
+        truncate an in-progress segment's start_time forward to "now" — so its
+        content changed every 15 minutes and the differential update disabled
+        and re-wrote it. A stable two-hour window cost 16 writes for zero
+        behavioural difference.
+        """
+        controller = _SimulatingController()
+        window = list(range(48, 56))  # 12:00-13:59, unchanged all the way
+
+        # Cycles up to and including the window's start.
+        for at_period in range(44, 49):
+            self._cycle(scheduler, controller, window, at_period)
+        writes_before = len(controller.calls)
+        assert writes_before >= 1, "The window should have been programmed by 12:00"
+
+        # 12:15 -> 13:45: the window is running and the plan has not changed.
+        for at_period in range(49, 56):
+            self._cycle(scheduler, controller, window, at_period)
+
+        assert (
+            len(controller.calls) == writes_before
+        ), "Rewrote a running window whose plan never changed:\n" + "\n".join(
+            f"  {c['start_time']}-{c['end_time']} {c['batt_mode']} "
+            f"enabled={c['enabled']}"
+            for c in controller.calls[writes_before:]
+        )
+
+    def test_running_window_still_reaches_hardware_after_a_restart(self, scheduler):
+        """A restart mid-window must still cover the period it is inside.
+
+        Modelled the way a restart actually looks: no previous schedule to
+        carry forward, so past periods arrive as IDLE
+        (battery_system_manager.py initialises them that way). The walk-back
+        therefore stops at the current period and the window is programmed
+        truncated to "now" — the accepted cost documented on
+        _group_periods_by_mode. What must not happen is the running period
+        going uncovered.
+
+        Feeding past periods the intent they were planned with would let this
+        pass for a reason the restart path cannot produce.
+        """
+        controller = _SimulatingController()
+
+        restart_intents = ["IDLE"] * 96  # nothing known about the past
+        for period in range(52, 56):  # 13:00-13:59, the rest of the window
+            restart_intents[period] = "GRID_CHARGING"
+        scheduler.strategic_intents = restart_intents
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=52)
+        scheduler.sync_to_hardware(controller, effective_period=52)
+
+        covering = [
+            s
+            for s in controller.hardware_segments()
+            if s["batt_mode"] == "battery_first"
+            and s["start_time"] <= "13:00"
+            and s["end_time"] >= "13:00"
+        ]
+        assert covering, (
+            "The period the restart landed inside is not covered by any "
+            f"enabled segment: {controller.hardware_segments()}"
+        )
+
+    def _seeded_controller(self, start, end, mode):
+        controller = _SimulatingController()
+        controller.slots[1] = {
+            "segment_id": 1,
+            "batt_mode": mode,
+            "start_time": start,
+            "end_time": end,
+            "enabled": True,
+        }
+        return controller
+
+    def test_far_future_segment_already_on_hardware_is_left_alone(self, scheduler):
+        """Deferral must not clear a far-future segment the plan agrees with.
+
+        Deferring only the *update* side would make the diff read the segment
+        as unplanned — because the plan's own copy is not eligible yet — and
+        disable it, only to write it back later. That is the churn this change
+        exists to remove, in the opposite direction.
+        """
+        controller = self._seeded_controller("20:00", "20:59", "battery_first")
+
+        # 12:00, eight hours before the window starts. The plan contains it.
+        self._cycle(scheduler, controller, [80, 81, 82, 83], 48)
+
+        assert (
+            controller.calls == []
+        ), "Touched a correctly-programmed segment eight hours early:\n" + "\n".join(
+            f"  {c['start_time']}-{c['end_time']} {c['batt_mode']} "
+            f"enabled={c['enabled']}"
+            for c in controller.calls
+        )
+
+    def test_unplanned_far_future_segment_is_cleared(self, scheduler):
+        """A segment the plan does not contain must still be disabled.
+
+        Deferral applies to updates only. The plan below is non-empty but
+        omits the 20:00 window, so this exercises the differential branch —
+        an empty plan would trip the clear-everything branch instead and prove
+        nothing about it.
+        """
+        controller = self._seeded_controller("20:00", "20:59", "battery_first")
+
+        # Plan has a 12:00 window and nothing at 20:00.
+        self._cycle(scheduler, controller, [48, 49, 50, 51], 48)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert ("20:00", "20:59") not in programmed, (
+            "Unplanned window left enabled on hardware. "
+            f"Programmed: {sorted(programmed)}"
+        )
+
+    def test_deferred_segment_is_not_flagged_pending_write(self, scheduler):
+        """Deferral is the normal state, not a warning.
+
+        pending_write means "should be on hardware by now, but is not" — the
+        dashboard paints it amber and hides the mode badge. A segment that is
+        merely too far out has nothing wrong with it, and flagging every one
+        of them would leave most of the day looking broken.
+        """
+        scheduler.strategic_intents = _grid_charging_at([28, 52, 72])
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=8)
+
+        flagged = [
+            (s["start_time"], s["end_time"])
+            for s in scheduler.get_all_tou_segments(current_period=8)
+            if not s.get("is_default") and s.get("pending_write")
+        ]
+
+        assert (
+            flagged == []
+        ), f"Deferred segments flagged as pending write at 02:00: {flagged}"
+
+    def test_display_and_write_paths_agree_on_what_is_deferred(self, scheduler):
+        """Both sides must measure the horizon from the same instant.
+
+        Eligibility is decided from the period floor, while get_all_tou_segments
+        falls back to the raw wall clock when no period is passed (as the API
+        does). A segment inside the band between the two is deferred by the
+        write path but not by the display path, so it lands back in the amber
+        "Pending Write" state this change exists to clear.
+
+        Only reachable for a segment whose start is off the 15-minute grid —
+        one read back from hardware rather than produced by the optimizer,
+        since _period_to_time only ever yields :00/:15/:30/:45.
+        """
+        scheduler.active_tou_intervals = []
+        scheduler.tou_intervals = [
+            {
+                "segment_id": 1,
+                "start_time": "08:59",
+                "end_time": "09:59",
+                "batt_mode": "battery_first",
+                "enabled": True,
+            }
+        ]
+
+        # 08:14 — period 32 (08:00). Write path: 539 > 480 + 45, deferred.
+        real_now = time_utils.now
+        try:
+            time_utils.now = lambda: real_now().replace(
+                hour=8, minute=14, second=0, microsecond=0
+            )
+            flagged = [
+                s["start_time"]
+                for s in scheduler.get_all_tou_segments()
+                if not s.get("is_default") and s.get("pending_write")
+            ]
+        finally:
+            time_utils.now = real_now
+
+        assert flagged == [], (
+            "Segment the write path defers was flagged pending by the display "
+            f"path: {flagged}"
+        )
+
+    def test_lost_segment_on_hardware_is_detected(self, scheduler):
+        """A segment that vanishes from the inverter must be noticed.
+
+        The write gate compares plan against plan, so once a segment is
+        written and the plan stops changing, nothing looks at the inverter
+        again. Before deferral the in-progress segment was renamed every
+        cycle, which forced a read and repaired drift by accident; that is
+        gone, and issue #551 showed this table really does drift.
+        """
+        controller = self._seeded_controller("03:00", "04:59", "battery_first")
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+
+        controller.calls.clear()
+        scheduler.reconcile_hardware(controller, 13)
+        assert controller.calls == [], "Wrote while hardware already matched the plan"
+
+        controller.slots.clear()  # inverter loses the table mid-window
+        scheduler.reconcile_hardware(controller, 14)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert ("03:00", "04:59") in programmed, (
+            "Lost segment stayed lost — the window would run load_first for "
+            f"the rest of its life with nothing in the logs. Got {programmed}"
+        )
+
+    def test_orphan_segment_is_cleared_on_a_quiet_cycle(self, scheduler):
+        """An unplanned segment the inverter holds must be turned off.
+
+        Detecting only *missing* segments covers half of #551. The other half
+        is the inverter restoring a slot the plan does not contain — and with
+        writes now deferred, the cycle that would have disabled it may not run
+        for hours, so the battery follows a window nobody planned.
+        """
+        controller = self._seeded_controller("18:00", "19:59", "grid_first")
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+
+        scheduler.reconcile_hardware(controller, 13)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert (
+            "18:00",
+            "19:59",
+        ) not in programmed, (
+            f"Unplanned window left running on the battery: {sorted(programmed)}"
+        )
+
+    def test_reconciliation_reads_the_inverter_once(self, scheduler):
+        """One read per cycle, and it is the one the writes are diffed against.
+
+        A separate drift check with its own read doubles the load on the
+        endpoint that #554 exists to relieve — the same endpoint the issue
+        reports returning 500s under load.
+        """
+        controller = _SimulatingController()
+        controller.reads = 0
+        inner = controller.read_inverter_time_segments
+
+        def counting():
+            controller.reads += 1
+            return inner()
+
+        controller.read_inverter_time_segments = counting
+
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+        scheduler.reconcile_hardware(controller, 12)
+
+        assert controller.reads == 1, f"Read the inverter {controller.reads} times"
+
+    def test_reconciliation_leaves_a_deferred_segment_alone(self, scheduler):
+        """A quiet cycle must stay quiet.
+
+        Reconciliation runs on every cycle, so if it treated a deliberately
+        unwritten far-future segment as something to repair it would rewrite
+        on every cycle and undo the whole change.
+        """
+        controller = _SimulatingController()
+        scheduler.strategic_intents = _grid_charging_at([48, 49, 50, 51, 80, 81])
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=48)
+        scheduler.sync_to_hardware(controller, effective_period=48)
+
+        controller.calls.clear()
+        scheduler.reconcile_hardware(controller, 48)
+
+        assert controller.calls == [], (
+            "Reconciliation rewrote on a quiet cycle: "
+            f"{[(c['start_time'], c['end_time']) for c in controller.calls]}"
+        )
+
+    def test_deferred_planned_segment_keeps_its_hardware_slot(self, scheduler):
+        """A planned segment spared by the disable diff must keep its slot.
+
+        The disable side spares hardware segments the plan still wants, even
+        when they are too far out to be rewritten. Slot assignment has to
+        agree: if it treats that slot as free, the next eligible segment is
+        written straight over the top and the window is lost with no disable
+        ever issued — silent, and worse than the churn this change removes.
+        """
+        controller = self._seeded_controller("20:00", "20:59", "battery_first")
+
+        # 12:00. The plan holds both windows; only 12:00 is eligible to write.
+        self._cycle(scheduler, controller, [48, 49, 50, 51, 80, 81, 82, 83], 48)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert ("20:00", "20:59") in programmed, (
+            "Planned 20:00 window was evicted from its slot by an imminent "
+            f"write. Programmed: {sorted(programmed)}"
+        )
+        assert (
+            "12:00",
+            "12:59",
+        ) in programmed, (
+            f"Imminent 12:00 window never reached hardware. {sorted(programmed)}"
+        )
+
+    def test_slots_are_reclaimed_furthest_first_when_hardware_is_full(self, scheduler):
+        """Protecting planned slots must not deadlock a full slot table.
+
+        On the first cycle after an upgrade the inverter can still hold nine
+        segments written by the old always-write behaviour. If every one of
+        them is protected, an imminent segment needing a slot would have none
+        left. The furthest-out segment yields its slot: it has the most cycles
+        remaining to be written again before it takes effect.
+        """
+        # Nine single-period windows, each separated by an idle period so they
+        # stay distinct — consecutive periods of the same mode would merge into
+        # one interval and never fill the slot table.
+        far_future = [60, 62, 64, 66, 68, 70, 72, 74, 76]  # 15:00 .. 19:00
+
+        def window(period):
+            start = f"{period // 4:02d}:{(period % 4) * 15:02d}"
+            end_minute = (period % 4) * 15 + 14
+            return start, f"{period // 4:02d}:{end_minute:02d}"
+
+        controller = _SimulatingController()
+        for slot, period in enumerate(far_future, start=1):
+            start, end = window(period)
+            controller.slots[slot] = {
+                "segment_id": slot,
+                "batt_mode": "battery_first",
+                "start_time": start,
+                "end_time": end,
+                "enabled": True,
+            }
+
+        # Plan keeps all nine of those windows and adds an imminent one.
+        self._cycle(scheduler, controller, [48, 49, 50, 51, *far_future], 48)
+
+        programmed = {
+            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
+        }
+        assert ("12:00", "12:59") in programmed, (
+            "Imminent window could not be programmed against a full slot "
+            f"table. Programmed: {sorted(programmed)}"
+        )
+        assert window(76) not in programmed, (
+            "Expected the furthest-out window (19:00) to yield its slot. "
+            f"Programmed: {sorted(programmed)}"
+        )
+        assert window(60) in programmed, (
+            "Nearest far-future window (15:00) should have been kept. "
+            f"Programmed: {sorted(programmed)}"
+        )

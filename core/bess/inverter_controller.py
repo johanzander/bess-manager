@@ -912,6 +912,19 @@ class InverterController(ABC):
         as an accepted diagnostic side effect on platforms that support it.
         """
 
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Re-assert the committed plan on a cycle that changed nothing.
+
+        Default: do nothing. A platform that rewrites its whole control state
+        whenever it runs cannot drift undetected — the next cycle overwrites
+        whatever it finds. Only a platform that *skips* the write while its
+        plan holds steady has a window in which the inverter can lose a
+        segment, or restore one, without anybody looking.
+
+        Returns (writes, disables).
+        """
+        return 0, 0
+
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:
         """Read current schedule from inverter and initialize this controller."""

@@ -684,6 +684,22 @@ class SolaxModbusGrowattController(GrowattMinController):
         logger.info("DECISION: Modbus schedules match")
         return False, ""
 
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Nothing to re-assert — and specifically not the parent's version.
+
+        The parent reconciles by re-running its own sync, which reads the
+        inverter's segment table over the growatt_server cloud services. This
+        platform is modbus: there is no Growatt device_id to address, so
+        inheriting that raises SystemConfigurationError and takes the whole
+        schedule update with it (issue #554).
+
+        It is also unnecessary here. TOU mode drives a single segment whose
+        mode is rewritten whenever it differs, and VPP mode issues per-period
+        commands, so neither skips a write while the plan holds steady the way
+        the parent does — there is no window in which drift could go unnoticed.
+        """
+        return 0, 0
+
     def evaluate_intents(
         self, schedule: DPSchedule, current_period: int = 0
     ) -> tuple[bool, str]:

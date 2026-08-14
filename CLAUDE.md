@@ -280,26 +280,65 @@ resulting breakage that the sandbox was unusable. It isn't; that config was.
 
 **What stays denied cannot be re-opened.** There is no allow-within-deny
 primitive for writes (reads have one, which is why `allowRead` differs), so no
-`allowWrite` entry overrides the built-in `denyWrite` list: `${repo}/.claude`,
-`${repo}/scripts`, `${repo}/.github`, `${repo}/.git/config`,
-`${repo}/.git/worktrees`, `package.json`, `package-lock.json`. In practice:
+`allowWrite` entry overrides the built-in `denyWrite` list. Confirmed by
+`verify-sandbox.sh`:
 
 - **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
-  the harness is not sandboxed; the Bash form writes `.git/config`.
-- **Edit `.claude/**`, `scripts/**` and `.github/**` with the Edit/Write tools**,
-  which the sandbox does not govern. Bash writes there fail.
-- `npm install` fails (lockfile). `worktree-setup.sh` symlinks `node_modules`,
-  so this bites only when a branch genuinely needs its own dependency set.
-- A `git merge origin/main` that touches `.claude/` or `scripts/` fails; finish
-  it with Edit/Write.
-- `.git/objects`, refs and the index are **not** denied, so commit, branch,
-  reset and reflog all work normally.
+  the harness is not sandboxed; the Bash form writes `.git/config` and
+  `.git/worktrees`, both denied. *(measured)*
+- **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
+  reset and reflog work normally. *(measured — this is the one that matters)*
+- The agent-config files are denied individually — `.claude/settings.json`,
+  `.claude/hooks`, `.claude/skills`, `.claude/workflows`, `.claude/routines`,
+  `.claude/output-styles`, `.claude/launch.json`, `.mcp.json` — but **not the
+  `.claude` directory as a whole**. Edit those files with the Edit/Write tools,
+  which the sandbox does not govern at all. *(measured)*
+- `scripts/**` is **writable** from Bash. *(measured)* An earlier claim here
+  that it was denied, along with `.github/` and the lockfiles, came from
+  misreading the binary's *GitHub Actions* default config (it listed
+  `~/actions-runner` and `GITHUB_EVENT_PATH`) as the local one.
 
-**Verify with `bash scripts/verify-sandbox.sh` in a FRESH session** after any
-change to `sandbox.*`. Policy is read once at session start, and a `claude -p`
-child inherits the parent's policy instead of loading the file, so a session
-that edited the config cannot test it — not directly and not through a subagent.
-Every such attempt measures the stale policy and reports confident nonsense.
+**`sandbox.*` live-reloads when a settings file is edited — it is NOT read only
+at session start.** The opposite is written all over the abandoned
+`chore/sandbox-replaces-worktree-hook` branch and was repeated into this file;
+it is wrong. Editing `.claude/settings.json` mid-session activated the sandbox
+in the session that made the edit, which then verified its own config. So you
+*can* iterate on `sandbox.*` in one session — just re-run `verify-sandbox.sh`
+after each edit rather than trusting the change landed.
+
+### Known-broken under the sandbox (unresolved)
+
+Both break `implement-issue`, and neither has the cause its old remedy text
+guessed. Do not re-diagnose from scratch:
+
+- **`gh` — the macOS keychain, not the network.** `gh auth status` returns *"The
+  token in keyring is invalid"*: gh reads its token from the keychain and the
+  sandbox blocks that. `enableWeakerNetworkIsolation` addresses TLS/`trustd` and
+  would not have helped. Blocks `gh pr create`, the closing step of Step 9.
+- **`podman` — a local TCP port, not a unix socket.** `podman info` returns
+  *"dial tcp 127.0.0.1:64752: connect: operation not permitted"*, so
+  `filesystem.allowRead` and `network.allowUnixSockets` are both wrong knobs.
+  Blocks every E2E run, i.e. Step 8.
+- `sandbox.excludedCommands` in `~/.claude/settings.json` and
+  `network.allowLocalBinding` in project settings were both tried and neither
+  took effect. Claude Code's own "exclude this command" action writes
+  `excludedCommands` to `userSettings`/`localSettings`, never to project
+  settings, so user settings is the right home — but it did not exempt `gh`
+  either. Unresolved.
+- **`frontend/node_modules` is a symlink into the main checkout**, so writes
+  through it land outside a worktree's `allowWrite: ["."]` root and fail with
+  `EPERM`. That breaks `vitest`, `vite build`, and therefore Step 6's quality
+  gate in every worktree. A user-level `allowWrite` naming the main checkout
+  would cover it (worktrees are nested inside), but an absolute path cannot live
+  in tracked settings. Same applies to `.venv`.
+
+**Verify with `bash scripts/verify-sandbox.sh` after any change to `sandbox.*`,
+and let the Bash tool run it.** A plain terminal is not sandboxed — the sandbox
+applies to commands Claude Code itself runs — so a shell invocation prints
+`NOT RUNNING UNDER THE SANDBOX` and checks nothing. The script's check 0 exists
+to catch exactly that. A fresh session is not required (see live-reload above),
+but re-running the script after each edit is, since a settings change can fail
+to apply silently.
 
 To set work aside on the branch you are on, use a temporary WIP commit — it
 lives on the branch, so it is per-worktree, private to that agent, and

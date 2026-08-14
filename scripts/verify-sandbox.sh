@@ -2,15 +2,19 @@
 # Verifies that .claude/settings.json's sandbox config actually does what it
 # claims, by exercising it rather than reasoning about it.
 #
-# RUN THIS IN A FRESH CLAUDE CODE SESSION, from the repo root or a worktree.
+# RUN THIS VIA THE BASH TOOL, from the repo root or a worktree.
 #
-# It has to be a fresh session, and that is the whole reason this script
-# exists. Sandbox policy is read ONCE at session start: edits to
-# settings.json during a session have no effect, and a `claude -p` child
-# inherits the parent's policy rather than loading the file, so a session
-# that changed the config cannot test the change -- not directly, and not
-# through a subagent. Every such attempt measures the stale policy and
-# reports confident nonsense.
+# A FRESH SESSION IS NOT REQUIRED. Earlier versions of this header insisted it
+# was, on the theory that sandbox policy is read once at session start. That is
+# false: `sandbox.*` live-reloads when a settings file is edited, and the
+# session that enabled the sandbox went on to verify its own config with this
+# script. Iterate in one session; just re-run after every edit, because a
+# settings change can silently fail to apply.
+#
+# What DOES matter is that the Bash TOOL runs it. The sandbox applies only to
+# commands Claude Code itself runs, so a `!`-prefixed or terminal-typed
+# invocation is unsandboxed -- it would pass the permissive checks and fail the
+# restrictive ones, which reads exactly like a real result. Check 0 catches it.
 #
 #   bash scripts/verify-sandbox.sh
 #
@@ -102,17 +106,27 @@ check "git worktree add is blocked (use EnterWorktree)" blocked "$wt" \
 # so a blocked create outside the repo means a blocked unlink outside the repo.
 # If check 0 passes, `rm -rf` cannot escape.
 
-# 4. EDITING THE AGENT CONFIG ITSELF. `.claude` is on the default denyWrite
-#    list specifically to stop a session rewriting its own hooks and agents.
-#    That is a reasonable default, but this repo edits .claude/** as ordinary
-#    work, and the Edit/Write tools are not affected -- only Bash is.
-touch .claude/.sandbox-probe 2>/dev/null && cl=allowed || cl=blocked
-rm -f .claude/.sandbox-probe 2>/dev/null
-# Expected BLOCKED, same reason. This is not a problem to fix: .claude/** is
-# edited with the Edit/Write tools, which the sandbox does not govern at all.
-# It is checked so the constraint stays a measured fact rather than folklore.
-check "Bash writing .claude/** is blocked (use Edit/Write)" blocked "$cl" \
-  "the sandbox allowed a .claude write, so the built-in denyWrite list changed. Re-derive it before trusting CLAUDE.md's Permissions section."
+# 4. EDITING THE AGENT CONFIG ITSELF. The deny is per-FILE, not on the .claude
+#    directory: settings.json, hooks, skills, workflows, routines,
+#    output-styles, launch.json and .mcp.json are denied so a session cannot
+#    rewrite the rules that govern it. An arbitrary new file under .claude/ is
+#    NOT denied -- an earlier version of this script probed with
+#    `touch .claude/.sandbox-probe`, which succeeds, and read that as the whole
+#    directory being writable. Probe a real entry on the list instead.
+if [ -f .claude/settings.json ]; then
+  printf '' >> .claude/settings.json 2>/dev/null && cl=allowed || cl=blocked
+else
+  cl=skipped
+fi
+check "Bash writing .claude/settings.json is blocked (use Edit/Write)" blocked "$cl" \
+  "the sandbox allowed a write to the settings file that governs it. Either the deny list changed or the sandbox is not applied -- re-derive before trusting CLAUDE.md's Permissions section."
+
+# 4b. The paths CLAUDE.md is unsure about. These are reported, not asserted:
+#     the earlier claim that they were denied came from misreading the binary's
+#     GitHub Actions config as the local one, so measure rather than restate.
+touch scripts/.sandbox-probe 2>/dev/null && sc=allowed || sc=blocked
+rm -f scripts/.sandbox-probe 2>/dev/null
+printf 'INFO  Bash writing scripts/** is %s\n' "$sc"
 
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
 #    binary: under the macOS sandbox it cannot reach trustd to verify TLS,

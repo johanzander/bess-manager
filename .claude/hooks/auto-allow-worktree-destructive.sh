@@ -191,9 +191,30 @@ is_globally_scoped() {
   # of settings.json's `gh` allow patterns, or a hook decision silently
   # revokes a permission the user granted. Counting per invocation catches
   # `gh pr view && gh pr merge`, where matching the first would clear both.
+  #
+  # `gh api` is on that safe list, but only in its read shape. gh sends GET
+  # unless the invocation says otherwise, and there are exactly two ways it
+  # can: `-X/--method` names a verb outright, and `-f/-F/--field/--raw-field/
+  # --input` attach a body, which flips the default to POST. A `gh api`
+  # segment carrying any of them is a mutation and still asks -- classified
+  # by the flags in the command, not by guessing what the endpoint does.
+  # Without this, one read-only `gh api` poisoned an otherwise safe chain:
+  # `gh pr view ... && gh api .../comments` counted 3 safe out of 4.
+  local rest api_args
+  rest=$1
+  while printf '%s' "$rest" | grep -qE "${CMD_START}gh[[:space:]]+api${CMD_END}"; do
+    rest=${rest#*gh api}
+    api_args=${rest%%&&*}
+    api_args=${api_args%%||*}
+    api_args=${api_args%%;*}
+    api_args=${api_args%%|*}
+    printf '%s' "$api_args" |
+      grep -qE "[[:space:]](-X|--method|-f|-F|--field|--raw-field|--input)([[:space:]]|=)" && return 0
+  done
+
   local gh_all gh_safe
   gh_all=$(printf '%s' "$1" | grep -oE "${CMD_START}gh${CMD_END}" | wc -l | tr -d ' ' || true)
-  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready|checkout|review)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+(view|clone)|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|search|auth[[:space:]]+status|--version|--help|-h)|${CMD_END})${CMD_END}" | wc -l | tr -d ' ' || true)
+  gh_safe=$(printf '%s' "$1" | grep -oE "${CMD_START}gh([[:space:]]+(pr[[:space:]]+(view|list|diff|checks|status|create|edit|comment|ready|checkout|review)|issue[[:space:]]+(view|list|create|edit|comment|close|reopen)|run[[:space:]]+(view|list|watch)|release[[:space:]]+(view|list)|repo[[:space:]]+(view|clone)|workflow[[:space:]]+(view|list)|label[[:space:]]+(list|create)|api|search|auth[[:space:]]+status|--version|--help|-h)|${CMD_END})${CMD_END}" | wc -l | tr -d ' ' || true)
   [ "$gh_all" -ne "$gh_safe" ] && return 0
 
   # Every push is examined, not just the first: stripping only to the first

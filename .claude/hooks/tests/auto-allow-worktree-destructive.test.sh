@@ -122,7 +122,6 @@ run allow "git status --short"
 
 echo "== gh reaches GitHub, which no worktree contains =="
 run ask "gh api -X DELETE repos/o/r"
-run ask "gh api repos/o/r"
 run ask "gh workflow run issue-fix.yml"
 run ask "gh secret set FOO"
 run ask "gh repo edit --visibility private"
@@ -144,6 +143,30 @@ run allow "gh issue edit 558 --add-label analyzed"
 # Authoring first must still not clear a publishing invocation after it.
 run ask "gh pr create --draft --title x && gh pr merge 561"
 run allow "gh run watch 123"
+
+# `gh api` sends GET unless the invocation says otherwise, so the read shape
+# is as safe as `gh pr view` -- and asking on it was not free: one read-only
+# `gh api .../comments` in a four-part PR-review fetch made the whole chain
+# prompt. What still asks is classified by the flags present, not by reading
+# the endpoint: `-X/--method` names a verb, and a field/body flag flips gh's
+# own default to POST.
+run allow "gh api repos/o/r/pulls/572/comments"
+run allow "gh api repos/:owner/:repo/pulls/572/comments --jq '.[] | .body'"
+run allow "gh api --paginate -H 'Accept: application/vnd.github+json' repos/o/r/issues"
+run ask "gh api -X PATCH repos/o/r/issues/1"
+run ask "gh api --method POST repos/o/r/issues"
+# No -X, but a field flag makes gh POST anyway.
+run ask "gh api repos/o/r/issues -f title=x"
+run ask "gh api repos/o/r/issues -F body=@note.md"
+run ask "gh api repos/o/r/issues --field title=x"
+run ask "gh api repos/o/r/issues --raw-field title=x"
+run ask "gh api repos/o/r/issues --input payload.json"
+run ask "gh api graphql -f query='mutation { ... }'"
+# The whole point: a read-only `gh api` must not poison an otherwise safe
+# chain, and must not clear a mutating one either -- in both orders.
+run allow "gh pr view 572 --json title && gh api repos/o/r/pulls/572/comments"
+run ask "gh api repos/o/r/pulls/1/comments && gh pr merge 1"
+run ask "gh api repos/o/r/x && gh api -X DELETE repos/o/r/y"
 
 echo "== the shared stash is denied outright =="
 # ONE refs/stash per repository, shared by the main checkout and every

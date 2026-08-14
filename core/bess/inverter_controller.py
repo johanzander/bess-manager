@@ -6,9 +6,11 @@ implement hardware-specific schedule conversion and deployment.
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
+from .execution_model import INTENT_TO_MODE
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -57,14 +59,13 @@ class InverterController(ABC):
     }
 
     # Map strategic intents to battery modes (shared across Growatt MIN and SPH).
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "load_first",
-        "LOAD_SUPPORT": "load_first",
-        "BATTERY_EXPORT": "grid_first",
-        "SOLAR_EXPORT": "load_first",
-        "IDLE": "load_first",
-    }
+    # Defined in `execution_model` -- the same vocabulary the optimizer scores
+    # commands against (Phase 4a, D1) -- and referenced here so the controllers
+    # and the execution model cannot drift apart.
+    # Typed `Mapping`, not `dict`: the object is a read-only view (see
+    # execution_model), so a `dict` annotation would type-check an in-place
+    # write that fails at runtime.
+    INTENT_TO_MODE: ClassVar[Mapping[str, str]] = INTENT_TO_MODE
 
     # Human-readable descriptions of strategic intents.
     INTENT_DESCRIPTIONS: ClassVar[dict[str, str]] = {
@@ -114,6 +115,22 @@ class InverterController(ABC):
     # written by the intra-period discharge gate (#187/#318) would force a
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
+
+    # Whether a planned LOAD_SUPPORT discharge is delivered as
+    # min(plan, actual load). Related to the flag above but NOT the same
+    # question, and the answers differ on solax_modbus VPP mode: there the
+    # rate register is a forced power (flag above False), yet LOAD_SUPPORT
+    # writes no rate at all -- #413 disables remote control for that intent
+    # and lets the inverter's own load-following self-use run the period, so
+    # a cover plan is delivered exactly (this flag True). True by default
+    # (TOU-register control, where the rate is a ceiling); False on native
+    # SolaX, which never received #413, and on the period-list platforms,
+    # which have no per-period control to deliver a partial cover with.
+    # Read by the optimizer through
+    # execution_model.PlatformCapabilities.load_support_delivers_exact_cover
+    # to decide whether the off-lattice exact-cover candidate (#466) is
+    # executable here (#580).
+    load_support_delivers_exact_cover: ClassVar[bool] = True
 
     # Whether the default _write_period_to_hardware() should skip re-sending
     # a register (grid_charge/discharge_rate) that already matches the last

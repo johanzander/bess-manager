@@ -2,7 +2,8 @@
 
 **Status: normative.** Every change to `core/bess/action_selector.py`,
 `core/bess/tie_policy.py`, `core/bess/dp_battery_algorithm.py`,
-`core/bess/pwl_window_dp.py`, `core/bess/tie_detection.py`,
+`core/bess/pwl_window_dp.py`, `core/bess/execution_model.py`,
+`core/bess/tie_detection.py`,
 `core/bess/models.py` (flow derivation), `core/bess/strategic_intent.py`,
 or `core/bess/simulation/` must either uphold the principles below or amend
 this document in the same PR, with the reason. "It was the fastest fix for
@@ -142,6 +143,33 @@ battery_first / grid-charge), rate on the hardware's actual lattice, and
 the mode's **reactive semantics** (a load-first discharge cap tracks real
 load; it is not a fixed energy quantity). Candidate value is computed by
 simulating that command's response to the forecast.
+
+**As built, Phase 4a (partial).** The platform half exists:
+`core/bess/execution_model.py` is a leaf module holding
+`PlatformCapabilities` — the discharge lattice, the mode vocabulary, the
+minimum commandable gear, and whether a discharge rate is a **ceiling**, a
+**target**, or **absent** — plus `intra_period_discharge_gate`, relocated
+out of `battery_system_manager` so the selector and
+`simulation/inverter_simulator` share one execution model without the
+optimizer importing the orchestrator. `BatterySystemManager` builds the
+object from the live controller and passes it to
+`optimize_battery_schedule`, which threads it to the candidate space in
+place of the old `discharge_resolution_kw` kwarg. Candidates are **not yet**
+commands — that is 4b (discharge) and 4c (charge). The first thing the
+capability buys: the off-lattice residual-cover candidate is now offered
+only where a planned LOAD_SUPPORT discharge is actually delivered as
+`min(plan, actual load)` (#580).
+
+**Two questions, not one — do not collapse them.** "Is the rate register a
+ceiling" (`discharge_rate_is_load_following`, what the intra-period gate
+needs, since it writes a rate) and "is a load-support discharge delivered
+load-following" (`load_support_delivers_exact_cover`, what the cover
+candidate needs) have different answers on solax-modbus Growatt in VPP
+mode: the register is a forced power, but #413 makes LOAD_SUPPORT write no
+rate at all and release the period to the inverter's own self-use. Each is
+declared per controller and read through `PlatformCapabilities`; a caller
+reading either fact off a controller directly is the drift this phase
+removed.
 
 Consequences:
 

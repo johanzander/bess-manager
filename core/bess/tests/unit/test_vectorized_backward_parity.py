@@ -35,6 +35,7 @@ from core.bess.dp_battery_algorithm import (
     _state_transition_grid,
 )
 from core.bess.dp_constants import SOE_STEP_KWH
+from core.bess.execution_model import DEFAULT_CAPABILITIES
 from core.bess.tests.helpers import make_battery_settings
 
 DT = 0.25
@@ -156,7 +157,7 @@ def test_backward_pass_values_the_residual_cover_candidate():
     home, solar, buy, sell = 0.02, 0.0, 1.5, -0.5
     soe = settings.min_soe_kwh + 4 * SOE_STEP_KWH
 
-    cover_p = _residual_cover_p(home, solar, DT, settings.max_discharge_power_kw / 100)
+    cover_p = _residual_cover_p(home, solar, DT, DEFAULT_CAPABILITIES, settings)
     assert cover_p is not None, "fixture no longer exercises the cover candidate"
 
     next_soe = _state_transition(

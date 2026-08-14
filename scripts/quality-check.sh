@@ -151,6 +151,34 @@ else
 fi
 
 echo ""
+echo "📋 Checking permission-hook decisions..."
+echo "-------------------------------------------"
+
+# The hook decides, per Bash command, whether an agent is prompted or runs
+# unattended -- including re-emitting the settings.json denials. Its
+# expectation matrix only protects that if something actually runs it.
+HOOK_TEST=".claude/hooks/tests/auto-allow-worktree-destructive.test.sh"
+if [ -f "$HOOK_TEST" ]; then
+    if bash "$HOOK_TEST" > /tmp/hook-test-out.txt 2>&1; then
+        echo "✅ Worktree permission hook behaves as pinned"
+    else
+        echo "❌ Worktree permission hook changed behaviour:"
+        grep "^FAIL" /tmp/hook-test-out.txt || tail -20 /tmp/hook-test-out.txt
+        ERRORS=$((ERRORS + 1))
+    fi
+    rm -f /tmp/hook-test-out.txt
+else
+    # An ERROR, not a warning. #562 converted every other unavailable tool in
+    # this script from WARNING to ERROR on the principle that a pre-commit
+    # gate which cannot run its checks must not report success, and
+    # rules.md requires explicit failure over silent degradation. This gate
+    # exists specifically to protect the permission-decision matrix, so a
+    # checkout missing it is the case that most needs to fail loudly.
+    echo "❌ $HOOK_TEST not found -- the permission-decision matrix is unguarded"
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Checking scenario discovery coverage..."
 echo "-------------------------------------------"
 

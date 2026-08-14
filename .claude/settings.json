@@ -60,7 +60,7 @@
           },
           {
             "type": "command",
-            "command": "bash .claude/hooks/auto-allow-worktree-destructive.sh"
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/auto-allow-worktree-destructive.sh\""
           }
         ]
       },
@@ -69,12 +69,33 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash .claude/hooks/check-worktree-path.sh"
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/check-worktree-path.sh\""
           },
           {
             "type": "command",
-            "command": "python3 .claude/hooks/optimizer_core_principles.py",
+            "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/optimizer_core_principles.py\"",
             "statusMessage": "Checking optimizer-core principles"
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/link-worktree-local-settings.sh\"",
+            "statusMessage": "Linking local settings into the worktree"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/link-worktree-local-settings.sh\""
           }
         ]
       }

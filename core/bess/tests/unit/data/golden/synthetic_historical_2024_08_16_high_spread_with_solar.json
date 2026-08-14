@@ -14,8 +14,8 @@
  "intra_period_discharge_allowed": [
   false,
   false,
-  false,
-  false
+  true,
+  true
  ],
  "soe_trajectory": [
   5.0,

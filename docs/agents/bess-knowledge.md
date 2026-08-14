@@ -324,9 +324,9 @@ hand — not downstream in `battery_system_manager.py`. The result is recorded a
 consumer (the BSM apply path and the inverter simulator) reads that boolean
 rather than re-deriving the comparison.
 
-The reason is that `shadow_price` is a *backward difference* between adjacent
-SoE grid levels, so it does not exist at the bottom level — and a SoE at or
-below the reserve floor clamps there. The DP used to skip the assignment in
+The reason is that `shadow_price` is a *one-sided slope* of the value function
+below the current state, so it does not exist at the bottom level — and a SoE at
+or below the reserve floor clamps there. The DP used to skip the assignment in
 that case, leaving the field at its `0.0` default, which is also what a
 genuinely worthless kWh produces. Any consumer comparing against the scalar
 therefore read "never computed" as "worth nothing", and `0.0` satisfies the
@@ -334,6 +334,24 @@ inequality for any positive buy price — so the ceiling opened on data nothing
 had computed. **`shadow_price` is now reporting-only; do not derive a decision
 from it.** Where no shadow price is computable there is no removable kWh below
 that state, so the authorization is `False`: absence is not permission.
+
+**How that slope is read (#571).** `_record_marginal_value` calls
+`_value_slope_below`, which returns the **left** one-sided derivative of the
+same piecewise-linear interpolant the policy walks (`_interpolate_value`) —
+left-sided because the gate authorizes energy *leaving* the battery, so what it
+must price is the value given up going down. It is deliberately not
+`_local_value_slope`, the right-sided reading the tie detector (#450) uses for a
+noise magnitude; swapping the two systematically over-opens the gate.
+
+Until #571 this function did its own index arithmetic, snapping to the *nearest*
+grid point with `round()` while the interpolant floors. A state in the lower
+half of a cell was therefore priced off the cell below — a region of the value
+function the battery is not in — so the reported marginal value stepped
+mid-cell instead of at cell boundaries. Signature in a bundle: two periods at
+almost the same SoE reporting different `shadow_price`, or an isolated period
+holding while its neighbours discharge. Measured effect of the fix on the
+fixture corpus: 142 of 2168 gate decisions flipped, 141 of them opening a gate
+that had been wrongly closed, with no change to planned energy or cost.
 
 What this works out to in practice — important for analysis:
 - During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal

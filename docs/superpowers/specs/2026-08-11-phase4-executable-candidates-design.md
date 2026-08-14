@@ -187,13 +187,15 @@ Phase 4 exists to end.
 
 **Consequences, in order of how much they change:**
 
-1. **No principle needs amending.** The earlier proposal to amend P7 rested on
-   "Shape B is decisively better under a point forecast, so P2 cannot reach
-   it". That decisiveness is ~85% an artifact of the missing candidate: with
-   exact cover injected the p99 margin collapses from 0.0388 SEK to 0.0067,
-   *inside* the period's epsilon of 0.0069. P3 already claims #352; the
-   architecture was right and the code was not implementing it. **Do not
-   record P7 as falsified.**
+1. **P7 needs no amendment — and a session that concludes otherwise should
+   re-check this first.** The tempting argument is "Shape B is decisively
+   better under a point forecast, so P2's within-epsilon preference for
+   load-tracking modes cannot reach it, so P7's structural claim fails". That
+   decisiveness is ~85% an artifact of the missing candidate: with exact cover
+   present the p99 margin collapses from 0.0388 SEK to **0.0067, inside the
+   period's own epsilon of 0.0069** — a near-tie, which is precisely the class
+   P2 handles. P3 already claims #352 among its consequences. The architecture
+   was right; the code was not implementing it.
 2. **Every D3 measurement in §5 was taken on the impoverished action space**,
    where each non-committing alternative carries a forced sub-lattice import at
    buy price — the very tariff asymmetry #352 is about. It systematically

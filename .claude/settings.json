@@ -2,12 +2,20 @@
   "sandbox": {
     "enabled": true,
     "autoAllowBashIfSandboxed": true,
+    "enableWeakerNetworkIsolation": true,
     "network": {
-      "allowLocalBinding": true
+      "allowLocalBinding": true,
+      "allowMachLookup": [
+        "com.apple.SecurityServer",
+        "com.apple.securityd",
+        "com.apple.trustd",
+        "com.apple.trustd.agent"
+      ]
     },
     "filesystem": {
       "allowWrite": [
-        "."
+        ".",
+        "~/GitHub/bess-manager"
       ]
     }
   },

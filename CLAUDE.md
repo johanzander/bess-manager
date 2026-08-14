@@ -298,13 +298,21 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   misreading the binary's *GitHub Actions* default config (it listed
   `~/actions-runner` and `GITHUB_EVENT_PATH`) as the local one.
 
-**`sandbox.*` live-reloads when a settings file is edited — it is NOT read only
-at session start.** The opposite is written all over the abandoned
-`chore/sandbox-replaces-worktree-hook` branch and was repeated into this file;
-it is wrong. Editing `.claude/settings.json` mid-session activated the sandbox
-in the session that made the edit, which then verified its own config. So you
-*can* iterate on `sandbox.*` in one session — just re-run `verify-sandbox.sh`
-after each edit rather than trusting the change landed.
+**The sandbox captures its policy ONCE, at activation, and ignores every later
+edit. You cannot iterate on `sandbox.*` in one session.** The trap is that it
+*looks* like you can: editing `.claude/settings.json` mid-session does activate
+the sandbox, so a session that turns it on immediately finds itself sandboxed
+and concludes the config live-reloads. It does not. Every subsequent edit —
+widening `allowWrite`, adding `allowMachLookup`, anything — is silently ignored
+while probes keep returning confident results measured against the *first*
+config. This was learned the expensive way: four knobs were "tested" that way
+and none of the results meant anything. A probe write to a path added to
+`allowWrite` minutes earlier still returned `Operation not permitted`, which is
+what exposed it.
+
+**So: one config change, then a genuinely fresh session, then
+`verify-sandbox.sh`.** Never a second edit in the same session. If a result
+contradicts the config you are looking at, the config is not what is running.
 
 ### Known-broken under the sandbox (unresolved)
 
@@ -329,26 +337,33 @@ guessed. Do not re-diagnose from scratch:
   *"dial tcp 127.0.0.1:64752: connect: operation not permitted"*, so
   `filesystem.allowRead` and `network.allowUnixSockets` are both wrong knobs.
   Blocks every E2E run, i.e. Step 8.
-- `sandbox.excludedCommands` in `~/.claude/settings.json` and
-  `network.allowLocalBinding` in project settings were both tried and neither
-  took effect. Claude Code's own "exclude this command" action writes
-  `excludedCommands` to `userSettings`/`localSettings`, never to project
-  settings, so user settings is the right home — but it did not exempt `gh`
-  either. Unresolved.
 - **`frontend/node_modules` is a symlink into the main checkout**, so writes
-  through it land outside a worktree's `allowWrite: ["."]` root and fail with
-  `EPERM`. That breaks `vitest`, `vite build`, and therefore Step 6's quality
-  gate in every worktree. A user-level `allowWrite` naming the main checkout
-  would cover it (worktrees are nested inside), but an absolute path cannot live
-  in tracked settings. Same applies to `.venv`.
+  through it land outside a worktree's own root and fail with `EPERM`. That
+  breaks `vitest`, `vite build`, and therefore Step 6's quality gate in every
+  worktree. `.venv` has the same shape. This is why `allowWrite` lists
+  `~/GitHub/bess-manager` alongside `.`: worktrees are nested inside the main
+  checkout, so allowing it covers both the worktree and every symlink target.
+  That entry hardcodes this machine's layout, which is ugly in a tracked file —
+  it is there because the alternative, a user-level `allowWrite`, is refused by
+  the auto-mode classifier (correctly: it will not let a session widen its own
+  containment).
 
-**Verify with `bash scripts/verify-sandbox.sh` after any change to `sandbox.*`,
-and let the Bash tool run it.** A plain terminal is not sandboxed — the sandbox
-applies to commands Claude Code itself runs — so a shell invocation prints
-`NOT RUNNING UNDER THE SANDBOX` and checks nothing. The script's check 0 exists
-to catch exactly that. A fresh session is not required (see live-reload above),
-but re-running the script after each edit is, since a settings change can fail
-to apply silently.
+**None of the four knobs currently set for `gh`/`podman`/symlinks has been
+verified** — `enableWeakerNetworkIsolation`, `allowMachLookup`,
+`allowLocalBinding` and the widened `allowWrite` were all added after the
+sandbox had already captured its policy, so the session that added them could
+not test them. They are reasoned from the measured error messages above, not
+confirmed. `sandbox.excludedCommands` was tried in both project and user
+settings before that point and appeared to do nothing, but that observation is
+now also suspect for the same reason. Treat the whole set as a hypothesis
+awaiting one fresh-session run.
+
+**Verify with `bash scripts/verify-sandbox.sh` in a FRESH session after any
+change to `sandbox.*`, and let the Bash TOOL run it.** Fresh because of the
+capture-once behaviour above. Bash tool because the sandbox applies only to
+commands Claude Code itself runs — a `!`-prefixed or terminal-typed invocation
+is unsandboxed and would pass the permissive checks while failing the
+restrictive ones, which reads exactly like a real result. Check 0 catches that.
 
 To set work aside on the branch you are on, use a temporary WIP commit — it
 lives on the branch, so it is per-worktree, private to that agent, and

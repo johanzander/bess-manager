@@ -2,19 +2,22 @@
 # Verifies that .claude/settings.json's sandbox config actually does what it
 # claims, by exercising it rather than reasoning about it.
 #
-# RUN THIS VIA THE BASH TOOL, from the repo root or a worktree.
+# RUN THIS IN A FRESH SESSION, VIA THE BASH TOOL, from the repo root or a
+# worktree.
 #
-# A FRESH SESSION IS NOT REQUIRED. Earlier versions of this header insisted it
-# was, on the theory that sandbox policy is read once at session start. That is
-# false: `sandbox.*` live-reloads when a settings file is edited, and the
-# session that enabled the sandbox went on to verify its own config with this
-# script. Iterate in one session; just re-run after every edit, because a
-# settings change can silently fail to apply.
+# FRESH, because the sandbox captures its policy once -- at activation -- and
+# then ignores every later settings edit. The trap is that this looks like the
+# opposite: editing settings.json mid-session DOES activate the sandbox, so the
+# editing session finds itself sandboxed and concludes the config live-reloads.
+# It does not. Subsequent edits are silently ignored while probes keep
+# returning confident results measured against the first config. Four knobs
+# were "verified" that way once; none of those results meant anything. If a
+# result contradicts the config you are reading, the config is not what runs.
 #
-# What DOES matter is that the Bash TOOL runs it. The sandbox applies only to
-# commands Claude Code itself runs, so a `!`-prefixed or terminal-typed
-# invocation is unsandboxed -- it would pass the permissive checks and fail the
-# restrictive ones, which reads exactly like a real result. Check 0 catches it.
+# VIA THE BASH TOOL, because the sandbox applies only to commands Claude Code
+# itself runs. A `!`-prefixed or terminal-typed invocation is unsandboxed -- it
+# would pass the permissive checks and fail the restrictive ones, which reads
+# exactly like a real result. Check 0 exists to catch that.
 #
 #   bash scripts/verify-sandbox.sh
 #

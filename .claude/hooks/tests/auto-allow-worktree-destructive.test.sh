@@ -138,6 +138,45 @@ run allow "gh issue edit 558 --add-label analyzed"
 run ask "gh pr create --draft --title x && gh pr merge 561"
 run allow "gh run watch 123"
 
+echo "== the shared stash is denied outright =="
+# ONE refs/stash per repository, shared by the main checkout and every
+# worktree, and the stack has no owner: another agent's `pop` takes your
+# entry with no way to tell it was not theirs. Denied rather than asked,
+# because for a subagent there is nobody watching the prompt.
+run deny "git stash"
+run deny "git stash -q"
+run deny "git stash -u"
+run deny "git stash push -u -m wip"
+run deny "git stash save wip"
+run deny "git stash pop"
+run deny "git stash apply"
+run deny "git stash apply stash@{0}"
+run deny "git stash drop"
+run deny "git stash clear"
+run deny "git stash branch tmp"
+# This guard is a hard `deny` that also applies in the main checkout, so the
+# two bypass classes fixed in #581 matter here more than anywhere: a
+# separator flush against the subcommand, and git's global options.
+run deny "git stash drop;"
+run deny "git stash;"
+run deny "git stash&&echo x"
+run deny "git stash pop;echo x"
+run deny "git -C sub stash pop"
+run deny "git -C sub stash"
+run deny "git -c core.x=1 stash drop"
+run deny "git --no-pager stash apply"
+# Reads are fine, and so is the WIP-commit alternative it points people to.
+run allow "git stash list"
+run allow "git stash show -p"
+# The bare-`git stash` branch must not swallow the space before a read-only
+# subcommand: its terminator is a separator or end of string, never a space.
+run allow "git stash list;"
+run allow "git stash list && git status"
+run allow "git -C sub stash show"
+run allow "git add -A && git commit -m 'wip: set aside'"
+run allow "git reset --soft HEAD~1"
+run allow "grep -rn 'git stash' docs/"
+
 echo "== settings.json denials stay denials =="
 # A hook decision supersedes a settings rule, so "ask" here would downgrade
 # a hard block on destroying the shared podman VM to one keystroke.
@@ -189,14 +228,9 @@ run allow "git push -u origin feat/x && gh pr create --draft --base main --title
 run allow "git commit -m 'fix main crash' && git push origin feat/x"
 run ask   "git commit -m 'x' && git push origin main"
 
-echo "== state shared across worktrees: stash, config, remotes =="
-# ONE refs/stash for every worktree; this project leans on stash for
-# branch isolation, so the shared stack is a live hazard.
-run ask "git stash clear"
-run ask "git stash drop"
-run ask "git stash pop"
-run allow "git stash list"
-run allow "git stash push -u -m wip"
+echo "== state shared across worktrees: config, remotes =="
+# The stash moved to its own section above -- it is denied outright now,
+# and denied in the main checkout too, so it is no longer an "ask" here.
 run ask "git config --global user.email x@y.z"
 run ask "git remote set-url origin git@github.com:other/repo.git"
 run ask "git remote remove origin"
@@ -207,9 +241,9 @@ echo "== a separator flush against the command word still terminates it =="
 # string and nothing else. A `;` or `&&` written without a space before it is
 # neither, so each of these was AUTO-ALLOWED while its spaced spelling asked
 # -- the same bypass in every guard at once, reachable by deleting one space.
-run ask "git stash drop;"
-run ask "git stash drop; echo x"
-run ask "git stash clear;"
+run deny "git stash drop;"
+run deny "git stash drop; echo x"
+run deny "git stash clear;"
 run ask "git gc;"
 run ask "git gc&&echo x"
 run ask "git worktree prune;"
@@ -220,7 +254,7 @@ run ask "sudo;"
 run deny "podman machine rm;"
 # The spaced spelling of a compound must keep asking too: the guard fires on
 # the stash, not on the `checkout main` that follows it.
-run ask "git stash pop && git checkout main"
+run deny "git stash pop && git checkout main"
 # ...and a terminator must not manufacture a match out of a longer word.
 run allow "git stashfoo drop"
 run allow "git gcfoo"
@@ -230,13 +264,13 @@ echo "== git global options must not slip past ANY guard =="
 # guard called it -- so every shared-state guard read the raw string and
 # `git -C sub <anything>` walked straight through. It is applied once, up
 # front, and every guard now matches the normalised form.
-run ask "git -C sub stash drop"
+run deny "git -C sub stash drop"
 run ask "git -C sub gc --prune=now"
 run ask "git -C sub tag -d v1.0.0"
 run ask "git -C sub config --global user.email x@y.z"
 run ask "git -C sub remote remove origin"
 run ask "git -C sub worktree prune"
-run ask "git -c core.x=1 stash clear"
+run deny "git -c core.x=1 stash clear"
 run ask "git --git-dir=sub/.git branch -f main HEAD"
 run ask "git --no-pager -C sub reflog expire --expire=now --all"
 # Normalisation is anchored like CMD_START, so a separator with no space

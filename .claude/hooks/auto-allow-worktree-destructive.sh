@@ -88,6 +88,41 @@ is_hard_denied() {
   printf '%s' "$1" | grep -qE "${CMD_START}podman[[:space:]]+(machine[[:space:]]+(rm|reset)|system[[:space:]]+reset)${CMD_END}"
 }
 
+# `git stash` does not work when more than one agent shares a repository.
+#
+# There is exactly ONE `refs/stash` per repository, shared by the main
+# checkout and every linked worktree. It is a stack with no owner: agent A's
+# `git stash` pushes an entry that agent B's `git stash pop` will happily
+# take, and B has no way to tell it was not theirs. With ~20 worktrees
+# active here that is not a race worth running -- it silently destroys work,
+# in a way git provides no recovery path for once popped and discarded.
+#
+# Denied rather than asked, and denied in the MAIN CHECKOUT TOO, because the
+# stack is shared repo-wide rather than worktree-scoped. A prompt would only
+# push the decision onto whoever is watching, which for a subagent is nobody.
+#
+# The alternative is a temporary WIP commit: it lives on the branch, so it is
+# per-worktree, private to that agent, and recoverable by SHA even if the
+# branch moves.
+#
+#     git add -A && git commit -m "wip: <what>"     # set work aside
+#     git reset --soft HEAD~1                        # pick it back up
+#
+# `git stash list` and `git stash show` only read, so they stay allowed.
+uses_shared_stash() {
+  # Bare `git stash` (implicit push), and every mutating subcommand.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash([[:space:]]+(push|save|pop|apply|drop|clear|branch|create|store)${CMD_END}|[[:space:]]*[;&|)<>]|[[:space:]]*$)" && return 0
+  # The bare-`git stash` branch spells its terminator out instead of reusing
+  # CMD_END: CMD_END accepts a SPACE, which here would swallow the space
+  # before a subcommand and deny the read-only `git stash list`. Only a
+  # separator or end of string means "no subcommand followed".
+  #
+  # `git stash -u`, `git stash -k`, etc: a flag straight after `stash` is
+  # still an implicit push.
+  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash[[:space:]]+-" && return 0
+  return 1
+}
+
 # Does one push's argument list name a ref shared with other checkouts?
 # Compared as TOKENS, not by substring: a substring test cannot tell `main`
 # from `feat/main-ish`, and widening it to catch `beta-release-*` would
@@ -174,9 +209,8 @@ mutates_shared_state() {
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+tag[[:space:]]+(.*[[:space:]])?(-d|--delete)${CMD_END}" && return 0
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+(gc|prune|reflog[[:space:]]+expire|filter-branch)${CMD_END}" && return 0
 
-  # ONE refs/stash for every worktree, and this project leans on stash for
-  # branch isolation, so the shared stack is a live hazard.
-  printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+stash[[:space:]]+(clear|drop|pop)${CMD_END}" && return 0
+  # The stash is handled earlier by uses_shared_stash, which applies in the
+  # main checkout too -- the stack is shared repo-wide, not worktree-scoped.
 
   # Shared .git/config, and --global reaches ~/.gitconfig.
   printf '%s' "$1" | grep -qE "${CMD_START}git[[:space:]]+config[[:space:]]+(.*[[:space:]])?(--global|--system)${CMD_END}" && return 0
@@ -201,6 +235,31 @@ mutates_shared_state() {
   return 1
 }
 
+decide() {
+  jq -n --arg d "$1" --arg reason "$2" '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: $d,
+      permissionDecisionReason: $reason
+    }
+  }'
+}
+
+# Normalise ONCE, here, so every guard below matches the same string. Doing it
+# inside a single guard is what let `git -C sub gc`, `git -C sub stash drop`
+# and `git -c x=y config --global ...` through: only the push guard normalised,
+# so git's global options walked past every other one. It has to happen above
+# the stash check too, not just above the worktree gate -- `git -C sub stash
+# pop` is the same bypass aimed at the one guard that is a hard deny.
+normalised=$(normalise_git "$command")
+
+# Checked before the worktree gate on purpose: refs/stash is shared by the
+# main checkout and every worktree alike, so this must hold everywhere.
+if uses_shared_stash "$normalised"; then
+  decide deny "Denied: there is ONE refs/stash for this whole repository, shared by the main checkout and all ~20 worktrees, and the stack has no owner -- another agent's \`git stash pop\` will take your entry with no way to tell it was not theirs. Use a temporary WIP commit instead, which stays on this branch and is recoverable by SHA: \`git add -A && git commit -m \"wip: ...\"\`, then \`git reset --soft HEAD~1\` to resume. (\`git stash list\`/\`show\` are read-only and still allowed.)"
+  exit 0
+fi
+
 session_root=$(git rev-parse --show-toplevel 2>/dev/null || true)
 if [ -z "$session_root" ]; then
   echo '{"continue": true}'
@@ -221,22 +280,6 @@ if [ -z "$main_root" ] || [ "$session_root" = "$main_root" ]; then
   echo '{"continue": true}'
   exit 0
 fi
-
-decide() {
-  jq -n --arg d "$1" --arg reason "$2" '{
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: $d,
-      permissionDecisionReason: $reason
-    }
-  }'
-}
-
-# Normalise ONCE, here, so every guard below matches the same string. Doing it
-# inside a single guard is what let `git -C sub gc`, `git -C sub stash drop`
-# and `git -c x=y config --global ...` through: only the push guard normalised,
-# so git's global options walked past every other one.
-normalised=$(normalise_git "$command")
 
 if is_hard_denied "$normalised"; then
   decide deny "Denied in settings.json: this destroys the shared podman VM that every worktree's E2E stack depends on. Being inside a disposable worktree does not contain it."

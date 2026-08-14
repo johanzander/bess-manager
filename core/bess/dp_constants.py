@@ -29,7 +29,7 @@ so it is not derived from POWER_STEP_KW and is not defined here).
 # POWER_STEP_KW * 0.25h (the quarterly-period reachable-state increment, the
 # production resolution -- see battery_system_manager.py) so V is sampled
 # only at states a single action can actually reach; a finer SOE_STEP_KWH
-# than that makes shadow_price's backward-difference report jagged/incorrect
+# than that makes shadow_price's one-sided-slope report jagged/incorrect
 # values at intermediate grid points that aren't independently reachable
 # (verified empirically during the #275 Option B investigation).
 #

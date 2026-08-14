@@ -156,6 +156,22 @@ def test_no_cell_below_the_floor_has_no_slope_to_read():
     assert _value_slope_below(V_row, a_hair_above_floor, settings) is None
 
 
+def test_single_level_value_row_has_no_slope_to_read():
+    """A one-level `V_row` has no cell at all, so there is nothing to price.
+
+    Without an explicit guard the clamp produces `lo = -1` and the function
+    reads `V_row[0] - V_row[-1]` -- the same element twice -- returning a
+    computed `0.0`. That is the #526 failure mode exactly: a zero shadow price
+    clears any positive buy price and opens the gate on a value that was never
+    computed, and unlike the missing-field default it survives every `None`
+    check downstream. Asserted directly rather than through a schedule because
+    a production battery always has >= 2 grid levels, so no scenario reaches it.
+    """
+    settings = make_battery_settings()
+
+    assert _value_slope_below(np.array([5.0]), settings.max_soe_kwh, settings) is None
+
+
 def _shadow_price_at_start_soe(initial_soe: float) -> float:
     """dV/dSoE the DP records for period 0 when the battery starts at `initial_soe`.
 

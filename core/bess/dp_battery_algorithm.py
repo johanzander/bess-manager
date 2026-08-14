@@ -1474,6 +1474,37 @@ def _local_value_slope(
 _GRID_POINT_TOLERANCE = 1e-9
 
 
+def _snapped_grid_index(soe: float, battery_settings: BatterySettings) -> float:
+    """Continuous value-function grid index of `soe`, with indices within
+    `_GRID_POINT_TOLERANCE` of a grid point snapped exactly onto it.
+
+    A one-sided derivative is discontinuous at each grid point, so an index a
+    single ulp off one would answer for the wrong cell. That is not
+    hypothetical: a battery resting exactly on its reserve floor yields
+    idx = +1e-16 rather than 0.0 in several fixtures, which without this would
+    price a kWh below the floor that does not exist and open the gate #526
+    closed. `_interpolate_value` needs no such guard -- it is continuous, so
+    the same noise moves its output by an ulp too.
+    """
+    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+    nearest = round(idx)
+    if abs(idx - nearest) < _GRID_POINT_TOLERANCE:
+        idx = float(nearest)
+    return idx
+
+
+def has_value_cell_below(soe: float, battery_settings: BatterySettings) -> bool:
+    """Whether a value-function cell exists below `soe` -- i.e. whether
+    `_value_slope_below` can price the last kWh below this state at all.
+
+    Exposed because tests need to select exactly the periods where the shadow
+    price is (or is not) computable. Re-deriving that rule test-side is what
+    #571 broke: the selectors mirrored the DP's old `round()` snapping and kept
+    passing while production moved to the interpolant's cell.
+    """
+    return _snapped_grid_index(soe, battery_settings) > 0.0
+
+
 def _value_slope_below(
     V_row: np.ndarray, soe: float, battery_settings: BatterySettings
 ) -> float | None:
@@ -1494,20 +1525,9 @@ def _value_slope_below(
     Both stay on the interpolant -- which is the property #571 was about
     (see `_record_marginal_value`).
     """
-    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+    idx = _snapped_grid_index(soe, battery_settings)
 
-    # A one-sided derivative is discontinuous at each grid point, so an index a
-    # single ulp off one would answer for the wrong cell. That is not
-    # hypothetical: a battery resting exactly on its reserve floor yields
-    # idx = +1e-16 rather than 0.0 in several fixtures, which without this would
-    # price a kWh below the floor that does not exist and open the gate #526
-    # closed. `_interpolate_value` needs no such guard -- it is continuous, so
-    # the same noise moves its output by an ulp too.
-    nearest = round(idx)
-    if abs(idx - nearest) < _GRID_POINT_TOLERANCE:
-        idx = float(nearest)
-
-    if idx <= 0.0:
+    if not has_value_cell_below(soe, battery_settings) or len(V_row) < 2:
         return None
     lo = int(np.ceil(min(idx, len(V_row) - 1))) - 1
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
@@ -1744,7 +1764,6 @@ def _replay_accounting_pass(
     flows_trajectory: list[PeriodFlows],
     initial_cost_basis: float,
     V: np.ndarray,
-    soe_levels: np.ndarray,
     buy_price: list[float],
     sell_price: list[float],
     reward_sell_price: list[float],
@@ -1987,11 +2006,6 @@ def optimize_battery_schedule(
     current_soe = initial_soe
     current_cost_basis = initial_cost_basis
     reward_objective_cost = 0.0
-    soe_levels = np.arange(
-        battery_settings.min_soe_kwh,
-        battery_settings.max_soe_kwh + SOE_STEP_KWH,
-        SOE_STEP_KWH,
-    )
     _, power_levels = _discretize_state_action_space(battery_settings)
 
     tie_margins: list[float] = []
@@ -2250,7 +2264,6 @@ def optimize_battery_schedule(
             flows_trajectory=flows_trajectory,
             initial_cost_basis=initial_cost_basis,
             V=V,
-            soe_levels=soe_levels,
             buy_price=buy_price,
             sell_price=sell_price,
             reward_sell_price=reward_sell_price,

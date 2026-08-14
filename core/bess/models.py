@@ -370,7 +370,9 @@ class DecisionData:
     shadow_price: float = (
         0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
         # (DP value-function gradient dV/dSoE). REPORTING ONLY (#526): it is a
-        # backward difference, so it does not exist at the bottom grid level,
+        # left one-sided slope of the interpolant the policy walks (#571,
+        # `_value_slope_below`), so it does not exist at or below the reserve
+        # floor, where there is no cell underneath to price,
         # and 0.0 is indistinguishable between "computed as worthless" and
         # "never computed". No consumer may re-derive a decision from it --
         # read intra_period_discharge_allowed instead.

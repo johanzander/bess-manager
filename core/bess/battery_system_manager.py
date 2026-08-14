@@ -3159,14 +3159,16 @@ class BatterySystemManager:
 
             if critical_failures:
                 logger.error(
-                    f"⚠️ SYSTEM DEGRADED: Critical sensor failures detected in required components: {', '.join(critical_failures)}"
+                    f"⚠️ SYSTEM DEGRADED: required components failing: {', '.join(critical_failures)}"
                 )
                 logger.error(
                     "⚠️ System will start in degraded mode. Some functionality may not work correctly."
                 )
-                logger.error(
-                    "⚠️ Please fix sensor configuration for full functionality."
-                )
+                # Deliberately does not tell the user to fix their configuration:
+                # a required component also fails when an upstream source is
+                # temporarily unavailable, and blaming the config sent a user
+                # hunting a Nordpool misconfiguration that did not exist (#583).
+                logger.error("⚠️ See the Health page for which check failed and why.")
                 # Store critical failures for UI to display
                 self._critical_sensor_failures = critical_failures
             else:

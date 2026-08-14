@@ -4,6 +4,7 @@ These tests exercise orchestration methods that do NOT require the DP optimizer,
 using MockHomeAssistantController from conftest.
 """
 
+import logging
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -521,6 +522,44 @@ class TestRefreshHealthCheck:
 
         assert system.has_critical_sensor_failures()
         assert system.get_critical_sensor_failures() == ["Battery SOC"]
+
+    def test_degraded_message_does_not_blame_sensor_configuration(self, system, caplog):
+        """Issue #583: a required component can fail because an upstream source
+        is temporarily unavailable, not because anything is misconfigured. The
+        degraded-mode banner must not tell the user to fix a configuration that
+        is correct — it pointed a user at the Nordpool settings for a 77-second
+        HA outage that healed itself.
+        """
+        failing_result = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Electricity Price Data",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Nordpool Service Call",
+                            "status": "ERROR",
+                            "error": "Nordpool price data is temporarily unavailable, "
+                            "will retry on the next fetch",
+                        }
+                    ],
+                }
+            ],
+        }
+        with patch(
+            "core.bess.battery_system_manager.run_system_health_checks",
+            return_value=failing_result,
+        ):
+            with caplog.at_level(
+                logging.INFO, logger="core.bess.battery_system_manager"
+            ):
+                system.refresh_health_check()
+
+        logged = "\n".join(r.getMessage() for r in caplog.records)
+        assert "fix sensor configuration" not in logged.lower()
+        assert "Electricity Price Data" in logged
 
     def test_retries_schedule_build_when_no_schedule_and_sensors_healthy(self, system):
         """A health check that finds no critical failures but no schedule was

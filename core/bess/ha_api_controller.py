@@ -1095,10 +1095,11 @@ class HomeAssistantAPIController:
             context: Optional dict of contextual parameters for failure diagnostics
             optional: If True, a 404 is expected (e.g. probing a legacy/disabled
                 entity) and is logged at debug level instead of error
-            suppress_retry_warnings: If True, retry/failure logging is downgraded
-                to debug/info (e.g. Nordpool tomorrow-price calls before the
+            suppress_retry_warnings: If True, the failure is an expected
+                condition (e.g. Nordpool tomorrow-price calls before the
                 provider has published data — an expected daily condition, not
-                an error)
+                an error): retry/failure logging is downgraded to debug/info and
+                no runtime failure is recorded
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -1169,8 +1170,11 @@ class HomeAssistantAPIController:
                         str(e),
                     )
 
-                    # Record runtime failure if failure tracker is available
-                    if self.failure_tracker:
+                    # Record runtime failure if failure tracker is available.
+                    # A suppressed failure is an expected condition (see
+                    # suppress_retry_warnings above) — recording it would surface
+                    # a routine daily event as a user-visible failure (#583).
+                    if self.failure_tracker and not suppress_retry_warnings:
                         # Use provided operation/category or fall back to generic description
                         operation_description = operation or f"{method.upper()} {path}"
                         operation_category = category or "other"

@@ -2518,6 +2518,21 @@ class BatterySystemManager:
             )
             return True, "Retry failed hardware write"
 
+        # A write that raised is covered above. This covers the write that did
+        # not raise and still is not there: the schedule comparison below only
+        # ever compares plan against plan, so on a platform that skips the
+        # write while the plan holds steady, nothing would look at the inverter
+        # again until the plan changed (issues #551, #554).
+        if self._controller is not None and not prepare_next_day:
+            drifted, drift_reason = (
+                self._inverter_controller.needs_hardware_reconciliation(
+                    self._controller, period
+                )
+            )
+            if drifted:
+                logger.warning("DECISION: Apply schedule - %s", drift_reason)
+                return True, drift_reason
+
         # Special case: preparing next day (runs at 23:55 for 00:00 start)
         if prepare_next_day:
             # Compare full day TOU settings for tomorrow (from start of day)

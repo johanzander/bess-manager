@@ -1718,24 +1718,38 @@ class TestFarFutureSegmentsAreDeferred:
         )
 
     def test_running_window_still_reaches_hardware_after_a_restart(self, scheduler):
-        """Keeping the true start must not stop a restart programming it.
+        """A restart mid-window must still cover the period it is inside.
 
-        A restart mid-window reads empty hardware and has to write the window
-        it is already inside, with its real start time, not a truncated one.
+        Modelled the way a restart actually looks: no previous schedule to
+        carry forward, so past periods arrive as IDLE
+        (battery_system_manager.py initialises them that way). The walk-back
+        therefore stops at the current period and the window is programmed
+        truncated to "now" — the accepted cost documented on
+        _group_periods_by_mode. What must not happen is the running period
+        going uncovered.
+
+        Feeding past periods the intent they were planned with would let this
+        pass for a reason the restart path cannot produce.
         """
         controller = _SimulatingController()
 
-        # First contact happens at 13:00, in the middle of a 12:00-13:59 window.
-        self._cycle(scheduler, controller, list(range(48, 56)), 52)
+        restart_intents = ["IDLE"] * 96  # nothing known about the past
+        for period in range(52, 56):  # 13:00-13:59, the rest of the window
+            restart_intents[period] = "GRID_CHARGING"
+        scheduler.strategic_intents = restart_intents
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=52)
+        scheduler.sync_to_hardware(controller, effective_period=52)
 
-        programmed = {
-            (s["start_time"], s["end_time"]) for s in controller.hardware_segments()
-        }
-        assert (
-            "12:00",
-            "13:59",
-        ) in programmed, (
-            f"Running window not programmed after restart: {sorted(programmed)}"
+        covering = [
+            s
+            for s in controller.hardware_segments()
+            if s["batt_mode"] == "battery_first"
+            and s["start_time"] <= "13:00"
+            and s["end_time"] >= "13:00"
+        ]
+        assert covering, (
+            "The period the restart landed inside is not covered by any "
+            f"enabled segment: {controller.hardware_segments()}"
         )
 
     def _seeded_controller(self, start, end, mode):
@@ -1854,6 +1868,49 @@ class TestFarFutureSegmentsAreDeferred:
             "Segment the write path defers was flagged pending by the display "
             f"path: {flagged}"
         )
+
+    def test_lost_segment_on_hardware_is_detected(self, scheduler):
+        """A segment that vanishes from the inverter must be noticed.
+
+        The write gate compares plan against plan, so once a segment is
+        written and the plan stops changing, nothing looks at the inverter
+        again. Before deferral the in-progress segment was renamed every
+        cycle, which forced a read and repaired drift by accident; that is
+        gone, and issue #551 showed this table really does drift.
+        """
+        controller = self._seeded_controller("03:00", "04:59", "battery_first")
+        scheduler.strategic_intents = _grid_charging_at(list(range(12, 20)))
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=12)
+
+        in_sync, _ = scheduler.needs_hardware_reconciliation(controller, 13)
+        assert not in_sync, "Reported drift while hardware matches the plan"
+
+        controller.slots.clear()  # inverter loses the table mid-window
+
+        drifted, reason = scheduler.needs_hardware_reconciliation(controller, 14)
+        assert drifted, (
+            "Lost segment went unnoticed — the window would run load_first "
+            "for the rest of its life with nothing in the logs"
+        )
+        assert "03:00" in reason, f"Reason should name the missing window: {reason!r}"
+
+    def test_deferred_segment_is_not_mistaken_for_drift(self, scheduler):
+        """Reconciliation must not fire for segments deliberately not written.
+
+        A planned-but-deferred segment is absent from hardware by design. If
+        that reads as drift the gate fires every cycle and the churn this
+        change removes comes straight back.
+        """
+        controller = _SimulatingController()
+        scheduler.strategic_intents = _grid_charging_at([48, 49, 50, 51, 80, 81])
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=48)
+        scheduler.sync_to_hardware(controller, effective_period=48)
+
+        drifted, reason = scheduler.needs_hardware_reconciliation(controller, 48)
+
+        assert (
+            not drifted
+        ), f"Deferred 20:00 window reported as hardware drift: {reason!r}"
 
     def test_deferred_planned_segment_keeps_its_hardware_slot(self, scheduler):
         """A planned segment spared by the disable diff must keep its slot.

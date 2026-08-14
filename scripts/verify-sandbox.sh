@@ -131,6 +131,22 @@ touch scripts/.sandbox-probe 2>/dev/null && sc=allowed || sc=blocked
 rm -f scripts/.sandbox-probe 2>/dev/null
 printf 'INFO  Bash writing scripts/** is %s\n' "$sc"
 
+# 4c. THE SYMLINKED DEPENDENCY TREES. In a worktree, frontend/node_modules and
+#     .venv are symlinks into the MAIN checkout (scripts/worktree-setup.sh), so
+#     a write through them resolves outside the worktree's own root. That is
+#     why allowWrite lists the main checkout as well as ".". Missing it does
+#     not look like a permissions problem -- it surfaces as vitest failing to
+#     load its config with EPERM on node_modules/.vite-temp, i.e. Step 6's
+#     quality gate breaking in every worktree for no visible reason.
+if [ -e frontend/node_modules ]; then
+  touch frontend/node_modules/.sandbox-probe 2>/dev/null && nm=allowed || nm=blocked
+  rm -f frontend/node_modules/.sandbox-probe 2>/dev/null
+  check "writing through the node_modules symlink is allowed" allowed "$nm" \
+    "add the main checkout to sandbox.filesystem.allowWrite -- worktrees are nested inside it, so one entry covers the worktree and every symlink target. Without it vitest and vite build fail EPERM in every worktree."
+else
+  printf 'SKIP  frontend/node_modules not present (run scripts/worktree-setup.sh)\n'
+fi
+
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
 #    binary: under the macOS sandbox it cannot reach trustd to verify TLS,
 #    which surfaces as x509: OSStatus -26276.

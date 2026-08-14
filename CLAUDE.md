@@ -314,49 +314,47 @@ what exposed it.
 `verify-sandbox.sh`.** Never a second edit in the same session. If a result
 contradicts the config you are looking at, the config is not what is running.
 
-### Known-broken under the sandbox (unresolved)
+### Why each non-default knob is there
 
-Both break `implement-issue`, and neither has the cause its old remedy text
-guessed. Do not re-diagnose from scratch:
+All four were verified together by a fresh-session `verify-sandbox.sh` run.
+Each exists for one measured failure — don't drop one because it looks
+redundant:
 
-- **`gh` fails twice over.** First the macOS keychain: `gh auth status` returns
-  *"The token in keyring is invalid"* because gh reads its token from the
-  keychain and the sandbox blocks that. Then, once a call reaches the network,
-  `gh pr edit` returns *"tls: failed to verify certificate: x509: OSStatus
-  -26276"* — gh is a Go binary and cannot reach `trustd` to verify TLS. Only
-  the second is what `enableWeakerNetworkIsolation` is documented for, so that
-  knob alone would not fix `gh`. Blocks `gh pr create`, the closing step of
-  Step 9. The same keychain block makes `git push` emit `failed to store:
-  100001` — the credential helper cannot cache the credential, though the push
-  itself still lands.
-- **The per-call escape hatch works**: the Bash tool's
-  `dangerouslyDisableSandbox: true` runs one command unsandboxed, and it was
-  used to reach GitHub while the sandbox was live. That is a workaround for a
-  one-off, not a fix — an autonomous Step 9 cannot rely on it.
-- **`podman` — a local TCP port, not a unix socket.** `podman info` returns
-  *"dial tcp 127.0.0.1:64752: connect: operation not permitted"*, so
-  `filesystem.allowRead` and `network.allowUnixSockets` are both wrong knobs.
-  Blocks every E2E run, i.e. Step 8.
-- **`frontend/node_modules` is a symlink into the main checkout**, so writes
-  through it land outside a worktree's own root and fail with `EPERM`. That
-  breaks `vitest`, `vite build`, and therefore Step 6's quality gate in every
-  worktree. `.venv` has the same shape. This is why `allowWrite` lists
-  `~/GitHub/bess-manager` alongside `.`: worktrees are nested inside the main
-  checkout, so allowing it covers both the worktree and every symlink target.
-  That entry hardcodes this machine's layout, which is ugly in a tracked file —
-  it is there because the alternative, a user-level `allowWrite`, is refused by
-  the auto-mode classifier (correctly: it will not let a session widen its own
-  containment).
+- **`enableWeakerNetworkIsolation`** — `gh` is a Go binary and returned
+  *"tls: failed to verify certificate: x509: OSStatus -26276"*: it cannot reach
+  `trustd` to verify TLS. Egress itself was never the problem — `curl
+  https://github.com` returned 200 in the same sandbox. This is the documented
+  knob for exactly this, and it is explicitly weaker: it opens `trustd`, which
+  is a potential exfiltration path.
+- **`network.allowMachLookup`** (`SecurityServer`, `securityd`, `trustd`) —
+  `gh auth status` returned *"The token in keyring is invalid"*. gh reads its
+  token from the macOS keychain, which is XPC, not network. The same block is
+  why `git push` emitted `failed to store: 100001` — the credential helper
+  could not cache the credential, though the push itself still landed.
+- **`network.allowLocalBinding`** — `podman info` returned *"dial tcp
+  127.0.0.1:64752: connect: operation not permitted"*. The podman VM is reached
+  over a local TCP port, so `filesystem.allowRead` and
+  `network.allowUnixSockets` are both the wrong knob.
+- **`filesystem.allowWrite: [".", "~/GitHub/bess-manager"]`** —
+  `frontend/node_modules` and `.venv` are symlinks into the main checkout, so
+  writes through them land outside a worktree's own root and fail `EPERM`,
+  breaking `vitest` and `vite build`. Worktrees are nested inside the main
+  checkout, so allowing it covers both. That entry hardcodes this machine's
+  layout, which is ugly in a tracked file; it is there because the alternative,
+  a user-level `allowWrite`, is refused by the auto-mode classifier —
+  correctly, since that is a session widening its own containment.
 
-**None of the four knobs currently set for `gh`/`podman`/symlinks has been
-verified** — `enableWeakerNetworkIsolation`, `allowMachLookup`,
-`allowLocalBinding` and the widened `allowWrite` were all added after the
-sandbox had already captured its policy, so the session that added them could
-not test them. They are reasoned from the measured error messages above, not
-confirmed. `sandbox.excludedCommands` was tried in both project and user
-settings before that point and appeared to do nothing, but that observation is
-now also suspect for the same reason. Treat the whole set as a hypothesis
-awaiting one fresh-session run.
+`sandbox.excludedCommands` is **not** used and is not needed. It was tried in
+both project and user settings while the four knobs above were missing, appeared
+to do nothing, and is now moot.
+
+**What the verification does and does not cover.** It exercises `gh auth
+status` (the keychain and TLS paths — good coverage of what `gh pr create`
+needs) and `podman info` (the socket/TCP connection only, *not* that a compose
+E2E completes). A full Step 8 run and a `gh pr create` are still the first real
+proof. If either fails, re-read the error before touching config: every knob
+here was found by reading the actual message, and every wrong guess came from
+reasoning about what *ought* to be blocked.
 
 **Verify with `bash scripts/verify-sandbox.sh` in a FRESH session after any
 change to `sandbox.*`, and let the Bash TOOL run it.** Fresh because of the

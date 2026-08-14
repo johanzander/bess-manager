@@ -30,6 +30,7 @@ from core.bess.huawei_controller import HuaweiController
 from core.bess.settings import BatterySettings
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+from core.bess.solis_modbus_controller import SolisModbusController
 from core.bess.tests.helpers import make_battery_settings
 
 
@@ -91,6 +92,33 @@ class TestDischargeRateSemantics:
     def test_unknown_semantics_is_rejected(self):
         with pytest.raises(ValueError, match="discharge_rate_semantics"):
             PlatformCapabilities(discharge_rate_semantics="load_following")
+
+    def test_no_rate_at_all_cannot_claim_to_deliver_an_exact_cover(self):
+        """The cross-field invariant, enforced rather than trusted to the
+        controllers: this PR exists partly because Solis declared
+        `period_list` while inheriting the base class's load-following True.
+        The next period-list controller that repeats it must fail at
+        construction, not plan an off-lattice delivery on hardware with no
+        per-period rate."""
+        with pytest.raises(ValueError, match="load_support_delivers_exact_cover"):
+            PlatformCapabilities(
+                discharge_rate_semantics=DISCHARGE_RATE_ABSENT,
+                load_support_delivers_exact_cover=True,
+            )
+
+    def test_every_shipped_controller_satisfies_the_invariant(self):
+        """The declarations themselves, not a constructed pair -- a controller
+        whose two flags disagree cannot even be read into a capability."""
+        for controller in (
+            GrowattMinController(_settings()),
+            GrowattSphController(_settings()),
+            HuaweiController(_settings()),
+            SolaxController(_settings()),
+            SolisModbusController(_settings()),
+            SolaxModbusGrowattController(_settings(), control_mode="tou"),
+            SolaxModbusGrowattController(_settings(), control_mode="vpp"),
+        ):
+            PlatformCapabilities.from_controller(controller, _settings())
 
 
 class TestLattice:

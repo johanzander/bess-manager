@@ -6,6 +6,7 @@ implement hardware-specific schedule conversion and deployment.
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
@@ -61,7 +62,10 @@ class InverterController(ABC):
     # Defined in `execution_model` -- the same vocabulary the optimizer scores
     # commands against (Phase 4a, D1) -- and referenced here so the controllers
     # and the execution model cannot drift apart.
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = INTENT_TO_MODE
+    # Typed `Mapping`, not `dict`: the object is a read-only view (see
+    # execution_model), so a `dict` annotation would type-check an in-place
+    # write that fails at runtime.
+    INTENT_TO_MODE: ClassVar[Mapping[str, str]] = INTENT_TO_MODE
 
     # Human-readable descriptions of strategic intents.
     INTENT_DESCRIPTIONS: ClassVar[dict[str, str]] = {

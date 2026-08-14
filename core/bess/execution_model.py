@@ -165,6 +165,29 @@ class PlatformCapabilities:
                 f"Unknown discharge_rate_semantics: "
                 f"{self.discharge_rate_semantics!r}"
             )
+        # A platform with no per-period discharge rate cannot deliver a
+        # partial load cover -- there is nothing to command it with. Every
+        # other combination is legitimate, including `target` + exact cover
+        # (solax-modbus VPP: forced rate register, but #413 makes
+        # LOAD_SUPPORT release the period to native load-following).
+        #
+        # Enforced here rather than trusted to the controllers, because this
+        # PR exists partly because one of those declarations was wrong: Solis
+        # declared `period_list` while inheriting the base class's
+        # load-following True. A controller that repeats that mistake now
+        # fails loudly at construction instead of quietly planning an
+        # off-lattice delivery on hardware that has no rate at all -- the
+        # #282/#580 shape this phase closes.
+        if (
+            self.discharge_rate_semantics == DISCHARGE_RATE_ABSENT
+            and self.load_support_delivers_exact_cover
+        ):
+            raise ValueError(
+                "load_support_delivers_exact_cover cannot be True when "
+                f"discharge_rate_semantics is {DISCHARGE_RATE_ABSENT!r}: a "
+                "platform with no per-period discharge rate has nothing to "
+                "deliver a partial load cover with"
+            )
 
     @property
     def discharge_rate_is_load_following(self) -> bool:

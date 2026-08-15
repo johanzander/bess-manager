@@ -129,10 +129,15 @@ of `analyzed`.
   Stages 1–3 and 5 stay owner-only — those spend money on work nobody has
   asked for yet.
 - Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
-- Never push directly to `main`. PRs are always *opened* as drafts, and stay
-  that way until an independent review approves them — `implement-issue`
-  Step 11 then marks the PR ready (`gh pr ready`) so the only thing left is
-  the maintainer's merge. No agent ever merges.
+- Never push directly to `main`. PRs are always *opened* as drafts, and no
+  agent ever merges one — the merge is the maintainer's, always.
+- **Who takes a PR out of draft depends on which flow opened it.** An
+  interactive `implement-issue` run drives its own review loop, so its
+  Step 11 marks the PR ready (`gh pr ready`) the moment Stage 4 returns
+  `APPROVED`, leaving only the merge. A **Stage 3 (`issue-fix.yml`) PR stays
+  a draft even after Stage 4 approves it** — CI mode skips Step 11, so
+  nothing there runs `gh pr ready`, and you are triggering that review by
+  hand anyway. Flip it yourself when you're satisfied.
 - The bot identity is `bess-manager-claude-bot` (a custom GitHub App). The
   official Anthropic Claude App is **suspended** to avoid collisions —
   do not unsuspend it.
@@ -260,7 +265,15 @@ matching `ask` with no matching `deny` turns a prohibition into a prompt. The
 gate checks stash and podman shapes against `deny` **only** for that reason.
 
 The standard for adding an entry: **the effect escapes the repo and git cannot
-undo it.** Not "the command looks dangerous". The second category exists
+undo it.** Not "the command looks dangerous". Both halves have to hold, which
+is why **`gh pr ready` is deliberately unattended** even though it plainly
+escapes to GitHub: `gh pr ready --undo` puts the PR straight back, it changes
+no content (the diff was already public — the `git push` that created it
+prompted), and it is the codified endpoint of `implement-issue` Step 11's
+review loop. Prompting there would stall the one flow whose entire point is to
+reach that state without you. Contrast `gh pr merge` one row up, which is the
+same category and *is* gated: nothing undoes a merge to `main`. The
+second category exists
 because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.

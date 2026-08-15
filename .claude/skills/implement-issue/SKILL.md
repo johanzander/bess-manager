@@ -500,12 +500,25 @@ On the verdict:
   never merge it, and never flip it early — an unreviewed or red PR stays a
   draft, no matter how confident you are in the diff.
 
-  If you push anything after the approval (parking a nit in `TODO.md`, a
-  `git merge origin/main`), re-check `gh pr checks` and
-  `mergeable`/`mergeStateStatus` before flipping, and say in your report
-  which commits landed after the approving review and whether they touched
-  the reviewed code. `gh pr ready` on a PR whose approved diff has since
-  changed underneath it is the one way this step can mislead.
+  **If you push anything after the approval, the approval covers a diff that
+  no longer exists, and what you do next depends on what you pushed.** Ask
+  whether the new commits touched code the reviewer actually reviewed:
+
+  - **They didn't** (parking a nit in `TODO.md`, a `CHANGELOG.md` line, a
+    clean `git merge origin/main` that changed nothing under review):
+    re-check `gh pr checks` and `mergeable`/`mergeStateStatus`, then flip.
+    Name those commits in your report and say why they fall outside the
+    reviewed diff, so the maintainer can check that call rather than take
+    it on trust.
+  - **They did:** do NOT flip. Go back and run another review round — the
+    approval you are holding was for different code, and `gh pr ready` on a
+    stale-approved diff is the one way this step can actively mislead. A
+    round costs minutes; a wrongly-ready PR spends the maintainer's trust in
+    the ready flag, which is the only thing that makes it worth setting.
+
+  The round cap counts this round like any other. If it lands you on the cap,
+  say so and hand over a draft PR with the outstanding state — an honest
+  draft beats a ready flag that means less than it claims.
 - **`CHANGES_REQUESTED` / `COMMENTED`** — collect the findings:
 
   ```bash

@@ -481,6 +481,15 @@ prefix-anchored, so they cannot exempt `git push origin main
 --force-with-lease`, while any pattern loose enough to catch that also catches
 plain `--force`. Exempting it means re-opening the hole. It asks.
 
+**That prompt costs nothing here, which is why the hole stays closed rather
+than the rule loosened.** Neither `implement-issue` nor `release` mentions
+`rebase`, `--force` or `--force-with-lease` anywhere, and this project merges
+the target branch before a PR instead of rebasing — a merge-based flow never
+needs a force push. So the rule should lie dormant. **If it ever fires, treat
+that as the finding**: an agent has gone off-script into a rebase or an amend
+of already-pushed commits. Answer the prompt on its merits; do not "fix" it by
+narrowing the push rule, which is how findings 1–3 of PR #596 were introduced.
+
 **What the unattended set actually risks is uncommitted work**, since the
 sandbox contains writes to the repo but cannot distinguish a wanted write from
 an unwanted one. Tracked content

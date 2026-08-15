@@ -215,16 +215,108 @@ frontend/node_modules` first) rather than installing through it. Re-running
 
 ### Permissions
 
-**An agent should run end-to-end without approving anything.** Prompts are the
-cost, not the safety: a stalled autonomous run is a guaranteed loss, while the
-commands that used to prompt are recoverable. Only two shapes still ask, and
-both reach past the repository where nothing local can contain them:
-`git push --force` and `sudo`. Two are denied outright: the shared podman VM
-(`machine rm`, `system reset`) and `git stash`. **That is the entire list.**
-Everything else — `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`,
-`git worktree remove` — runs unattended. Do not add to the list because a
-command *looks* dangerous; add to it only when the effect escapes the repo and
-git cannot undo it.
+**An agent should run end-to-end without approving anything that the sandbox
+already contains.** Prompts are the cost, not the safety: a stalled autonomous
+run is a guaranteed loss, while anything the sandbox bounds is recoverable.
+`rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
+remove` all run unattended. **Every `git push` asks**, `--force-with-lease`
+included — see below for why that one is not carved out.
+
+What still asks is one closed list, and every entry is there because the
+**sandbox cannot contain it** — it bounds the filesystem, not the network, and
+not `.git`'s own recovery data:
+
+| Category | Rules |
+|---|---|
+| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
+| Leaves the user boundary | `sudo` |
+
+Each of those also has a `git -* <verb>` twin covering the global-option
+spelling (`git -C <path> gc`, `git --no-pager push`). The twins name a **verb**
+on purpose: a blanket `Bash(git -*)` was tried and put read-only inspection —
+`git -C sub status`, `git -C <wt> diff`, the verify step of the cross-checkout
+patch recipe — behind a prompt, and it shadowed the `git commit` allow via
+`git -c user.email=… commit`.
+
+**`*` compiles to a greedy `.*` that spans spaces**, which bounds how precise
+any of this can be. `git -* push*` therefore also matches a `git -c … commit`
+whose *message* contains " push". That is an extra prompt, not a gap, and it is
+accepted — the alternative is dropping the global-option guard on push, which
+is a real bypass. When the choice is between a false prompt and a hole, take
+the prompt. The one case where that trade flips is `deny`, which has no
+override: an over-broad deny **blocks** documented work rather than prompting
+for it, which is why `git prune` has no twin (it caught `git worktree prune`,
+and Step 4 prunes in a loop) and why the stash twins are per-verb.
+
+Denied outright: the shared podman VM (`machine rm`, `system reset`) and every
+mutating `git stash` form, **including `git -C <path> stash …`**. That last
+clause is load-bearing rather than decorative: the global-option spelling was
+briefly covered only by an `ask`, and since `deny > ask` applies by category, a
+matching `ask` with no matching `deny` turns a prohibition into a prompt. The
+gate checks stash and podman shapes against `deny` **only** for that reason.
+
+The standard for adding an entry: **the effect escapes the repo and git cannot
+undo it.** Not "the command looks dangerous". The second category exists
+because leaving `rm` and `reset --hard` unattended is only defensible while the
+object database and reflog can recover them — a `gc --prune=now` that ran
+unprompted would remove the ground that argument stands on.
+
+**`git push` and `gh api` are guarded bluntly, and that is deliberate.** Both
+were enumerated by shape first, and both leaked, twice:
+
+```
+git push origin main --force          # --force not adjacent to `push`
+git push origin +beta-release-9.9     # force via refspec
+git push origin --delete release-X.Y  # destroys a shared ref
+git push origin v9.9.0                # publishes a release tag
+gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
+gh api <path> -f key=val              # any -f/-F makes it a POST
+```
+
+The marker sits at an arbitrary argument position, and **prefix globbing cannot
+reach it.** Narrowing these two back to specific forms re-opens every line
+above, so `quality-check.sh` requires the blanket spelling rather than merely
+"some push rule exists". The cost is one prompt at Step 9 per issue, and a
+prompt during release work — which the release skill requires explicit approval
+for anyway.
+
+**Patterns match the command as written — prefix globbing, no normalisation.**
+This is the single biggest source of rules that look right and match nothing,
+and it produced a bug here in four consecutive review rounds.
+
+**Nothing normalises `git`'s global options**, so `git -C <path> stash pop`,
+`git --git-dir=… push`, `git -c k=v push` and `git --no-pager gc` sidestep every
+rule anchored on `git stash` / `git push` / `git gc`. The deleted hook
+normalised for exactly this — and CLAUDE.md itself teaches `git -C
+.claude/worktrees/<name>` as the cross-checkout idiom, so it is the spelling an
+agent reaches for first. `Bash(git -*)` covers the whole class in one rule,
+including options nobody has thought of yet. Do not replace it with an
+enumeration.
+
+**`scripts/quality-check.sh` asserts this by COMMAND STRING, not by rule name.**
+Presence checks — "is rule X in the list" — passed for four review rounds while
+real spellings slipped through, because they answer the wrong question. The gate
+now carries ~56 real command strings in three lists, using the same prefix-glob
+semantics the harness applies:
+
+- `MUST_BE_DENIED` — checked against `deny` **only**, so a matching `ask` cannot
+  certify a command that policy says is unapprovable.
+- `MUST_BE_GUARDED` — checked against `deny` + `ask`; a prompt is acceptable.
+- `MUST_NOT_BE_GUARDED` — read-only git that must stay unattended. This is what
+  catches a rule that is too *broad*, the failure the blanket `Bash(git -*)`
+  introduced.
+
+When a new bypass spelling turns up, add the string to the right list first —
+then fix the rule until the gate goes green.
+
+**A rule that fails to match does not fall through to the `auto` classifier.**
+It falls through to whatever `allow` rule covers the command — here
+`Bash(git push *)` in project settings and `Bash(git *)` in user settings — and
+runs unattended. Precedence is `deny > ask > allow` **by category**, not by
+specificity, so a broad `allow` is only ever overridden by an `ask` that
+actually matches. That is why a too-narrow `ask` is worse than no rule: it
+reads as covered while changing nothing.
 
 **`defaultMode` is `auto`, and it is what makes the list above short enough to
 work.** The `allow` list cannot enumerate what an issue actually needs — a
@@ -264,9 +356,17 @@ agent's `git stash pop` will take, with no way to tell it was not theirs. With
 ~20 worktrees active that silently destroys work, and once popped and discarded
 git offers no recovery. `permissions.deny` lists every mutating form (bare `git
 stash`, `push`, `save`, `pop`, `apply`, `drop`, `clear`, `branch`, `create`,
-`store`); `git stash list`/`show` still work. The rules match the command as
-written, so a prefixed form such as `git -C <dir> stash pop` slips past — don't
-reach for one.
+`store`), **each with a `git -* stash <verb>` twin**, so the global-option
+spelling `git -C <dir> stash pop` is denied too — that is the form the
+cross-checkout recipe below would otherwise reach for, and it was a live
+bypass until #596.
+
+`git stash list` and `git stash show` still work, in both spellings. The twins
+name a verb for exactly that reason: a blanket `git -* stash *` deny also
+caught `git -C sub stash list`, and `deny` has no override, so it hard-blocked
+inspection rather than merely prompting for it. `scripts/quality-check.sh` pins
+both directions — the mutating forms must match a **deny**, the read-only forms
+must match **nothing**.
 
 **The OS sandbox is what makes the unattended list safe, and it is on.**
 `sandbox.enabled` confines every Bash write to the repository, decided by the OS
@@ -290,6 +390,12 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
 - **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
   the harness is not sandboxed; the Bash form writes `.git/config` and
   `.git/worktrees`, both denied. *(measured)*
+- **`git checkout -b <branch> origin/<branch>` fails**, because recording the
+  upstream writes `.git/config` — and it fails *after* creating the branch, so
+  the branch exists while the command reports an error and leaves you on the
+  old one. Use `git checkout -b <branch> --no-track origin/<branch>`, or just
+  re-run `git checkout <branch>`. Set upstream at push time with
+  `git push -u`. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,
@@ -342,11 +448,21 @@ redundant:
 - **`filesystem.allowWrite: [".", "~/GitHub/bess-manager"]`** —
   `frontend/node_modules` and `.venv` are symlinks into the main checkout, so
   writes through them land outside a worktree's own root and fail `EPERM`,
-  breaking `vitest` and `vite build`. Worktrees are nested inside the main
-  checkout, so allowing it covers both. That entry hardcodes this machine's
+  breaking `vitest` and `vite build`. Native worktrees live under
+  `.claude/worktrees/`, i.e. *inside* the main checkout, so that one entry
+  covers them and every symlink target. That entry hardcodes this machine's
   layout, which is ugly in a tracked file; it is there because the alternative,
   a user-level `allowWrite`, is refused by the auto-mode classifier —
   correctly, since that is a session widening its own containment.
+
+  **It does not cover a sibling checkout.** `../bess-manager-feature/` sits
+  under `~/GitHub/`, not `~/GitHub/bess-manager`, so it is writable only via
+  the `"."` entry resolving to that session's own cwd. A session working *on* a
+  sibling from elsewhere — the main checkout, or another worktree — is silently
+  blocked. Sibling folders are still first-class for running and inspecting
+  code; they just need their own `allowWrite` entry if a session has to reach
+  one from outside. `verify-sandbox.sh` skips its symlink check outside a
+  linked worktree rather than reporting a PASS that proves nothing.
 
 `sandbox.excludedCommands` is **not** used and is not needed. It was tried in
 both project and user settings while the four knobs above were missing, appeared
@@ -393,16 +509,33 @@ The full procedure, including the staged-changes variant, is in
 There is no cwd-conditional behaviour left, so nothing changes when a session
 enters a worktree.
 
-**Don't add a prompt where git already refuses.** `git branch -D`, plain `git
-worktree remove` and `git push --force-with-lease` are deliberately not in the
-`ask` list: git itself blocks the dangerous case (it won't delete a branch
-checked out in another worktree, won't remove a worktree holding uncommitted or
-untracked files, and `--force-with-lease` won't clobber an update it hasn't
-seen). A second prompt there buys nothing and costs a stall on every run —
-`implement-issue` Step 4's prune loop alone would have hit ~24 of them.
+**Don't add a prompt where git already refuses.** `git branch -D` and plain
+`git worktree remove` are deliberately not in the `ask` list: git itself blocks
+the dangerous case (it won't delete a branch checked out in another worktree,
+and won't remove a worktree holding uncommitted or untracked files). A second
+prompt there buys nothing and costs a stall on every run — `implement-issue`
+Step 4's prune loop alone would have hit ~24 of them.
+
+`git push --force-with-lease` **used to** be excluded on the same reasoning, and
+is not any more. It is a push, and the push guard has to be blanket (above): the
+only spellings that would exempt it — `Bash(git push --force-with-lease*)` — are
+prefix-anchored, so they cannot exempt `git push origin main
+--force-with-lease`, while any pattern loose enough to catch that also catches
+plain `--force`. Exempting it means re-opening the hole. It asks.
+
+**That prompt costs nothing here, which is why the hole stays closed rather
+than the rule loosened.** Neither `implement-issue` nor `release` mentions
+`rebase`, `--force` or `--force-with-lease` anywhere, and this project merges
+the target branch before a PR instead of rebasing — a merge-based flow never
+needs a force push. So the rule should lie dormant. **If it ever fires, treat
+that as the finding**: an agent has gone off-script into a rebase or an amend
+of already-pushed commits. Answer the prompt on its merits; do not "fix" it by
+narrowing the push rule — that is how the gaps PR #596 had to close were
+introduced in #588.
 
 **What the unattended set actually risks is uncommitted work**, since the
-sandbox that would have contained it is unavailable (below). Tracked content
+sandbox contains writes to the repo but cannot distinguish a wanted write from
+an unwanted one. Tracked content
 survives anything on the list — `git reset --hard` and `rm` on a tracked file
 are both recoverable from the object database, and a discarded commit is
 recoverable by SHA from the reflog. Uncommitted, untracked work is not. That is

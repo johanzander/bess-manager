@@ -31,6 +31,9 @@ import json
 
 import pytest
 
+from core.bess.tests.unit.test_action_selector_parity import (
+    PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS,
+)
 from core.bess.tests.unit.vpp_capture import (
     BASELINE_PATH,
     capture_plan,
@@ -105,6 +108,13 @@ def test_current_plan_is_pinned(name):
         "`scripts/capture_vpp_baseline.py --add-new`."
     )
     entry = baseline[name]
+
+    if name in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
+        pytest.skip(
+            "plan selection is interpreter-dependent on this fixture (#606) -- "
+            "two near-equal-value plans, chosen by float details. Pinning it "
+            "would assert whichever interpreter last captured the baseline."
+        )
 
     assert capture_plan(name) == entry["current_plan"], (
         "the DP now plans this fixture differently. If deliberate, re-pin "

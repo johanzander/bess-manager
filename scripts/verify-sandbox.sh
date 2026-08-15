@@ -93,6 +93,11 @@ if wt_err=$(git worktree add -q -b "sandbox-probe-$$" "$probe_wt" HEAD 2>&1 >/de
   git branch -D "sandbox-probe-$$" >/dev/null 2>&1
 else
   wt=blocked
+  # Report WHY it was blocked here, on the PASS path. The remedy string below
+  # cannot: it prints only when the check FAILS, i.e. when the add SUCCEEDED,
+  # and then there is no error to show. Surfacing it here also catches a block
+  # for some reason other than the sandbox.
+  [ -n "$wt_err" ] && printf 'INFO  worktree add blocked with: %s\n' "$(printf '%s' "$wt_err" | head -1)"
   # Clean up the partial directory the failed add left behind.
   rm -rf "$probe_wt" 2>/dev/null
   git worktree prune >/dev/null 2>&1
@@ -103,7 +108,7 @@ fi
 # allow-within-deny primitive, so allowWrite cannot re-open them. A "created"
 # here would mean the sandbox is looser than this repo's docs assume.
 check "git worktree add is blocked (use EnterWorktree)" blocked "$wt" \
-  "$(printf 'the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. Error was: %s' "$(printf '%s' "$wt_err" | head -1)")"
+  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
 
 # NOTE ON `rm -rf`, which is the reason settings.json leaves rm unattended.
 # There is deliberately no probe for it, because a safe one cannot be written.

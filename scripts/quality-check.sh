@@ -163,27 +163,45 @@ echo "-------------------------------------------"
 # enumerated literal subcommands, and the GitHub-publishing guards were dropped
 # entirely -- effects the sandbox cannot contain, since it bounds the
 # filesystem, not the network.
-python3 - <<'PY'
+# `if ! ...` is load-bearing: `set -e` (line 6) aborts the whole script on a
+# bare failing statement, so a plain heredoc here would skip the ERRORS
+# increment, the checks below it, AND the final summary -- a missing rule would
+# stop the run mid-file with no verdict, which is the opposite of a gate.
+if ! python3 - <<'PY'
 import json, sys
 
+# Patterns must match the command AS WRITTEN -- no normalisation, prefix
+# globbing only. `Bash(git push --force *)` does NOT match bare
+# `git push --force`, which is why the exact and spaced forms are both listed;
+# and `Bash(git push --force*)` would wrongly swallow `--force-with-lease`,
+# which is deliberately unattended because git itself refuses the unsafe case.
 REQUIRED = {
     "deny": ["Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)"],
     "ask": [
-        "Bash(git push --force*)", "Bash(git push -f*)",
-        "Bash(git push origin main*)", "Bash(git push beta*)",
+        "Bash(git push --force)", "Bash(git push --force *)",
+        "Bash(git push -f)", "Bash(git push -f *)",
+        "Bash(git push beta)", "Bash(git push beta *)",
         "Bash(gh pr merge*)", "Bash(gh release*)",
         "Bash(git gc*)", "Bash(git reflog expire*)", "Bash(sudo *)",
     ],
 }
+# A pattern ending in `--force*`/`-f*` re-introduces the --force-with-lease
+# false positive, so reject it explicitly rather than only checking presence.
+FORBIDDEN = ["Bash(git push --force*)", "Bash(git push -f*)"]
+
 perms = json.load(open(".claude/settings.json"))["permissions"]
-missing = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
-if missing:
-    for k, p in missing:
-        print(f"❌ permissions.{k} is missing {p}")
+bad = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
+for k, p in bad:
+    print(f"❌ permissions.{k} is missing {p}")
+for p in FORBIDDEN:
+    if p in perms.get("ask", []):
+        print(f"❌ permissions.ask has {p} -- it also matches --force-with-lease, which must stay unattended")
+        bad.append(("ask", p))
+if bad:
     sys.exit(1)
 print("✅ Permission surface intact")
 PY
-if [ $? -ne 0 ]; then
+then
     ERRORS=$((ERRORS + 1))
 fi
 

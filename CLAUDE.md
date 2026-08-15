@@ -211,16 +211,47 @@ frontend/node_modules` first) rather than installing through it. Re-running
 
 ### Permissions
 
-**An agent should run end-to-end without approving anything.** Prompts are the
-cost, not the safety: a stalled autonomous run is a guaranteed loss, while the
-commands that used to prompt are recoverable. Only two shapes still ask, and
-both reach past the repository where nothing local can contain them:
-`git push --force` and `sudo`. Two are denied outright: the shared podman VM
-(`machine rm`, `system reset`) and `git stash`. **That is the entire list.**
-Everything else — `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`,
-`git worktree remove` — runs unattended. Do not add to the list because a
-command *looks* dangerous; add to it only when the effect escapes the repo and
-git cannot undo it.
+**An agent should run end-to-end without approving anything that the sandbox
+already contains.** Prompts are the cost, not the safety: a stalled autonomous
+run is a guaranteed loss, while anything the sandbox bounds is recoverable.
+`rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
+remove` and `git push --force-with-lease` all run unattended.
+
+What still asks is one closed list, and every entry is there because the
+**sandbox cannot contain it** — it bounds the filesystem, not the network, and
+not `.git`'s own recovery data:
+
+| Category | Rules |
+|---|---|
+| Escapes to GitHub | `git push --force` / `-f`, `git push beta`, `git push --tags`, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Destroys the recovery mechanism | `git gc`, `git reflog expire`, `git tag -d` |
+| Leaves the user boundary | `sudo` |
+
+Denied outright: the shared podman VM (`machine rm`, `system reset`) and every
+mutating `git stash` form.
+
+The standard for adding an entry: **the effect escapes the repo and git cannot
+undo it.** Not "the command looks dangerous". The second category exists
+because leaving `rm` and `reset --hard` unattended is only defensible while the
+object database and reflog can recover them — a `gc --prune=now` that ran
+unprompted would remove the ground that argument stands on.
+
+`git push origin main` is deliberately **not** listed: `main` is protected by a
+GitHub ruleset, so the server refuses it. Don't add a prompt where something
+upstream already refuses (same reasoning as `git branch -D` and
+`--force-with-lease`).
+
+**Patterns match the command as written — prefix globbing, no normalisation.**
+This is the single biggest source of rules that look right and match nothing.
+`Bash(git push --force *)` does not match bare `git push --force`, so both
+forms are listed; `Bash(git push --force*)` would wrongly swallow
+`--force-with-lease`. Shapes that a prefix glob cannot express — `git push -u
+origin main`, `git push origin HEAD:main`, `gh api -f` (implicit POST) — are
+left to the `auto` classifier, which reads the whole command. Do not paper over
+those with mid-string wildcards; they do not work, and a rule that matches
+nothing is worse than no rule because it reads as covered.
+`scripts/quality-check.sh` asserts the load-bearing patterns are present and
+that the `--force*` false-positive form has not crept back.
 
 **`defaultMode` is `auto`, and it is what makes the list above short enough to
 work.** The `allow` list cannot enumerate what an issue actually needs — a

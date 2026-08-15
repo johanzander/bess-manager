@@ -812,3 +812,29 @@ value surfaced and that matters for how the next reader reads this list:
    `battery_power_polarity` and raises `ValueError` on anything other than
    `charge_positive`. The grid helper stays deliberately lax (anything that
    isn't `"import_positive"` is treated as `"export_positive"`).
+
+## From #601 (defer running-window end rewrites) review — non-blocking
+
+**`_assign_hardware_slots` does not know about the new `same_segment`
+equivalence.** `core/bess/growatt_min_controller.py:440`, specifically the
+`content_key`/`keep_keys` logic at lines 461-486, reserves a hardware slot for
+a `current_tou` entry only on an exact `(start, end, mode, enabled)` match
+against `planned_tou`. `same_segment` now treats a running segment as
+unchanged even when its `end_time` differs (the change deferred beyond the
+write horizon), so a deferred segment's real slot is not recognized as spoken
+for and lands in `free_slots` — in principle it could be handed to another
+segment written the same cycle, silently overwriting the deferred segment with
+no disable or update recorded.
+
+Not reachable today, and the reviewer and I both failed to build a repro:
+`strategic_intents` partitions the day into non-overlapping segments, so
+anything eligible for `to_update` this cycle starts within
+`WRITE_HORIZON_MINUTES` of `effective_minute`, while a genuinely-deferred
+segment's nearest boundary (per `same_segment`'s own `bites_at`) is by
+definition further away than that. Correctness here therefore rests on an
+invariant that is neither asserted nor referenced near the function, and the
+`_assign_hardware_slots` docstring ("A slot counts as spoken for when it holds
+anything in planned_tou") is now inaccurate for the deferred case. Fix by
+making slot preservation `same_segment`-aware directly, before anything
+relaxes the single-partition assumption (a multi-window-per-period or VPP
+mode would).

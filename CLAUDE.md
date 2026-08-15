@@ -129,7 +129,10 @@ of `analyzed`.
   Stages 1–3 and 5 stay owner-only — those spend money on work nobody has
   asked for yet.
 - Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
-- Never push directly to `main`. PRs are always opened as drafts.
+- Never push directly to `main`. PRs are always *opened* as drafts, and stay
+  that way until an independent review approves them — `implement-issue`
+  Step 11 then marks the PR ready (`gh pr ready`) so the only thing left is
+  the maintainer's merge. No agent ever merges.
 - The bot identity is `bess-manager-claude-bot` (a custom GitHub App). The
   official Anthropic Claude App is **suspended** to avoid collisions —
   do not unsuspend it.

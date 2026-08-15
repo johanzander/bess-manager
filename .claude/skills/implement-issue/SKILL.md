@@ -48,7 +48,7 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
 | 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
 | 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
-| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. |
+| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. Since the loop never runs here, the PR also stays a draft: `gh pr ready` is Step 11's, and there is no approval in CI mode to earn it. |
 | 12. Hard constraints | Apply verbatim. |
 
 ## Process
@@ -440,8 +440,9 @@ Then, on this PR only:
 - **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
   `git merge origin/main`, resolve, `quality-check.sh`, push.
 - **Green and mergeable:** continue to Step 11's review loop — a green PR is
-  the precondition for asking the bot to review it, not the finish line. Do
-  not merge, do not take it out of draft — Step 12 still holds.
+  the precondition for asking the bot to review it, not the finish line. It
+  stays a draft *here*, because nothing has reviewed it yet; Step 11 is what
+  marks it ready, and never merge — Step 12 still holds.
 
 **Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
 `gh pr list` shows other PRs red or conflicted, that is not this session's
@@ -480,7 +481,31 @@ when it exits. This is a hard session boundary, same as Step 6.
 
 On the verdict:
 
-- **`APPROVED`** — the loop is done. Report the PR link and stop.
+- **`APPROVED`** — the loop is done. **Mark the PR ready for review, then
+  report the link and stop:**
+
+  ```bash
+  gh pr ready <n>
+  ```
+
+  This is the one status change the skill makes on its own, and the approval
+  is what earns it. A draft says "not finished"; once the bot has approved a
+  green PR, that is no longer true, and leaving it draft means the maintainer
+  has to notice it, judge whether it is actually done, and flip it by hand
+  before merging — three steps to re-derive something the loop already
+  established. Ready says "reviewed, green, and waiting on your judgement",
+  which is exactly the state it is in.
+
+  Two things this does *not* license, both still hard constraints (Step 12):
+  never merge it, and never flip it early — an unreviewed or red PR stays a
+  draft, no matter how confident you are in the diff.
+
+  If you push anything after the approval (parking a nit in `TODO.md`, a
+  `git merge origin/main`), re-check `gh pr checks` and
+  `mergeable`/`mergeStateStatus` before flipping, and say in your report
+  which commits landed after the approving review and whether they touched
+  the reviewed code. `gh pr ready` on a PR whose approved diff has since
+  changed underneath it is the one way this step can mislead.
 - **`CHANGES_REQUESTED` / `COMMENTED`** — collect the findings:
 
   ```bash
@@ -511,7 +536,12 @@ not about a bug, and another round will not settle it.
 
 ### 12. Hard constraints
 
-- Draft PR only. Never auto-merge.
+- **Never merge, ever** — not after a green CI run, not after an `APPROVED`
+  review, not when the diff is trivial. The merge is the maintainer's final
+  judgement and it is the one thing this skill never takes. Marking the PR
+  ready once Step 11 approves it (and only then) is not merging, and is
+  required rather than forbidden.
+- Open the PR as a draft and leave it that way until Step 11's approval.
 - Never push directly to `main`.
 - Do NOT modify the version in `bess_manager/config.yaml` — bumping it is a
   release-time step, not a per-PR one. DO add a `CHANGELOG.md` entry under
@@ -529,8 +559,8 @@ not about a bug, and another round will not settle it.
 
 A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at a green, bot-reviewed draft PR per the Step 12
-constraints.
+flow above, which stops at a green, bot-approved, ready-for-review PR that
+the maintainer has not merged yet, per the Step 12 constraints.
 
 **Treat this as best-effort, not the cleanup mechanism.** Because it depends
 on someone returning after the merge, it reliably does not happen; Step 4's
@@ -578,6 +608,7 @@ net is upstream, not this section.
 | "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
 | "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
 | "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
+| "it's approved, but flipping it out of draft is the maintainer's call" | Merging is their call; marking it ready is just reporting the state the loop already established. Leaving it draft makes them re-derive "is this finished?" by hand. |
 | "Step 6's code review already covered this, skip Step 11" | Step 6 is you reviewing your own diff with the reasoning that produced it. The Stage 4 bot reads the diff cold against the checklist, and in practice takes two to four rounds to run out of real findings. |
 | "the reviewer asked for it, so change it" | The reviewer has the diff, not the diagnosis. A finding that contradicts a deliberate Step 3 scope decision gets a reply explaining why, not a commit. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
@@ -612,6 +643,9 @@ net is upstream, not this section.
 - About to stop at "draft PR opened" without watching CI settle (Step 10).
 - About to stop at "CI is green" without running the Step 11 review loop.
   Your own Step 6 review is not the independent one.
+- About to hand over an `APPROVED`, green PR still marked draft — Step 11
+  flips it with `gh pr ready`; the maintainer should only have to merge.
+- About to run `gh pr ready` before an approval, or `gh pr merge` at all.
 - About to implement a review finding because the bot said so, without
   checking it against the Step 2 diagnosis and the Step 3 scope assessment.
 - About to read `no checks reported` as green. It means either a conflict
@@ -635,4 +669,4 @@ net is upstream, not this section.
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
 | 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |
-| 11. Independent review loop | `scripts/request-pr-review.sh` (background) + `receiving-code-review`, max 3 rounds | No |
+| 11. Independent review loop | `scripts/request-pr-review.sh` (background) + `receiving-code-review`, max 3 rounds; `gh pr ready` on `APPROVED` | No |

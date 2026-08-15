@@ -175,7 +175,7 @@ nothing is indistinguishable from a broken one.
 | Excuse | Reality |
 |---|---|
 | "that worktree's session is idle, so nobody's using it" | Idle and blocked both mean owned. An agent parked between Step 6 and Step 8 is idle and still holds that branch. |
-| "the PR shows no CI checks, so the workflow must have failed to trigger" | A CONFLICTING PR creates no workflow run at all. Check `mergeable` before blaming a dropped event. |
+| "the PR shows no CI checks, so the workflow must have failed to trigger" | Two causes, never a dropped event. A CONFLICTING PR creates no run at all; a just-pushed PR has a run that hasn't registered yet. Check `mergeable`, then `gh run list --branch`. |
 | "`mergeable` came back UNKNOWN, so gh can't tell" | It's computed lazily — the first query only triggers the computation. Ask again. A single pass reports UNKNOWN for precisely the stale PRs you're looking for. |
 | "`git branch --merged` will tell me what's safe to delete" | Not in this repo. Squash-merge means a merged branch is never an ancestor of main, so that check reports everything as unmerged and cleanup never fires. Use `gh pr list --state merged`. |
 | "they asked me to sweep, obviously they want it fixed" | A bare `/sweep-prs` reports. Merging and pushing to a PR the user hasn't looked at is not something to infer from a missing flag — hand back the report and the `/sweep-prs <numbers>` line. |

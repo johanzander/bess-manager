@@ -415,6 +415,22 @@ gh pr checks <n> --watch --fail-fast     # blocks until the run settles
 gh pr view <n> --json mergeable,mergeStateStatus
 ```
 
+**`no checks reported on the '<branch>' branch` is not a result.** It has
+two entirely different causes and you must tell them apart before doing
+anything else:
+
+```bash
+gh pr view <n> --json mergeable,mergeStateStatus   # CONFLICTING -> merge origin/main
+gh run list --branch <branch> --limit 3            # in_progress -> --watch just raced it
+gh run watch <run-id> --exit-status                # then wait on the run directly
+```
+
+If `mergeable` is `CONFLICTING`, there is genuinely no run and never will
+be — GitHub does not build a conflicted PR. If a run is `in_progress`,
+`--watch` simply returned before the run was registered (observed on this
+skill's own PR, ~8s after the push) and you wait on the run id instead.
+Reading "no checks" as green is how a red PR gets handed over as finished.
+
 Then, on this PR only:
 
 - **Checks fail:** read `gh run view --log-failed`, fix in the worktree,
@@ -534,6 +550,8 @@ net is upstream, not this section.
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
 - About to push the branch without having merged `origin/main` since Step 4.
 - About to stop at "draft PR opened" without watching CI settle (Step 10).
+- About to read `no checks reported` as green. It means either a conflict
+  or a run that hasn't registered yet — distinguish before reporting.
 - About to touch another PR or another worktree from inside this session —
   that is `sweep-prs`, not this skill.
 - About to write a repro test from hand-built data when a user debug log/

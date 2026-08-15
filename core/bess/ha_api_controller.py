@@ -10,6 +10,7 @@ import re
 import ssl
 import time
 import urllib.parse
+from functools import partial
 from typing import ClassVar
 
 import requests
@@ -990,6 +991,46 @@ class HomeAssistantAPIController:
             return False
         return True
 
+    def _signed_split_state(self, method_name: str, state):
+        """Apply the signed split to a raw entity state, for diagnostics.
+
+        get_method_sensor_info reads /api/states/{entity_id} directly rather
+        than going through the getters, so on a platform whose charge and
+        discharge (or import and export) keys resolve to ONE signed entity it
+        would report the same raw signed value for both — e.g. -800 for both
+        "Battery Charging Power" and "Battery Discharging Power" on a native
+        SolaX discharging at 800 W. Reuses the getters' own split predicates
+        instead of re-deriving the polarity here.
+
+        Returns the state unchanged for every other method, for a platform
+        with two real entities, or for a state that isn't numeric.
+        """
+        if method_name in ("get_battery_charge_power", "get_battery_discharge_power"):
+            if not self._is_shared_signed_battery_power():
+                return state
+            split = partial(
+                self._split_signed_battery_power,
+                charging=method_name == "get_battery_charge_power",
+            )
+        elif method_name in ("get_import_power", "get_export_power"):
+            if not self._is_shared_signed_grid_power():
+                return state
+            split = partial(
+                self._split_signed_grid_power,
+                importing=method_name == "get_import_power",
+            )
+        else:
+            return state
+
+        try:
+            raw = float(state)
+        except (TypeError, ValueError):
+            return state
+        # .10g, not .g: the default 6 significant digits would round a raw
+        # state like "12345.678" to "12345.7" and switch to scientific
+        # notation above 1e6, silently degrading a diagnostic reading.
+        return f"{split(raw):.10g}"
+
     def get_method_sensor_info(self, method_name: str) -> dict:
         """Get sensor configuration info for a controller method."""
         method_info = self.METHOD_SENSOR_MAP.get(method_name)
@@ -1050,7 +1091,17 @@ class HomeAssistantAPIController:
                     }
                 )
             else:
-                result.update({"status": "ok", "current_value": response.get("state")})
+                state = response.get("state")
+                # Caught separately from the outer handler: an unknown polarity
+                # is a configuration fault, and reporting it as a connectivity
+                # error ("Failed to check entity") would hide exactly the loud
+                # failure _split_signed_battery_power raises to produce.
+                try:
+                    current_value = self._signed_split_state(method_name, state)
+                except ValueError as e:
+                    result.update({"status": "error", "error": str(e)})
+                else:
+                    result.update({"status": "ok", "current_value": current_value})
         except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
@@ -1488,13 +1539,31 @@ class HomeAssistantAPIController:
             and charge_entity == discharge_entity
         )
 
+    def _split_signed_battery_power(self, raw: float, *, charging: bool) -> float:
+        """Split one signed battery reading into the requested direction.
+
+        Branches on battery_power_polarity rather than assuming it, so that an
+        unimplemented or typo'd entry in PLATFORM_BATTERY_POWER_POLARITY fails
+        loudly instead of reporting every charge as a discharge and vice versa.
+        "charge_positive" is the only value that map holds today.
+
+        Raises:
+            ValueError: If battery_power_polarity is not a recognised value.
+        """
+        if self.battery_power_polarity != "charge_positive":
+            raise ValueError(
+                f"Unknown battery_power_polarity '{self.battery_power_polarity}' — "
+                "cannot split the signed battery power sensor"
+            )
+        return max(0.0, raw if charging else -raw)
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
         if self._is_shared_signed_battery_power():
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, raw)  # charge_positive
+            return self._split_signed_battery_power(raw, charging=True)
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
@@ -1503,7 +1572,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, -raw)  # charge_positive
+            return self._split_signed_battery_power(raw, charging=False)
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -2578,15 +2647,22 @@ class HomeAssistantAPIController:
             and import_entity == export_entity
         )
 
+    def _split_signed_grid_power(self, raw: float, *, importing: bool) -> float:
+        """Split one signed grid reading into the requested direction.
+
+        Anything that is not "import_positive" is treated as
+        "export_positive" — the two values PLATFORM_GRID_POWER_POLARITY holds.
+        """
+        positive_is_import = self.grid_power_polarity == "import_positive"
+        return max(0.0, raw if importing == positive_is_import else -raw)
+
     def get_import_power(self):
         """Get current grid import power in watts."""
         if self._is_shared_signed_grid_power():
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, raw)
-            return max(0.0, -raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=True)
         return self._get_sensor_value("import_power")
 
     def get_export_power(self):
@@ -2595,9 +2671,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, -raw)
-            return max(0.0, raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=False)
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):

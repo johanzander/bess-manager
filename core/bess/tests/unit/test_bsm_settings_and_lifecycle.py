@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import SystemConfigurationError
 from core.bess.models import (
@@ -1249,6 +1250,24 @@ class TestQuietCycleReconcilesHardware:
     is the only thing that looks at the inverter on a quiet cycle. Issue #551
     established that the segment table drifts on its own.
     """
+
+    @pytest.fixture(autouse=True)
+    def _pin_time_of_day(self):
+        """Pin the clock past period 10, keeping today's date.
+
+        Both tests drive `update_battery_schedule(current_period=10)` while the
+        rest of the system reads the real clock. Before 02:30 local, period 9 is
+        still in the future, so data collection raises ("Period 9 is still in
+        progress or in the future") and the cycle aborts before reaching
+        reconcile_hardware — the assertion then fails for a reason that has
+        nothing to do with reconciliation. The window is real: this fails every
+        day between local midnight and 02:30, which is why it passed in CI on
+        the way in (21:49 UTC = 23:49 local) and failed on the next PR
+        (22:30 UTC = 00:30 local).
+        """
+        pinned = time_utils.now().replace(hour=15, minute=0, second=0, microsecond=0)
+        with patch("core.bess.time_utils.now", return_value=pinned):
+            yield
 
     def test_quiet_cycle_reconciles(self, system):
         system._current_schedule = MagicMock()

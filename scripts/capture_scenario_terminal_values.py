@@ -44,10 +44,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.bess.terminal_value import (  # noqa: E402
-    calculate_terminal_value_per_kwh,
-)
-from core.bess.tests.helpers import _scenario_inputs  # noqa: E402
+from core.bess.tests.helpers import scenario_terminal_value  # noqa: E402
 
 DATA_DIR = REPO_ROOT / "core/bess/tests/unit/data"
 
@@ -56,47 +53,13 @@ DATA_DIR = REPO_ROOT / "core/bess/tests/unit/data"
 PRECISION = 9
 
 
-def terminal_value_for(scenario: dict) -> float:
-    """Production terminal value for one scenario, with #422 cap scoping."""
-    inputs = _scenario_inputs(scenario)
-    buy_price = inputs["buy_price"]
-    sell_price = inputs["sell_price"]
-    periods_per_day = round(24 / inputs["period_duration_hours"])
-
-    # PRECONDITION, unenforceable here: the horizon ends on a day boundary.
-    # Production groups the cap window by calendar date; this slice matches it
-    # only under that assumption. It holds for the whole corpus today -- every
-    # fixture is either shorter than a day, or "partial first day + whole
-    # terminal day" -- and `regression_frank_debug_before`'s independently
-    # pinned 0.143013413 is the evidence, since the slice reproduces it exactly
-    # while the unscoped array gives the pre-#422 0.195488259.
-    #
-    # It cannot be asserted from fixture data: with no timestamps, a horizon of
-    # k + periods_per_day is indistinguishable from one ending mid-day for any
-    # k, so no arithmetic on the length separates the two (in particular
-    # `n % periods_per_day == 0` is NOT the precondition -- it is false for
-    # every correct multi-day fixture in the corpus, 118 % 96 = 22 among them).
-    # A fixture ending mid-day would therefore get a cap window straddling two
-    # days, silently. The durable fix is upstream: once a run records its own
-    # terminal value in `input_data` (#602 follow-up), a bundle-derived fixture
-    # should carry the real value and this script should leave it alone, which
-    # is already the behaviour for any fixture that has one recorded.
-    cap_sell_price = sell_price[-periods_per_day:]
-    return round(
-        calculate_terminal_value_per_kwh(
-            buy_price, cap_sell_price, inputs["battery_settings"]
-        ),
-        PRECISION,
-    )
-
-
 def main() -> None:
     check_only = "--check" in sys.argv
     stale: list[str] = []
 
     for path in sorted(DATA_DIR.glob("*.json")):
         scenario = json.loads(path.read_text())
-        computed = terminal_value_for(scenario)
+        computed = round(scenario_terminal_value(scenario), PRECISION)
         recorded = scenario.get("terminal_value_per_kwh")
 
         if recorded is not None and abs(recorded - computed) < 10**-PRECISION:

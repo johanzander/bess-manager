@@ -25,6 +25,7 @@ from core.bess.tests.helpers import (
     assert_physical_constraints,
     assert_savings_positive,
     get_intent_distribution,
+    scenario_terminal_value,
 )
 
 pytestmark = pytest.mark.slow
@@ -60,6 +61,47 @@ def test_every_fixture_declares_a_terminal_value():
     assert missing == [], (
         f"fixtures without a declared terminal value: {missing}. Run "
         "`.venv/bin/python scripts/capture_scenario_terminal_values.py`."
+    )
+
+
+def test_recorded_terminal_values_still_match_the_production_formula():
+    """A change to the terminal-value formula must reach the pinned corpus.
+
+    Fixtures record `terminal_value_per_kwh` as an explicit number so a reader
+    can see what a scenario runs at. That transparency costs something this
+    test buys back: a recorded constant does not move when
+    `core/bess/terminal_value.py` changes, so without this guard a formula
+    change would leave all 38 fixtures replaying their old values and the
+    economics pins would stay green -- the same blindness the retrofit set out
+    to remove, in a new form.
+
+    Caught by mutation, not by inspection: dropping the double `cycle_cost`
+    deduction (#602's candidate change) left `test_all_scenarios` at 43 passed
+    until this existed. With it, the same mutation reddens this test first,
+    which forces the re-capture that then moves 28 of 38 fixtures' economics.
+
+    A fixture that must pin a *specific* terminal value regardless of the
+    formula -- because its defect lives in how that input is computed upstream
+    -- does not belong in this corpus; give it a standalone test where the
+    intent is visible.
+    """
+    stale = []
+    for name in get_all_scenario_files():
+        scenario = load_test_scenario(name)
+        recorded = scenario["terminal_value_per_kwh"]
+        computed = scenario_terminal_value(scenario)
+        if abs(recorded - computed) > 1e-9:
+            stale.append(f"{name}: recorded={recorded} computed={computed}")
+
+    assert stale == [], (
+        "recorded terminal values no longer match the production formula:\n  "
+        + "\n  ".join(stale)
+        + "\nIf the formula change is deliberate, re-capture and re-pin:\n"
+        "  .venv/bin/python scripts/capture_scenario_terminal_values.py\n"
+        "  .venv/bin/python scripts/capture_scenario_expected_results.py\n"
+        "  .venv/bin/python scripts/capture_selector_goldens.py\n"
+        "  PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py "
+        "--repin-current"
     )
 
 

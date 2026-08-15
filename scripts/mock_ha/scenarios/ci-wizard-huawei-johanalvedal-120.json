@@ -1,6 +1,6 @@
 {
   "name": "ci-wizard-huawei-johanalvedal-120",
-  "description": "Real (anonymized) Huawei LUNA2000 rig from the issue #120 beta tester: huawei_solar over local Modbus with a Huawei three-phase smart meter, official Nord Pool SE3, Solcast, 3-phase 20 A service with power monitoring enabled. Verbatim entity registry (209 entities) from bess-debug-2026-08-13-100511.md; device ids and the inverter serial replaced with stable placeholders, register-key suffixes preserved because they are what discovery matches on. Pins the two defects this user hit: battery_discharge_power left unmapped behind the single signed storage_charge_discharge_power register (their install went SYSTEM DEGRADED on it), and meter-side Phase A/B/C current naming. Note the registry carries BOTH sensor.power_meter_phase_a_current (active_grid_A_current) and sensor.inverter_phase_a_current (phase_A_current) \u2014 the real-world collision the meter gate exists for. The three inverter phase currents are the only added (non-verbatim) states: the debug bundle carries them in the entity registry but not among its states, and discover_current_sensors reads states, so without them the meter gate is never exercised. They are listed ahead of the meter's, which is the order that would pick the wrong device.",
+  "description": "Real (anonymized) Huawei LUNA2000 rig from the issue #120 beta tester: huawei_solar over local Modbus with a Huawei three-phase smart meter, official Nord Pool SE3, Solcast, 3-phase 20 A service with power monitoring enabled. Verbatim entity registry (209 entities) from bess-debug-2026-08-13-100511.md; device ids and the inverter serial replaced with stable placeholders, register-key suffixes preserved because they are what discovery matches on. Pins the two defects this user hit: battery_discharge_power left unmapped behind the single signed storage_charge_discharge_power register (their install went SYSTEM DEGRADED on it), and meter-side Phase A/B/C current naming. Note the registry carries BOTH sensor.power_meter_phase_a_current (active_grid_A_current) and sensor.inverter_phase_a_current (phase_A_current) \u2014 the real-world collision the meter gate exists for. The three inverter phase currents are the only added (non-verbatim) states: the debug bundle carries them in the entity registry but not among its states, and discover_current_sensors reads states, so without them the meter gate is never exercised. They are listed ahead of the meter's, which is the order that would pick the wrong device. sensor.inverter_total_dc_input_energy (total_dc_input_power, register 32108) is the fourth added state, and for the same reason: the register IS in this real install's verbatim registry, enabled, but the bundle captured no state for it because #569 had not yet pointed lifetime_solar_energy at it. Its value is synthesized, not measured — 38412.65 kWh, consistent with the install's real AC yield of 41248.79 and 12470.59/12160.12 kWh battery charge/discharge, where grid-charged arbitrage energy inflates AC yield above DC PV input.",
   "mock_time": "@2026-08-13 10:05:07",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -87,7 +87,7 @@
         "battery_discharge_stop_soc": "number.inverter_grid_charge_cutoff_soc",
         "pv_power": "sensor.inverter_input_power",
         "local_load_power": "sensor.inverter_active_power",
-        "lifetime_solar_energy": "sensor.inverter_total_yield",
+        "lifetime_solar_energy": "sensor.inverter_total_dc_input_energy",
         "import_power": "sensor.power_meter_active_power",
         "lifetime_export_to_grid": "sensor.power_meter_exported",
         "lifetime_import_from_grid": "sensor.power_meter_consumption",
@@ -1671,6 +1671,16 @@
         "unit_of_measurement": "kWh",
         "device_class": "energy",
         "friendly_name": "Inverter Total yield"
+      }
+    },
+    "sensor.inverter_total_dc_input_energy": {
+      "entity_id": "sensor.inverter_total_dc_input_energy",
+      "state": "38412.65",
+      "attributes": {
+        "state_class": "total",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Inverter Total DC input energy"
       }
     },
     "sensor.power_meter_phase_c_current": {

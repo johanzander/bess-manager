@@ -185,6 +185,12 @@
         "unit_of_measurement": "kWh"
       }
     },
+    "sensor.inverter_total_dc_input_energy": {
+      "state": "9250",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
     "sensor.batteries_total_charge": {
       "state": "4200",
       "attributes": {
@@ -477,6 +483,12 @@
       "entity_id": "sensor.inverter_active_power",
       "platform": "huawei_solar",
       "unique_id": "SN2024HUAWEI01_active_power",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_total_dc_input_energy",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_total_dc_input_power",
       "device_id": "dev-huawei-inverter-001"
     },
     {

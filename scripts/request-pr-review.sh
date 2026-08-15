@@ -42,7 +42,14 @@ scripts/gh-agent.sh pr comment "$pr" --body "@claude-bot review" >/dev/null
 
 deadline=$(( $(date +%s) + timeout ))
 while [ "$(date +%s)" -lt "$deadline" ]; do
-    sleep "$interval"
+    # Never sleep past the deadline: a caller passing a timeout shorter than
+    # the poll interval must still get its exit 2 on time.
+    remaining=$(( deadline - $(date +%s) ))
+    if [ "$remaining" -lt "$interval" ]; then
+        sleep "$remaining"
+    else
+        sleep "$interval"
+    fi
 
     # Last review submitted after the trigger comment, if any.
     verdict=$(gh pr view "$pr" --json reviews \

@@ -14,6 +14,8 @@ opportunity value of stored energy), persisted per period on DecisionData.
 See docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md.
 """
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import numpy as np
@@ -22,7 +24,9 @@ import pytest
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import (
+    _interpolate_value,
     _record_marginal_value,
+    _value_slope_below,
     optimize_battery_schedule,
 )
 from core.bess.dp_constants import SOE_STEP_KWH
@@ -36,9 +40,11 @@ from core.bess.models import (
 )
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController
-from core.bess.tests.helpers import make_battery_settings
+from core.bess.tests.helpers import make_battery_settings, run_scenario
 
 PERIOD = 20  # Arbitrary test period (quarter-hour slot)
+
+ISSUE_571_FIXTURE = Path(__file__).parent / "data" / "regression_2026_08_13_145213.json"
 
 
 def _authorize(shadow_price: float, buy_price: float, eff_d: float):
@@ -60,7 +66,6 @@ def _authorize(shadow_price: float, buy_price: float, eff_d: float):
         V=V,
         t=0,
         soe=soe,
-        soe_levels=[0.0, 1.0],
         battery_settings=settings,
         buy_price_t=buy_price,
     )
@@ -99,8 +104,7 @@ def test_no_computable_shadow_price_does_not_authorize():
         decision,
         V=np.array([[0.0, 10.0]]),
         t=0,
-        soe=settings.min_soe_kwh,  # snaps to grid index 0
-        soe_levels=[0.0, 1.0],
+        soe=settings.min_soe_kwh,  # grid index 0 -- no cell below it
         battery_settings=settings,
         buy_price_t=99.0,
     )
@@ -108,6 +112,111 @@ def test_no_computable_shadow_price_does_not_authorize():
     assert decision.shadow_price == 0.0  # never computed, still the default
     assert decision.intra_period_discharge_allowed is False
     assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 0
+
+
+@pytest.mark.parametrize("offset_steps", [1.5, 2.0])
+def test_gate_slope_stays_on_the_policys_interpolant(offset_steps):
+    """#571's standing guard: the gate's value estimate must BE a reading of
+    `_interpolate_value`, not a second implementation that can drift from it.
+
+    Checked at a strictly-interior SoE and at an exact grid point, because
+    those are the two cases the old `round()` arithmetic got differently wrong.
+    """
+    settings = make_battery_settings()
+    V_row = np.array([0.0, 1.0, 3.0, 4.0])  # deliberately non-linear
+    soe = settings.min_soe_kwh + offset_steps * SOE_STEP_KWH
+
+    step_down = 0.25 * SOE_STEP_KWH  # stays inside the cell below `soe`
+    expected = (
+        _interpolate_value(V_row, soe, settings)
+        - _interpolate_value(V_row, soe - step_down, settings)
+    ) / step_down
+
+    assert _value_slope_below(V_row, soe, settings) == pytest.approx(expected)
+
+
+def test_no_cell_below_the_floor_has_no_slope_to_read():
+    """At and below the bottom grid level there is no removable kWh, so there
+    is nothing to price -- `None`, which #526 requires to read as "no
+    authorization" rather than "worthless"."""
+    settings = make_battery_settings()
+    V_row = np.array([0.0, 1.0, 3.0, 4.0])
+
+    assert _value_slope_below(V_row, settings.min_soe_kwh, settings) is None
+    assert _value_slope_below(V_row, settings.min_soe_kwh - 1.0, settings) is None
+
+    # A battery resting ON the floor does not always land on a clean 0.0: the
+    # subtraction leaves a sub-picowatt-hour positive residue in several
+    # fixtures. Same physical state, so it must reach the same answer -- a
+    # one-sided slope is discontinuous here, and #526 is what breaks otherwise.
+    a_hair_above_floor = np.nextafter(settings.min_soe_kwh, np.inf)
+    assert a_hair_above_floor > settings.min_soe_kwh  # guard: really is above
+    assert _value_slope_below(V_row, a_hair_above_floor, settings) is None
+
+
+def test_single_level_value_row_has_no_slope_to_read():
+    """A one-level `V_row` has no cell at all, so there is nothing to price.
+
+    Without an explicit guard the clamp produces `lo = -1` and the function
+    reads `V_row[0] - V_row[-1]` -- the same element twice -- returning a
+    computed `0.0`. That is the #526 failure mode exactly: a zero shadow price
+    clears any positive buy price and opens the gate on a value that was never
+    computed, and unlike the missing-field default it survives every `None`
+    check downstream. Asserted directly rather than through a schedule because
+    a production battery always has >= 2 grid levels, so no scenario reaches it.
+    """
+    settings = make_battery_settings()
+
+    assert _value_slope_below(np.array([5.0]), settings.max_soe_kwh, settings) is None
+
+
+def _shadow_price_at_start_soe(initial_soe: float) -> float:
+    """dV/dSoE the DP records for period 0 when the battery starts at `initial_soe`.
+
+    Real data from issue #571's debug bundle, run through the real optimizer.
+    Only the forward pass depends on `initial_soe`, so `V[0, :]` -- the row the
+    shadow price is read from -- is identical across these runs; the only thing
+    that varies is which part of that row the recording samples.
+    """
+    scenario = json.loads(ISSUE_571_FIXTURE.read_text())
+    scenario["battery"]["initial_soe"] = initial_soe
+    return run_scenario(scenario).period_data[0].decision.shadow_price
+
+
+def test_shadow_price_is_constant_within_one_grid_cell():
+    """#571: the recorded dV/dSoE must be the slope of the SoE cell the battery
+    is actually in, so two states inside the same cell report the same value.
+
+    `_record_marginal_value` used to snap with `round()` while `_interpolate_value`
+    (which the policy walks) floors. Rounding makes the reported slope piecewise
+    constant around each *grid point* instead of across each *cell*, so a state
+    in the lower half of a cell is priced off the cell below -- a value function
+    region the battery is not in. On this bundle that put a 0.013 EUR/kWh step
+    in the middle of a cell, and the gate reads this number raw.
+    """
+    min_soe = json.loads(ISSUE_571_FIXTURE.read_text())["battery"]["min_soe_kwh"]
+    # Both inside cell [323, 324] -> SoE 9.8750..9.9000; fractions 0.2 and 0.8
+    # straddle the 0.5 point where round() -- and only round() -- changes cell.
+    lower_half, upper_half = 9.8800, 9.8950
+    assert int((lower_half - min_soe) / SOE_STEP_KWH) == 323
+    assert int((upper_half - min_soe) / SOE_STEP_KWH) == 323
+
+    assert _shadow_price_at_start_soe(lower_half) == pytest.approx(
+        _shadow_price_at_start_soe(upper_half)
+    )
+
+
+def test_shadow_price_still_varies_between_grid_cells():
+    """Guard on the test above: equality within a cell must not come from a
+    degenerate estimator that reports one value everywhere."""
+    min_soe = json.loads(ISSUE_571_FIXTURE.read_text())["battery"]["min_soe_kwh"]
+    in_cell_323, in_cell_324 = 9.8800, 9.9200
+    assert int((in_cell_323 - min_soe) / SOE_STEP_KWH) == 323
+    assert int((in_cell_324 - min_soe) / SOE_STEP_KWH) == 324
+
+    assert _shadow_price_at_start_soe(in_cell_323) != pytest.approx(
+        _shadow_price_at_start_soe(in_cell_324)
+    )
 
 
 def _make_bsm(

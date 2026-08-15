@@ -886,15 +886,14 @@ def _record_marginal_value(
     V,
     t: int,
     soe: float,
-    soe_levels,
     battery_settings: BatterySettings,
     buy_price_t: float,
 ) -> None:
     """Record dV/dSoE for this period and the discharge authorization it implies.
 
-    The shadow price is a backward difference between adjacent SoE grid levels,
-    so it does not exist at the bottom level -- and a SoE at or below the
-    reserve floor clamps there. Previously the assignment was simply skipped,
+    The shadow price is the value of the last kWh below this state, so it does
+    not exist at the bottom level -- and a SoE at or below the reserve floor
+    clamps there. Previously the assignment was simply skipped,
     leaving `shadow_price` at its 0.0 default, which every consumer read as
     "stored energy is worthless" and used to open the sub-period discharge
     ceiling on a value that had never been computed (#526).
@@ -905,13 +904,20 @@ def _record_marginal_value(
     not permission. Both call sites route through this function so the grid
     forward pass and the PWL-splice replay cannot drift onto different rules,
     which is the mirrored-implementation bug class P1 exists to prevent.
+
+    The same argument applies to the *value estimate* itself, which is what
+    #571 fixed: this used to do its own index arithmetic, snapping to the
+    nearest grid point with `round()` while the policy walks the interpolant
+    (`_interpolate_value`, which floors). A state in the lower half of a cell
+    was therefore priced off the cell below -- a region of the value function
+    the battery is not in -- so the reported slope stepped mid-cell instead of
+    at cell boundaries, and the gate reads that number raw. It now reads the
+    interpolant like every other consumer.
     """
-    i = round((soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH)
-    i = min(max(0, i), len(soe_levels) - 1)
-    if i == 0:
+    shadow_price = _value_slope_below(V[t], soe, battery_settings)
+    if shadow_price is None:
         return
 
-    shadow_price = float((V[t, i] - V[t, i - 1]) / SOE_STEP_KWH)
     decision.shadow_price = shadow_price
     decision.intra_period_discharge_allowed = bool(
         buy_price_t * battery_settings.efficiency_discharge >= shadow_price
@@ -1463,6 +1469,70 @@ def _local_value_slope(
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
 
 
+# In grid-index units, so 2.5e-11 kWh of SoE -- far below any physical
+# resolution, and ~1e5x larger than the ulp noise it exists to absorb.
+_GRID_POINT_TOLERANCE = 1e-9
+
+
+def _snapped_grid_index(soe: float, battery_settings: BatterySettings) -> float:
+    """Continuous value-function grid index of `soe`, with indices within
+    `_GRID_POINT_TOLERANCE` of a grid point snapped exactly onto it.
+
+    A one-sided derivative is discontinuous at each grid point, so an index a
+    single ulp off one would answer for the wrong cell. That is not
+    hypothetical: a battery resting exactly on its reserve floor yields
+    idx = +1e-16 rather than 0.0 in several fixtures, which without this would
+    price a kWh below the floor that does not exist and open the gate #526
+    closed. `_interpolate_value` needs no such guard -- it is continuous, so
+    the same noise moves its output by an ulp too.
+    """
+    idx = (soe - battery_settings.min_soe_kwh) / SOE_STEP_KWH
+    nearest = round(idx)
+    if abs(idx - nearest) < _GRID_POINT_TOLERANCE:
+        idx = float(nearest)
+    return idx
+
+
+def has_value_cell_below(soe: float, battery_settings: BatterySettings) -> bool:
+    """Whether a value-function cell exists below `soe` -- i.e. whether
+    `_value_slope_below` can price the last kWh below this state at all.
+
+    Exposed because tests need to select exactly the periods where the shadow
+    price is (or is not) computable. Re-deriving that rule test-side is what
+    #571 broke: the selectors mirrored the DP's old `round()` snapping and kept
+    passing while production moved to the interpolant's cell.
+    """
+    return _snapped_grid_index(soe, battery_settings) > 0.0
+
+
+def _value_slope_below(
+    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
+) -> float | None:
+    """Left one-sided dV/dSoE at a continuous SoE -- the value of the last kWh
+    below this state, priced on the same piecewise-linear interpolant
+    `_interpolate_value` walks. `None` when no cell below exists.
+
+    Left-sided, because the only consumer authorizes energy *leaving* the
+    battery (#526): what it must price is the value given up going down, not
+    the value gained going up. That makes it the mirror of `_local_value_slope`,
+    which is right-sided because the tie detector wants a noise magnitude.
+
+    Strictly inside a cell the two agree; they diverge only exactly on a grid
+    point, where this reads the cell below and `_local_value_slope` the one
+    above. In practice that case is rarer than it looks: SoC arrives as whole
+    percent, and those SoEs land a hair *below* their nominal index in binary
+    (66% of 15.0 kWh -> 323.99999999999994), so both fall in the same cell.
+    Both stay on the interpolant -- which is the property #571 was about
+    (see `_record_marginal_value`).
+    """
+    idx = _snapped_grid_index(soe, battery_settings)
+
+    if not has_value_cell_below(soe, battery_settings) or len(V_row) < 2:
+        return None
+    lo = int(np.ceil(min(idx, len(V_row) - 1))) - 1
+    return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
+
+
 def _best_action_at_continuous_state(
     soe: float,
     t: int,
@@ -1694,7 +1764,6 @@ def _replay_accounting_pass(
     flows_trajectory: list[PeriodFlows],
     initial_cost_basis: float,
     V: np.ndarray,
-    soe_levels: np.ndarray,
     buy_price: list[float],
     sell_price: list[float],
     reward_sell_price: list[float],
@@ -1780,7 +1849,6 @@ def _replay_accounting_pass(
             V=V,
             t=t,
             soe=soe,
-            soe_levels=soe_levels,
             battery_settings=battery_settings,
             buy_price_t=buy_price[t],
         )
@@ -1947,11 +2015,6 @@ def optimize_battery_schedule(
     current_soe = initial_soe
     current_cost_basis = initial_cost_basis
     reward_objective_cost = 0.0
-    soe_levels = np.arange(
-        battery_settings.min_soe_kwh,
-        battery_settings.max_soe_kwh + SOE_STEP_KWH,
-        SOE_STEP_KWH,
-    )
     _, power_levels = _discretize_state_action_space(battery_settings)
 
     tie_margins: list[float] = []
@@ -2036,7 +2099,6 @@ def optimize_battery_schedule(
             V=V,
             t=t,
             soe=current_soe,
-            soe_levels=soe_levels,
             battery_settings=battery_settings,
             buy_price_t=buy_price[t],
         )
@@ -2211,7 +2273,6 @@ def optimize_battery_schedule(
             flows_trajectory=flows_trajectory,
             initial_cost_basis=initial_cost_basis,
             V=V,
-            soe_levels=soe_levels,
             buy_price=buy_price,
             sell_price=sell_price,
             reward_sell_price=reward_sell_price,

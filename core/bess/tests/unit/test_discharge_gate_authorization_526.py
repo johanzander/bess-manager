@@ -1,8 +1,8 @@
 """The sub-period discharge authorization is decided by the DP, not re-derived (#526).
 
-`shadow_price` is a backward difference `(V[t,i] - V[t,i-1]) / SOE_STEP_KWH`, which
-is undefined at the bottom grid level. The DP therefore skips the assignment when
-start-of-period SoE snaps to `i == 0`, leaving the field at its `0.0` default — the
+`shadow_price` is a left one-sided slope of the value-function interpolant, which
+is undefined at or below the reserve floor, where no cell below exists. The DP therefore skips the assignment when
+start-of-period SoE has no cell below it, leaving the field at its `0.0` default — the
 same value a genuinely worthless kWh produces. Consumers comparing
 `buy_price * eff_d >= shadow_price` cannot tell the two apart, and `0.0` satisfies
 that inequality for any positive buy price, so the sub-period discharge ceiling was
@@ -16,7 +16,7 @@ test on the gate function looks fine.
 
 import pytest
 
-from core.bess.dp_constants import SOE_STEP_KWH
+from core.bess.dp_battery_algorithm import has_value_cell_below
 from core.bess.tests.helpers import run_scenario
 from core.bess.tests.unit.test_scenarios import (
     build_scenario_inputs,
@@ -32,19 +32,18 @@ FLOOR_SOE_FIXTURES = [
 ]
 
 
-def _floor_index_periods(result, min_soe_kwh):
-    """Periods whose start-of-period SoE snaps to grid index 0.
+def _floor_index_periods(result, settings):
+    """Periods with no value-function cell below their start-of-period SoE.
 
-    Mirrors the DP's own index derivation, including its clamp: a SoE at or below
-    the reserve floor lands on index 0, where the backward difference the shadow
-    price is built from does not exist.
+    Asks the DP's own predicate rather than re-deriving the index rule: a
+    test-side mirror of that arithmetic is exactly what went stale in #571,
+    silently selecting a different set of periods than production priced.
     """
-    floor_periods = []
-    for pd in result.period_data:
-        i = round((pd.energy.battery_soe_start - min_soe_kwh) / SOE_STEP_KWH)
-        if max(0, i) == 0:
-            floor_periods.append(pd)
-    return floor_periods
+    return [
+        pd
+        for pd in result.period_data
+        if not has_value_cell_below(pd.energy.battery_soe_start, settings)
+    ]
 
 
 @pytest.mark.parametrize("scenario_name", FLOOR_SOE_FIXTURES)
@@ -58,7 +57,7 @@ def test_floor_soe_period_does_not_authorize_intra_period_discharge(scenario_nam
     _, settings, _, _, _ = build_scenario_inputs(scenario_name)
     result = run_scenario(scenario)
 
-    floor_periods = _floor_index_periods(result, settings.min_soe_kwh)
+    floor_periods = _floor_index_periods(result, settings)
 
     # Vacuity guard: if the fixture stops producing floor-SoE periods, this test
     # silently stops testing anything. That is the coverage gap #526 is about.
@@ -89,9 +88,7 @@ def test_computed_periods_authorize_on_the_economics(scenario_name):
     _, settings, buy_prices, _, _ = build_scenario_inputs(scenario_name)
     result = run_scenario(scenario)
 
-    floor_periods = {
-        id(pd) for pd in _floor_index_periods(result, settings.min_soe_kwh)
-    }
+    floor_periods = {id(pd) for pd in _floor_index_periods(result, settings)}
 
     evaluated = 0
     for period, pd in enumerate(result.period_data):

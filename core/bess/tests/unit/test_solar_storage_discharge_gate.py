@@ -25,8 +25,10 @@ import pytest
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
-from core.bess.dp_constants import SOE_STEP_KWH
+from core.bess.dp_battery_algorithm import (
+    has_value_cell_below,
+    optimize_battery_schedule,
+)
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -124,20 +126,22 @@ class TestSolarStorageDischargeGate:
 def _solar_storage_periods(result, settings):
     """SOLAR_STORAGE periods whose shadow price the DP could actually compute.
 
-    Periods whose start-of-period SoE snaps to grid index 0 (a battery sitting
-    on its reserve floor, e.g. the first period of a scenario starting empty)
-    are excluded: the shadow price is a backward difference between adjacent
-    SoE levels and does not exist there, so there is no marginal opportunity
-    value for these tests to reason about. Before #526 such periods reported
-    the `0.0` default, which read as "stored energy is worthless" and wrongly
-    satisfied the gate-open comparison -- the exact confusion #526 removed.
+    Periods with no value-function cell below their start-of-period SoE (a
+    battery sitting on its reserve floor, e.g. the first period of a scenario
+    starting empty) are excluded: the shadow price is a left one-sided slope
+    and does not exist there, so there is no marginal opportunity value for
+    these tests to reason about. Before #526 such periods reported the `0.0`
+    default, which read as "stored energy is worthless" and wrongly satisfied
+    the gate-open comparison -- the exact confusion #526 removed.
+
+    Asks the DP's own predicate rather than re-deriving the index rule; a
+    test-side mirror of that arithmetic is what went stale in #571.
     """
     return [
         t
         for t, pd in enumerate(result.period_data)
         if pd.decision.strategic_intent == "SOLAR_STORAGE"
-        and round((pd.energy.battery_soe_start - settings.min_soe_kwh) / SOE_STEP_KWH)
-        > 0
+        and has_value_cell_below(pd.energy.battery_soe_start, settings)
     ]
 
 

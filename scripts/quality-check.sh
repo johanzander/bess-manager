@@ -186,14 +186,15 @@ import json, re, sys
 REQUIRED = {
     "deny": [
         "Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)",
-        "Bash(git -* stash)", "Bash(git -* stash *)",
+        "Bash(git -* stash)", "Bash(git -* stash pop*)",
+        "Bash(git -* stash drop*)", "Bash(git -* stash clear*)",
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
         "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
         "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
-        "Bash(gh secret*)", "Bash(gh workflow run*)",
+        "Bash(gh repo delete*)", "Bash(gh secret*)", "Bash(gh workflow run*)",
         "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
         "Bash(git maintenance*)",
         "Bash(git reflog expire*)", "Bash(git reflog delete*)",
@@ -261,8 +262,29 @@ MUST_BE_GUARDED = [
     "gh api repos/o/r/releases -f tag_name=v1",
     "gh pr merge 588 --squash", "gh release create v9.9.0",
     "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
+    # Unrecoverable gh mutations. `gh repo delete` was unguarded while the far
+    # milder `gh repo edit` asked -- it escapes to GitHub and git cannot undo
+    # it, which is this file's stated standard for the ask list.
+    "gh repo delete owner/repo --yes", "gh pr close 1",
+    "gh issue delete 1", "gh cache delete --all",
     "sudo rm -rf /",
 ]
+
+# NOT modelled here, deliberately:
+#
+# * COMPOUND COMMANDS. `cd frontend && git push origin main` matches nothing in
+#   this matcher, because matches() emulates a single command string. The
+#   harness decomposes on &&/;/| before applying rules, so the real decision is
+#   made on `git push origin main` -- do not "fix" this by adding compound
+#   entries here; they would fail against a matcher that is correct for what it
+#   models. Verifying the decomposition claim needs a live permission test, not
+#   this gate.
+# * GREEDY GLOBS. `*` compiles to `.*`, which spans spaces, so `git -* push*`
+#   also matches e.g. a commit whose MESSAGE contains " push". That is a false
+#   PROMPT, not a hole, and it is accepted: the alternative is dropping the
+#   global-option guard on push, which is a real bypass. Precision here is
+#   bounded by prefix globbing -- when the choice is between an extra prompt
+#   and a gap, take the prompt.
 
 # Read-only git must NOT be caught: an autonomous run executing rules.md's
 # cross-checkout procedure (`git diff -- f | git -C <wt> apply`, then
@@ -275,6 +297,18 @@ MUST_NOT_BE_GUARDED = [
     "git -C .claude/worktrees/x diff -- file.py",
     "git -C .claude/worktrees/x apply",
     "git status", "git diff", "git log --oneline",
+    # Read-only stash inspection, which CLAUDE.md and rules.md both promise
+    # keeps working. A blanket `git -* stash *` DENY caught these, and deny has
+    # no override -- so the cross-checkout recipe was hard-blocked, not merely
+    # prompted. That is why the stash twins name a verb.
+    "git stash list", "git stash show",
+    "git -C sub stash list",
+    "git -C .claude/worktrees/x stash show",
+    # implement-issue Step 4 prunes worktrees in a loop; CLAUDE.md argues that
+    # must stay unattended. A `git -* prune*` twin caught `worktree prune` and
+    # `remote prune` through the same greedy glob, so the twin was dropped.
+    "git -C /main worktree prune", "git worktree prune",
+    "git -C sub remote prune origin",
 ]
 
 

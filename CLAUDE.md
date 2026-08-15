@@ -235,6 +235,16 @@ on purpose: a blanket `Bash(git -*)` was tried and put read-only inspection —
 patch recipe — behind a prompt, and it shadowed the `git commit` allow via
 `git -c user.email=… commit`.
 
+**`*` compiles to a greedy `.*` that spans spaces**, which bounds how precise
+any of this can be. `git -* push*` therefore also matches a `git -c … commit`
+whose *message* contains " push". That is an extra prompt, not a gap, and it is
+accepted — the alternative is dropping the global-option guard on push, which
+is a real bypass. When the choice is between a false prompt and a hole, take
+the prompt. The one case where that trade flips is `deny`, which has no
+override: an over-broad deny **blocks** documented work rather than prompting
+for it, which is why `git prune` has no twin (it caught `git worktree prune`,
+and Step 4 prunes in a loop) and why the stash twins are per-verb.
+
 Denied outright: the shared podman VM (`machine rm`, `system reset`) and every
 mutating `git stash` form, **including `git -C <path> stash …`**. That last
 clause is load-bearing rather than decorative: the global-option spelling was
@@ -342,9 +352,17 @@ agent's `git stash pop` will take, with no way to tell it was not theirs. With
 ~20 worktrees active that silently destroys work, and once popped and discarded
 git offers no recovery. `permissions.deny` lists every mutating form (bare `git
 stash`, `push`, `save`, `pop`, `apply`, `drop`, `clear`, `branch`, `create`,
-`store`); `git stash list`/`show` still work. The rules match the command as
-written, so a prefixed form such as `git -C <dir> stash pop` slips past — don't
-reach for one.
+`store`), **each with a `git -* stash <verb>` twin**, so the global-option
+spelling `git -C <dir> stash pop` is denied too — that is the form the
+cross-checkout recipe below would otherwise reach for, and it was a live
+bypass until #596.
+
+`git stash list` and `git stash show` still work, in both spellings. The twins
+name a verb for exactly that reason: a blanket `git -* stash *` deny also
+caught `git -C sub stash list`, and `deny` has no override, so it hard-blocked
+inspection rather than merely prompting for it. `scripts/quality-check.sh` pins
+both directions — the mutating forms must match a **deny**, the read-only forms
+must match **nothing**.
 
 **The OS sandbox is what makes the unattended list safe, and it is on.**
 `sandbox.enabled` confines every Bash write to the repository, decided by the OS

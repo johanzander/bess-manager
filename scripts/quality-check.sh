@@ -170,33 +170,35 @@ echo "-------------------------------------------"
 if ! python3 - <<'PY'
 import json, sys
 
-# Patterns must match the command AS WRITTEN -- no normalisation, prefix
-# globbing only. `Bash(git push --force *)` does NOT match bare
-# `git push --force`, which is why the exact and spaced forms are both listed;
-# and `Bash(git push --force*)` would wrongly swallow `--force-with-lease`,
-# which is deliberately unattended because git itself refuses the unsafe case.
+# Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
+# `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
+# dangerous shapes put their marker at an arbitrary argument position
+# (`git push origin main --force`, `git push origin +beta-release-9.9`,
+# `git push origin --delete release-X.Y`, `gh api <path> -X PUT`), which a
+# prefix glob cannot reach. Enumerating them left real holes twice. Narrowing
+# these two back to specific forms re-opens the holes, so the check requires
+# the blanket spelling rather than merely "some rule exists".
+#
+# Every entry below is a rule whose deletion is the exact regression this gate
+# was written for -- the GitHub-reaching and history-destroying guards. Keep
+# this list in sync with the ask/deny lists; a rule absent from here is a rule
+# that can be silently removed.
 REQUIRED = {
     "deny": ["Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)"],
     "ask": [
-        "Bash(git push --force)", "Bash(git push --force *)",
-        "Bash(git push -f)", "Bash(git push -f *)",
-        "Bash(git push beta)", "Bash(git push beta *)",
-        "Bash(gh pr merge*)", "Bash(gh release*)",
-        "Bash(git gc*)", "Bash(git reflog expire*)", "Bash(sudo *)",
+        "Bash(git push)", "Bash(git push *)",
+        "Bash(gh api)", "Bash(gh api *)",
+        "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
+        "Bash(gh secret*)", "Bash(gh workflow run*)",
+        "Bash(git gc*)", "Bash(git reflog expire*)", "Bash(git tag -d*)",
+        "Bash(sudo *)",
     ],
 }
-# A pattern ending in `--force*`/`-f*` re-introduces the --force-with-lease
-# false positive, so reject it explicitly rather than only checking presence.
-FORBIDDEN = ["Bash(git push --force*)", "Bash(git push -f*)"]
 
 perms = json.load(open(".claude/settings.json"))["permissions"]
 bad = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
 for k, p in bad:
     print(f"❌ permissions.{k} is missing {p}")
-for p in FORBIDDEN:
-    if p in perms.get("ask", []):
-        print(f"❌ permissions.ask has {p} -- it also matches --force-with-lease, which must stay unattended")
-        bad.append(("ask", p))
 if bad:
     sys.exit(1)
 print("✅ Permission surface intact")

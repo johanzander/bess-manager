@@ -223,7 +223,7 @@ not `.git`'s own recovery data:
 
 | Category | Rules |
 |---|---|
-| Escapes to GitHub | `git push --force` / `-f`, `git push beta`, `git push --tags`, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
 | Destroys the recovery mechanism | `git gc`, `git reflog expire`, `git tag -d` |
 | Leaves the user boundary | `sudo` |
 
@@ -236,22 +236,36 @@ because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.
 
-`git push origin main` is deliberately **not** listed: `main` is protected by a
-GitHub ruleset, so the server refuses it. Don't add a prompt where something
-upstream already refuses (same reasoning as `git branch -D` and
-`--force-with-lease`).
+**`git push` and `gh api` are guarded bluntly, and that is deliberate.** Both
+were enumerated by shape first, and both leaked, twice:
+
+```
+git push origin main --force          # --force not adjacent to `push`
+git push origin +beta-release-9.9     # force via refspec
+git push origin --delete release-X.Y  # destroys a shared ref
+git push origin v9.9.0                # publishes a release tag
+gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
+gh api <path> -f key=val              # any -f/-F makes it a POST
+```
+
+The marker sits at an arbitrary argument position, and **prefix globbing cannot
+reach it.** Narrowing these two back to specific forms re-opens every line
+above, so `quality-check.sh` requires the blanket spelling rather than merely
+"some push rule exists". The cost is one prompt at Step 9 per issue, and a
+prompt during release work — which the release skill requires explicit approval
+for anyway.
 
 **Patterns match the command as written — prefix globbing, no normalisation.**
-This is the single biggest source of rules that look right and match nothing.
-`Bash(git push --force *)` does not match bare `git push --force`, so both
-forms are listed; `Bash(git push --force*)` would wrongly swallow
-`--force-with-lease`. Shapes that a prefix glob cannot express — `git push -u
-origin main`, `git push origin HEAD:main`, `gh api -f` (implicit POST) — are
-left to the `auto` classifier, which reads the whole command. Do not paper over
-those with mid-string wildcards; they do not work, and a rule that matches
-nothing is worse than no rule because it reads as covered.
-`scripts/quality-check.sh` asserts the load-bearing patterns are present and
-that the `--force*` false-positive form has not crept back.
+This is the single biggest source of rules that look right and match nothing,
+and it has produced a bug in this file three times.
+
+**A rule that fails to match does not fall through to the `auto` classifier.**
+It falls through to whatever `allow` rule covers the command — here
+`Bash(git push *)` in project settings and `Bash(git *)` in user settings — and
+runs unattended. Precedence is `deny > ask > allow` **by category**, not by
+specificity, so a broad `allow` is only ever overridden by an `ask` that
+actually matches. That is why a too-narrow `ask` is worse than no rule: it
+reads as covered while changing nothing.
 
 **`defaultMode` is `auto`, and it is what makes the list above short enough to
 work.** The `allow` list cannot enumerate what an issue actually needs — a

@@ -75,14 +75,10 @@
       "Bash(git stash --*)"
     ],
     "ask": [
-      "Bash(git push --force)",
-      "Bash(git push --force *)",
-      "Bash(git push -f)",
-      "Bash(git push -f *)",
-      "Bash(git push beta)",
-      "Bash(git push beta *)",
-      "Bash(git push --tags)",
-      "Bash(git push --tags *)",
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(gh api)",
+      "Bash(gh api *)",
       "Bash(gh pr merge*)",
       "Bash(gh release*)",
       "Bash(gh repo edit*)",

@@ -157,7 +157,15 @@ printf 'INFO  Bash writing scripts/** is %s\n' "$sc"
 #     no matter what allowWrite says -- and the main checkout is the obvious
 #     place to run this script from, so a PASS there means nothing. Say so
 #     rather than bank a false green.
-if [ ! -L frontend/node_modules ]; then
+#     Three states, and they must not be conflated. `-L` alone is not enough:
+#     a DANGLING link (main checkout's node_modules removed or reinstalled
+#     while a worktree still points at it) is `-L` true but `-e` false, and
+#     probing it fails on the missing target -- reporting a sandbox
+#     misconfiguration and sending the reader to allowWrite, which is the wrong
+#     knob entirely. Require both.
+if [ -L frontend/node_modules ] && [ ! -e frontend/node_modules ]; then
+  printf 'SKIP  frontend/node_modules is a DANGLING symlink -- its target is gone, not a sandbox problem (re-run scripts/worktree-setup.sh)\n'
+elif [ ! -L frontend/node_modules ]; then
   if [ -e frontend/node_modules ]; then
     printf 'SKIP  node_modules symlink check -- not a symlink here (run this from a linked worktree; a PASS in the main checkout proves nothing)\n'
   else

@@ -877,8 +877,8 @@ class HomeAssistantAPIController:
     # f"{device.serial_number}_{register_key}" — verified against
     # wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200.
     # Lifetime energy register keys verified against
-    # wlcrs/huawei-solar-lib register_names.py/sensor.py: accumulated_yield_energy
-    # (inverter), storage_total_charge/storage_total_discharge (battery),
+    # wlcrs/huawei-solar-lib register_names.py/sensor.py: total_dc_input_power
+    # (inverter PV total, see #569 below), storage_total_charge/storage_total_discharge (battery),
     # grid_exported_energy/grid_accumulated_energy (separate power-meter device,
     # so these two resolve to "not configured" on meterless installs).
     # input_power (inverter, real-time PV) and power_meter_active_power
@@ -900,7 +900,17 @@ class HomeAssistantAPIController:
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
         "active_power": "local_load_power",
-        "accumulated_yield_energy": "lifetime_solar_energy",
+        # PV production, NOT accumulated_yield_energy (#569).  That register
+        # (32106, "Total yield") is the inverter's accumulated AC *output*:
+        # on a LUNA2000 hybrid it rises while the battery discharges and
+        # misses whatever charged it, so feeding it to
+        # derive_load_consumption inflates home consumption by
+        # (battery_discharged - solar_to_battery) with no visible error.
+        # 32108 "Total DC input energy" is the lifetime integral of 32064,
+        # which is already mapped to pv_power below -- DC-side, so it
+        # excludes conversion losses, but Huawei exposes no AC-side PV
+        # total at all (wlcrs/huawei_solar README FAQ).
+        "total_dc_input_power": "lifetime_solar_energy",
         "storage_total_charge": "lifetime_battery_charged",
         "storage_total_discharge": "lifetime_battery_discharged",
         "grid_exported_energy": "lifetime_export_to_grid",

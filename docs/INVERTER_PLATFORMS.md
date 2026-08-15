@@ -846,6 +846,28 @@ above); an install with no power meter genuinely cannot report them, and the
 health check correctly reports that as an error rather than silently
 reporting OK.
 
+**`lifetime_solar_energy` is `total_dc_input_power`, not `accumulated_yield_energy`
+(#569) — do not "correct" it back.** The obvious-looking candidate,
+`accumulated_yield_energy` (reg 32106, entity "Total yield"), is the inverter's
+accumulated AC *output*: on a LUNA2000 hybrid it rises while the battery
+discharges and misses everything used to charge it, which upstream states
+outright in its README FAQ. Feeding that to `derive_load_consumption`'s
+five-term balance inflates home consumption — and therefore `grid_only_cost`
+and reported savings — by `battery_discharged - solar_to_battery`, silently,
+because the lifetime total stays positive and the health check still passes.
+`total_dc_input_power` (reg 32108, entity "Total DC input energy") is the
+lifetime integral of reg 32064, already mapped to `pv_power` above. It is
+DC-side, so it excludes inverter conversion losses (a systematic ~2-3% bias on
+the solar term); Huawei exposes no AC-side PV total at all, so that residual is
+irreducible. FusionSolar's own reconstruction
+(`yield - discharge + charge`) is **not** a valid alternative here: it assumes
+all battery charge came from PV, and BESS grid-charges for arbitrage, so it
+would report grid-charged energy as solar production.
+
+Note the suffix collision this creates: `..._total_dc_input_power` also ends in
+`_input_power`. The two stay apart only because `_map_registry_entities` sorts
+suffixes longest-first before breaking on the first match.
+
 **Auto-detection:** `HUAWEI_SUFFIX_MAP` is wired into `discover_sensors_from_registry`
 (the same production entity-registry scan every other platform uses — fixed
 in #438; previously this map had no caller there and every Huawei sensor

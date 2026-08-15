@@ -123,7 +123,11 @@ of `analyzed`.
 
 ### General bot rules
 
-- Only the repo owner can trigger bot commands.
+- Only the repo owner can trigger bot commands. The one exception is Stage 4:
+  `pr-review.yml` also accepts `@claude-bot` from the `bess-agent` automation
+  identity, so `implement-issue`'s Step 11 loop can request its own review.
+  Stages 1–3 and 5 stay owner-only — those spend money on work nobody has
+  asked for yet.
 - Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
 - Never push directly to `main`. PRs are always opened as drafts.
 - The bot identity is `bess-manager-claude-bot` (a custom GitHub App). The

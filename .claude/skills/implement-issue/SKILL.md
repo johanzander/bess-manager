@@ -41,13 +41,14 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 |---|---|
 | 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
 | 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
-| 4. Fleet sweep + worktree | Skip both — the CI checkout is already isolated and has no worktree fleet to sweep. Create the branch directly (naming per Step 1). |
+| 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
 | 5. TDD | The substance applies verbatim (RED test first, required test shape); there is just no `superpowers:test-driven-development` skill to invoke — follow this section's own rules. |
 | 6. Quality gate + code review | Run inline, no background agent (CI is one throwaway session — the cost-discipline reason to background doesn't exist). The `code-review` plugin is unavailable; the Stage-4 `@claude-bot` PR review covers it. Checks 1–3 (fast suite, slow suite, required-test-shape) still apply. |
 | 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
-| 9. Commit + draft PR | Applies verbatim, including the pre-push `git merge origin/main` and the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
-| 10. Hard constraints | Apply verbatim. |
+| 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
+| 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
+| 11. Hard constraints | Apply verbatim. |
 
 ## Process
 
@@ -96,117 +97,45 @@ owner is not ready to present. Wait for explicit go-ahead before touching
 code. One message — cheap insurance against building an entire
 implementation on a wrong diagnosis *or* a wrong placement.
 
-### 4. Fleet sweep, then worktree + branch
+### 4. Worktree + branch
 
-#### 4a. Fleet sweep (runs FIRST, before creating anything)
-
-**This is the cleanup-and-refresh step, and it lives here on purpose.** The
-"After Merge" section at the bottom also removes a worktree, but it is
-defined as a separate later invocation, so it depends on someone choosing to
-come back — and nobody does. That postcondition ran zero times in ~40 issues
-and left 39 worktrees on disk, 24 of them long merged. Running the sweep as a
-*precondition* of the next issue needs no memory: the next person to do issue
-work cleans up the last one's mess automatically.
-
-The sweep has two arms, because pruning merged worktrees alone leaves the
-other half of the fleet to rot. A PR that was green and mergeable when its
-session ended goes `CONFLICTING` the moment two or three others merge into
-`main` ahead of it — and a `CONFLICTING` PR **creates no workflow run at
-all**, so it presents as "CI never fired", not as a conflict. Nobody is
-watching for that, which is exactly why it has to be swept rather than
-noticed.
-
-**The skip gate comes before both arms.** Another agent may be mid-`implement-issue`
-in any of these worktrees; merging `origin/main` underneath it moves its HEAD
-mid-run and puts two sessions on the same branch pushing to the same PR.
+**Prune merged worktrees FIRST — this is the cleanup step, and it lives here
+on purpose.** The "After Merge" section at the bottom also removes a
+worktree, but it is defined as a separate later invocation, so it depends on
+someone choosing to come back — and nobody does. That postcondition ran zero
+times in ~40 issues and left 39 worktrees on disk, 24 of them long merged.
+Running the prune as a *precondition* of the next issue needs no memory: the
+next person to do issue work cleans up the last one's mess automatically.
 
 ```bash
-git fetch origin --prune
-# NOTE: `git branch --merged` / `rev-list origin/main..branch` DO NOT WORK
-# here -- this repo squash-merges, so a merged branch's commits are never
-# reachable from main and every worktree looks unmerged forever. PR state is
-# the only authoritative signal.
+# Worktrees whose PR has merged. NOTE: `git branch --merged` / `rev-list
+# origin/main..branch` DO NOT WORK here -- this repo squash-merges, so a
+# merged branch's commits are never reachable from main and every worktree
+# looks unmerged forever. PR state is the only authoritative signal.
 merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName')
-# Live sessions own their worktree at ANY status -- idle and blocked included.
-# UNSCOPED on purpose: sibling worktrees never appear in the project-scoped
-# view (CLAUDE.md, Worktree Conventions), and missing one is the collision.
-owned=$(cd ~ && claude agents --json 2>/dev/null | jq -r '.[].cwd')
-
 git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
   b=$(git -C "$wt" branch --show-current 2>/dev/null)
-  [ -n "$b" ] || continue                                     # detached: leave alone
-  if echo "$owned" | grep -qF "$wt"; then
-    echo "SKIP (live session): $wt"; continue
+  [ -n "$b" ] || continue                                   # detached: leave alone
+  echo "$merged" | grep -qx "$b" || continue                # not merged: leave alone
+  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then # tracked edits: never auto-delete
+    echo "KEEP (uncommitted changes): $wt"; continue
   fi
-  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then   # tracked edits: never touch
-    echo "SKIP (uncommitted changes): $wt"; continue
-  fi
-  if echo "$merged" | grep -qx "$b"; then                     # arm 1: merged -> prune
-    git worktree remove "$wt" && git branch -D "$b"; continue
-  fi
-  age=$(( ($(date +%s) - $(git -C "$wt" log -1 --format=%ct)) / 60 ))
-  if [ "$age" -lt 30 ]; then
-    echo "SKIP (HEAD ${age}m old, likely active): $wt"; continue
-  fi
-  # arm 2: open -> refresh. GitHub computes `mergeable` LAZILY: the first
-  # query on a cold PR returns UNKNOWN *and* triggers the computation, so a
-  # single pass reports UNKNOWN for every stale PR -- i.e. exactly the ones
-  # the sweep exists to find. Ask again until it resolves.
-  for _ in 1 2 3; do
-    pr=$(gh pr view "$b" --json number,mergeable,mergeStateStatus,statusCheckRollup \
-         -q '"#\(.number) \(.mergeable) \(.mergeStateStatus) " +
-             ([.statusCheckRollup[]?|select(.conclusion=="FAILURE").name]|join(","))' \
-         2>/dev/null)
-    [ -z "$pr" ] && { echo "NO PR (never pushed): $b"; break; }
-    case "$pr" in *UNKNOWN*) sleep 3; continue;; esac
-    echo "OPEN $pr <- $wt"; break
-  done
+  git worktree remove "$wt" && git branch -D "$b"
 done
+git fetch origin --prune
 ```
 
-**Arm 1 — merged: prune.** Two guards that matter: never remove a worktree
-with **uncommitted tracked changes** — report it and let a human decide (one
-such worktree held a 375-line module that existed nowhere else) — and never
-touch a **detached or locked** worktree, which is usually another agent's
-live session.
+Two guards that matter: never remove a worktree with **uncommitted tracked
+changes** — report it and let a human decide (one such worktree held a
+375-line module that existed nowhere else) — and never touch a **detached or
+locked** worktree, which is usually another agent's live session.
 
-**Arm 2 — open: refresh.** For each PR the loop printed, act on its state.
-This is judgment, not script:
-
-| State | Action |
-|---|---|
-| `CONFLICTING`, or `mergeStateStatus: BEHIND` | In that worktree: `git merge origin/main`. Auto-resolve **mechanical** conflicts only — `CHANGELOG.md` under `## [Unreleased]` (keep both bullets), import ordering, lockfiles. Then `./scripts/quality-check.sh`, then push. |
-| Conflict is semantic | `git merge --abort` and report it. Do not guess at someone else's fix. |
-| Checks `FAILURE` | Read the failing job log (`gh run view --log-failed`). Auto-fix only Black/Ruff formatting and a missing `## [Unreleased]` changelog entry — the mechanical CI failures. A real test failure is reported, never patched blind. |
-| Green and mergeable | Nothing. |
-| `NO PR (never pushed)` | Report only — never delete. This is a branch with local commits and no PR, which is either abandoned work or someone's parked experiment. The first dry run found 11 of them; they are the same "uncommitted changes" hazard one step later, and the sweep is not what decides their fate. |
-
-Hard rules for arm 2, all of them learned the expensive way: never push
-without `quality-check.sh` green; never `git stash` (denied repo-wide, see
-`CLAUDE.md`); never `--force`; never merge the PR or take it out of draft;
-one commit per PR per sweep (`chore: merge main into <branch>`). Everything
-skipped is **reported with its reason** — "3 skipped: #589 owned by live
-session" is the useful output; a sweep that silently does nothing is not.
-
-**Running the sweep on a loop.** Section 4a is also the thing to `/loop` when
-you want the fleet held green between issues — it is the same instructions,
-not a second mechanism, so do not write a separate skill for it. The one
-difference: as a Step 4 precondition it takes a single snapshot of
-`statusCheckRollup` and moves on, because blocking the start of issue work on
-another PR turning green is exactly backwards. Under `/loop` it re-reads CI
-each tick, and a fully-green fleet is a noop tick. Run **one** sweep loop at a
-time — two of them collide with each other for the same reason arm 2 skips
-owned worktrees, and there is no lock enforcing it.
-
-#### 4b. Worktree + branch
-
-The sweep above already ran `git fetch origin --prune`, which is what makes
-`origin/main` current — that ordering is the point, not incidental.
-`using-git-worktrees`' git fallback branches from the current local `HEAD`,
-not `origin/main`, so a stale local checkout silently cuts the branch behind
-main (missed release cuts, changelog rewrites, other merged fixes), surfacing
-later as an avoidable merge conflict. Invoke
-`superpowers:using-git-worktrees`, basing the new branch on `origin/main`.
+Then `git fetch origin main` — `using-git-worktrees`' git fallback branches
+from the current local `HEAD`, not `origin/main`, so a stale local checkout
+silently cuts the branch behind main (missed release cuts, changelog
+rewrites, other merged fixes), surfacing later as an avoidable merge
+conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
+branch on `origin/main`.
 
 Then run `./scripts/worktree-setup.sh` in the new worktree — once, before any
 test, build or `verify` step. It shares `.venv` and both `node_modules` trees
@@ -417,8 +346,8 @@ git fetch origin && git merge origin/main
 
 Resolve any conflicts here, in the worktree, where you have the context; if
 the merge brought changes in, re-run `./scripts/quality-check.sh` before
-pushing. Step 4b cut this branch from a current `origin/main`, but Steps 5–8
-take hours (slow suite, `verify`), and other PRs merge during them. Opening a
+pushing. Step 4 cut this branch from a current `origin/main`, but Steps 5–8
+take hours (slow suite, `verify`) and other PRs merge during them. Opening a
 PR that is already `CONFLICTING` is worse than it sounds: GitHub creates **no
 workflow run at all** for it, so the PR shows no checks rather than a
 conflict, and the first reader concludes CI dropped the event.
@@ -475,7 +404,39 @@ If you cannot produce a mutation that reddens your test, you have not
 demonstrated the bug — say so in the PR and stop, rather than filling the
 section in with the suite result.
 
-### 10. Hard constraints
+### 10. Watch this PR to green (and only this PR)
+
+The draft PR is open, but CI has not run yet. Local `quality-check.sh` and
+the slow suite are not the same as the CI matrix, and a PR left red or
+`CONFLICTING` is a PR the user cannot review.
+
+```bash
+gh pr checks <n> --watch --fail-fast     # blocks until the run settles
+gh pr view <n> --json mergeable,mergeStateStatus
+```
+
+Then, on this PR only:
+
+- **Checks fail:** read `gh run view --log-failed`, fix in the worktree,
+  re-run `./scripts/quality-check.sh`, push. This is your diff, so a real
+  test failure is yours to fix — not merely to report.
+- **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
+  `git merge origin/main`, resolve, `quality-check.sh`, push.
+- **Green and mergeable:** report the PR link and stop. Do not merge, do not
+  take it out of draft — Step 11 still holds.
+
+**Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
+`gh pr list` shows other PRs red or conflicted, that is not this session's
+job — hand it to the `sweep-prs` skill, which owns fleet-wide maintenance
+and has the ownership skip gate needed to touch a worktree another agent may
+be sitting in. Widening a single-issue session into fleet cleanup is how two
+sessions end up pushing to the same branch.
+
+`gh pr checks --watch` blocks rather than polls, so this costs one wait, not
+a re-read of the whole session context every 60s. If CI is badly backed up,
+say so and leave the PR — don't hold the session open indefinitely.
+
+### 11. Hard constraints
 
 - Draft PR only. Never auto-merge.
 - Never push directly to `main`.
@@ -495,7 +456,7 @@ section in with the suite result.
 
 A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at draft-PR-open per the Step 10 constraints.
+flow above, which stops at draft-PR-green per the Step 11 constraints.
 
 **Treat this as best-effort, not the cleanup mechanism.** Because it depends
 on someone returning after the merge, it reliably does not happen; Step 4's
@@ -540,13 +501,12 @@ net is upstream, not this section.
 | "I'll clean up this other thing while I'm in here" | Out of scope. Minimal fix only. |
 | "code review can wait until after I've verified it works" | Reordered on purpose — catch cheap issues before spending time on manual verification, not after. |
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
+| "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
+| "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
+| "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll clean up the worktree after it merges" | You won't — that's the postcondition that already failed 24 times. Prune at Step 4, before creating the next one. |
-| "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict is invisible until someone digs. |
-| "the sweep found an open PR with red CI — I'll fix it properly while I'm here" | Arm 2 auto-fixes Black/Ruff/changelog and nothing else. A real test failure on someone else's PR is reported, not patched blind — you don't have their diagnosis. |
-| "that worktree's session is idle, so nobody's using it" | Idle and blocked both mean owned. An agent parked between Step 6 and Step 8 is idle and very much still holds that branch. Any live session at that cwd skips it. |
-| "I'll write a babysit-PRs skill to keep the fleet green" | That's Step 4a, run under `/loop`. A second skill with the same instructions is a fork that drifts, and two sweeps running at once collide exactly the way arm 2's skip gate exists to prevent. |
 | "`git branch --merged` will tell me what's safe to delete" | Not in this repo. Squash-merge means a merged branch is never an ancestor of main, so that check reports *everything* as unmerged and the cleanup silently never fires. Use `gh pr list --state merged`. |
 | "I'll just hop into the other worktree for a second" | Not while a background agent spawned from this session is running — its isolation follows you and its tooling starts resolving against the wrong checkout. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
@@ -572,9 +532,10 @@ net is upstream, not this section.
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
 - About to write only a synthetic-input unit test for a DP/intent/control-
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
-- About to push the branch without having merged `origin/main` since Step 4b.
-- About to run arm 2 of the sweep against a worktree that has a live session,
-  uncommitted tracked changes, or a HEAD less than 30 minutes old.
+- About to push the branch without having merged `origin/main` since Step 4.
+- About to stop at "draft PR opened" without watching CI settle (Step 10).
+- About to touch another PR or another worktree from inside this session —
+  that is `sweep-prs`, not this skill.
 - About to write a repro test from hand-built data when a user debug log/
   bundle is available and `from_debug_log.py` could build it from real data.
 
@@ -585,10 +546,10 @@ net is upstream, not this section.
 | 1. Fetch & scope | `gh issue view` | No |
 | 2. Diagnose | `bess-analyst` (if no bot comment) | Conditional |
 | 3. Confirm gate | — | No |
-| 4a. Fleet sweep | `gh pr list/view` + `claude agents --json` (also `/loop`-able) | No |
-| 4b. Worktree | `using-git-worktrees` | No |
+| 4. Worktree | `using-git-worktrees` | No |
 | 5. TDD | `test-driven-development` | No |
 | 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
 | 7. Confirm gate 2 | — | Conditional (auto-continue if backend-only + clean; otherwise No) |
 | 8. Local run & observe | `verify` | **Never** |
-| 9. Commit + PR | `finishing-a-development-branch` | No |
+| 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
+| 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |

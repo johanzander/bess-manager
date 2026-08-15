@@ -192,6 +192,28 @@
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
+### **Measure TOU write volume properly before optimizing it further**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `growatt_min_controller.py`, `core/bess/tests/conftest.py`, debug bundles
+
+**Description**: There is no repeatable way to measure how many inverter writes a real day costs, and three separate attempts during #589 each produced a different answer for harness reasons rather than code reasons:
+
+- driving `update_battery_schedule` over 96 cycles through `MockHomeAssistantController` measures nothing, because `read_inverter_time_segments()` (`conftest.py`) always returns `empty_slot_table()`. Every segment looks absent from hardware on every cycle, so the plan is rewritten wholesale and no gate can affect the count. It also makes the disable path dead, since every slot reads back disabled.
+- the same harness with a modelled slot table but a **frozen SOC** invents churn: the DP believes the battery never charges and walks a window's end forward one quarter-hour per cycle, indefinitely.
+- replaying a scenario fixture over 96 cycles **suppresses** churn: the fixture is one snapshot, so every cycle re-solves identical inputs and the plan barely moves.
+
+The only faithful instrument found was replaying a debug bundle's recorded per-run forecasts (`## Prediction Snapshots` → per-run `strategic_intent`) straight through the controller — no DP re-solve, so the harness can neither invent nor suppress plan movement. On `bess-debug-2026-08-12-202906.md` (83 real runs) that gives 149 writes before #554, 32 after, and 32 with #589 — i.e. #554 captured essentially all of it on that day.
+
+**Why it matters**: #589 was written on the premise that ~+8 writes/day of deferrable end-churn remained after #554. One real day does not support that. The remaining writes there were all changes taking effect at or before the current period — plan reshaping, which is #485's territory, not a write-gate's.
+
+**Fix**:
+
+1. Promote `_SimulatingController`'s slot modelling (in `test_growatt_tou_scheduling.py`) into `conftest.py` so the shared mock stops being blind to redundant writes and to the disable path. Removes the duplicate at the same time.
+2. Turn the bundle replay into a checked-in script, and teach it the compact `predicted_periods_delta` encoding introduced by #555/#567 — only the three pre-#555 bundles can be replayed today.
+3. Re-measure across several real days. Only then decide whether any further write-gating work (or #485) is worth doing, and let that data set the target rather than a single day.
+
+---
+
 ### **Retry discovery on startup when HA WebSocket is not ready**
 
 **Impact**: High | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `battery_system_manager.py`
@@ -790,3 +812,29 @@ value surfaced and that matters for how the next reader reads this list:
    `battery_power_polarity` and raises `ValueError` on anything other than
    `charge_positive`. The grid helper stays deliberately lax (anything that
    isn't `"import_positive"` is treated as `"export_positive"`).
+
+## From #601 (defer running-window end rewrites) review — non-blocking
+
+**`_assign_hardware_slots` does not know about the new `same_segment`
+equivalence.** `core/bess/growatt_min_controller.py:440`, specifically the
+`content_key`/`keep_keys` logic at lines 461-486, reserves a hardware slot for
+a `current_tou` entry only on an exact `(start, end, mode, enabled)` match
+against `planned_tou`. `same_segment` now treats a running segment as
+unchanged even when its `end_time` differs (the change deferred beyond the
+write horizon), so a deferred segment's real slot is not recognized as spoken
+for and lands in `free_slots` — in principle it could be handed to another
+segment written the same cycle, silently overwriting the deferred segment with
+no disable or update recorded.
+
+Not reachable today, and the reviewer and I both failed to build a repro:
+`strategic_intents` partitions the day into non-overlapping segments, so
+anything eligible for `to_update` this cycle starts within
+`WRITE_HORIZON_MINUTES` of `effective_minute`, while a genuinely-deferred
+segment's nearest boundary (per `same_segment`'s own `bites_at`) is by
+definition further away than that. Correctness here therefore rests on an
+invariant that is neither asserted nor referenced near the function, and the
+`_assign_hardware_slots` docstring ("A slot counts as spoken for when it holds
+anything in planned_tou") is now inaccurate for the deferred case. Fix by
+making slot preservation `same_segment`-aware directly, before anything
+relaxes the single-partition assumption (a multi-window-per-period or VPP
+mode would).

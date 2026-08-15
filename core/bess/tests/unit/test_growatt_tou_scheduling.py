@@ -1256,9 +1256,14 @@ _LIVE_HARDWARE_SLOTS = [
 _ORPHAN_RANGES = {
     ("09:00", "09:14"),
     ("11:45", "11:59"),
-    ("13:45", "14:14"),
     ("16:00", "16:14"),
 }
+
+# 13:45-14:14 is deliberately not in the set above. The plan holds
+# 13:45-13:59, so it is the same window with a later end rather than a
+# segment nobody planned, and the two behave identically until 14:00. Since
+# #589 that write waits until the difference is imminent; the deadline is
+# covered by test_a_shortened_window_is_cleared_before_the_cut_takes_effect.
 
 
 def _intents_at_0730() -> list[str]:
@@ -1365,6 +1370,32 @@ class TestWriteDiffsAgainstRealHardware:
         assert not still_enabled, (
             "Segments left enabled on the inverter that the plan does not "
             f"contain: {sorted(still_enabled)}"
+        )
+
+    def test_a_shortened_window_is_cleared_before_the_cut_takes_effect(self, scheduler):
+        """13:45-14:14 on hardware against 13:45-13:59 in the plan.
+
+        Not an orphan: same start, same mode, and identical behaviour until
+        14:00. Since #589 the write waits, because issuing it at 07:30 is
+        churn — six hours before the only quarter-hour that differs. What must
+        not slip is the deadline: the cut has to reach the inverter before
+        14:00, or the battery runs a quarter-hour the plan does not want.
+
+        Asserted at 13:15 rather than 07:30 for that reason — the earlier
+        cycle deliberately writes nothing here, so asserting there would pin
+        the churn this change removes.
+        """
+        controller = _PreloadedController(_LIVE_HARDWARE_SLOTS)
+        scheduler.strategic_intents = _intents_at_0730()
+
+        # 13:15 — 45 minutes before the difference at 14:00 takes effect.
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period=53)
+        scheduler.sync_to_hardware(controller, effective_period=53)
+
+        assert ("13:45", "14:14") not in controller.enabled_ranges(), (
+            "The over-long window is still enabled 45 minutes before its "
+            "extra quarter-hour would run: "
+            f"{sorted(controller.enabled_ranges())}"
         )
 
     def test_slots_already_disabled_on_hardware_are_not_rewritten(self, scheduler):
@@ -2038,5 +2069,145 @@ class TestFarFutureSegmentsAreDeferred:
         )
         assert window(60) in programmed, (
             "Nearest far-future window (15:00) should have been kept. "
+            f"Programmed: {sorted(programmed)}"
+        )
+
+
+# ── Issue #589: gate on when a change takes effect, not on when it starts ─────
+#
+# #554 gates eligibility on a segment's *start*, so a window that is already
+# running is eligible on every cycle forever. The DP keeps nudging its *end* as
+# it re-solves — 02:00-05:59, then 06:59, then back — and each nudge is written
+# at once even though it cannot take effect for hours. That is the residual
+# overhead measured on #554: +8 writes against a floor of 4 on a four-window
+# day, all of it end-boundary churn.
+#
+# The rule below generalises #554's rather than replacing it: write when the
+# earliest period at which the programmed table and the plan would execute
+# different modes falls within the horizon. A not-yet-started segment first
+# diverges at its start, so #554's behaviour is unchanged by construction.
+
+
+class TestRunningWindowEndChangesWait:
+    """Regression for issue #589."""
+
+    def _cycle(self, scheduler, controller, periods, at_period):
+        """One optimization cycle: rebuild the plan, then sync it to hardware."""
+        scheduler.strategic_intents = _grid_charging_at(periods)
+        scheduler._consolidate_and_convert_with_strategic_intents(
+            current_period=at_period
+        )
+        scheduler.sync_to_hardware(controller, effective_period=at_period)
+
+    def test_moving_the_end_of_a_running_window_issues_no_writes(self, scheduler):
+        """The end moves hours ahead of where it can matter, so it can wait.
+
+        02:00-05:59 is running from 02:00. The marginal 06:00-06:59 hour flips
+        in and out of the plan across the 02:15-03:45 cycles. Every one of
+        those flips first takes effect at 06:00, more than two hours out.
+        """
+        controller = _SimulatingController()
+        short = list(range(8, 24))  # 02:00-05:59
+        long = list(range(8, 28))  # 02:00-06:59
+
+        # 02:00 — the window is running and gets programmed.
+        self._cycle(scheduler, controller, short, 8)
+        writes_after_start = len(controller.calls)
+        assert writes_after_start >= 1, "The running window should be programmed"
+
+        # 02:15 -> 03:45 — the end flips back and forth, always hours away.
+        for at_period, periods in [
+            (9, long),
+            (10, short),
+            (11, long),
+            (12, short),
+            (13, long),
+            (14, short),
+            (15, long),
+        ]:
+            self._cycle(scheduler, controller, periods, at_period)
+
+        assert len(controller.calls) == writes_after_start, (
+            "Rewrote a running window for an end change that cannot take "
+            "effect for hours:\n"
+            + "\n".join(
+                f"  {c['start_time']}-{c['end_time']} {c['batt_mode']} "
+                f"enabled={c['enabled']}"
+                for c in controller.calls[writes_after_start:]
+            )
+        )
+
+    def test_moved_end_reaches_hardware_before_it_takes_effect(self, scheduler):
+        """Deferral must delay the write, never lose it.
+
+        The outcome that matters is the inverter's table at the moment the
+        extension would start running, not which cycle wrote it.
+        """
+        controller = _SimulatingController()
+        long = list(range(8, 28))  # 02:00-06:59
+
+        # 02:00 committed short, then extended and left extended. Cycles run
+        # up to 05:30, half an hour before the extension takes effect.
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+        for at_period in range(9, 23):  # 02:15 -> 05:30
+            self._cycle(scheduler, controller, long, at_period)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert ("02:00", "06:59", "battery_first") in programmed, (
+            "The extended window is not on hardware at 05:30, 30 minutes "
+            f"before its new end must take effect. Programmed: "
+            f"{sorted(programmed)}"
+        )
+
+    def test_a_deferred_end_change_leaves_the_running_window_programmed(
+        self, scheduler
+    ):
+        """Deferring the update must not clear what is already running.
+
+        The plan wants 02:00-06:59 while hardware holds 02:00-05:59. The
+        disable side sees a programmed segment the plan no longer contains
+        verbatim — it must recognise it as the version deferral chose to keep,
+        not clear it and leave the battery unmanaged for the rest of the hour.
+        """
+        controller = _SimulatingController()
+
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+        self._cycle(scheduler, controller, list(range(8, 28)), 9)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert ("02:00", "05:59", "battery_first") in programmed, (
+            "Disabled the running window while deferring its end change. "
+            f"Programmed: {sorted(programmed)}"
+        )
+
+    def test_a_mode_change_inside_a_running_window_is_written_at_once(self, scheduler):
+        """Over-gating guard: divergence *now* is not deferrable.
+
+        A running window whose mode the plan changes diverges at the current
+        period, so the horizon is satisfied immediately and the write must go
+        out on this cycle.
+        """
+        controller = _SimulatingController()
+
+        # 02:00-05:59 battery_first, running.
+        self._cycle(scheduler, controller, list(range(8, 24)), 8)
+
+        # 02:15 — the plan drops charging from here on. The remaining window
+        # is gone from the plan, so the programmed segment now disagrees with
+        # the plan at 02:15 itself.
+        self._cycle(scheduler, controller, [], 9)
+
+        programmed = {
+            (s["start_time"], s["end_time"], s["batt_mode"])
+            for s in controller.hardware_segments()
+        }
+        assert not programmed, (
+            "A window the plan abandoned mid-run stayed on hardware. "
             f"Programmed: {sorted(programmed)}"
         )

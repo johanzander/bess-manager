@@ -40,6 +40,20 @@ has no v10.0.2 plan and never will, so:
 
 appends an entry per missing fixture with `plan: null` and today's plan pinned
 as `current_plan`. It never touches existing entries.
+
+**A deliberate planner change does not need it either.** When a change moves
+what the DP plans, only the `current_plan`/`current` half of each entry is
+stale -- the v10.0.2 half is a historical record and must survive untouched,
+since the recorded drift between the two halves is the signal
+`test_drift_from_the_released_version_is_recorded` exists to hold:
+
+    PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --repin-current
+
+rewrites that half only, printing each fixture's realized-cost delta so the PR
+can quote the measured VPP movement. Before this existed the only two options
+were `--add-new` (a no-op on an unchanged fixture set) and a full re-baseline,
+so a legitimate planner change had no supported path and the full re-baseline
+-- the one the docstring above warns against -- looked like the remedy.
 """
 
 import argparse
@@ -58,6 +72,13 @@ parser.add_argument(
     help="add an entry for each fixture missing from the baseline, pinning "
     "today's plan only (plan: null). The incremental path -- a new fixture "
     "has no v10.0.2 reference and must not trigger a full re-baseline.",
+)
+parser.add_argument(
+    "--repin-current",
+    action="store_true",
+    help="rewrite only the current_plan/current half of every existing entry, "
+    "leaving the v10.0.2 half untouched. For a PR that deliberately changes "
+    "what the DP plans; prints the realized-cost delta per fixture.",
 )
 args = parser.parse_args()
 
@@ -81,8 +102,8 @@ if args.plans_only:
     print(f"captured {len(plans)} plans")
     raise SystemExit(0)
 
-if not args.from_plans and not args.add_new:
-    parser.error("pass --plans-only, --from-plans or --add-new")
+if not args.from_plans and not args.add_new and not args.repin_current:
+    parser.error("pass --plans-only, --from-plans, --add-new or --repin-current")
 
 from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     BASELINE_PATH,
@@ -90,6 +111,35 @@ from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     fixture_names,
     simulate_plan,
 )
+
+if args.repin_current:
+    baseline = json.loads(BASELINE_PATH.read_text())
+    moved = []
+    for name in fixture_names():
+        entry = baseline["fixtures"].get(name)
+        if entry is None:
+            raise SystemExit(
+                f"{name} has no baseline entry -- run --add-new first, not this."
+            )
+        current_plan = capture_plan(name)
+        if current_plan == entry["current_plan"]:
+            continue
+        current = simulate_plan(name, current_plan)
+        before = entry["current"]["realized_cost"]
+        after = current["realized_cost"]
+        moved.append((name, after - before))
+        # The v10.0.2 half (`plan`, `commands`, `realized_cost`,
+        # `soe_trajectory`) is deliberately not touched.
+        entry["current_plan"] = current_plan
+        entry["current"] = current
+    if not moved:
+        print("no fixture's plan changed; nothing written")
+        raise SystemExit(0)
+    BASELINE_PATH.write_text(json.dumps(baseline, indent=1))
+    print(f"re-pinned the current half of {len(moved)} fixture(s):")
+    for name, delta in sorted(moved, key=lambda x: -abs(x[1])):
+        print(f"  {name:56s} realized_cost {delta:+.4f} SEK")
+    raise SystemExit(0)
 
 if args.add_new:
     # A fixture added today has no v10.0.2 plan and never will -- the tag

@@ -97,9 +97,9 @@
   },
   "expected_results": {
     "base_cost": 268.88225,
-    "battery_solar_cost": 134.09037,
-    "base_to_battery_solar_savings": 134.79188,
-    "base_to_battery_solar_savings_pct": 50.13045,
+    "battery_solar_cost": 134.02439,
+    "base_to_battery_solar_savings": 134.85786,
+    "base_to_battery_solar_savings_pct": 50.15499,
     "total_charged": 42.3,
     "total_discharged": 38.16
   },
@@ -114,5 +114,6 @@
       "soe_within_bounds": true,
       "power_within_limits": true
     }
-  }
+  },
+  "terminal_value_per_kwh": 1.555278125
 }

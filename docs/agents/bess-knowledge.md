@@ -81,8 +81,12 @@ where `buy_prices` is the median over the full remaining horizon, capped at
 `max(sell_prices) * efficiency_discharge - cycle_cost` — an
 **arbitrage-consistency cap** that prevents the estimate from exceeding what
 could actually be realized by selling at the best available price
-(`core/bess/battery_system_manager.py:1841-1921`, `_calculate_terminal_value`;
-see issues #126/#244/#246/#345). This is the mechanism to check first for
+(the formula lives in `core/bess/terminal_value.py`, called by
+`BatterySystemManager._calculate_terminal_value`, which owns fetching its
+inputs and logging the result; see issues #126/#244/#246/#345/#422). The same
+function is what the forecast-robustness harness and the pinned scenario
+corpus price the boundary with, so all three optimize against one objective.
+This is the mechanism to check first for
 "why didn't the battery discharge everything right before midnight" or "why
 does it hold charge near the end of the horizon" — it applies at both the
 today-only and today+tomorrow boundary, so this remains the first thing to

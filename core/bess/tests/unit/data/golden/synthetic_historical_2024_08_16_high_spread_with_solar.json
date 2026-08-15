@@ -2,8 +2,8 @@
  "actions": [
   -0.5,
   -0.6,
-  -0.38,
-  -1.22
+  -0.4,
+  -1.2
  ],
  "intents": [
   "LOAD_SUPPORT",
@@ -12,8 +12,8 @@
   "BATTERY_EXPORT"
  ],
  "intra_period_discharge_allowed": [
-  false,
-  false,
+  true,
+  true,
   true,
   true
  ],
@@ -21,8 +21,8 @@
   5.0,
   4.444444444444445,
   3.777777777777778,
-  3.355555555555556,
-  2.000000000000001
+  3.3333333333333335,
+  2.0
  ],
- "battery_solar_cost": -0.545176
+ "battery_solar_cost": -0.5591599999999999
 }

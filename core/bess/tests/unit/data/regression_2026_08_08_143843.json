@@ -582,5 +582,6 @@
     "constraints": {
       "soe_within_bounds": true
     }
-  }
+  },
+  "terminal_value_per_kwh": 0.121350373
 }

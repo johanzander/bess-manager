@@ -1389,6 +1389,34 @@ class GrowattMinController(InverterController):
         logger.info("Validating TOU intervals before sending to inverter...")
         self.validate_tou_intervals_ordering(new_tou, "before_sending_to_inverter")
 
+        def same_segment(planned: dict, programmed: dict) -> bool:
+            """Would writing `planned` over `programmed` change anything yet?
+
+            Identical content is the ordinary case. The exception is an end
+            time that has moved while the segment is already programmed: the
+            move only takes effect at the earlier of the two ends, so until
+            that moment is within WRITE_HORIZON_MINUTES the inverter behaves
+            exactly the same either way, and the write is pure churn.
+
+            #554 defers a segment until its *start* is imminent, which by
+            construction never defers one that has already started — so the DP
+            nudging a running window's end was written at once, however far
+            out it was (issue #589). Treating the two as equal until the
+            difference bites closes that without deferring anything: the
+            segment stays in the plan and in active_tou_intervals, and only
+            the decision to write is postponed.
+            """
+            if (
+                planned["start_time"] != programmed["start_time"]
+                or planned["batt_mode"] != programmed["batt_mode"]
+                or planned.get("enabled", True) != programmed.get("enabled", True)
+            ):
+                return False
+            if planned["end_time"] == programmed["end_time"]:
+                return True
+            bites_at = min(end_minute(planned), end_minute(programmed)) + 1
+            return bites_at > effective_minute + self.WRITE_HORIZON_MINUTES
+
         to_disable: list[dict] = []
         to_update: list[dict] = []
 
@@ -1437,11 +1465,7 @@ class GrowattMinController(InverterController):
                     continue
                 if end_minute(current) >= effective_minute:
                     has_match = any(
-                        segment["start_time"] == current["start_time"]
-                        and segment["end_time"] == current["end_time"]
-                        and segment["batt_mode"] == current["batt_mode"]
-                        and segment.get("enabled", True) == current["enabled"]
-                        for segment in planned_tou
+                        same_segment(segment, current) for segment in planned_tou
                     )
 
                     if not has_match:
@@ -1459,11 +1483,7 @@ class GrowattMinController(InverterController):
         for segment in new_tou:
             if end_minute(segment) >= effective_minute:
                 existing_match = any(
-                    current["start_time"] == segment["start_time"]
-                    and current["end_time"] == segment["end_time"]
-                    and current["batt_mode"] == segment["batt_mode"]
-                    and current["enabled"] == segment["enabled"]
-                    for current in current_tou
+                    same_segment(segment, current) for current in current_tou
                 )
 
                 if not existing_match:

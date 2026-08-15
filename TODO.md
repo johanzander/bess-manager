@@ -192,6 +192,28 @@
 
 ## 🔵 **ROBUSTNESS IMPROVEMENTS** (System Observability)
 
+### **Measure TOU write volume properly before optimizing it further**
+
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `growatt_min_controller.py`, `core/bess/tests/conftest.py`, debug bundles
+
+**Description**: There is no repeatable way to measure how many inverter writes a real day costs, and three separate attempts during #589 each produced a different answer for harness reasons rather than code reasons:
+
+- driving `update_battery_schedule` over 96 cycles through `MockHomeAssistantController` measures nothing, because `read_inverter_time_segments()` (`conftest.py`) always returns `empty_slot_table()`. Every segment looks absent from hardware on every cycle, so the plan is rewritten wholesale and no gate can affect the count. It also makes the disable path dead, since every slot reads back disabled.
+- the same harness with a modelled slot table but a **frozen SOC** invents churn: the DP believes the battery never charges and walks a window's end forward one quarter-hour per cycle, indefinitely.
+- replaying a scenario fixture over 96 cycles **suppresses** churn: the fixture is one snapshot, so every cycle re-solves identical inputs and the plan barely moves.
+
+The only faithful instrument found was replaying a debug bundle's recorded per-run forecasts (`## Prediction Snapshots` → per-run `strategic_intent`) straight through the controller — no DP re-solve, so the harness can neither invent nor suppress plan movement. On `bess-debug-2026-08-12-202906.md` (83 real runs) that gives 149 writes before #554, 32 after, and 32 with #589 — i.e. #554 captured essentially all of it on that day.
+
+**Why it matters**: #589 was written on the premise that ~+8 writes/day of deferrable end-churn remained after #554. One real day does not support that. The remaining writes there were all changes taking effect at or before the current period — plan reshaping, which is #485's territory, not a write-gate's.
+
+**Fix**:
+
+1. Promote `_SimulatingController`'s slot modelling (in `test_growatt_tou_scheduling.py`) into `conftest.py` so the shared mock stops being blind to redundant writes and to the disable path. Removes the duplicate at the same time.
+2. Turn the bundle replay into a checked-in script, and teach it the compact `predicted_periods_delta` encoding introduced by #555/#567 — only the three pre-#555 bundles can be replayed today.
+3. Re-measure across several real days. Only then decide whether any further write-gating work (or #485) is worth doing, and let that data set the target rather than a single day.
+
+---
+
 ### **Retry discovery on startup when HA WebSocket is not ready**
 
 **Impact**: High | **Effort**: Low | **Dependencies**: `ha_api_controller.py`, `battery_system_manager.py`

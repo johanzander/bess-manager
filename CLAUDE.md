@@ -215,7 +215,8 @@ frontend/node_modules` first) rather than installing through it. Re-running
 already contains.** Prompts are the cost, not the safety: a stalled autonomous
 run is a guaranteed loss, while anything the sandbox bounds is recoverable.
 `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
-remove` and `git push --force-with-lease` all run unattended.
+remove` all run unattended. **Every `git push` asks**, `--force-with-lease`
+included — see below for why that one is not carved out.
 
 What still asks is one closed list, and every entry is there because the
 **sandbox cannot contain it** — it bounds the filesystem, not the network, and
@@ -257,7 +258,23 @@ for anyway.
 
 **Patterns match the command as written — prefix globbing, no normalisation.**
 This is the single biggest source of rules that look right and match nothing,
-and it has produced a bug in this file three times.
+and it produced a bug here in four consecutive review rounds.
+
+**Nothing normalises `git`'s global options**, so `git -C <path> stash pop`,
+`git --git-dir=… push`, `git -c k=v push` and `git --no-pager gc` sidestep every
+rule anchored on `git stash` / `git push` / `git gc`. The deleted hook
+normalised for exactly this — and CLAUDE.md itself teaches `git -C
+.claude/worktrees/<name>` as the cross-checkout idiom, so it is the spelling an
+agent reaches for first. `Bash(git -*)` covers the whole class in one rule,
+including options nobody has thought of yet. Do not replace it with an
+enumeration.
+
+**`scripts/quality-check.sh` asserts this by COMMAND STRING, not by rule name.**
+It carries a matrix of ~30 real spellings and checks each is matched by some
+`deny`/`ask` rule, using the same prefix-glob semantics. Presence checks alone
+passed for four rounds while real spellings slipped through; this is what
+finally caught them. When a new bypass spelling turns up, add the string to
+`MUST_BE_GUARDED` first — then fix the rule until the gate goes green.
 
 **A rule that fails to match does not fall through to the `auto` classifier.**
 It falls through to whatever `allow` rule covers the command — here
@@ -450,16 +467,23 @@ The full procedure, including the staged-changes variant, is in
 There is no cwd-conditional behaviour left, so nothing changes when a session
 enters a worktree.
 
-**Don't add a prompt where git already refuses.** `git branch -D`, plain `git
-worktree remove` and `git push --force-with-lease` are deliberately not in the
-`ask` list: git itself blocks the dangerous case (it won't delete a branch
-checked out in another worktree, won't remove a worktree holding uncommitted or
-untracked files, and `--force-with-lease` won't clobber an update it hasn't
-seen). A second prompt there buys nothing and costs a stall on every run —
-`implement-issue` Step 4's prune loop alone would have hit ~24 of them.
+**Don't add a prompt where git already refuses.** `git branch -D` and plain
+`git worktree remove` are deliberately not in the `ask` list: git itself blocks
+the dangerous case (it won't delete a branch checked out in another worktree,
+and won't remove a worktree holding uncommitted or untracked files). A second
+prompt there buys nothing and costs a stall on every run — `implement-issue`
+Step 4's prune loop alone would have hit ~24 of them.
+
+`git push --force-with-lease` **used to** be excluded on the same reasoning, and
+is not any more. It is a push, and the push guard has to be blanket (above): the
+only spellings that would exempt it — `Bash(git push --force-with-lease*)` — are
+prefix-anchored, so they cannot exempt `git push origin main
+--force-with-lease`, while any pattern loose enough to catch that also catches
+plain `--force`. Exempting it means re-opening the hole. It asks.
 
 **What the unattended set actually risks is uncommitted work**, since the
-sandbox that would have contained it is unavailable (below). Tracked content
+sandbox contains writes to the repo but cannot distinguish a wanted write from
+an unwanted one. Tracked content
 survives anything on the list — `git reset --hard` and `rm` on a tracked file
 are both recoverable from the object database, and a discarded commit is
 recoverable by SHA from the reflog. Uncommitted, untracked work is not. That is

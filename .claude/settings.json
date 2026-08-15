@@ -40,7 +40,6 @@
       "Bash(podman machine stop)",
       "Bash(podman-compose *)",
       "Bash(git commit *)",
-      "Bash(git push *)",
       "Bash(git merge --ff-only *)",
       "Bash(gh issue view *)",
       "Bash(gh issue edit *)",
@@ -75,6 +74,7 @@
       "Bash(git stash --*)"
     ],
     "ask": [
+      "Bash(git -*)",
       "Bash(git push)",
       "Bash(git push *)",
       "Bash(gh api)",
@@ -85,8 +85,11 @@
       "Bash(gh secret*)",
       "Bash(gh workflow run*)",
       "Bash(git gc*)",
+      "Bash(git prune*)",
+      "Bash(git repack*)",
       "Bash(git reflog expire*)",
       "Bash(git tag -d*)",
+      "Bash(git tag --delete*)",
       "Bash(sudo *)"
     ]
   },

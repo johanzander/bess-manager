@@ -168,7 +168,7 @@ echo "-------------------------------------------"
 # increment, the checks below it, AND the final summary -- a missing rule would
 # stop the run mid-file with no verdict, which is the opposite of a gate.
 if ! python3 - <<'PY'
-import json, sys
+import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
 # `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
@@ -184,24 +184,85 @@ import json, sys
 # this list in sync with the ask/deny lists; a rule absent from here is a rule
 # that can be silently removed.
 REQUIRED = {
-    "deny": ["Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)"],
+    "deny": [
+        "Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)",
+        "Bash(podman machine rm)", "Bash(podman system reset)",
+    ],
     "ask": [
+        "Bash(git -*)",
         "Bash(git push)", "Bash(git push *)",
         "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
         "Bash(gh secret*)", "Bash(gh workflow run*)",
-        "Bash(git gc*)", "Bash(git reflog expire*)", "Bash(git tag -d*)",
+        "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
+        "Bash(git reflog expire*)",
+        "Bash(git tag -d*)", "Bash(git tag --delete*)",
         "Bash(sudo *)",
     ],
 }
+
+# Presence checks alone kept passing while real command spellings slipped
+# through -- four review rounds of the same class of bug. So also assert, per
+# COMMAND STRING, that something actually matches it. Patterns are prefix
+# globs over the command as written, which is the semantics that keeps
+# surprising people: `git stash pop` is covered while `git -C x stash pop` is
+# not, because the rule anchors on the literal `git stash`.
+#
+# Add a line here whenever a new spelling is found in the wild. A rule that
+# looks right and matches nothing is the failure mode this exists to catch.
+MUST_BE_GUARDED = [
+    # git's global options may precede the subcommand -- the hook this
+    # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
+    # the cross-checkout idiom, so it is the spelling most likely to be used.
+    "git -C ../bess-manager-feature stash pop",
+    "git -C .claude/worktrees/x push origin main",
+    "git --git-dir=/tmp/r/.git stash drop",
+    "git -c push.default=current push beta main",
+    "git --no-pager gc --prune=now",
+    # the marker sits at an arbitrary argument position
+    "git push origin main --force",
+    "git push origin +beta-release-9.9",
+    "git push origin --delete release-9.9",
+    "git push origin v9.9.0",
+    "git push -u origin main",
+    "git push",
+    # option-first stash forms
+    "git stash -u", "git stash --include-untracked", "git stash pop",
+    # long-option spellings of history destruction
+    "git tag --delete v9.9.0", "git tag -d v9.9.0",
+    "git reflog expire --expire=now --all", "git gc --prune=now",
+    "git prune", "git repack -d",
+    # gh reaching GitHub, including the raw API path
+    "gh api repos/o/r/pulls/1/merge -X PUT",
+    "gh api repos/o/r/releases -f tag_name=v1",
+    "gh pr merge 588 --squash", "gh release create v9.9.0",
+    "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
+    # the shared podman VM, which the sandbox cannot contain
+    "podman machine rm", "podman system reset",
+    "sudo rm -rf /",
+]
+
+
+def matches(pattern: str, command: str) -> bool:
+    """Prefix-glob match over the raw command, mirroring the documented rules."""
+    inner = pattern[len("Bash(") : -1] if pattern.startswith("Bash(") else pattern
+    return re.fullmatch(re.escape(inner).replace(r"\*", ".*"), command) is not None
+
 
 perms = json.load(open(".claude/settings.json"))["permissions"]
 bad = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
 for k, p in bad:
     print(f"❌ permissions.{k} is missing {p}")
+
+guards = perms.get("deny", []) + perms.get("ask", [])
+for cmd in MUST_BE_GUARDED:
+    if not any(matches(p, cmd) for p in guards):
+        print(f"❌ no deny/ask rule matches: {cmd}")
+        bad.append(("ask", cmd))
+
 if bad:
     sys.exit(1)
-print("✅ Permission surface intact")
+print(f"✅ Permission surface intact ({len(MUST_BE_GUARDED)} command shapes guarded)")
 PY
 then
     ERRORS=$((ERRORS + 1))

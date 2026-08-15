@@ -48,7 +48,8 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
 | 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
 | 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
-| 11. Hard constraints | Apply verbatim. |
+| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. |
+| 12. Hard constraints | Apply verbatim. |
 
 ## Process
 
@@ -438,8 +439,9 @@ Then, on this PR only:
   test failure is yours to fix — not merely to report.
 - **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
   `git merge origin/main`, resolve, `quality-check.sh`, push.
-- **Green and mergeable:** report the PR link and stop. Do not merge, do not
-  take it out of draft — Step 11 still holds.
+- **Green and mergeable:** continue to Step 11's review loop — a green PR is
+  the precondition for asking the bot to review it, not the finish line. Do
+  not merge, do not take it out of draft — Step 12 still holds.
 
 **Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
 `gh pr list` shows other PRs red or conflicted, that is not this session's
@@ -452,7 +454,62 @@ sessions end up pushing to the same branch.
 a re-read of the whole session context every 60s. If CI is badly backed up,
 say so and leave the PR — don't hold the session open indefinitely.
 
-### 11. Hard constraints
+### 11. Independent review loop (never skip this)
+
+Step 6's `code-review` is your own review of your own diff, and it is not
+enough on its own — in practice this PR needs two to four rounds of the
+independent Stage 4 bot before only nits remain. That loop is mechanical, so
+run it here rather than leaving it to a second session.
+
+**Only enter this loop once Step 10 says the PR is green and mergeable.**
+Asking for a review of a red or `CONFLICTING` PR burns a paid review round on
+a diff that is about to change.
+
+Each round:
+
+```bash
+scripts/request-pr-review.sh <n>     # run_in_background: true
+```
+
+The script posts `@claude-bot review` as `bess-agent` and blocks until a new
+review lands, printing `VERDICT <STATE> <submittedAt> <author>` (exit 2 on a
+15-minute timeout, after dumping recent `PR Review` runs). Like Step 10's
+`--watch`, it blocks rather than polls — so **do not poll it and do not
+re-touch the diagnosis/TDD context while it runs.** You are notified once,
+when it exits. This is a hard session boundary, same as Step 6.
+
+On the verdict:
+
+- **`APPROVED`** — the loop is done. Report the PR link and stop.
+- **`CHANGES_REQUESTED` / `COMMENTED`** — collect the findings:
+
+  ```bash
+  gh api repos/johanzander/bess-manager/pulls/<n>/comments \
+    --jq '.[] | select(.created_at > "<submittedAt from the round before>") | "\(.path):\(.line) \(.body)"'
+  ```
+
+  Then invoke `superpowers:receiving-code-review`. This is the reason the loop
+  lives in the main session and not in a subagent: you still hold the Step 2
+  diagnosis and the Step 3 scope assessment, so you can tell a real finding
+  from one that contradicts a decision already made deliberately. Verify each
+  finding against the code before acting on it. Where the reviewer is wrong,
+  reply on the PR saying why — do not silently implement it, and do not
+  silently ignore it either.
+- **A review from the maintainer rather than the bot** (the `<author>` field):
+  treat it as authoritative and stop the loop — a human has taken over.
+
+Fix the blockers, park genuine nits in `TODO.md`, run
+`./scripts/quality-check.sh`, commit, and push. Step 9's frontend rule carries
+over unchanged: if the diff touches `frontend/**` or `*.tsx`/`*.jsx`/`*.css`,
+show the user the fixes and wait for go-ahead before pushing. Then start the
+next round.
+
+**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, or on any script
+timeout, stop and hand the outstanding findings to the user verbatim. Three
+rounds of disagreement means the reviewer and you disagree about the design,
+not about a bug, and another round will not settle it.
+
+### 12. Hard constraints
 
 - Draft PR only. Never auto-merge.
 - Never push directly to `main`.
@@ -472,7 +529,8 @@ say so and leave the PR — don't hold the session open indefinitely.
 
 A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at draft-PR-green per the Step 11 constraints.
+flow above, which stops at a green, bot-reviewed draft PR per the Step 12
+constraints.
 
 **Treat this as best-effort, not the cleanup mechanism.** Because it depends
 on someone returning after the merge, it reliably does not happen; Step 4's
@@ -520,6 +578,8 @@ net is upstream, not this section.
 | "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
 | "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
 | "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
+| "Step 6's code review already covered this, skip Step 11" | Step 6 is you reviewing your own diff with the reasoning that produced it. The Stage 4 bot reads the diff cold against the checklist, and in practice takes two to four rounds to run out of real findings. |
+| "the reviewer asked for it, so change it" | The reviewer has the diff, not the diagnosis. A finding that contradicts a deliberate Step 3 scope decision gets a reply explaining why, not a commit. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll clean up the worktree after it merges" | You won't — that's the postcondition that already failed 24 times. Prune at Step 4, before creating the next one. |
@@ -550,6 +610,10 @@ net is upstream, not this section.
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
 - About to push the branch without having merged `origin/main` since Step 4.
 - About to stop at "draft PR opened" without watching CI settle (Step 10).
+- About to stop at "CI is green" without running the Step 11 review loop.
+  Your own Step 6 review is not the independent one.
+- About to implement a review finding because the bot said so, without
+  checking it against the Step 2 diagnosis and the Step 3 scope assessment.
 - About to read `no checks reported` as green. It means either a conflict
   or a run that hasn't registered yet — distinguish before reporting.
 - About to touch another PR or another worktree from inside this session —
@@ -571,3 +635,4 @@ net is upstream, not this section.
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
 | 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |
+| 11. Independent review loop | `scripts/request-pr-review.sh` (background) + `receiving-code-review`, max 3 rounds | No |

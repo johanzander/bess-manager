@@ -50,15 +50,20 @@ Issue opened/edited  → issue-triage.yml      [auto, ~$0.05]
                        → opens DRAFT PR (never auto-merged)
                        → label `has-fix-pr`
 
-@claude-bot review   → pr-review.yml        [manual, ~$0.50–2]
+@claude-bot review   → pr-review.yml        [manual or implement-issue, ~$0.50–2]
+                       → owner, or `bess-agent` (implement-issue Step 11 loop)
                        → reviews diff against rules.md + claude-bot.md
                        → posts inline comments + summary verdict
+                       → loop repeats until APPROVED, max 3 rounds
 
 YOU approve + merge  → human decision, always
 ```
 
-**Gates:** Stages 2, 3, and 4 are manually triggered — the bot never
-spends money on its own. Stage 1 is auto but cheap.
+**Gates:** Stages 2 and 3 are manually triggered — the bot never spends money
+on its own. Stage 1 is auto but cheap. Stage 4 is manual too, except when
+`implement-issue`'s Step 11 loop requests it as `bess-agent` on a PR that
+session just opened; that loop is capped at 3 rounds, so the spend is bounded
+and it only ever reviews the session's own diff.
 
 ## PR Merge Workflow
 

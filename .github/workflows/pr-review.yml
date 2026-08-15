@@ -1,6 +1,8 @@
 # Stage 4 — PR Review (manual)
 #
-# Triggered with `@claude-bot` on a pull request comment. Reviews the diff
+# Triggered with `@claude-bot` on a pull request comment, by the repo owner or
+# by the `bess-agent` automation identity (the `implement-issue` review loop
+# posts as bess-agent via scripts/request-pr-review.sh). Reviews the diff
 # against docs/agents/rules.md and the checklist in .github/claude-bot.md.
 
 name: PR Review
@@ -13,7 +15,8 @@ jobs:
   review:
     name: Review PR
     if: |
-      github.event.comment.user.login == github.repository_owner &&
+      (github.event.comment.user.login == github.repository_owner ||
+       github.event.comment.user.login == 'bess-agent') &&
       github.event.issue.pull_request != null &&
       contains(github.event.comment.body, '@claude-bot')
     runs-on: ubuntu-latest

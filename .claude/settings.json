@@ -70,10 +70,29 @@
       "Bash(git stash clear)",
       "Bash(git stash branch *)",
       "Bash(git stash create)",
-      "Bash(git stash store *)"
+      "Bash(git stash store *)",
+      "Bash(git stash -*)",
+      "Bash(git stash --*)"
     ],
     "ask": [
-      "Bash(git push --force *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push origin main*)",
+      "Bash(git push beta*)",
+      "Bash(git push *beta-release-*)",
+      "Bash(git push --tags*)",
+      "Bash(git push *--tags*)",
+      "Bash(git push *refs/tags/*)",
+      "Bash(gh pr merge*)",
+      "Bash(gh release*)",
+      "Bash(gh repo edit*)",
+      "Bash(gh secret*)",
+      "Bash(gh workflow run*)",
+      "Bash(gh api -X*)",
+      "Bash(gh api --method*)",
+      "Bash(git gc*)",
+      "Bash(git reflog expire*)",
+      "Bash(git tag -d*)",
       "Bash(sudo *)"
     ]
   },

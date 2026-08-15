@@ -151,6 +151,43 @@ else
 fi
 
 echo ""
+echo "📋 Checking permission surface..."
+echo "-------------------------------------------"
+
+# Replaces the hook-matrix gate deleted with the hooks (#588). verify-sandbox.sh
+# cannot fill that role -- it exits 2 unless the Bash tool runs it in a
+# sandboxed session, so it can never be a CI or pre-commit check. What IS
+# statically checkable is that the rules which stand in for the deleted hooks
+# are still present. Every entry below was a real regression at some point:
+# option-first `git stash` forms fell through to `auto` because the deny list
+# enumerated literal subcommands, and the GitHub-publishing guards were dropped
+# entirely -- effects the sandbox cannot contain, since it bounds the
+# filesystem, not the network.
+python3 - <<'PY'
+import json, sys
+
+REQUIRED = {
+    "deny": ["Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)"],
+    "ask": [
+        "Bash(git push --force*)", "Bash(git push -f*)",
+        "Bash(git push origin main*)", "Bash(git push beta*)",
+        "Bash(gh pr merge*)", "Bash(gh release*)",
+        "Bash(git gc*)", "Bash(git reflog expire*)", "Bash(sudo *)",
+    ],
+}
+perms = json.load(open(".claude/settings.json"))["permissions"]
+missing = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
+if missing:
+    for k, p in missing:
+        print(f"❌ permissions.{k} is missing {p}")
+    sys.exit(1)
+print("✅ Permission surface intact")
+PY
+if [ $? -ne 0 ]; then
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Checking scenario discovery coverage..."
 echo "-------------------------------------------"
 

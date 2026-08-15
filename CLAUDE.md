@@ -286,6 +286,12 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
 - **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
   the harness is not sandboxed; the Bash form writes `.git/config` and
   `.git/worktrees`, both denied. *(measured)*
+- **`git checkout -b <branch> origin/<branch>` fails**, because recording the
+  upstream writes `.git/config` — and it fails *after* creating the branch, so
+  the branch exists while the command reports an error and leaves you on the
+  old one. Use `git checkout -b <branch> --no-track origin/<branch>`, or just
+  re-run `git checkout <branch>`. Set upstream at push time with
+  `git push -u`. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,
@@ -338,11 +344,21 @@ redundant:
 - **`filesystem.allowWrite: [".", "~/GitHub/bess-manager"]`** —
   `frontend/node_modules` and `.venv` are symlinks into the main checkout, so
   writes through them land outside a worktree's own root and fail `EPERM`,
-  breaking `vitest` and `vite build`. Worktrees are nested inside the main
-  checkout, so allowing it covers both. That entry hardcodes this machine's
+  breaking `vitest` and `vite build`. Native worktrees live under
+  `.claude/worktrees/`, i.e. *inside* the main checkout, so that one entry
+  covers them and every symlink target. That entry hardcodes this machine's
   layout, which is ugly in a tracked file; it is there because the alternative,
   a user-level `allowWrite`, is refused by the auto-mode classifier —
   correctly, since that is a session widening its own containment.
+
+  **It does not cover a sibling checkout.** `../bess-manager-feature/` sits
+  under `~/GitHub/`, not `~/GitHub/bess-manager`, so it is writable only via
+  the `"."` entry resolving to that session's own cwd. A session working *on* a
+  sibling from elsewhere — the main checkout, or another worktree — is silently
+  blocked. Sibling folders are still first-class for running and inspecting
+  code; they just need their own `allowWrite` entry if a session has to reach
+  one from outside. `verify-sandbox.sh` skips its symlink check outside a
+  linked worktree rather than reporting a PASS that proves nothing.
 
 `sandbox.excludedCommands` is **not** used and is not needed. It was tried in
 both project and user settings while the four knobs above were missing, appeared

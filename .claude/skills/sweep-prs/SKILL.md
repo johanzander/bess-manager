@@ -1,6 +1,6 @@
 ---
 name: sweep-prs
-description: Use when asked to check, refresh, or keep the open bess-manager PRs green and mergeable across the whole fleet — pruning merged worktrees, merging main into stale branches, and reporting red CI. Run under /loop for continuous maintenance.
+description: Use when asked to check, refresh, or keep the open bess-manager PRs green and mergeable across the whole fleet — pruning merged worktrees, merging main into stale branches, and reporting red CI. Reports only by default; pass PR numbers to act on those, or --all (pair with /loop) for unattended maintenance.
 ---
 
 # Sweep PRs
@@ -23,16 +23,40 @@ conflicted with no one aware.
 
 - Asked to check whether the open PRs are green/mergeable, or to fix up the
   ones that aren't.
-- Under `/loop` to hold the fleet green between issues. Self-paced is right:
-  a fully-green fleet costs a noop tick.
+- Under `/loop /sweep-prs --all` to hold the fleet green between issues.
+  Self-paced is right: a fully-green fleet costs a noop tick. `--all` is
+  required here — a bare `/sweep-prs` on a loop just re-reports the same
+  fleet forever without fixing anything.
 - **Not** from inside an `implement-issue` session. That skill owns exactly
   one PR — its own — and deliberately does not widen into fleet cleanup
   (see its Step 10). Run this separately.
 
-## Scope
+## Modes
 
-Every worktree in `git worktree list`. A branch is only *acted on* when it
-survives the skip gate below; everything else is reported with its reason.
+Classification always covers every worktree in `git worktree list`. What
+differs is **what gets acted on**, and that is chosen by the invocation:
+
+| Invocation | Behaviour |
+|---|---|
+| `/sweep-prs` | **Report only — the default.** Classify the whole fleet, print what each PR *would* get, change nothing. No merges, no pushes. |
+| `/sweep-prs 437 579` | Act, restricted to the listed PR numbers. Everything else is classified and reported, untouched. This is the normal way to use it: read the report, pick. |
+| `/sweep-prs --all` | Act on every PR that survives the skip gate. Pair this one with `/loop` for unattended maintenance. |
+
+**Report-only is the default on purpose.** Merging and pushing to a PR the
+user has not looked at is not something to do because they forgot to pass a
+flag. The safe mode is the one you get when you don't think about it; acting
+is the one you have to ask for.
+
+**Pruning merged worktrees runs in every mode, including report-only.** It
+is not gated, because it deletes only work that is already merged into
+`main` — nothing is at risk — and because gating it recreates exactly the
+failure it was introduced to fix: a cleanup that depends on someone choosing
+to run it doesn't run. That is how 39 worktrees accumulated on disk, 24 of
+them long merged. The uncommitted-changes and live-session guards still
+apply to it.
+
+Whatever the mode, a branch is only ever *acted on* when it survives the
+skip gate below; everything else is reported with its reason.
 
 ## Process
 
@@ -110,7 +134,9 @@ Force-delete is expected, not a warning sign: squash-merge means the
 branch's commits never become reachable from `main`, so `git branch -d`'s
 ancestry check always refuses.
 
-**`OPEN`** — act on the state. This is judgment, not script:
+**`OPEN`** — in report-only mode (the default), print the row from the table
+below that this PR matches and take no action. In `--all` mode, or when the
+PR number was listed explicitly, act on it. This is judgment, not script:
 
 | State | Action |
 |---|---|
@@ -122,8 +148,11 @@ ancestry check always refuses.
 
 ### 4. Report
 
-Print what was pruned, what was refreshed and pushed, what failed, and
-**what was skipped with the reason** — "3 skipped: #589 owned by live
+In report-only mode, end with the invocation that would act on what you
+found — `/sweep-prs 437 579` — so choosing is one paste, not a re-read.
+
+Print what was pruned, what was refreshed and pushed (or *would* be), what
+failed, and **what was skipped with the reason** — "3 skipped: #589 owned by live
 session `bess-manager-34`" is the useful output. A sweep that silently does
 nothing is indistinguishable from a broken one.
 
@@ -138,6 +167,8 @@ nothing is indistinguishable from a broken one.
   isn't yours to diagnose. Report and move on.
 - **Run one sweep at a time.** Two collide with each other for exactly the
   reason the skip gate exists, and nothing enforces it.
+- Never act on a PR the invocation didn't select. A bare `/sweep-prs`
+  reports; it does not merge or push.
 
 ## Rationalizations — Reality
 
@@ -147,6 +178,8 @@ nothing is indistinguishable from a broken one.
 | "the PR shows no CI checks, so the workflow must have failed to trigger" | A CONFLICTING PR creates no workflow run at all. Check `mergeable` before blaming a dropped event. |
 | "`mergeable` came back UNKNOWN, so gh can't tell" | It's computed lazily — the first query only triggers the computation. Ask again. A single pass reports UNKNOWN for precisely the stale PRs you're looking for. |
 | "`git branch --merged` will tell me what's safe to delete" | Not in this repo. Squash-merge means a merged branch is never an ancestor of main, so that check reports everything as unmerged and cleanup never fires. Use `gh pr list --state merged`. |
+| "they asked me to sweep, obviously they want it fixed" | A bare `/sweep-prs` reports. Merging and pushing to a PR the user hasn't looked at is not something to infer from a missing flag — hand back the report and the `/sweep-prs <numbers>` line. |
+| "they named #437, and #579 has the same problem, I'll do both" | They picked one. Selecting PRs is the whole point of the mode; extending the selection silently makes it meaningless. |
 | "this conflict is small, I can see what they meant" | Mechanical means CHANGELOG/imports/lockfiles. Anything touching logic is a guess at someone else's fix — abort and report. |
 | "I'm already in an implement-issue session, I'll sweep while I'm here" | That session owns one PR and lacks the skip gate. Widening it is how two sessions end up pushing to one branch. |
 
@@ -158,3 +191,5 @@ nothing is indistinguishable from a broken one.
 - About to push a merge without `quality-check.sh` green.
 - About to fix a real test failure on a PR you didn't write.
 - About to run this from inside an `implement-issue` session.
+- About to merge or push on a bare `/sweep-prs` — that mode reports only.
+- About to act on a PR the user didn't list.

@@ -357,6 +357,15 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             "huawei_solar",
             f"{serial}_grid_accumulated_energy",
         ),
+        # Deliberately listed BEFORE input_power: "SN_total_dc_input_power"
+        # also ends with "_input_power", so registry order alone would let
+        # this entity claim pv_power.  Only _map_registry_entities' longest-
+        # suffix-first ordering keeps the two apart (#569).
+        _entity(
+            "sensor.huawei_inverter_total_dc_input_energy",
+            "huawei_solar",
+            f"{serial}_total_dc_input_power",
+        ),
         _entity(
             "sensor.huawei_inverter_input_power",
             "huawei_solar",
@@ -2387,7 +2396,7 @@ class TestHuaweiDiscovery:
         )
         assert (
             result["lifetime_solar_energy"]
-            == "sensor.huawei_inverter_accumulated_yield_energy"
+            == "sensor.huawei_inverter_total_dc_input_energy"
         )
         assert (
             result["lifetime_battery_charged"] == "sensor.huawei_battery_total_charge"
@@ -2403,6 +2412,61 @@ class TestHuaweiDiscovery:
         assert (
             result["lifetime_import_from_grid"]
             == "sensor.huawei_meter_grid_accumulated_energy"
+        )
+
+    def test_huawei_solar_energy_is_pv_input_not_inverter_yield(self):
+        """issue #569: lifetime_solar_energy must be PV production.
+
+        accumulated_yield_energy is register 32106, the inverter's
+        accumulated *AC output* yield.  On a LUNA2000 hybrid that counter
+        rises while the battery discharges and misses everything used to
+        charge it, which upstream states outright ("The Daily Yield/Total
+        Yield is incorrect: it also goes up when the battery is
+        discharging" -- wlcrs/huawei_solar README FAQ).
+
+        Every consumer of lifetime_solar_energy treats it as PV
+        production: both feed derive_load_consumption's five-term balance
+        (ha_api_controller.get_load_consumption_lifetime and
+        energy_flow_calculator._calculate_derived_flows), so mapping AC
+        yield there reports home consumption inflated by
+        (battery_discharged - solar_to_battery) -- silently, since the
+        lifetime total stays positive and the health check passes.
+
+        total_dc_input_power is register 32108, "Total DC input energy":
+        the lifetime integral of register 32064, which this same map
+        already points at pv_power.  It is DC-side, so it excludes
+        inverter conversion losses -- but no Huawei register gives PV
+        production on the AC side at all, and this is the counter
+        upstream names as the panels' input.
+        """
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert "accumulated_yield_energy" not in self.ctrl.HUAWEI_SUFFIX_MAP
+        # The AC-yield entity is still present in the registry -- a real
+        # install exposes both.  It must simply never be chosen.
+        assert "sensor.huawei_inverter_accumulated_yield_energy" not in result.values()
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_total_dc_input_energy"
+        )
+
+    def test_huawei_dc_input_energy_does_not_steal_pv_power(self):
+        """issue #569: "_total_dc_input_power" also ends with "_input_power".
+
+        Both suffixes are in HUAWEI_SUFFIX_MAP and the matcher is an
+        endswith, so the two keys are separated only by
+        _map_registry_entities sorting suffixes longest-first before
+        breaking on the first hit.  The fixture lists the DC-energy entity
+        first precisely so registry order cannot mask that.
+        """
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert result["pv_power"] == "sensor.huawei_inverter_input_power"
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_total_dc_input_energy"
         )
 
     def test_huawei_wired_into_discover_sensors_from_registry(self):

@@ -67,7 +67,7 @@
       "pv_power": "sensor.inverter_input_power",
       "import_power": "sensor.power_meter_active_power",
       "export_power": "sensor.power_meter_active_power",
-      "lifetime_solar_energy": "sensor.inverter_total_yield",
+      "lifetime_solar_energy": "sensor.inverter_total_dc_input_energy",
       "lifetime_battery_charged": "sensor.batteries_total_charge",
       "lifetime_battery_discharged": "sensor.batteries_total_discharge",
       "lifetime_export_to_grid": "sensor.power_meter_exported",

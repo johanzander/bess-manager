@@ -225,11 +225,22 @@ not `.git`'s own recovery data:
 | Category | Rules |
 |---|---|
 | Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
-| Destroys the recovery mechanism | `git gc`, `git reflog expire`, `git tag -d` |
+| Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
 | Leaves the user boundary | `sudo` |
 
+Each of those also has a `git -* <verb>` twin covering the global-option
+spelling (`git -C <path> gc`, `git --no-pager push`). The twins name a **verb**
+on purpose: a blanket `Bash(git -*)` was tried and put read-only inspection —
+`git -C sub status`, `git -C <wt> diff`, the verify step of the cross-checkout
+patch recipe — behind a prompt, and it shadowed the `git commit` allow via
+`git -c user.email=… commit`.
+
 Denied outright: the shared podman VM (`machine rm`, `system reset`) and every
-mutating `git stash` form.
+mutating `git stash` form, **including `git -C <path> stash …`**. That last
+clause is load-bearing rather than decorative: the global-option spelling was
+briefly covered only by an `ask`, and since `deny > ask` applies by category, a
+matching `ask` with no matching `deny` turns a prohibition into a prompt. The
+gate checks stash and podman shapes against `deny` **only** for that reason.
 
 The standard for adding an entry: **the effect escapes the repo and git cannot
 undo it.** Not "the command looks dangerous". The second category exists
@@ -270,11 +281,20 @@ including options nobody has thought of yet. Do not replace it with an
 enumeration.
 
 **`scripts/quality-check.sh` asserts this by COMMAND STRING, not by rule name.**
-It carries a matrix of ~30 real spellings and checks each is matched by some
-`deny`/`ask` rule, using the same prefix-glob semantics. Presence checks alone
-passed for four rounds while real spellings slipped through; this is what
-finally caught them. When a new bypass spelling turns up, add the string to
-`MUST_BE_GUARDED` first — then fix the rule until the gate goes green.
+Presence checks — "is rule X in the list" — passed for four review rounds while
+real spellings slipped through, because they answer the wrong question. The gate
+now carries ~56 real command strings in three lists, using the same prefix-glob
+semantics the harness applies:
+
+- `MUST_BE_DENIED` — checked against `deny` **only**, so a matching `ask` cannot
+  certify a command that policy says is unapprovable.
+- `MUST_BE_GUARDED` — checked against `deny` + `ask`; a prompt is acceptable.
+- `MUST_NOT_BE_GUARDED` — read-only git that must stay unattended. This is what
+  catches a rule that is too *broad*, the failure the blanket `Bash(git -*)`
+  introduced.
+
+When a new bypass spelling turns up, add the string to the right list first —
+then fix the rule until the gate goes green.
 
 **A rule that fails to match does not fall through to the `auto` classifier.**
 It falls through to whatever `allow` rule covers the command — here
@@ -488,7 +508,8 @@ the target branch before a PR instead of rebasing — a merge-based flow never
 needs a force push. So the rule should lie dormant. **If it ever fires, treat
 that as the finding**: an agent has gone off-script into a rebase or an amend
 of already-pushed commits. Answer the prompt on its merits; do not "fix" it by
-narrowing the push rule, which is how findings 1–3 of PR #596 were introduced.
+narrowing the push rule — that is how the gaps PR #596 had to close were
+introduced in #588.
 
 **What the unattended set actually risks is uncommitted work**, since the
 sandbox contains writes to the repo but cannot distinguish a wanted write from

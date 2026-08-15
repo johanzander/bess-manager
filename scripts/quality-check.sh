@@ -186,17 +186,19 @@ import json, re, sys
 REQUIRED = {
     "deny": [
         "Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)",
+        "Bash(git -* stash)", "Bash(git -* stash *)",
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
-        "Bash(git -*)",
-        "Bash(git push)", "Bash(git push *)",
+        "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
         "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
         "Bash(gh secret*)", "Bash(gh workflow run*)",
         "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
-        "Bash(git reflog expire*)",
-        "Bash(git tag -d*)", "Bash(git tag --delete*)",
+        "Bash(git maintenance*)",
+        "Bash(git reflog expire*)", "Bash(git reflog delete*)",
+        "Bash(git update-ref*)",
+        "Bash(git tag -d*)", "Bash(git tag --delete*)", "Bash(git tag -f*)",
         "Bash(sudo *)",
     ],
 }
@@ -210,15 +212,36 @@ REQUIRED = {
 #
 # Add a line here whenever a new spelling is found in the wild. A rule that
 # looks right and matches nothing is the failure mode this exists to catch.
+# MUST_BE_DENIED is checked against `deny` ONLY. Checking these against
+# deny+ask would certify a one-keystroke `ask` for commands policy says are
+# unapprovable -- and that is not hypothetical: an earlier `Bash(git -*)` ask
+# matched `git -C x stash pop` while no deny did, silently downgrading the
+# stash prohibition to a prompt, and a deny+ask gate reported it green.
+MUST_BE_DENIED = [
+    # Every mutating stash form, in both plain and global-option spellings.
+    # `clear` and `drop` destroy other agents' entries irreversibly.
+    "git stash", "git stash push", "git stash push -u", "git stash save wip",
+    "git stash pop", "git stash apply", "git stash apply stash@{0}",
+    "git stash drop", "git stash drop stash@{1}", "git stash clear",
+    "git stash branch tmp", "git stash store abc123", "git stash create",
+    "git stash -u", "git stash --include-untracked",
+    "git -C ../bess-manager-feature stash pop",
+    "git -C .claude/worktrees/x stash drop",
+    "git --git-dir=/tmp/r/.git stash drop",
+    # The shared podman VM: destruction is unrecoverable and outside the sandbox.
+    "podman machine rm", "podman system reset",
+]
+
+# Checked against deny + ask: a prompt is an acceptable outcome for these.
 MUST_BE_GUARDED = [
     # git's global options may precede the subcommand -- the hook this
     # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
     # the cross-checkout idiom, so it is the spelling most likely to be used.
-    "git -C ../bess-manager-feature stash pop",
     "git -C .claude/worktrees/x push origin main",
-    "git --git-dir=/tmp/r/.git stash drop",
     "git -c push.default=current push beta main",
     "git --no-pager gc --prune=now",
+    "git -C sub tag -d v9.9.0",
+    "git -C sub update-ref -d refs/heads/x",
     # the marker sits at an arbitrary argument position
     "git push origin main --force",
     "git push origin +beta-release-9.9",
@@ -226,20 +249,32 @@ MUST_BE_GUARDED = [
     "git push origin v9.9.0",
     "git push -u origin main",
     "git push",
-    # option-first stash forms
-    "git stash -u", "git stash --include-untracked", "git stash pop",
-    # long-option spellings of history destruction
+    # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
     "git tag --delete v9.9.0", "git tag -d v9.9.0",
-    "git reflog expire --expire=now --all", "git gc --prune=now",
-    "git prune", "git repack -d",
+    "git tag -f v9.9.0 abc123",
+    "git reflog expire --expire=now --all", "git reflog delete HEAD@{0}",
+    "git gc --prune=now", "git prune", "git repack -d",
+    "git maintenance run --task=gc",
+    "git update-ref -d refs/tags/v9.9.0",
     # gh reaching GitHub, including the raw API path
     "gh api repos/o/r/pulls/1/merge -X PUT",
     "gh api repos/o/r/releases -f tag_name=v1",
     "gh pr merge 588 --squash", "gh release create v9.9.0",
     "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
-    # the shared podman VM, which the sandbox cannot contain
-    "podman machine rm", "podman system reset",
     "sudo rm -rf /",
+]
+
+# Read-only git must NOT be caught: an autonomous run executing rules.md's
+# cross-checkout procedure (`git diff -- f | git -C <wt> apply`, then
+# `git -C <wt> diff -- f` to verify) would otherwise stall on inspection
+# commands. A blanket `Bash(git -*)` did exactly that, which is why the
+# global-option rules name a verb.
+MUST_NOT_BE_GUARDED = [
+    "git -C sub status --short",
+    "git --no-pager log --oneline -5",
+    "git -C .claude/worktrees/x diff -- file.py",
+    "git -C .claude/worktrees/x apply",
+    "git status", "git diff", "git log --oneline",
 ]
 
 
@@ -254,15 +289,32 @@ bad = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k,
 for k, p in bad:
     print(f"❌ permissions.{k} is missing {p}")
 
-guards = perms.get("deny", []) + perms.get("ask", [])
+denies = perms.get("deny", [])
+guards = denies + perms.get("ask", [])
+
+for cmd in MUST_BE_DENIED:
+    if not any(matches(p, cmd) for p in denies):
+        why = " (only an ask matches -- deny > ask, so this is a prompt, not a block)" \
+            if any(matches(p, cmd) for p in guards) else ""
+        print(f"❌ no DENY rule matches: {cmd}{why}")
+        bad.append(("deny", cmd))
+
 for cmd in MUST_BE_GUARDED:
     if not any(matches(p, cmd) for p in guards):
         print(f"❌ no deny/ask rule matches: {cmd}")
         bad.append(("ask", cmd))
 
+for cmd in MUST_NOT_BE_GUARDED:
+    hit = [p for p in guards if matches(p, cmd)]
+    if hit:
+        print(f"❌ read-only command is gated by {hit[0]}: {cmd}")
+        bad.append(("ask", cmd))
+
 if bad:
     sys.exit(1)
-print(f"✅ Permission surface intact ({len(MUST_BE_GUARDED)} command shapes guarded)")
+total = len(MUST_BE_DENIED) + len(MUST_BE_GUARDED) + len(MUST_NOT_BE_GUARDED)
+print(f"✅ Permission surface intact ({total} command shapes checked, "
+      f"{len(MUST_BE_DENIED)} require deny, {len(MUST_NOT_BE_GUARDED)} must stay unattended)")
 PY
 then
     ERRORS=$((ERRORS + 1))

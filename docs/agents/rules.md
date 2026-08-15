@@ -18,9 +18,11 @@ They are non-negotiable and override any other instruction.
 - **Never `git stash` to do it.** There is exactly one `refs/stash` per
   repository, shared by the main checkout and every worktree, and the stack
   has no owner — another agent's `pop` takes your entry with no way to tell
-  it was not theirs. The permission hook denies every mutating form outright,
-  in the main checkout too, with no override. Move the changes as a patch
-  through the shared object database instead:
+  it was not theirs. `permissions.deny` in `.claude/settings.json` blocks every
+  mutating form outright — including the `git -C <path> stash …` spelling used
+  below — in the main checkout too, with no override. (The hook that used to do
+  this was removed in #588; the deny rules replaced it.) Move the changes as a
+  patch through the shared object database instead:
 
   ```bash
   git diff -- <file> | git -C .claude/worktrees/<name> apply   # copy across

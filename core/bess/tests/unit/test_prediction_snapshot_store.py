@@ -2,11 +2,12 @@
 
 import itertools
 import json
+import os
 import threading
 import time
 from datetime import date, datetime
 
-from core.bess import daily_view_store, time_utils
+from core.bess import daily_view_store, prediction_snapshot, time_utils
 from core.bess.daily_view_builder import DailyView
 from core.bess.daily_view_store import DailyViewStore
 from core.bess.models import EconomicData, EnergyData, PeriodData
@@ -221,8 +222,11 @@ class TestDayRollover:
         assert store.get_snapshot_count() == 1
 
     def test_rollover_writes_only_new_day_file(self, tmp_path, monkeypatch):
+        """Today's snapshot never leaks into yesterday's file, and yesterday's
+        snapshots are pruned to one-day retention while its view survives."""
         current = {"day": date(2026, 7, 8)}
         monkeypatch.setattr(time_utils, "today", lambda: current["day"])
+        view_store = DailyViewStore(persist_dir=tmp_path)
 
         store = PredictionSnapshotStore(persist_dir=tmp_path)
         store.store_snapshot(
@@ -232,6 +236,7 @@ class TestDayRollover:
             growatt_schedule=[],
             predicted_daily_savings=3.0,
         )
+        view_store.save_day(_make_view(date(2026, 7, 8)))
 
         current["day"] = date(2026, 7, 9)
         store.store_snapshot(
@@ -244,8 +249,8 @@ class TestDayRollover:
 
         day1 = json.loads((tmp_path / "2026-07-08.json").read_text())
         day2 = json.loads((tmp_path / "2026-07-09.json").read_text())
-        # Yesterday's file is untouched by today's writes.
-        assert [s["optimization_period"] for s in day1["snapshots"]] == [24]
+        assert "snapshots" not in day1
+        assert day1["view"]["total_savings"] == 3.5
         assert [s["optimization_period"] for s in day2["snapshots"]] == [25]
 
     def test_read_only_access_also_rolls_over(self, tmp_path, monkeypatch):
@@ -387,12 +392,14 @@ class TestConcurrentDayRollover:
         monkeypatch.setattr(time_utils, "today", lambda: current["day"])
         store = PredictionSnapshotStore(persist_dir=tmp_path)
 
+        DailyViewStore(persist_dir=tmp_path).save_day(_make_view(date(2026, 7, 8)))
+
         day1_entered = threading.Event()
         day1_may_append = threading.Event()
         real_ensure_current_day = store._ensure_current_day
 
-        def slow_ensure_current_day():
-            real_ensure_current_day()
+        def slow_ensure_current_day(as_of=None):
+            real_ensure_current_day(as_of=as_of)
             if current["day"] == date(2026, 7, 8):
                 # Thread A has just confirmed it's still "day 1" and is
                 # about to append; give thread B a chance to flip the day
@@ -443,10 +450,15 @@ class TestConcurrentDayRollover:
 
         day1_file = json.loads((tmp_path / "2026-07-08.json").read_text())
         day2_file = json.loads((tmp_path / "2026-07-09.json").read_text())
-        # Thread A's snapshot must land in day 1's file, not be lost or
-        # misfiled into day 2's file by the concurrent rollover.
-        assert [s["optimization_period"] for s in day1_file["snapshots"]] == [95]
+        # Thread A's day-1 snapshot must never be misfiled into day 2's file by
+        # the concurrent rollover (see TestSnapshotFiledUnderItsOwnDate for the
+        # deterministic single-threaded case).
         assert [s["optimization_period"] for s in day2_file["snapshots"]] == [0]
+        # Both threads serialize on _instance_lock, so A's append+save to day 1
+        # completes before B's rollover prunes it under one-day retention. Day
+        # 1's view - the part that is real history - is untouched.
+        assert "snapshots" not in day1_file
+        assert day1_file["view"]["total_savings"] == 3.5
 
 
 class TestTempFileHousekeeping:
@@ -454,6 +466,10 @@ class TestTempFileHousekeeping:
         monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
         orphan = tmp_path / "2026-07-08.99999-deadbeef.tmp"
         orphan.write_text("{partial")
+        # Aged past the in-flight threshold: a real crashed write, not a
+        # concurrent writer's live temp file (see TestTempFileOwnership).
+        old = time.time() - 3600
+        os.utime(orphan, (old, old))
 
         DailyViewStore(persist_dir=tmp_path).save_day(_make_view(date(2026, 7, 8)))
 
@@ -476,3 +492,231 @@ class TestLegacyFlatFormatFallback:
         store = PredictionSnapshotStore(persist_dir=tmp_path)
 
         assert store.get_all_snapshots_today() == []
+
+
+class TestOneDayRetention:
+    """Snapshots stay today-only on disk, as they were before #409.
+
+    Consolidating the *format* into the shared per-day file must not silently
+    change the *lifecycle*. Pre-#409 the snapshot file was discarded unless it
+    was dated today, so a year of history cost ~30 MB. Letting every day keep
+    its ~96 embedded DailyViews takes that to ~2.9 GB on an SD-backed /data.
+    """
+
+    def test_rollover_prunes_previous_days_snapshots_from_disk(
+        self, tmp_path, monkeypatch
+    ):
+        current = {"day": date(2026, 7, 8)}
+        monkeypatch.setattr(time_utils, "today", lambda: current["day"])
+
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+        store.store_snapshot(
+            snapshot_timestamp=datetime(2026, 7, 8, 6, 0),
+            optimization_period=24,
+            daily_view=_make_view(date(2026, 7, 8)),
+            growatt_schedule=[],
+            predicted_daily_savings=3.0,
+        )
+        DailyViewStore(persist_dir=tmp_path).save_day(_make_view(date(2026, 7, 8)))
+
+        day1 = tmp_path / "2026-07-08.json"
+        assert json.loads(day1.read_text())["snapshots"]
+
+        current["day"] = date(2026, 7, 9)
+        store.get_snapshot_count()  # any public access triggers rollover
+
+        raw = json.loads(day1.read_text())
+        assert "snapshots" not in raw, "yesterday's snapshots must be pruned"
+        assert raw["view"]["total_savings"] == 3.5, "the day's view must survive"
+
+    def test_startup_sweep_prunes_snapshots_left_by_a_previous_process(
+        self, tmp_path, monkeypatch
+    ):
+        """A restart across midnight never runs the in-process rollover."""
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        stale = tmp_path / "2026-07-07.json"
+        stale.write_text(
+            json.dumps({"view": {"total_savings": 1.0}, "snapshots": [{"x": 1}]})
+        )
+
+        PredictionSnapshotStore(persist_dir=tmp_path)
+
+        raw = json.loads(stale.read_text())
+        assert "snapshots" not in raw
+        assert raw["view"] == {"total_savings": 1.0}
+
+    def test_sweep_deletes_a_snapshot_only_file_with_no_view(
+        self, tmp_path, monkeypatch
+    ):
+        """A view-less file would otherwise be advertised by
+        list_available_dates() and then 404 / dilute the savings average."""
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        orphan = tmp_path / "2026-07-06.json"
+        orphan.write_text(json.dumps({"snapshots": [{"x": 1}]}))
+
+        PredictionSnapshotStore(persist_dir=tmp_path)
+
+        assert not orphan.exists()
+        assert DailyViewStore(persist_dir=tmp_path).list_available_dates() == []
+
+    def test_rollover_prune_is_scoped_to_the_day_that_just_ended(
+        self, tmp_path, monkeypatch
+    ):
+        """A midnight rollover must not re-scan the whole history directory.
+
+        Only the previous day's file can have gained snapshots while the
+        process was running; sweeping every file an install has ever written
+        costs a full glob+parse under container_lock every midnight.
+        """
+        current = {"day": date(2026, 7, 8)}
+        monkeypatch.setattr(time_utils, "today", lambda: current["day"])
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+
+        # Written after startup, so the startup sweep never saw it.
+        untouched = tmp_path / "2026-01-01.json"
+        untouched.write_text(
+            json.dumps({"view": {"total_savings": 9.0}, "snapshots": [{"x": 1}]})
+        )
+        store.store_snapshot(
+            snapshot_timestamp=datetime(2026, 7, 8, 6, 0),
+            optimization_period=24,
+            daily_view=_make_view(date(2026, 7, 8)),
+            growatt_schedule=[],
+            predicted_daily_savings=3.0,
+        )
+        DailyViewStore(persist_dir=tmp_path).save_day(_make_view(date(2026, 7, 8)))
+
+        current["day"] = date(2026, 7, 9)
+        store.get_snapshot_count()
+
+        assert "snapshots" not in json.loads((tmp_path / "2026-07-08.json").read_text())
+        # The unrelated old file was not visited: rollover touches one file.
+        assert json.loads(untouched.read_text())["snapshots"] == [{"x": 1}]
+
+    def test_sweep_leaves_todays_snapshots_alone(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+        store.store_snapshot(
+            snapshot_timestamp=datetime(2026, 7, 8, 6, 0),
+            optimization_period=24,
+            daily_view=_make_view(date(2026, 7, 8)),
+            growatt_schedule=[],
+            predicted_daily_savings=3.0,
+        )
+
+        assert PredictionSnapshotStore(persist_dir=tmp_path).get_snapshot_count() == 1
+
+    def test_sweep_preserves_a_legacy_flat_view_file(self, tmp_path, monkeypatch):
+        """Pre-#409 flat files are the whole DailyView dict - not view-less."""
+        from dataclasses import asdict
+
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        legacy = tmp_path / "2026-07-05.json"
+        legacy.write_text(json.dumps(asdict(_make_view(date(2026, 7, 5))), default=str))
+
+        PredictionSnapshotStore(persist_dir=tmp_path)
+
+        assert legacy.exists()
+        loaded = DailyViewStore(persist_dir=tmp_path).load_day(date(2026, 7, 5))
+        assert loaded is not None and loaded.total_savings == 3.5
+
+
+class TestLegacyPersistFileRemoval:
+    """The pre-#409 /data/bess_prediction_snapshots.json is superseded.
+
+    Nothing references it after this change, so left in place it would sit on
+    /data forever.
+    """
+
+    def test_startup_removes_the_legacy_file(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        legacy = tmp_path / "bess_prediction_snapshots.json"
+        legacy.write_text(json.dumps({"date": "2026-07-08", "snapshots": []}))
+        data_dir = tmp_path / "daily_views"
+        monkeypatch.setattr(prediction_snapshot, "PERSIST_DIR", data_dir)
+        monkeypatch.setattr(prediction_snapshot, "LEGACY_PERSIST_PATH", legacy)
+
+        PredictionSnapshotStore(persist_dir=data_dir)
+
+        assert not legacy.exists()
+
+    def test_a_store_on_another_root_leaves_the_legacy_file_alone(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        legacy = tmp_path / "bess_prediction_snapshots.json"
+        legacy.write_text("{}")
+        monkeypatch.setattr(prediction_snapshot, "PERSIST_DIR", tmp_path / "real")
+        monkeypatch.setattr(prediction_snapshot, "LEGACY_PERSIST_PATH", legacy)
+
+        PredictionSnapshotStore(persist_dir=tmp_path / "elsewhere")
+
+        assert legacy.exists()
+
+
+class TestSnapshotFiledUnderItsOwnDate:
+    def test_snapshot_built_before_midnight_lands_in_its_own_day_file(
+        self, tmp_path, monkeypatch
+    ):
+        """The caller stamps snapshot_timestamp; if the clock ticks past
+        midnight before the lock is acquired, the snapshot must still be filed
+        under the day it describes, not the day it was written."""
+        current = {"day": date(2026, 7, 8)}
+        monkeypatch.setattr(time_utils, "today", lambda: current["day"])
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+
+        current["day"] = date(2026, 7, 9)  # midnight passes before the write
+        store.store_snapshot(
+            snapshot_timestamp=datetime(2026, 7, 8, 23, 59, 55),
+            optimization_period=95,
+            daily_view=_make_view(date(2026, 7, 8)),
+            growatt_schedule=[],
+            predicted_daily_savings=3.0,
+        )
+
+        day1 = json.loads((tmp_path / "2026-07-08.json").read_text())
+        assert len(day1["snapshots"]) == 1
+        assert not (tmp_path / "2026-07-09.json").exists()
+
+
+class TestCorruptSnapshotIsBestEffort:
+    def test_malformed_snapshot_entry_does_not_raise(self, tmp_path, monkeypatch):
+        """_load_from_disk runs inside every public accessor, so a schema-shifted
+        entry must not turn /api/prediction-analysis/snapshots into a 500."""
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 7, 8))
+        path = tmp_path / "2026-07-08.json"
+        # Every key present, so the old `except (KeyError, ValueError)` does not
+        # catch it: _daily_view_from_dict does d["periods"] on a str, raising
+        # TypeError.
+        path.write_text(
+            json.dumps(
+                {
+                    "snapshots": [
+                        {
+                            "snapshot_timestamp": "2026-07-08T06:00:00",
+                            "optimization_period": 24,
+                            "daily_view": "not-a-dict",
+                            "growatt_schedule": [],
+                            "predicted_daily_savings": 1.0,
+                        }
+                    ]
+                }
+            )
+        )
+
+        store = PredictionSnapshotStore(persist_dir=tmp_path)
+
+        assert store.get_all_snapshots_today() == []
+
+
+class TestTempFileOwnership:
+    def test_write_leaves_a_fresh_foreign_temp_file_alone(self, tmp_path):
+        """container_lock is process-local; another process's in-flight temp
+        file must not be unlinked out from under its os.replace()."""
+        path = tmp_path / "2026-07-08.json"
+        foreign = tmp_path / "2026-07-08.99999-deadbeef.tmp"
+        foreign.write_text("{}")
+
+        daily_view_store._write_container(path, {"view": None})
+
+        assert foreign.exists()

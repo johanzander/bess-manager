@@ -769,6 +769,12 @@ class BatterySystemManager:
             optimization_period: Period when optimization ran (0-95)
             optimization_result: Result from DP optimization
         """
+        # Skip during BESS_HISTORICAL_SEED_FILE replay, for the same reason
+        # _persist_today_view() does: since #409 snapshots live in the shared
+        # /data/daily_views/{date}.json, so writing replayed fixture data here
+        # would inject it into the real persisted day.
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
         try:
             # Build daily view (merges actuals + predictions)
             daily_view = self.daily_view_builder.build_daily_view(optimization_period)

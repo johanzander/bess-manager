@@ -169,11 +169,15 @@ def build_buckets(
         days_in_bucket = sorted(d for d in available_dates if start <= d <= end)
 
         totals = DailyTotals()
+        day_count = 0
         for day in days_in_bucket:
             view = store.load_day(day)
             if view is not None:
                 totals = totals + DailyTotals.from_daily_view(view)
-        day_count = len(days_in_bucket)
+                # Counted only when it contributes to totals: a listed date
+                # whose view will not load would otherwise drag the
+                # per-day average toward zero.
+                day_count += 1
 
         if (
             period == "day"

@@ -2,10 +2,16 @@
 
 Stores snapshots of predictions and actuals throughout the day for deviation
 analysis. Leverages DailyView for consistent data representation.
-Persists to disk in the shared per-day file owned by DailyViewStore, so
-snapshots survive restarts and are kept per calendar day forever (same
-retention as DailyViewStore) until a user clears the history. Only the
-in-memory snapshot list is per-day: it rolls over on date change.
+Persists to disk in the shared per-day file owned by DailyViewStore (under the
+"snapshots" key), so snapshots survive restarts within the day.
+
+Retention is one day, on disk as well as in memory — the same lifecycle this
+store had before #409, which consolidated the storage *format* only. Each
+snapshot embeds a full DailyView and one is captured per optimization (~96/day),
+so a day's file holds ~96x more snapshot data than view data; keeping that for
+every day would take a year of /data from ~30 MB to ~2.9 GB. Yesterday's
+snapshots are therefore pruned (see daily_view_store.prune_snapshots_before)
+while the day's view — the actual history — is kept forever.
 """
 
 import logging
@@ -19,11 +25,20 @@ from core.bess.daily_view_builder import (
     DailyView,
     _daily_view_from_dict,
 )
-from core.bess.daily_view_store import container_transaction, read_container
+from core.bess.daily_view_store import (
+    container_transaction,
+    prune_snapshots_before,
+    prune_snapshots_for_day,
+    read_container,
+)
 
 logger = logging.getLogger(__name__)
 
 PERSIST_DIR = Path("/data/daily_views")
+
+# Pre-#409 location. Superseded by the shared per-day file; removed on startup
+# so it does not linger on /data forever with nothing left to reference it.
+LEGACY_PERSIST_PATH = Path("/data/bess_prediction_snapshots.json")
 
 
 @dataclass
@@ -58,9 +73,9 @@ class PredictionSnapshotStore:
 
     Stores snapshots captured during each optimization to enable comparison
     of predicted vs actual outcomes. Persisted to disk so snapshots survive
-    add-on restarts. The in-memory list holds a single calendar day and rolls
-    over automatically on date change — the store is long-lived (constructed
-    once per process), so it re-checks the current date on every public access
+    add-on restarts. Retention is a single calendar day, in memory and on
+    disk — the store is long-lived (constructed once per process), so it
+    re-checks the current date on every public access and rolls over itself
     rather than relying on an external clear() at midnight.
     """
 
@@ -75,30 +90,67 @@ class PredictionSnapshotStore:
         # file, not this in-memory state, so scheduler-thread and
         # request-thread calls must not interleave here either.
         self._instance_lock = threading.Lock()
+        self._remove_legacy_persist_file()
+        # A restart across midnight never runs the in-process rollover below,
+        # so sweep on startup too — otherwise a crash or upgrade leaves an
+        # earlier day's snapshots on disk permanently.
+        prune_snapshots_before(self._persist_dir, self._current_date)
         self._load_from_disk()
         logger.debug("Initialized PredictionSnapshotStore")
+
+    def _remove_legacy_persist_file(self) -> None:
+        """Delete the pre-#409 standalone snapshot file if it is still around.
+
+        Its contents are deliberately not migrated: it holds at most the
+        current day's display/diagnostic snapshots, which the next optimization
+        regenerates within 15 minutes.
+        """
+        if self._persist_dir != PERSIST_DIR:
+            # The legacy file is an absolute /data path. A store pointed at a
+            # different root (tests, an alternate data dir) does not own /data
+            # and must not delete anything there.
+            return
+        try:
+            if LEGACY_PERSIST_PATH.exists():
+                LEGACY_PERSIST_PATH.unlink()
+                logger.info(
+                    "Removed superseded snapshot file %s (now stored per-day)",
+                    LEGACY_PERSIST_PATH,
+                )
+        except OSError as e:
+            logger.warning("Could not remove %s: %s", LEGACY_PERSIST_PATH, e)
 
     def _today_path(self) -> Path:
         return self._persist_dir / f"{self._current_date.isoformat()}.json"
 
-    def _ensure_current_day(self) -> None:
+    def _ensure_current_day(self, as_of: date | None = None) -> None:
         """Roll the in-memory snapshot list over when the calendar day changes.
 
         This store outlives any single day (it is created once at process
-        start), so every public read/write re-anchors it to today before
-        touching self._snapshots.
+        start), so every public read/write re-anchors it before touching
+        self._snapshots.
+
+        `as_of` anchors to the day a snapshot describes rather than to the wall
+        clock. A snapshot stamped at 23:59:5x can reach the write a moment after
+        midnight (slow optimization, contended lock); it belongs in its own
+        day's file, not the new day's.
         """
-        today = time_utils.today()
-        if today == self._current_date:
+        target = as_of or time_utils.today()
+        if target == self._current_date:
             return
 
         logger.info(
             "Prediction snapshot day rollover: %s -> %s (discarding %d in-memory snapshots)",
             self._current_date,
-            today,
+            target,
             len(self._snapshots),
         )
-        self._current_date = today
+        previous_date = self._current_date
+        self._current_date = target
+        # The day just ended has served its purpose; keep only its view. Scoped
+        # to that one file — the startup sweep is what handles missed days.
+        if target > previous_date:
+            prune_snapshots_for_day(self._persist_dir, previous_date)
         # A new day's file normally has no snapshots yet; reloading also
         # recovers any written earlier today by a previous process.
         self._load_from_disk()
@@ -132,7 +184,9 @@ class PredictionSnapshotStore:
         )
 
         with self._instance_lock:
-            self._ensure_current_day()
+            # Anchored to the snapshot's own timestamp, not the wall clock:
+            # see _ensure_current_day().
+            self._ensure_current_day(as_of=snapshot_timestamp.date())
             self._snapshots.append(snapshot)
             self._save_to_disk()
 
@@ -212,7 +266,10 @@ class PredictionSnapshotStore:
                 len(self._snapshots),
                 path,
             )
-        except OSError as e:
+        except Exception as e:
+            # Best-effort by contract: snapshots are display/diagnostic data,
+            # and this runs on the optimization tick. A disk problem must not
+            # abort the tick's hardware write.
             logger.warning("Failed to persist prediction snapshots: %s", e)
 
     def _load_from_disk(self) -> None:
@@ -227,6 +284,10 @@ class PredictionSnapshotStore:
                     "Loaded %d persisted prediction snapshots from disk",
                     len(self._snapshots),
                 )
-        except (KeyError, ValueError) as e:
+        except Exception as e:
+            # Best-effort by contract. This runs from __init__ *and* from
+            # _ensure_current_day() inside every public accessor, so a single
+            # schema-shifted entry must not abort BatterySystemManager
+            # construction or 500 the prediction-analysis endpoints.
             logger.warning("Failed to load persisted prediction snapshots: %s", e)
             self._snapshots = []

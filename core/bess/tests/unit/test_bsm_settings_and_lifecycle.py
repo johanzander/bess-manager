@@ -422,6 +422,52 @@ class TestPersistTodayView:
         assert saved.total_savings == 4.0
 
 
+class TestSeedReplayDoesNotTouchRealDiskState:
+    """BESS_HISTORICAL_SEED_FILE replay must not write to /data/daily_views.
+
+    _persist_today_view already guards this. Since #409 the snapshot store
+    writes into that same directory and the same per-day file, so it needs the
+    same guard - otherwise a seeded mock-run/E2E injects fixture snapshots into
+    a real user's persisted day.
+    """
+
+    def test_capture_prediction_snapshot_is_skipped_during_seed_replay(
+        self, system, monkeypatch
+    ):
+        monkeypatch.setenv("BESS_HISTORICAL_SEED_FILE", "/tmp/seed.json")
+
+        with (
+            patch.object(system.daily_view_builder, "build_daily_view"),
+            patch.object(
+                system.prediction_snapshot_store, "store_snapshot"
+            ) as mock_store,
+        ):
+            system._capture_prediction_snapshot(
+                optimization_period=24, optimization_result=MagicMock()
+            )
+
+        mock_store.assert_not_called()
+
+    def test_capture_prediction_snapshot_runs_when_not_replaying(
+        self, system, monkeypatch
+    ):
+        """The paired positive case - without it the guard test above would
+        also pass if _capture_prediction_snapshot never stored anything."""
+        monkeypatch.delenv("BESS_HISTORICAL_SEED_FILE", raising=False)
+
+        with (
+            patch.object(system.daily_view_builder, "build_daily_view"),
+            patch.object(
+                system.prediction_snapshot_store, "store_snapshot"
+            ) as mock_store,
+        ):
+            system._capture_prediction_snapshot(
+                optimization_period=24, optimization_result=MagicMock()
+            )
+
+        mock_store.assert_called_once()
+
+
 class TestUpdateEnergyDataCallsPersist:
     def test_update_energy_data_calls_persist_today_view(self, system):
         with patch.object(system, "_persist_today_view") as mock_persist:

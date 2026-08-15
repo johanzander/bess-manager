@@ -5,8 +5,9 @@ each calendar day, so week/month/year aggregates can be computed later and
 full daily detail isn't thrown away. Unlike HistoricalDataStore, this store is
 never cleared at day rollover — one file accumulates per day, kept forever
 until a user clears it. PredictionSnapshotStore shares the same per-day file
-(under the "snapshots" key) and the same forever-retention on disk; only its
-in-memory cache resets on date change.
+(under the "snapshots" key) but NOT the same retention: its snapshots are
+today-only and are pruned from older files by prune_snapshots_before(), since
+each one embeds a full DailyView (~96 per day, ~100x the view's own size).
 
 Reuses DailyViewBuilder's DailyView (de)serialization helpers rather
 than duplicating that logic — see _daily_view_from_dict in daily_view_builder.py.
@@ -16,6 +17,7 @@ import json
 import logging
 import os
 import threading
+import time
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -38,6 +40,10 @@ PERSIST_DIR = Path("/data/daily_views")
 # 15 minutes, plus one per stored snapshot.
 container_lock = threading.RLock()
 
+# A temp file younger than this may belong to a live writer in another process
+# (container_lock does not span processes), so cleanup leaves it alone.
+TEMP_FILE_STALE_SECONDS = 60
+
 
 def _load_container(path: Path) -> dict:
     """Read a per-day file's JSON container, or {} if missing/corrupt."""
@@ -56,10 +62,23 @@ def _cleanup_stale_temp_files(path: Path) -> None:
 
     Temp files use a unique per-call name, so a failed write leaves a sibling
     that no *.json glob (housekeeping, disk usage, clear_all) will ever see.
+
+    Only files older than TEMP_FILE_STALE_SECONDS are removed. container_lock
+    is process-local, so another process (an add-on restart overlapping the
+    old one, or a mock-run container sharing /data) may have a temp file in
+    flight; unlinking it between its open() and os.replace() makes that
+    replace fail with FileNotFoundError, silently dropping its write. A JSON
+    dump never takes a minute, so anything older is a genuine crash orphan.
     """
+    cutoff = time.time() - TEMP_FILE_STALE_SECONDS
     try:
         for stale in path.parent.glob(f"{path.stem}.*.tmp"):
-            stale.unlink()
+            try:
+                if stale.stat().st_mtime > cutoff:
+                    continue
+                stale.unlink()
+            except FileNotFoundError:
+                continue  # another writer cleaned it up first
     except OSError as e:
         logger.debug("Could not clean up stale temp files for %s: %s", path, e)
 
@@ -95,6 +114,69 @@ def read_container(path: Path) -> dict:
     """Read a per-day container under the shared lock."""
     with container_lock:
         return _load_container(path)
+
+
+def _container_has_view(container: dict) -> bool:
+    """True if the container holds a view in either the wrapped or legacy shape."""
+    if container.get("view") is not None:
+        return True
+    # Legacy pre-#409 flat file: the container IS the view dict.
+    return "date" in container and "periods" in container
+
+
+def _prune_snapshots_from_file(path: Path) -> None:
+    """Drop the "snapshots" key from one per-day file. Caller holds container_lock.
+
+    Snapshots are today-only data (#409): each one embeds a full DailyView, so
+    keeping ~96 of them per day would grow /data by ~100x versus the view
+    alone. Only the day's view is long-lived history.
+
+    A file left with nothing but snapshots is deleted outright rather than kept
+    as a view-less husk — list_available_dates() would otherwise advertise a
+    date that load_day() cannot serve.
+    """
+    container = _load_container(path)
+    if "snapshots" not in container:
+        return
+    del container["snapshots"]
+    try:
+        if _container_has_view(container):
+            _write_container(path, container)
+            logger.info("Pruned stale prediction snapshots from %s", path.name)
+        else:
+            path.unlink()
+            logger.info("Removed view-less snapshot file %s", path.name)
+    except OSError as e:
+        logger.warning("Could not prune snapshots from %s: %s", path, e)
+
+
+def prune_snapshots_for_day(persist_dir: Path, day: date) -> None:
+    """Prune snapshots from exactly one day's file.
+
+    Used at day rollover, where the day just ended is the only file that can
+    have gained snapshots. Scoped deliberately: a full-directory sweep here
+    would re-parse every file an install has ever written, every midnight,
+    while holding container_lock.
+    """
+    with container_lock:
+        _prune_snapshots_from_file(persist_dir / f"{day.isoformat()}.json")
+
+
+def prune_snapshots_before(persist_dir: Path, keep_day: date) -> None:
+    """Drop the "snapshots" key from every per-day file except `keep_day`'s.
+
+    Full-directory sweep, for startup only: a process that crashed or was
+    upgraded mid-day never ran the rollover prune, and any number of days may
+    have been missed. Steady-state rollover uses prune_snapshots_for_day().
+    """
+    if not persist_dir.exists():
+        return
+    keep = f"{keep_day.isoformat()}.json"
+    with container_lock:
+        for path in sorted(persist_dir.glob("*.json")):
+            if path.name == keep:
+                continue
+            _prune_snapshots_from_file(path)
 
 
 class DailyViewStore:

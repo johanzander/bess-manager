@@ -348,6 +348,26 @@ class TestInvalidPeriod:
             build_buckets("fortnight", count=1, store=store)
 
 
+class TestUnloadableDayDoesNotDiluteTheAverage:
+    def test_day_count_ignores_a_file_whose_view_cannot_be_loaded(self, tmp_path):
+        """day_count used to count every listed date while totals skipped the
+        ones load_day() returned None for, silently dragging the per-day
+        average toward zero."""
+        import json
+
+        store = DailyViewStore(persist_dir=tmp_path)
+        _seed_day(
+            store, date(2026, 7, 8), grid_imported=1.0, grid_exported=2.0, savings=3.0
+        )
+        # A file with neither a "view" key nor a legacy flat view.
+        (tmp_path / "2026-07-09.json").write_text(json.dumps({"snapshots": []}))
+
+        buckets = build_buckets("week", count=1, store=store, today=date(2026, 7, 10))
+
+        assert buckets[0].day_count == 1
+        assert buckets[0].totals.import_kwh == pytest.approx(1.0)
+
+
 class TestDefaultCounts:
     def test_has_an_entry_for_every_valid_period(self):
         assert set(DEFAULT_COUNTS.keys()) == {"day", "week", "month", "year"}

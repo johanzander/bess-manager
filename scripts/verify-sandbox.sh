@@ -80,21 +80,35 @@ check "write inside the repo is allowed" allowed "$in" \
 # Errors are captured in a VARIABLE, never a temp file: the sandbox denies
 # /tmp and $TMPDIR, so `2>/tmp/...` fails to open and swallows the very
 # message this check exists to report.
+# Decide from the EXIT STATUS, not from whether the directory exists.
+# `git worktree add` creates the target directory BEFORE writing .git/worktrees,
+# and .claude/worktrees/<name> is not itself denied (only specific .claude
+# files are -- see check 4). So a correctly-blocked run still leaves the
+# directory behind, and a `[ -d ]` test reports "created" on a correct config:
+# a false FAIL, plus a stray directory when `git worktree remove` then fails.
 probe_wt=".claude/worktrees/sandbox-probe-$$"
-wt_err=$(git worktree add -q -b "sandbox-probe-$$" "$probe_wt" HEAD 2>&1 >/dev/null)
-if [ -d "$probe_wt" ]; then
+if wt_err=$(git worktree add -q -b "sandbox-probe-$$" "$probe_wt" HEAD 2>&1 >/dev/null); then
   wt=created
   git worktree remove --force "$probe_wt" >/dev/null 2>&1
   git branch -D "sandbox-probe-$$" >/dev/null 2>&1
 else
   wt=blocked
+  # Report WHY it was blocked here, on the PASS path. The remedy string below
+  # cannot: it prints only when the check FAILS, i.e. when the add SUCCEEDED,
+  # and then there is no error to show. Surfacing it here also catches a block
+  # for some reason other than the sandbox.
+  [ -n "$wt_err" ] && printf 'INFO  worktree add blocked with: %s\n' "$(printf '%s' "$wt_err" | head -1)"
+  # Clean up the partial directory the failed add left behind.
+  rm -rf "$probe_wt" 2>/dev/null
+  git worktree prune >/dev/null 2>&1
+  git branch -D "sandbox-probe-$$" >/dev/null 2>&1
 fi
 # Expected BLOCKED: .git/config and .git/worktrees are on the built-in
 # denyWrite list, and writes are allowOnly minus denyWithinAllow with no
 # allow-within-deny primitive, so allowWrite cannot re-open them. A "created"
 # here would mean the sandbox is looser than this repo's docs assume.
 check "git worktree add is blocked (use EnterWorktree)" blocked "$wt" \
-  "$(printf 'the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. Error was: %s' "$(printf '%s' "$wt_err" | head -1)")"
+  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
 
 # NOTE ON `rm -rf`, which is the reason settings.json leaves rm unattended.
 # There is deliberately no probe for it, because a safe one cannot be written.
@@ -138,13 +152,30 @@ printf 'INFO  Bash writing scripts/** is %s\n' "$sc"
 #     not look like a permissions problem -- it surfaces as vitest failing to
 #     load its config with EPERM on node_modules/.vite-temp, i.e. Step 6's
 #     quality gate breaking in every worktree for no visible reason.
-if [ -e frontend/node_modules ]; then
+#     This check is only MEANINGFUL in a linked worktree. In the main checkout
+#     frontend/node_modules is a real directory inside ".", so the probe passes
+#     no matter what allowWrite says -- and the main checkout is the obvious
+#     place to run this script from, so a PASS there means nothing. Say so
+#     rather than bank a false green.
+#     Three states, and they must not be conflated. `-L` alone is not enough:
+#     a DANGLING link (main checkout's node_modules removed or reinstalled
+#     while a worktree still points at it) is `-L` true but `-e` false, and
+#     probing it fails on the missing target -- reporting a sandbox
+#     misconfiguration and sending the reader to allowWrite, which is the wrong
+#     knob entirely. Require both.
+if [ -L frontend/node_modules ] && [ ! -e frontend/node_modules ]; then
+  printf 'SKIP  frontend/node_modules is a DANGLING symlink -- its target is gone, not a sandbox problem (re-run scripts/worktree-setup.sh)\n'
+elif [ ! -L frontend/node_modules ]; then
+  if [ -e frontend/node_modules ]; then
+    printf 'SKIP  node_modules symlink check -- not a symlink here (run this from a linked worktree; a PASS in the main checkout proves nothing)\n'
+  else
+    printf 'SKIP  frontend/node_modules not present (run scripts/worktree-setup.sh)\n'
+  fi
+else
   touch frontend/node_modules/.sandbox-probe 2>/dev/null && nm=allowed || nm=blocked
   rm -f frontend/node_modules/.sandbox-probe 2>/dev/null
   check "writing through the node_modules symlink is allowed" allowed "$nm" \
-    "add the main checkout to sandbox.filesystem.allowWrite -- worktrees are nested inside it, so one entry covers the worktree and every symlink target. Without it vitest and vite build fail EPERM in every worktree."
-else
-  printf 'SKIP  frontend/node_modules not present (run scripts/worktree-setup.sh)\n'
+    "add the main checkout to sandbox.filesystem.allowWrite -- nested worktrees and every symlink target are then covered by one entry. Without it vitest and vite build fail EPERM in every worktree. NOTE: a SIBLING checkout (../bess-manager-feature) is NOT under that path and needs its own entry."
 fi
 
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
@@ -153,7 +184,7 @@ fi
 if command -v gh >/dev/null 2>&1; then
   gh_err=$(gh auth status 2>&1 >/dev/null) && g=works || g=broken
   check "gh reaches GitHub" works "$g" \
-    "$(printf 'sandbox.excludedCommands did not exempt gh. Try sandbox.enableWeakerNetworkIsolation (documented for exactly this, and explicitly weaker), or move the exclusion to ~/.claude/settings.json -- several sandbox keys are ignored in PROJECT settings. First error: %s' "$(printf '%s' "$gh_err" | head -1)")"
+    "$(printf 'gh needs BOTH sandbox.enableWeakerNetworkIsolation (trustd TLS: x509 OSStatus -26276) and network.allowMachLookup for SecurityServer/securityd (keychain: "token in keyring is invalid"). Check both are still set. Do NOT reach for excludedCommands -- it was tried in project and user settings and did nothing. First error: %s' "$(printf '%s' "$gh_err" | head -1)")"
 else
   printf 'SKIP  gh not installed\n'
 fi
@@ -162,7 +193,7 @@ fi
 if command -v podman >/dev/null 2>&1; then
   podman info >/dev/null 2>&1 && p=works || p=broken
   check "podman reaches its VM" works "$p" \
-    "the sandbox denies the podman socket; add it to sandbox.filesystem.allowRead or exclude podman"
+    "podman reaches its VM over a LOCAL TCP PORT (dial tcp 127.0.0.1:<port>), not a unix socket -- check sandbox.network.allowLocalBinding is still set. filesystem.allowRead, network.allowUnixSockets and excludedCommands are all the wrong knob; each was tried and disproved."
 else
   printf 'SKIP  podman not installed\n'
 fi

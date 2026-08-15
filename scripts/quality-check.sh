@@ -151,6 +151,210 @@ else
 fi
 
 echo ""
+echo "📋 Checking permission surface..."
+echo "-------------------------------------------"
+
+# Replaces the hook-matrix gate deleted with the hooks (#588). verify-sandbox.sh
+# cannot fill that role -- it exits 2 unless the Bash tool runs it in a
+# sandboxed session, so it can never be a CI or pre-commit check. What IS
+# statically checkable is that the rules which stand in for the deleted hooks
+# are still present. Every entry below was a real regression at some point:
+# option-first `git stash` forms fell through to `auto` because the deny list
+# enumerated literal subcommands, and the GitHub-publishing guards were dropped
+# entirely -- effects the sandbox cannot contain, since it bounds the
+# filesystem, not the network.
+# `if ! ...` is load-bearing: `set -e` (line 6) aborts the whole script on a
+# bare failing statement, so a plain heredoc here would skip the ERRORS
+# increment, the checks below it, AND the final summary -- a missing rule would
+# stop the run mid-file with no verdict, which is the opposite of a gate.
+if ! python3 - <<'PY'
+import json, re, sys
+
+# Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
+# `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
+# dangerous shapes put their marker at an arbitrary argument position
+# (`git push origin main --force`, `git push origin +beta-release-9.9`,
+# `git push origin --delete release-X.Y`, `gh api <path> -X PUT`), which a
+# prefix glob cannot reach. Enumerating them left real holes twice. Narrowing
+# these two back to specific forms re-opens the holes, so the check requires
+# the blanket spelling rather than merely "some rule exists".
+#
+# Every entry below is a rule whose deletion is the exact regression this gate
+# was written for -- the GitHub-reaching and history-destroying guards. Keep
+# this list in sync with the ask/deny lists; a rule absent from here is a rule
+# that can be silently removed.
+REQUIRED = {
+    "deny": [
+        "Bash(git stash -*)", "Bash(git stash --*)", "Bash(git stash)",
+        "Bash(git -* stash)", "Bash(git -* stash pop*)",
+        "Bash(git -* stash drop*)", "Bash(git -* stash clear*)",
+        "Bash(podman machine rm)", "Bash(podman system reset)",
+    ],
+    "ask": [
+        "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
+        "Bash(gh api)", "Bash(gh api *)",
+        "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
+        "Bash(gh repo delete*)", "Bash(gh secret*)", "Bash(gh workflow run*)",
+        "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
+        "Bash(git maintenance*)",
+        "Bash(git reflog expire*)", "Bash(git reflog delete*)",
+        "Bash(git update-ref*)",
+        "Bash(git tag -d*)", "Bash(git tag --delete*)", "Bash(git tag -f*)",
+        "Bash(sudo *)",
+    ],
+}
+
+# Presence checks alone kept passing while real command spellings slipped
+# through -- four review rounds of the same class of bug. So also assert, per
+# COMMAND STRING, that something actually matches it. Patterns are prefix
+# globs over the command as written, which is the semantics that keeps
+# surprising people: `git stash pop` is covered while `git -C x stash pop` is
+# not, because the rule anchors on the literal `git stash`.
+#
+# Add a line here whenever a new spelling is found in the wild. A rule that
+# looks right and matches nothing is the failure mode this exists to catch.
+# MUST_BE_DENIED is checked against `deny` ONLY. Checking these against
+# deny+ask would certify a one-keystroke `ask` for commands policy says are
+# unapprovable -- and that is not hypothetical: an earlier `Bash(git -*)` ask
+# matched `git -C x stash pop` while no deny did, silently downgrading the
+# stash prohibition to a prompt, and a deny+ask gate reported it green.
+MUST_BE_DENIED = [
+    # Every mutating stash form, in both plain and global-option spellings.
+    # `clear` and `drop` destroy other agents' entries irreversibly.
+    "git stash", "git stash push", "git stash push -u", "git stash save wip",
+    "git stash pop", "git stash apply", "git stash apply stash@{0}",
+    "git stash drop", "git stash drop stash@{1}", "git stash clear",
+    "git stash branch tmp", "git stash store abc123", "git stash create",
+    "git stash -u", "git stash --include-untracked",
+    "git -C ../bess-manager-feature stash pop",
+    "git -C .claude/worktrees/x stash drop",
+    "git --git-dir=/tmp/r/.git stash drop",
+    # The shared podman VM: destruction is unrecoverable and outside the sandbox.
+    "podman machine rm", "podman system reset",
+]
+
+# Checked against deny + ask: a prompt is an acceptable outcome for these.
+MUST_BE_GUARDED = [
+    # git's global options may precede the subcommand -- the hook this
+    # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
+    # the cross-checkout idiom, so it is the spelling most likely to be used.
+    "git -C .claude/worktrees/x push origin main",
+    "git -c push.default=current push beta main",
+    "git --no-pager gc --prune=now",
+    "git -C sub tag -d v9.9.0",
+    "git -C sub update-ref -d refs/heads/x",
+    # the marker sits at an arbitrary argument position
+    "git push origin main --force",
+    "git push origin +beta-release-9.9",
+    "git push origin --delete release-9.9",
+    "git push origin v9.9.0",
+    "git push -u origin main",
+    "git push",
+    # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
+    "git tag --delete v9.9.0", "git tag -d v9.9.0",
+    "git tag -f v9.9.0 abc123",
+    "git reflog expire --expire=now --all", "git reflog delete HEAD@{0}",
+    "git gc --prune=now", "git prune", "git repack -d",
+    "git maintenance run --task=gc",
+    "git update-ref -d refs/tags/v9.9.0",
+    # gh reaching GitHub, including the raw API path
+    "gh api repos/o/r/pulls/1/merge -X PUT",
+    "gh api repos/o/r/releases -f tag_name=v1",
+    "gh pr merge 588 --squash", "gh release create v9.9.0",
+    "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
+    # Unrecoverable gh mutations. `gh repo delete` was unguarded while the far
+    # milder `gh repo edit` asked -- it escapes to GitHub and git cannot undo
+    # it, which is this file's stated standard for the ask list.
+    "gh repo delete owner/repo --yes", "gh pr close 1",
+    "gh issue delete 1", "gh cache delete --all",
+    "sudo rm -rf /",
+]
+
+# NOT modelled here, deliberately:
+#
+# * COMPOUND COMMANDS. `cd frontend && git push origin main` matches nothing in
+#   this matcher, because matches() emulates a single command string. The
+#   harness decomposes on &&/;/| before applying rules, so the real decision is
+#   made on `git push origin main` -- do not "fix" this by adding compound
+#   entries here; they would fail against a matcher that is correct for what it
+#   models. Verifying the decomposition claim needs a live permission test, not
+#   this gate.
+# * GREEDY GLOBS. `*` compiles to `.*`, which spans spaces, so `git -* push*`
+#   also matches e.g. a commit whose MESSAGE contains " push". That is a false
+#   PROMPT, not a hole, and it is accepted: the alternative is dropping the
+#   global-option guard on push, which is a real bypass. Precision here is
+#   bounded by prefix globbing -- when the choice is between an extra prompt
+#   and a gap, take the prompt.
+
+# Read-only git must NOT be caught: an autonomous run executing rules.md's
+# cross-checkout procedure (`git diff -- f | git -C <wt> apply`, then
+# `git -C <wt> diff -- f` to verify) would otherwise stall on inspection
+# commands. A blanket `Bash(git -*)` did exactly that, which is why the
+# global-option rules name a verb.
+MUST_NOT_BE_GUARDED = [
+    "git -C sub status --short",
+    "git --no-pager log --oneline -5",
+    "git -C .claude/worktrees/x diff -- file.py",
+    "git -C .claude/worktrees/x apply",
+    "git status", "git diff", "git log --oneline",
+    # Read-only stash inspection, which CLAUDE.md and rules.md both promise
+    # keeps working. A blanket `git -* stash *` DENY caught these, and deny has
+    # no override -- so the cross-checkout recipe was hard-blocked, not merely
+    # prompted. That is why the stash twins name a verb.
+    "git stash list", "git stash show",
+    "git -C sub stash list",
+    "git -C .claude/worktrees/x stash show",
+    # implement-issue Step 4 prunes worktrees in a loop; CLAUDE.md argues that
+    # must stay unattended. A `git -* prune*` twin caught `worktree prune` and
+    # `remote prune` through the same greedy glob, so the twin was dropped.
+    "git -C /main worktree prune", "git worktree prune",
+    "git -C sub remote prune origin",
+]
+
+
+def matches(pattern: str, command: str) -> bool:
+    """Prefix-glob match over the raw command, mirroring the documented rules."""
+    inner = pattern[len("Bash(") : -1] if pattern.startswith("Bash(") else pattern
+    return re.fullmatch(re.escape(inner).replace(r"\*", ".*"), command) is not None
+
+
+perms = json.load(open(".claude/settings.json"))["permissions"]
+bad = [(k, p) for k, ps in REQUIRED.items() for p in ps if p not in perms.get(k, [])]
+for k, p in bad:
+    print(f"❌ permissions.{k} is missing {p}")
+
+denies = perms.get("deny", [])
+guards = denies + perms.get("ask", [])
+
+for cmd in MUST_BE_DENIED:
+    if not any(matches(p, cmd) for p in denies):
+        why = " (only an ask matches -- deny > ask, so this is a prompt, not a block)" \
+            if any(matches(p, cmd) for p in guards) else ""
+        print(f"❌ no DENY rule matches: {cmd}{why}")
+        bad.append(("deny", cmd))
+
+for cmd in MUST_BE_GUARDED:
+    if not any(matches(p, cmd) for p in guards):
+        print(f"❌ no deny/ask rule matches: {cmd}")
+        bad.append(("ask", cmd))
+
+for cmd in MUST_NOT_BE_GUARDED:
+    hit = [p for p in guards if matches(p, cmd)]
+    if hit:
+        print(f"❌ read-only command is gated by {hit[0]}: {cmd}")
+        bad.append(("ask", cmd))
+
+if bad:
+    sys.exit(1)
+total = len(MUST_BE_DENIED) + len(MUST_BE_GUARDED) + len(MUST_NOT_BE_GUARDED)
+print(f"✅ Permission surface intact ({total} command shapes checked, "
+      f"{len(MUST_BE_DENIED)} require deny, {len(MUST_NOT_BE_GUARDED)} must stay unattended)")
+PY
+then
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Checking scenario discovery coverage..."
 echo "-------------------------------------------"
 

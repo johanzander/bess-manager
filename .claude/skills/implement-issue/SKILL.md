@@ -47,7 +47,8 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
 | 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
-| 10. Hard constraints | Apply verbatim. |
+| 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
+| 11. Hard constraints | Apply verbatim. |
 
 ## Process
 
@@ -337,6 +338,20 @@ to guess whether it was checked.
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
 explaining WHY).
 
+**Then bring the branch up to date before pushing — not after.**
+
+```bash
+git fetch origin && git merge origin/main
+```
+
+Resolve any conflicts here, in the worktree, where you have the context; if
+the merge brought changes in, re-run `./scripts/quality-check.sh` before
+pushing. Step 4 cut this branch from a current `origin/main`, but Steps 5–8
+take hours (slow suite, `verify`) and other PRs merge during them. Opening a
+PR that is already `CONFLICTING` is worse than it sounds: GitHub creates **no
+workflow run at all** for it, so the PR shows no checks rather than a
+conflict, and the first reader concludes CI dropped the event.
+
 **Frontend diffs only:** before pushing, show the user the diff and the
 Step 8 verification output (screenshot/dev-server observation) and wait for
 explicit go-ahead. This is the one point in the fully-automatic flow where a
@@ -389,7 +404,55 @@ If you cannot produce a mutation that reddens your test, you have not
 demonstrated the bug — say so in the PR and stop, rather than filling the
 section in with the suite result.
 
-### 10. Hard constraints
+### 10. Watch this PR to green (and only this PR)
+
+The draft PR is open, but CI has not run yet. Local `quality-check.sh` and
+the slow suite are not the same as the CI matrix, and a PR left red or
+`CONFLICTING` is a PR the user cannot review.
+
+```bash
+gh pr checks <n> --watch --fail-fast     # blocks until the run settles
+gh pr view <n> --json mergeable,mergeStateStatus
+```
+
+**`no checks reported on the '<branch>' branch` is not a result.** It has
+two entirely different causes and you must tell them apart before doing
+anything else:
+
+```bash
+gh pr view <n> --json mergeable,mergeStateStatus   # CONFLICTING -> merge origin/main
+gh run list --branch <branch> --limit 3            # in_progress -> --watch just raced it
+gh run watch <run-id> --exit-status                # then wait on the run directly
+```
+
+If `mergeable` is `CONFLICTING`, there is genuinely no run and never will
+be — GitHub does not build a conflicted PR. If a run is `in_progress`,
+`--watch` simply returned before the run was registered (observed on this
+skill's own PR, ~8s after the push) and you wait on the run id instead.
+Reading "no checks" as green is how a red PR gets handed over as finished.
+
+Then, on this PR only:
+
+- **Checks fail:** read `gh run view --log-failed`, fix in the worktree,
+  re-run `./scripts/quality-check.sh`, push. This is your diff, so a real
+  test failure is yours to fix — not merely to report.
+- **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
+  `git merge origin/main`, resolve, `quality-check.sh`, push.
+- **Green and mergeable:** report the PR link and stop. Do not merge, do not
+  take it out of draft — Step 11 still holds.
+
+**Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
+`gh pr list` shows other PRs red or conflicted, that is not this session's
+job — hand it to the `sweep-prs` skill, which owns fleet-wide maintenance
+and has the ownership skip gate needed to touch a worktree another agent may
+be sitting in. Widening a single-issue session into fleet cleanup is how two
+sessions end up pushing to the same branch.
+
+`gh pr checks --watch` blocks rather than polls, so this costs one wait, not
+a re-read of the whole session context every 60s. If CI is badly backed up,
+say so and leave the PR — don't hold the session open indefinitely.
+
+### 11. Hard constraints
 
 - Draft PR only. Never auto-merge.
 - Never push directly to `main`.
@@ -409,7 +472,7 @@ section in with the suite result.
 
 A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at draft-PR-open per the Step 10 constraints.
+flow above, which stops at draft-PR-green per the Step 11 constraints.
 
 **Treat this as best-effort, not the cleanup mechanism.** Because it depends
 on someone returning after the merge, it reliably does not happen; Step 4's
@@ -454,6 +517,9 @@ net is upstream, not this section.
 | "I'll clean up this other thing while I'm in here" | Out of scope. Minimal fix only. |
 | "code review can wait until after I've verified it works" | Reordered on purpose — catch cheap issues before spending time on manual verification, not after. |
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
+| "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
+| "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
+| "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
 | "I'll clean up the worktree after it merges" | You won't — that's the postcondition that already failed 24 times. Prune at Step 4, before creating the next one. |
@@ -482,6 +548,12 @@ net is upstream, not this section.
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
 - About to write only a synthetic-input unit test for a DP/intent/control-
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
+- About to push the branch without having merged `origin/main` since Step 4.
+- About to stop at "draft PR opened" without watching CI settle (Step 10).
+- About to read `no checks reported` as green. It means either a conflict
+  or a run that hasn't registered yet — distinguish before reporting.
+- About to touch another PR or another worktree from inside this session —
+  that is `sweep-prs`, not this skill.
 - About to write a repro test from hand-built data when a user debug log/
   bundle is available and `from_debug_log.py` could build it from real data.
 
@@ -497,4 +569,5 @@ net is upstream, not this section.
 | 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
 | 7. Confirm gate 2 | — | Conditional (auto-continue if backend-only + clean; otherwise No) |
 | 8. Local run & observe | `verify` | **Never** |
-| 9. Commit + PR | `finishing-a-development-branch` | No |
+| 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
+| 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |

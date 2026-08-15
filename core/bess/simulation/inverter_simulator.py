@@ -7,13 +7,13 @@ so that faithful control yields cent-exact equality with the plan.
 
 from dataclasses import dataclass, field
 
-from core.bess.battery_system_manager import intra_period_discharge_gate
 from core.bess.dp_battery_algorithm import (
     _build_period_data,
     _effective_ac_cap_kwh,
     _period_flows,
     _state_transition,
 )
+from core.bess.execution_model import intra_period_discharge_gate
 from core.bess.inverter_controller import InverterController
 from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings

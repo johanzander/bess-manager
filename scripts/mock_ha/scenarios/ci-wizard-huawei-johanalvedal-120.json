@@ -1,0 +1,3341 @@
+{
+  "name": "ci-wizard-huawei-johanalvedal-120",
+  "description": "Real (anonymized) Huawei LUNA2000 rig from the issue #120 beta tester: huawei_solar over local Modbus with a Huawei three-phase smart meter, official Nord Pool SE3, Solcast, 3-phase 20 A service with power monitoring enabled. Verbatim entity registry (209 entities) from bess-debug-2026-08-13-100511.md; device ids and the inverter serial replaced with stable placeholders, register-key suffixes preserved because they are what discovery matches on. Pins the two defects this user hit: battery_discharge_power left unmapped behind the single signed storage_charge_discharge_power register (their install went SYSTEM DEGRADED on it), and meter-side Phase A/B/C current naming. Note the registry carries BOTH sensor.power_meter_phase_a_current (active_grid_A_current) and sensor.inverter_phase_a_current (phase_A_current) \u2014 the real-world collision the meter gate exists for. The three inverter phase currents are the only added (non-verbatim) states: the debug bundle carries them in the entity registry but not among its states, and discover_current_sensors reads states, so without them the meter gate is never exercised. They are listed ahead of the meter's, which is the order that would pick the wrong device. sensor.inverter_total_dc_input_energy (total_dc_input_power, register 32108) is the fourth added state, and for the same reason: the register IS in this real install's verbatim registry, enabled, but the bundle captured no state for it because #569 had not yet pointed lifetime_solar_energy at it. Its value is synthesized, not measured — 38412.65 kWh, consistent with the install's real AC yield of 41248.79 and 12470.59/12160.12 kWh battery charge/discharge, where grid-charged arbitrage energy inflates AC yield above DC PV input.",
+  "mock_time": "@2026-08-13 10:05:07",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "battery": {
+      "total_capacity": 10,
+      "min_soc": 5,
+      "max_soc": 100,
+      "max_charge_power_kw": 5,
+      "max_discharge_power_kw": 5,
+      "cycle_cost_per_kwh": 0.4,
+      "charging_power_rate": 40,
+      "efficiency_charge": 0.93,
+      "efficiency_discharge": 0.93,
+      "inverter_max_ac_power_kw": 0,
+      "inverter_ac_power_margin": 0.05,
+      "export_curtailment_enabled": false,
+      "export_curtailment_price_floor": 0,
+      "temperature_derating": {
+        "enabled": false,
+        "weather_entity": "weather.openweathermap"
+      }
+    },
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "influxdb_7d_avg",
+      "max_fuse_current": 20,
+      "voltage": 230,
+      "safety_margin": 1,
+      "phase_count": 3,
+      "power_monitoring_enabled": true
+    },
+    "electricity_price": {
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 0.773,
+      "tax_reduction": 0.055,
+      "area": "SE3",
+      "spot_multiplier": 1,
+      "export_spot_multiplier": 1,
+      "use_actual_price": false
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": "entry-nordpool-001"
+      },
+      "nordpool_hacs": {
+        "entity": ""
+      },
+      "octopus": {
+        "import_today_entity": "",
+        "import_tomorrow_entity": "",
+        "export_today_entity": "",
+        "export_tomorrow_entity": ""
+      },
+      "entsoe": {
+        "entity": ""
+      }
+    },
+    "growatt": {
+      "device_id": ""
+    },
+    "inverter": {
+      "platform": "huawei_solar_luna2000",
+      "device_id": "dev-huawei-battery",
+      "control_mode": "tou",
+      "service_domain": ""
+    },
+    "sensors": {
+      "platform": "huawei_solar_luna2000",
+      "growatt_server_min": {},
+      "growatt_server_sph": {},
+      "solax_modbus_growatt_min": {},
+      "solax_modbus_growatt_sph": {},
+      "solax_modbus_native": {},
+      "solis_modbus": {},
+      "huawei_solar_luna2000": {
+        "huawei_working_mode": "select.batteries_working_mode",
+        "grid_charge": "switch.batteries_charge_from_grid",
+        "battery_charging_power_rate": "number.inverter_maximum_charging_power",
+        "battery_discharging_power_rate": "number.inverter_maximum_discharging_power",
+        "battery_charge_stop_soc": "number.inverter_end_of_charge_soc",
+        "battery_discharge_stop_soc": "number.inverter_grid_charge_cutoff_soc",
+        "pv_power": "sensor.inverter_input_power",
+        "local_load_power": "sensor.inverter_active_power",
+        "lifetime_solar_energy": "sensor.inverter_total_dc_input_energy",
+        "import_power": "sensor.power_meter_active_power",
+        "lifetime_export_to_grid": "sensor.power_meter_exported",
+        "lifetime_import_from_grid": "sensor.power_meter_consumption",
+        "battery_soc": "sensor.batteries_state_of_capacity",
+        "battery_charge_power": "sensor.batteries_charge_discharge_power",
+        "lifetime_battery_charged": "sensor.batteries_total_charge",
+        "lifetime_battery_discharged": "sensor.batteries_total_discharge",
+        "export_power": "sensor.power_meter_active_power"
+      },
+      "shared": {
+        "solar_forecast_today": "sensor.solcast_pv_forecast_forecast_today",
+        "solar_forecast_tomorrow": "sensor.solcast_pv_forecast_forecast_tomorrow",
+        "48h_avg_grid_import": "sensor.48h_average_grid_import_power",
+        "current_l1": "sensor.power_meter_phase_a_current",
+        "current_l2": "sensor.power_meter_phase_b_current",
+        "current_l3": "sensor.power_meter_phase_c_current",
+        "discharge_inhibit": "binary_sensor.go_echarger_265216_charging",
+        "weather_entity": "weather.openweathermap"
+      }
+    },
+    "demo_mode": {
+      "enabled": true
+    },
+    "ai_analyst": {
+      "api_key": "<redacted>",
+      "model": "claude-sonnet-4-6",
+      "enabled": true
+    }
+  },
+  "sensors": {
+    "sensor.inverter_active_power": {
+      "entity_id": "sensor.inverter_active_power",
+      "state": "499",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Inverter Active power"
+      }
+    },
+    "number.inverter_maximum_discharging_power": {
+      "entity_id": "number.inverter_maximum_discharging_power",
+      "state": "5000",
+      "attributes": {
+        "min": 0.0,
+        "max": 5000,
+        "step": 1.0,
+        "mode": "box",
+        "unit_of_measurement": "W",
+        "icon": "mdi:battery-negative",
+        "friendly_name": "Inverter Maximum discharging power"
+      }
+    },
+    "sensor.inverter_phase_a_current": {
+      "entity_id": "sensor.inverter_phase_a_current",
+      "state": "2.30",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Inverter Phase A current"
+      }
+    },
+    "sensor.inverter_phase_b_current": {
+      "entity_id": "sensor.inverter_phase_b_current",
+      "state": "2.21",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Inverter Phase B current"
+      }
+    },
+    "sensor.inverter_phase_c_current": {
+      "entity_id": "sensor.inverter_phase_c_current",
+      "state": "2.44",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Inverter Phase C current"
+      }
+    },
+    "sensor.power_meter_phase_a_current": {
+      "entity_id": "sensor.power_meter_phase_a_current",
+      "state": "1.61",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Power meter Phase A current"
+      }
+    },
+    "sensor.48h_average_grid_import_power": {
+      "entity_id": "sensor.48h_average_grid_import_power",
+      "state": "884.1",
+      "attributes": {
+        "state_class": "measurement",
+        "age_coverage_ratio": 1.0,
+        "source_value_valid": true,
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "icon": "mdi:calculator",
+        "friendly_name": "48h Average Grid Import Power"
+      }
+    },
+    "number.inverter_maximum_charging_power": {
+      "entity_id": "number.inverter_maximum_charging_power",
+      "state": "5000",
+      "attributes": {
+        "min": 0.0,
+        "max": 5000,
+        "step": 1.0,
+        "mode": "box",
+        "unit_of_measurement": "W",
+        "icon": "mdi:battery-positive",
+        "friendly_name": "Inverter Maximum charging power"
+      }
+    },
+    "number.inverter_grid_charge_cutoff_soc": {
+      "entity_id": "number.inverter_grid_charge_cutoff_soc",
+      "state": "100.0",
+      "attributes": {
+        "min": 20,
+        "max": 100,
+        "step": 0.1,
+        "mode": "box",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-charging-50",
+        "friendly_name": "Inverter Grid charge cutoff SOC"
+      }
+    },
+    "sensor.batteries_total_charge": {
+      "entity_id": "sensor.batteries_total_charge",
+      "state": "12470.59",
+      "attributes": {
+        "state_class": "total",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-plus-variant",
+        "friendly_name": "Batteries Total charge"
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_tomorrow": {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_tomorrow",
+      "state": "27.2511",
+      "attributes": {
+        "state_class": "total",
+        "5d64_4124_0a11_a25a": 27.2511,
+        "estimate_5d64_4124_0a11_a25a": 48.2838,
+        "estimate10_5d64_4124_0a11_a25a": 27.2511,
+        "estimate90_5d64_4124_0a11_a25a": 55.9014,
+        "estimate": 48.2838,
+        "estimate10": 27.2511,
+        "estimate90": 55.9014,
+        "dayname": "Friday",
+        "dataCorrect": true,
+        "analysis": {
+          "estimate10_kwh": 27.2511,
+          "estimate90_kwh": 55.9014,
+          "spread_kwh": 28.6503,
+          "confidence": 0.4875,
+          "intervals": [
+            {
+              "period_start": "2026-08-14T00:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T00:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T01:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T01:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T02:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T02:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T03:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T03:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T04:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T04:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T05:00:00+02:00",
+              "spread_kwh": 0.0027,
+              "confidence": 0.0
+            },
+            {
+              "period_start": "2026-08-14T05:30:00+02:00",
+              "spread_kwh": 0.0315,
+              "confidence": 0.2989
+            },
+            {
+              "period_start": "2026-08-14T06:00:00+02:00",
+              "spread_kwh": 0.0811,
+              "confidence": 0.3322
+            },
+            {
+              "period_start": "2026-08-14T06:30:00+02:00",
+              "spread_kwh": 0.1813,
+              "confidence": 0.3196
+            },
+            {
+              "period_start": "2026-08-14T07:00:00+02:00",
+              "spread_kwh": 0.2259,
+              "confidence": 0.4054
+            },
+            {
+              "period_start": "2026-08-14T07:30:00+02:00",
+              "spread_kwh": 0.3038,
+              "confidence": 0.4629
+            },
+            {
+              "period_start": "2026-08-14T08:00:00+02:00",
+              "spread_kwh": 0.4018,
+              "confidence": 0.4921
+            },
+            {
+              "period_start": "2026-08-14T08:30:00+02:00",
+              "spread_kwh": 0.5302,
+              "confidence": 0.5019
+            },
+            {
+              "period_start": "2026-08-14T09:00:00+02:00",
+              "spread_kwh": 0.7628,
+              "confidence": 0.4647
+            },
+            {
+              "period_start": "2026-08-14T09:30:00+02:00",
+              "spread_kwh": 0.9736,
+              "confidence": 0.4443
+            },
+            {
+              "period_start": "2026-08-14T10:00:00+02:00",
+              "spread_kwh": 1.2021,
+              "confidence": 0.4235
+            },
+            {
+              "period_start": "2026-08-14T10:30:00+02:00",
+              "spread_kwh": 1.3954,
+              "confidence": 0.4107
+            },
+            {
+              "period_start": "2026-08-14T11:00:00+02:00",
+              "spread_kwh": 1.5074,
+              "confidence": 0.4231
+            },
+            {
+              "period_start": "2026-08-14T11:30:00+02:00",
+              "spread_kwh": 1.5387,
+              "confidence": 0.4574
+            },
+            {
+              "period_start": "2026-08-14T12:00:00+02:00",
+              "spread_kwh": 1.5628,
+              "confidence": 0.4833
+            },
+            {
+              "period_start": "2026-08-14T12:30:00+02:00",
+              "spread_kwh": 1.5836,
+              "confidence": 0.4994
+            },
+            {
+              "period_start": "2026-08-14T13:00:00+02:00",
+              "spread_kwh": 1.5942,
+              "confidence": 0.5108
+            },
+            {
+              "period_start": "2026-08-14T13:30:00+02:00",
+              "spread_kwh": 1.59,
+              "confidence": 0.5182
+            },
+            {
+              "period_start": "2026-08-14T14:00:00+02:00",
+              "spread_kwh": 1.5146,
+              "confidence": 0.5428
+            },
+            {
+              "period_start": "2026-08-14T14:30:00+02:00",
+              "spread_kwh": 1.3414,
+              "confidence": 0.5891
+            },
+            {
+              "period_start": "2026-08-14T15:00:00+02:00",
+              "spread_kwh": 1.2392,
+              "confidence": 0.6074
+            },
+            {
+              "period_start": "2026-08-14T15:30:00+02:00",
+              "spread_kwh": 1.221,
+              "confidence": 0.5942
+            },
+            {
+              "period_start": "2026-08-14T16:00:00+02:00",
+              "spread_kwh": 1.202,
+              "confidence": 0.5725
+            },
+            {
+              "period_start": "2026-08-14T16:30:00+02:00",
+              "spread_kwh": 1.1916,
+              "confidence": 0.5397
+            },
+            {
+              "period_start": "2026-08-14T17:00:00+02:00",
+              "spread_kwh": 1.1552,
+              "confidence": 0.5018
+            },
+            {
+              "period_start": "2026-08-14T17:30:00+02:00",
+              "spread_kwh": 1.1131,
+              "confidence": 0.4462
+            },
+            {
+              "period_start": "2026-08-14T18:00:00+02:00",
+              "spread_kwh": 1.0495,
+              "confidence": 0.3628
+            },
+            {
+              "period_start": "2026-08-14T18:30:00+02:00",
+              "spread_kwh": 0.9243,
+              "confidence": 0.2696
+            },
+            {
+              "period_start": "2026-08-14T19:00:00+02:00",
+              "spread_kwh": 0.7329,
+              "confidence": 0.1614
+            },
+            {
+              "period_start": "2026-08-14T19:30:00+02:00",
+              "spread_kwh": 0.4093,
+              "confidence": 0.134
+            },
+            {
+              "period_start": "2026-08-14T20:00:00+02:00",
+              "spread_kwh": 0.0847,
+              "confidence": 0.207
+            },
+            {
+              "period_start": "2026-08-14T20:30:00+02:00",
+              "spread_kwh": 0.0025,
+              "confidence": 0.0
+            },
+            {
+              "period_start": "2026-08-14T21:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T21:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T22:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T22:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T23:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-14T23:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            }
+          ]
+        },
+        "detailedForecast": [
+          {
+            "period_start": "2026-08-14T00:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T00:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T01:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T01:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T02:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T02:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T03:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T03:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T04:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T04:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T05:00:00+02:00",
+            "pv_estimate": 0.0054,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0054
+          },
+          {
+            "period_start": "2026-08-14T05:30:00+02:00",
+            "pv_estimate": 0.0861,
+            "pv_estimate10": 0.0269,
+            "pv_estimate90": 0.09
+          },
+          {
+            "period_start": "2026-08-14T06:00:00+02:00",
+            "pv_estimate": 0.2313,
+            "pv_estimate10": 0.0807,
+            "pv_estimate90": 0.2429
+          },
+          {
+            "period_start": "2026-08-14T06:30:00+02:00",
+            "pv_estimate": 0.5075,
+            "pv_estimate10": 0.1703,
+            "pv_estimate90": 0.5329
+          },
+          {
+            "period_start": "2026-08-14T07:00:00+02:00",
+            "pv_estimate": 0.7235,
+            "pv_estimate10": 0.308,
+            "pv_estimate90": 0.7597
+          },
+          {
+            "period_start": "2026-08-14T07:30:00+02:00",
+            "pv_estimate": 1.0775,
+            "pv_estimate10": 0.5237,
+            "pv_estimate90": 1.1314
+          },
+          {
+            "period_start": "2026-08-14T08:00:00+02:00",
+            "pv_estimate": 1.507,
+            "pv_estimate10": 0.7787,
+            "pv_estimate90": 1.5823
+          },
+          {
+            "period_start": "2026-08-14T08:30:00+02:00",
+            "pv_estimate": 1.9756,
+            "pv_estimate10": 1.0686,
+            "pv_estimate90": 2.129
+          },
+          {
+            "period_start": "2026-08-14T09:00:00+02:00",
+            "pv_estimate": 2.4464,
+            "pv_estimate10": 1.3244,
+            "pv_estimate90": 2.85
+          },
+          {
+            "period_start": "2026-08-14T09:30:00+02:00",
+            "pv_estimate": 2.8783,
+            "pv_estimate10": 1.5568,
+            "pv_estimate90": 3.504
+          },
+          {
+            "period_start": "2026-08-14T10:00:00+02:00",
+            "pv_estimate": 3.2932,
+            "pv_estimate10": 1.7664,
+            "pv_estimate90": 4.1706
+          },
+          {
+            "period_start": "2026-08-14T10:30:00+02:00",
+            "pv_estimate": 3.6426,
+            "pv_estimate10": 1.9447,
+            "pv_estimate90": 4.7354
+          },
+          {
+            "period_start": "2026-08-14T11:00:00+02:00",
+            "pv_estimate": 4.0235,
+            "pv_estimate10": 2.2108,
+            "pv_estimate90": 5.2257
+          },
+          {
+            "period_start": "2026-08-14T11:30:00+02:00",
+            "pv_estimate": 4.5162,
+            "pv_estimate10": 2.5937,
+            "pv_estimate90": 5.6711
+          },
+          {
+            "period_start": "2026-08-14T12:00:00+02:00",
+            "pv_estimate": 4.9339,
+            "pv_estimate10": 2.9234,
+            "pv_estimate90": 6.049
+          },
+          {
+            "period_start": "2026-08-14T12:30:00+02:00",
+            "pv_estimate": 5.2152,
+            "pv_estimate10": 3.1593,
+            "pv_estimate90": 6.3265
+          },
+          {
+            "period_start": "2026-08-14T13:00:00+02:00",
+            "pv_estimate": 5.4213,
+            "pv_estimate10": 3.3289,
+            "pv_estimate90": 6.5173
+          },
+          {
+            "period_start": "2026-08-14T13:30:00+02:00",
+            "pv_estimate": 5.5345,
+            "pv_estimate10": 3.4198,
+            "pv_estimate90": 6.5999
+          },
+          {
+            "period_start": "2026-08-14T14:00:00+02:00",
+            "pv_estimate": 5.7423,
+            "pv_estimate10": 3.5966,
+            "pv_estimate90": 6.6258
+          },
+          {
+            "period_start": "2026-08-14T14:30:00+02:00",
+            "pv_estimate": 5.9968,
+            "pv_estimate10": 3.8463,
+            "pv_estimate90": 6.5291
+          },
+          {
+            "period_start": "2026-08-14T15:00:00+02:00",
+            "pv_estimate": 6.0012,
+            "pv_estimate10": 3.8337,
+            "pv_estimate90": 6.312
+          },
+          {
+            "period_start": "2026-08-14T15:30:00+02:00",
+            "pv_estimate": 5.7575,
+            "pv_estimate10": 3.5756,
+            "pv_estimate90": 6.0177
+          },
+          {
+            "period_start": "2026-08-14T16:00:00+02:00",
+            "pv_estimate": 5.3767,
+            "pv_estimate10": 3.2195,
+            "pv_estimate90": 5.6235
+          },
+          {
+            "period_start": "2026-08-14T16:30:00+02:00",
+            "pv_estimate": 4.8894,
+            "pv_estimate10": 2.794,
+            "pv_estimate90": 5.1772
+          },
+          {
+            "period_start": "2026-08-14T17:00:00+02:00",
+            "pv_estimate": 4.3391,
+            "pv_estimate10": 2.327,
+            "pv_estimate90": 4.6374
+          },
+          {
+            "period_start": "2026-08-14T17:30:00+02:00",
+            "pv_estimate": 3.6916,
+            "pv_estimate10": 1.7937,
+            "pv_estimate90": 4.02
+          },
+          {
+            "period_start": "2026-08-14T18:00:00+02:00",
+            "pv_estimate": 2.9145,
+            "pv_estimate10": 1.1952,
+            "pv_estimate90": 3.2942
+          },
+          {
+            "period_start": "2026-08-14T18:30:00+02:00",
+            "pv_estimate": 2.0656,
+            "pv_estimate10": 0.6825,
+            "pv_estimate90": 2.5311
+          },
+          {
+            "period_start": "2026-08-14T19:00:00+02:00",
+            "pv_estimate": 1.2176,
+            "pv_estimate10": 0.2821,
+            "pv_estimate90": 1.7479
+          },
+          {
+            "period_start": "2026-08-14T19:30:00+02:00",
+            "pv_estimate": 0.453,
+            "pv_estimate10": 0.1267,
+            "pv_estimate90": 0.9454
+          },
+          {
+            "period_start": "2026-08-14T20:00:00+02:00",
+            "pv_estimate": 0.0983,
+            "pv_estimate10": 0.0442,
+            "pv_estimate90": 0.2135
+          },
+          {
+            "period_start": "2026-08-14T20:30:00+02:00",
+            "pv_estimate": 0.005,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.005
+          },
+          {
+            "period_start": "2026-08-14T21:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T21:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T22:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T22:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T23:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T23:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          }
+        ],
+        "detailedHourly": [
+          {
+            "period_start": "2026-08-14T00:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T01:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T02:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T03:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T04:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T05:00:00+02:00",
+            "pv_estimate": 0.0457,
+            "pv_estimate10": 0.0135,
+            "pv_estimate90": 0.0477
+          },
+          {
+            "period_start": "2026-08-14T06:00:00+02:00",
+            "pv_estimate": 0.3694,
+            "pv_estimate10": 0.1255,
+            "pv_estimate90": 0.3879
+          },
+          {
+            "period_start": "2026-08-14T07:00:00+02:00",
+            "pv_estimate": 0.9005,
+            "pv_estimate10": 0.4159,
+            "pv_estimate90": 0.9456
+          },
+          {
+            "period_start": "2026-08-14T08:00:00+02:00",
+            "pv_estimate": 1.7413,
+            "pv_estimate10": 0.9236,
+            "pv_estimate90": 1.8557
+          },
+          {
+            "period_start": "2026-08-14T09:00:00+02:00",
+            "pv_estimate": 2.6623,
+            "pv_estimate10": 1.4406,
+            "pv_estimate90": 3.177
+          },
+          {
+            "period_start": "2026-08-14T10:00:00+02:00",
+            "pv_estimate": 3.4679,
+            "pv_estimate10": 1.8556,
+            "pv_estimate90": 4.453
+          },
+          {
+            "period_start": "2026-08-14T11:00:00+02:00",
+            "pv_estimate": 4.2698,
+            "pv_estimate10": 2.4022,
+            "pv_estimate90": 5.4484
+          },
+          {
+            "period_start": "2026-08-14T12:00:00+02:00",
+            "pv_estimate": 5.0746,
+            "pv_estimate10": 3.0413,
+            "pv_estimate90": 6.1878
+          },
+          {
+            "period_start": "2026-08-14T13:00:00+02:00",
+            "pv_estimate": 5.4779,
+            "pv_estimate10": 3.3743,
+            "pv_estimate90": 6.5586
+          },
+          {
+            "period_start": "2026-08-14T14:00:00+02:00",
+            "pv_estimate": 5.8696,
+            "pv_estimate10": 3.7214,
+            "pv_estimate90": 6.5774
+          },
+          {
+            "period_start": "2026-08-14T15:00:00+02:00",
+            "pv_estimate": 5.8794,
+            "pv_estimate10": 3.7046,
+            "pv_estimate90": 6.1648
+          },
+          {
+            "period_start": "2026-08-14T16:00:00+02:00",
+            "pv_estimate": 5.133,
+            "pv_estimate10": 3.0068,
+            "pv_estimate90": 5.4003
+          },
+          {
+            "period_start": "2026-08-14T17:00:00+02:00",
+            "pv_estimate": 4.0153,
+            "pv_estimate10": 2.0604,
+            "pv_estimate90": 4.3287
+          },
+          {
+            "period_start": "2026-08-14T18:00:00+02:00",
+            "pv_estimate": 2.4901,
+            "pv_estimate10": 0.9388,
+            "pv_estimate90": 2.9127
+          },
+          {
+            "period_start": "2026-08-14T19:00:00+02:00",
+            "pv_estimate": 0.8353,
+            "pv_estimate10": 0.2044,
+            "pv_estimate90": 1.3466
+          },
+          {
+            "period_start": "2026-08-14T20:00:00+02:00",
+            "pv_estimate": 0.0517,
+            "pv_estimate10": 0.0221,
+            "pv_estimate90": 0.1092
+          },
+          {
+            "period_start": "2026-08-14T21:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T22:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-14T23:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          }
+        ],
+        "unit_of_measurement": "kWh",
+        "attribution": "Data retrieved from Solcast",
+        "device_class": "energy",
+        "friendly_name": "Solcast PV Forecast Forecast Tomorrow"
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_today": {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_today",
+      "state": "32.8871",
+      "attributes": {
+        "state_class": "total",
+        "5d64_4124_0a11_a25a": 32.8871,
+        "estimate_5d64_4124_0a11_a25a": 50.4435,
+        "estimate10_5d64_4124_0a11_a25a": 32.8871,
+        "estimate90_5d64_4124_0a11_a25a": 56.0208,
+        "estimate": 50.4435,
+        "estimate10": 32.8871,
+        "estimate90": 56.0208,
+        "dayname": "Thursday",
+        "dataCorrect": true,
+        "analysis": {
+          "estimate10_kwh": 32.8871,
+          "estimate90_kwh": 56.0208,
+          "spread_kwh": 23.1337,
+          "confidence": 0.5871,
+          "intervals": [
+            {
+              "period_start": "2026-08-13T00:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T00:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T01:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T01:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T02:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T02:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T03:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T03:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T04:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T04:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T05:00:00+02:00",
+              "spread_kwh": 0.0028,
+              "confidence": 0.5045
+            },
+            {
+              "period_start": "2026-08-13T05:30:00+02:00",
+              "spread_kwh": 0.0176,
+              "confidence": 0.6863
+            },
+            {
+              "period_start": "2026-08-13T06:00:00+02:00",
+              "spread_kwh": 0.0313,
+              "confidence": 0.76
+            },
+            {
+              "period_start": "2026-08-13T06:30:00+02:00",
+              "spread_kwh": 0.0135,
+              "confidence": 0.9044
+            },
+            {
+              "period_start": "2026-08-13T07:00:00+02:00",
+              "spread_kwh": 0.0216,
+              "confidence": 0.9046
+            },
+            {
+              "period_start": "2026-08-13T07:30:00+02:00",
+              "spread_kwh": 0.0527,
+              "confidence": 0.9047
+            },
+            {
+              "period_start": "2026-08-13T08:00:00+02:00",
+              "spread_kwh": 0.1094,
+              "confidence": 0.8524
+            },
+            {
+              "period_start": "2026-08-13T08:30:00+02:00",
+              "spread_kwh": 0.2212,
+              "confidence": 0.786
+            },
+            {
+              "period_start": "2026-08-13T09:00:00+02:00",
+              "spread_kwh": 0.3181,
+              "confidence": 0.777
+            },
+            {
+              "period_start": "2026-08-13T09:30:00+02:00",
+              "spread_kwh": 0.074,
+              "confidence": 0.9562
+            },
+            {
+              "period_start": "2026-08-13T10:00:00+02:00",
+              "spread_kwh": 0.1671,
+              "confidence": 0.9207
+            },
+            {
+              "period_start": "2026-08-13T10:30:00+02:00",
+              "spread_kwh": 0.2156,
+              "confidence": 0.9103
+            },
+            {
+              "period_start": "2026-08-13T11:00:00+02:00",
+              "spread_kwh": 0.5448,
+              "confidence": 0.796
+            },
+            {
+              "period_start": "2026-08-13T11:30:00+02:00",
+              "spread_kwh": 0.7706,
+              "confidence": 0.7328
+            },
+            {
+              "period_start": "2026-08-13T12:00:00+02:00",
+              "spread_kwh": 1.1439,
+              "confidence": 0.6258
+            },
+            {
+              "period_start": "2026-08-13T12:30:00+02:00",
+              "spread_kwh": 1.2508,
+              "confidence": 0.6063
+            },
+            {
+              "period_start": "2026-08-13T13:00:00+02:00",
+              "spread_kwh": 1.382,
+              "confidence": 0.5785
+            },
+            {
+              "period_start": "2026-08-13T13:30:00+02:00",
+              "spread_kwh": 1.2501,
+              "confidence": 0.6226
+            },
+            {
+              "period_start": "2026-08-13T14:00:00+02:00",
+              "spread_kwh": 1.3598,
+              "confidence": 0.5895
+            },
+            {
+              "period_start": "2026-08-13T14:30:00+02:00",
+              "spread_kwh": 1.4931,
+              "confidence": 0.5434
+            },
+            {
+              "period_start": "2026-08-13T15:00:00+02:00",
+              "spread_kwh": 1.6145,
+              "confidence": 0.4939
+            },
+            {
+              "period_start": "2026-08-13T15:30:00+02:00",
+              "spread_kwh": 1.7014,
+              "confidence": 0.4428
+            },
+            {
+              "period_start": "2026-08-13T16:00:00+02:00",
+              "spread_kwh": 1.6746,
+              "confidence": 0.4143
+            },
+            {
+              "period_start": "2026-08-13T16:30:00+02:00",
+              "spread_kwh": 1.5848,
+              "confidence": 0.4005
+            },
+            {
+              "period_start": "2026-08-13T17:00:00+02:00",
+              "spread_kwh": 1.4442,
+              "confidence": 0.3856
+            },
+            {
+              "period_start": "2026-08-13T17:30:00+02:00",
+              "spread_kwh": 1.3033,
+              "confidence": 0.3565
+            },
+            {
+              "period_start": "2026-08-13T18:00:00+02:00",
+              "spread_kwh": 1.1647,
+              "confidence": 0.3049
+            },
+            {
+              "period_start": "2026-08-13T18:30:00+02:00",
+              "spread_kwh": 0.9677,
+              "confidence": 0.2387
+            },
+            {
+              "period_start": "2026-08-13T19:00:00+02:00",
+              "spread_kwh": 0.7389,
+              "confidence": 0.1541
+            },
+            {
+              "period_start": "2026-08-13T19:30:00+02:00",
+              "spread_kwh": 0.4104,
+              "confidence": 0.1459
+            },
+            {
+              "period_start": "2026-08-13T20:00:00+02:00",
+              "spread_kwh": 0.0865,
+              "confidence": 0.2432
+            },
+            {
+              "period_start": "2026-08-13T20:30:00+02:00",
+              "spread_kwh": 0.0026,
+              "confidence": 0.5
+            },
+            {
+              "period_start": "2026-08-13T21:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T21:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T22:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T22:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T23:00:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            },
+            {
+              "period_start": "2026-08-13T23:30:00+02:00",
+              "spread_kwh": 0.0,
+              "confidence": 1.0
+            }
+          ]
+        },
+        "detailedForecast": [
+          {
+            "period_start": "2026-08-13T00:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T00:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T01:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T01:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T02:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T02:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T03:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T03:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T04:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T04:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T05:00:00+02:00",
+            "pv_estimate": 0.0056,
+            "pv_estimate10": 0.0056,
+            "pv_estimate90": 0.0111
+          },
+          {
+            "period_start": "2026-08-13T05:30:00+02:00",
+            "pv_estimate": 0.1084,
+            "pv_estimate10": 0.077,
+            "pv_estimate90": 0.1122
+          },
+          {
+            "period_start": "2026-08-13T06:00:00+02:00",
+            "pv_estimate": 0.248,
+            "pv_estimate10": 0.1979,
+            "pv_estimate90": 0.2604
+          },
+          {
+            "period_start": "2026-08-13T06:30:00+02:00",
+            "pv_estimate": 0.269,
+            "pv_estimate10": 0.2555,
+            "pv_estimate90": 0.2825
+          },
+          {
+            "period_start": "2026-08-13T07:00:00+02:00",
+            "pv_estimate": 0.4311,
+            "pv_estimate10": 0.4095,
+            "pv_estimate90": 0.4527
+          },
+          {
+            "period_start": "2026-08-13T07:30:00+02:00",
+            "pv_estimate": 1.0532,
+            "pv_estimate10": 1.0005,
+            "pv_estimate90": 1.1059
+          },
+          {
+            "period_start": "2026-08-13T08:00:00+02:00",
+            "pv_estimate": 1.3887,
+            "pv_estimate10": 1.2637,
+            "pv_estimate90": 1.4826
+          },
+          {
+            "period_start": "2026-08-13T08:30:00+02:00",
+            "pv_estimate": 2.023,
+            "pv_estimate10": 1.6253,
+            "pv_estimate90": 2.0677
+          },
+          {
+            "period_start": "2026-08-13T09:00:00+02:00",
+            "pv_estimate": 2.7346,
+            "pv_estimate10": 2.2173,
+            "pv_estimate90": 2.8535
+          },
+          {
+            "period_start": "2026-08-13T09:30:00+02:00",
+            "pv_estimate": 3.3088,
+            "pv_estimate10": 3.2325,
+            "pv_estimate90": 3.3806
+          },
+          {
+            "period_start": "2026-08-13T10:00:00+02:00",
+            "pv_estimate": 4.1331,
+            "pv_estimate10": 3.8822,
+            "pv_estimate90": 4.2165
+          },
+          {
+            "period_start": "2026-08-13T10:30:00+02:00",
+            "pv_estimate": 4.7911,
+            "pv_estimate10": 4.3772,
+            "pv_estimate90": 4.8084
+          },
+          {
+            "period_start": "2026-08-13T11:00:00+02:00",
+            "pv_estimate": 5.3194,
+            "pv_estimate10": 4.2504,
+            "pv_estimate90": 5.3399
+          },
+          {
+            "period_start": "2026-08-13T11:30:00+02:00",
+            "pv_estimate": 5.7669,
+            "pv_estimate10": 4.2257,
+            "pv_estimate90": 5.7669
+          },
+          {
+            "period_start": "2026-08-13T12:00:00+02:00",
+            "pv_estimate": 6.1148,
+            "pv_estimate10": 3.8269,
+            "pv_estimate90": 6.1148
+          },
+          {
+            "period_start": "2026-08-13T12:30:00+02:00",
+            "pv_estimate": 6.3544,
+            "pv_estimate10": 3.8529,
+            "pv_estimate90": 6.3544
+          },
+          {
+            "period_start": "2026-08-13T13:00:00+02:00",
+            "pv_estimate": 6.5573,
+            "pv_estimate10": 3.7932,
+            "pv_estimate90": 6.5573
+          },
+          {
+            "period_start": "2026-08-13T13:30:00+02:00",
+            "pv_estimate": 6.3979,
+            "pv_estimate10": 4.1245,
+            "pv_estimate90": 6.6248
+          },
+          {
+            "period_start": "2026-08-13T14:00:00+02:00",
+            "pv_estimate": 6.2355,
+            "pv_estimate10": 3.9051,
+            "pv_estimate90": 6.6246
+          },
+          {
+            "period_start": "2026-08-13T14:30:00+02:00",
+            "pv_estimate": 5.8958,
+            "pv_estimate10": 3.5538,
+            "pv_estimate90": 6.5401
+          },
+          {
+            "period_start": "2026-08-13T15:00:00+02:00",
+            "pv_estimate": 5.4869,
+            "pv_estimate10": 3.1517,
+            "pv_estimate90": 6.3807
+          },
+          {
+            "period_start": "2026-08-13T15:30:00+02:00",
+            "pv_estimate": 4.976,
+            "pv_estimate10": 2.7041,
+            "pv_estimate90": 6.1069
+          },
+          {
+            "period_start": "2026-08-13T16:00:00+02:00",
+            "pv_estimate": 4.541,
+            "pv_estimate10": 2.3688,
+            "pv_estimate90": 5.718
+          },
+          {
+            "period_start": "2026-08-13T16:30:00+02:00",
+            "pv_estimate": 4.1807,
+            "pv_estimate10": 2.1176,
+            "pv_estimate90": 5.2872
+          },
+          {
+            "period_start": "2026-08-13T17:00:00+02:00",
+            "pv_estimate": 3.7205,
+            "pv_estimate10": 1.8128,
+            "pv_estimate90": 4.7013
+          },
+          {
+            "period_start": "2026-08-13T17:30:00+02:00",
+            "pv_estimate": 3.2099,
+            "pv_estimate10": 1.444,
+            "pv_estimate90": 4.0506
+          },
+          {
+            "period_start": "2026-08-13T18:00:00+02:00",
+            "pv_estimate": 2.5299,
+            "pv_estimate10": 1.0216,
+            "pv_estimate90": 3.351
+          },
+          {
+            "period_start": "2026-08-13T18:30:00+02:00",
+            "pv_estimate": 1.6979,
+            "pv_estimate10": 0.6067,
+            "pv_estimate90": 2.5422
+          },
+          {
+            "period_start": "2026-08-13T19:00:00+02:00",
+            "pv_estimate": 0.9412,
+            "pv_estimate10": 0.2693,
+            "pv_estimate90": 1.7471
+          },
+          {
+            "period_start": "2026-08-13T19:30:00+02:00",
+            "pv_estimate": 0.35,
+            "pv_estimate10": 0.1402,
+            "pv_estimate90": 0.961
+          },
+          {
+            "period_start": "2026-08-13T20:00:00+02:00",
+            "pv_estimate": 0.1062,
+            "pv_estimate10": 0.0556,
+            "pv_estimate90": 0.2286
+          },
+          {
+            "period_start": "2026-08-13T20:30:00+02:00",
+            "pv_estimate": 0.0102,
+            "pv_estimate10": 0.0051,
+            "pv_estimate90": 0.0102
+          },
+          {
+            "period_start": "2026-08-13T21:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T21:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T22:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T22:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T23:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T23:30:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          }
+        ],
+        "detailedHourly": [
+          {
+            "period_start": "2026-08-13T00:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T01:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T02:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T03:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T04:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T05:00:00+02:00",
+            "pv_estimate": 0.057,
+            "pv_estimate10": 0.0413,
+            "pv_estimate90": 0.0616
+          },
+          {
+            "period_start": "2026-08-13T06:00:00+02:00",
+            "pv_estimate": 0.2585,
+            "pv_estimate10": 0.2267,
+            "pv_estimate90": 0.2714
+          },
+          {
+            "period_start": "2026-08-13T07:00:00+02:00",
+            "pv_estimate": 0.7421,
+            "pv_estimate10": 0.705,
+            "pv_estimate90": 0.7793
+          },
+          {
+            "period_start": "2026-08-13T08:00:00+02:00",
+            "pv_estimate": 1.7059,
+            "pv_estimate10": 1.4445,
+            "pv_estimate90": 1.7752
+          },
+          {
+            "period_start": "2026-08-13T09:00:00+02:00",
+            "pv_estimate": 3.0217,
+            "pv_estimate10": 2.7249,
+            "pv_estimate90": 3.117
+          },
+          {
+            "period_start": "2026-08-13T10:00:00+02:00",
+            "pv_estimate": 4.4621,
+            "pv_estimate10": 4.1297,
+            "pv_estimate90": 4.5124
+          },
+          {
+            "period_start": "2026-08-13T11:00:00+02:00",
+            "pv_estimate": 5.5431,
+            "pv_estimate10": 4.238,
+            "pv_estimate90": 5.5534
+          },
+          {
+            "period_start": "2026-08-13T12:00:00+02:00",
+            "pv_estimate": 6.2346,
+            "pv_estimate10": 3.8399,
+            "pv_estimate90": 6.2346
+          },
+          {
+            "period_start": "2026-08-13T13:00:00+02:00",
+            "pv_estimate": 6.4776,
+            "pv_estimate10": 3.9588,
+            "pv_estimate90": 6.591
+          },
+          {
+            "period_start": "2026-08-13T14:00:00+02:00",
+            "pv_estimate": 6.0656,
+            "pv_estimate10": 3.7294,
+            "pv_estimate90": 6.5823
+          },
+          {
+            "period_start": "2026-08-13T15:00:00+02:00",
+            "pv_estimate": 5.2315,
+            "pv_estimate10": 2.9279,
+            "pv_estimate90": 6.2438
+          },
+          {
+            "period_start": "2026-08-13T16:00:00+02:00",
+            "pv_estimate": 4.3609,
+            "pv_estimate10": 2.2432,
+            "pv_estimate90": 5.5026
+          },
+          {
+            "period_start": "2026-08-13T17:00:00+02:00",
+            "pv_estimate": 3.4652,
+            "pv_estimate10": 1.6284,
+            "pv_estimate90": 4.3759
+          },
+          {
+            "period_start": "2026-08-13T18:00:00+02:00",
+            "pv_estimate": 2.1139,
+            "pv_estimate10": 0.8142,
+            "pv_estimate90": 2.9466
+          },
+          {
+            "period_start": "2026-08-13T19:00:00+02:00",
+            "pv_estimate": 0.6456,
+            "pv_estimate10": 0.2047,
+            "pv_estimate90": 1.354
+          },
+          {
+            "period_start": "2026-08-13T20:00:00+02:00",
+            "pv_estimate": 0.0582,
+            "pv_estimate10": 0.0303,
+            "pv_estimate90": 0.1194
+          },
+          {
+            "period_start": "2026-08-13T21:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T22:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          },
+          {
+            "period_start": "2026-08-13T23:00:00+02:00",
+            "pv_estimate": 0.0,
+            "pv_estimate10": 0.0,
+            "pv_estimate90": 0.0
+          }
+        ],
+        "unit_of_measurement": "kWh",
+        "attribution": "Data retrieved from Solcast",
+        "device_class": "energy",
+        "friendly_name": "Solcast PV Forecast Forecast Today"
+      }
+    },
+    "weather.openweathermap": {
+      "entity_id": "weather.openweathermap",
+      "state": "cloudy",
+      "attributes": {
+        "temperature": 18.9,
+        "apparent_temperature": 18.3,
+        "dew_point": 9.4,
+        "temperature_unit": "\u00b0C",
+        "humidity": 54,
+        "cloud_coverage": 69,
+        "pressure": 1026.0,
+        "pressure_unit": "hPa",
+        "wind_bearing": 264,
+        "wind_gust_speed": 18.0,
+        "wind_speed": 11.41,
+        "wind_speed_unit": "km/h",
+        "visibility": 10.0,
+        "visibility_unit": "km",
+        "precipitation_unit": "mm",
+        "attribution": "Data provided by OpenWeatherMap",
+        "friendly_name": "OpenWeatherMap",
+        "supported_features": 3
+      }
+    },
+    "sensor.inverter_total_yield": {
+      "entity_id": "sensor.inverter_total_yield",
+      "state": "41248.79",
+      "attributes": {
+        "state_class": "total",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Inverter Total yield"
+      }
+    },
+    "sensor.inverter_total_dc_input_energy": {
+      "entity_id": "sensor.inverter_total_dc_input_energy",
+      "state": "38412.65",
+      "attributes": {
+        "state_class": "total",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "friendly_name": "Inverter Total DC input energy"
+      }
+    },
+    "sensor.power_meter_phase_c_current": {
+      "entity_id": "sensor.power_meter_phase_c_current",
+      "state": "-1.6",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Power meter Phase C current"
+      }
+    },
+    "sensor.batteries_state_of_capacity": {
+      "entity_id": "sensor.batteries_state_of_capacity",
+      "state": "16.0",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "%",
+        "device_class": "battery",
+        "friendly_name": "Batteries State of capacity"
+      }
+    },
+    "sensor.batteries_charge_discharge_power": {
+      "entity_id": "sensor.batteries_charge_discharge_power",
+      "state": "3919",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "icon": "mdi:home-battery-outline",
+        "friendly_name": "Batteries Charge/Discharge power"
+      }
+    },
+    "sensor.batteries_total_discharge": {
+      "entity_id": "sensor.batteries_total_discharge",
+      "state": "12160.12",
+      "attributes": {
+        "state_class": "total",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:battery-minus-variant",
+        "friendly_name": "Batteries Total discharge"
+      }
+    },
+    "sensor.inverter_input_power": {
+      "entity_id": "sensor.inverter_input_power",
+      "state": "4418",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "friendly_name": "Inverter Input power"
+      }
+    },
+    "switch.batteries_charge_from_grid": {
+      "entity_id": "switch.batteries_charge_from_grid",
+      "state": "off",
+      "attributes": {
+        "icon": "mdi:battery-charging-50",
+        "friendly_name": "Batteries Charge from grid"
+      }
+    },
+    "number.inverter_end_of_charge_soc": {
+      "entity_id": "number.inverter_end_of_charge_soc",
+      "state": "100.0",
+      "attributes": {
+        "min": 90,
+        "max": 100,
+        "step": 0.1,
+        "mode": "box",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-positive",
+        "friendly_name": "Inverter End-of-charge SOC"
+      }
+    },
+    "sensor.power_meter_active_power": {
+      "entity_id": "sensor.power_meter_active_power",
+      "state": "5",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "W",
+        "device_class": "power",
+        "icon": "mdi:flash",
+        "friendly_name": "Power meter Active power"
+      }
+    },
+    "sensor.power_meter_exported": {
+      "entity_id": "sensor.power_meter_exported",
+      "state": "23778.51",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:transmission-tower-import",
+        "friendly_name": "Power meter Exported"
+      }
+    },
+    "sensor.power_meter_consumption": {
+      "entity_id": "sensor.power_meter_consumption",
+      "state": "40239.71",
+      "attributes": {
+        "state_class": "total_increasing",
+        "unit_of_measurement": "kWh",
+        "device_class": "energy",
+        "icon": "mdi:transmission-tower-export",
+        "friendly_name": "Power meter Consumption"
+      }
+    },
+    "binary_sensor.go_echarger_265216_charging": {
+      "entity_id": "binary_sensor.go_echarger_265216_charging",
+      "state": "off",
+      "attributes": {
+        "device_class": "battery_charging",
+        "friendly_name": "go-eCharger_265216 Charging"
+      }
+    },
+    "select.batteries_working_mode": {
+      "entity_id": "select.batteries_working_mode",
+      "state": "maximise_self_consumption",
+      "attributes": {
+        "options": [
+          "adaptive",
+          "fixed_charge_discharge",
+          "maximise_self_consumption",
+          "fully_fed_to_grid",
+          "time_of_use_luna2000"
+        ],
+        "friendly_name": "Batteries Working Mode"
+      }
+    },
+    "sensor.power_meter_phase_b_current": {
+      "entity_id": "sensor.power_meter_phase_b_current",
+      "state": "1.3",
+      "attributes": {
+        "state_class": "measurement",
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "friendly_name": "Power meter Phase B current"
+      }
+    }
+  },
+  "entity_registry": [
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_today",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_today",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_peak_forecast_today",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_peak_w_today",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_peak_time_today",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_peak_w_time_today",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_this_hour",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_forecast_this_hour",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_remaining_today",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_get_remaining_today",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_next_hour",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_forecast_next_hour",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_tomorrow",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_tomorrow",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_peak_forecast_tomorrow",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_peak_w_tomorrow",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_peak_time_tomorrow",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_peak_w_time_tomorrow",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_api_used",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_api_counter",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_api_limit",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_api_limit",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_api_last_polled",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_lastupdated",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_hard_limit_set",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_hard_limit",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_day_3",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_d3",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_day_4",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_d4",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_day_5",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_d5",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_day_6",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_d6",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_day_7",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_total_kwh_forecast_d7",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_power_now",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_power_now",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_power_next_30_mins",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_power_now_30m",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_power_next_hour",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_power_now_1hr",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.tallstigen",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_solcast_solcast_api_5d64-4124-0a11-a25a",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "select.solcast_pv_forecast_use_forecast_field",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_estimate_mode",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_forecast_next_x_hours",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_forecast_custom_hours",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "switch.solcast_pv_solar_pre_release",
+      "platform": "hacs",
+      "unique_id": "HW0000000001_solcast_pv_solar_pre_release",
+      "device_id": "dev-other-002"
+    },
+    {
+      "entity_id": "update.solcast_pv_solar_update",
+      "platform": "hacs",
+      "unique_id": "HW0000000001_solcast_pv_solar_update",
+      "device_id": "dev-other-002"
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_dampening",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_dampen",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_last_updated",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-updated_at",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_currency",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-currency",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_exchange_rate",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-exchange_rate",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_current_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-current_price",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_previous_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-last_price",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_next_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-next_price",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_lowest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-lowest_price",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_highest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-highest_price",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_daily_average",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-daily_average",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_1_average",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_1-SE3-block_average",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_1_lowest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_1-SE3-block_min",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_1_highest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_1-SE3-block_max",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_1_time_from",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_1-SE3-block_start_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_1_time_until",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_1-SE3-block_end_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_peak_average",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_peak-SE3-block_average",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_peak_lowest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_peak-SE3-block_min",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_peak_highest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_peak-SE3-block_max",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_peak_time_from",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_peak-SE3-block_start_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_peak_time_until",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_peak-SE3-block_end_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_2_average",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_2-SE3-block_average",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_2_lowest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_2-SE3-block_min",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_2_highest_price",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_2-SE3-block_max",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_2_time_from",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_2-SE3-block_start_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_off_peak_2_time_until",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_off_peak_2-SE3-block_end_time",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "sensor.nordpool_price_band",
+      "platform": "template",
+      "unique_id": "HW0000000001_nordpool_price_band",
+      "device_id": null
+    },
+    {
+      "entity_id": "sensor.solcast_pv_forecast_accuracy",
+      "platform": "solcast_solar",
+      "unique_id": "HW0000000001_accuracy",
+      "device_id": "dev-other-001"
+    },
+    {
+      "entity_id": "binary_sensor.nord_pool_se3_tomorrow_price_available",
+      "platform": "nordpool",
+      "unique_id": "HW0000000001_SE3-tomorrow_price_available",
+      "device_id": "dev-other-003"
+    },
+    {
+      "entity_id": "update.huawei_solar_update",
+      "platform": "hacs",
+      "unique_id": "HW0000000001_huawei_solar_update",
+      "device_id": "dev-other-004"
+    },
+    {
+      "entity_id": "switch.huawei_solar_pre_release",
+      "platform": "hacs",
+      "unique_id": "HW0000000001_huawei_solar_pre_release",
+      "device_id": "dev-other-004"
+    },
+    {
+      "entity_id": "sensor.predbat_import_nordpool",
+      "platform": "template",
+      "unique_id": "HW0000000001_predbat_import_nordpool",
+      "device_id": null
+    },
+    {
+      "entity_id": "sensor.predbat_export_nordpool",
+      "platform": "template",
+      "unique_id": "HW0000000001_predbat_export_nordpool",
+      "device_id": null
+    },
+    {
+      "entity_id": "button.batteries_stop_forcible_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_stop_forcible_charge",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "select.batteries_excess_pv_energy_use_in_tou",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_excess_pv_energy_use_in_tou",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "select.batteries_working_mode",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_working_mode_settings",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "select.batteries_capacity_control_mode",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_capacity_control_mode",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "switch.inverter",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_startup",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "switch.inverter_mppt_scan",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_mppt_multimodal_scanning",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "switch.batteries_charge_from_grid",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_charge_from_grid_function",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "number.inverter_power_derating_by_percentage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_power_percentage_derating",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_power_derating",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_power_fixed_value_derating",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_mppt_scan_interval",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_mppt_scanning_interval",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_maximum_charging_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_maximum_charging_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_maximum_discharging_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_maximum_discharging_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_end_of_charge_soc",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_charging_cutoff_capacity",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_backup_power_soc",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_backup_power_state_of_charge",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_grid_charge_cutoff_soc",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_grid_charge_cutoff_state_of_charge",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.inverter_grid_charge_maximum_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_power_of_charge_from_grid",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "number.batteries_peak_shaving_soc",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_capacity_control_soc_peak_shaving",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "number.batteries_end_of_discharge_soc",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_discharging_cutoff_capacity",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.inverter_rated_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_rated_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_max_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_P_max",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_input_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_input_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_a_b_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_line_voltage_A_B",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_b_c_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_line_voltage_B_C",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_c_a_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_line_voltage_C_A",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_a_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_A_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_b_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_B_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_c_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_C_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_a_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_A_current",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_b_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_B_current",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_c_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_phase_C_current",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_day_active_power_peak",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_day_active_power_peak",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_reactive_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_reactive_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_power_factor",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_power_factor",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_frequency",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_frequency",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_efficiency",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_efficiency",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_internal_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_internal_temperature",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_insulation_resistance",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_insulation_resistance",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_device_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_device_status",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_startup_time",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_startup_time",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_shutdown_time",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_shutdown_time",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_total_yield",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_accumulated_yield_energy",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_total_dc_input_energy",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_total_dc_input_power",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_current_electricity_generation_statistics_time",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_current_electricity_generation_statistics_time",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_hourly_yield",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_hourly_yield_energy",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_daily_yield",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_daily_yield_energy",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_monthly_yield",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_monthly_yield_energy",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_yearly_yield",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_yearly_yield_energy",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_inverter_state",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_1",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_locking_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_2#0",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_pv_connection_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_2#1",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_dsp_data_collection",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_2#2",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_off_grid_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_3#0",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_off_grid_switch",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_state_3#1",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_alarms",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_ALARMS",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_pv_1_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_pv_01_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_pv_1_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_pv_01_current",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_pv_2_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_pv_02_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.inverter_pv_2_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_pv_02_current",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.power_meter_meter_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_meter_status",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_a_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_A_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_b_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_B_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_c_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_C_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_a_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_A_current",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_b_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_B_current",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_c_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_C_current",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_power_meter_active_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_reactive_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_power_meter_reactive_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_power_factor",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_power_factor",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_frequency",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_frequency",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_exported",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_exported_energy",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_consumption",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_accumulated_energy",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_reactive_energy",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_grid_accumulated_reactive_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_a_b_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_A_B_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_b_c_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_B_C_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_c_a_line_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_C_A_voltage",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_a_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_A_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_b_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_B_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_c_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_grid_C_power",
+      "device_id": "dev-huawei-meter"
+    },
+    {
+      "entity_id": "sensor.inverter_active_power_control_mode",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_active_power_control_mode",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.batteries_maximum_charge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_maximum_charge_power",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_maximum_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_maximum_discharge_power",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_rated_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_rated_capacity",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_state_of_capacity",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_running_status",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_bus_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_bus_voltage",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_bus_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_bus_current",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_charge_discharge_power",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_total_charge",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_total_discharge",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_day_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_current_day_charge_capacity",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_day_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_current_day_discharge_capacity",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_tou_charging_and_discharging_periods",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_huawei_luna2000_time_of_use_charging_and_discharging_periods",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_forcible_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_forcible_charge_discharge_write",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.batteries_capacity_control_periods",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_capacity_control_periods",
+      "device_id": "dev-huawei-battery"
+    },
+    {
+      "entity_id": "sensor.battery_1_working_mode",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_working_mode_b",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_day_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_current_day_charge_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_day_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_current_day_discharge_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_bus_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_bus_current",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_bus_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_bus_voltage",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_bms_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_remaining_charge_discharge_time",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_remaining_charge_dis_charge_time",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_total_charge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_total_discharge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_state_of_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_running_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_running_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_charge_discharge_power",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_soh_calibration_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_soh_calibration_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_max_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_maximum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_min_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_minimum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_max_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_maximum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_min_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_minimum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_max_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_maximum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_min_temperature",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_minimum_temperature",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_working_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_working_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_working_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_working_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_working_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_working_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_firmware_version",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_firmware_version",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_serial_number",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_serial_number",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_state_of_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_charge_discharge_power",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_voltage",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_current",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_soh_calibration_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_soh_calibration_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_total_charge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_1_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_1_total_discharge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_firmware_version",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_firmware_version",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_serial_number",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_serial_number",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_state_of_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_charge_discharge_power",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_voltage",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_current",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_soh_calibration_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_soh_calibration_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_total_charge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_2_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_2_total_discharge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_firmware_version",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_firmware_version",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_serial_number",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_serial_number",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_state_of_capacity",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_charge_discharge_power",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_voltage",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_current",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_current",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_soh_calibration_status",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_soh_calibration_status",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_total_charge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "sensor.battery_1_pack_3_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_storage_unit_1_battery_pack_3_total_discharge",
+      "device_id": "dev-other-005"
+    },
+    {
+      "entity_id": "automation.predbat_huawei_smart_charge_limit",
+      "platform": "automation",
+      "unique_id": "HW0000000001_1781018151088",
+      "device_id": null
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_voltage",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_max_pv_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_voltage_2",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_min_pv_voltage",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_energy",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_cumulative_dc_energy_yield_mppt1",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_energy_2",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_cumulative_dc_energy_yield_mppt2",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_energy_3",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_cumulative_dc_energy_yield_mppt3",
+      "device_id": "dev-huawei-inverter"
+    },
+    {
+      "entity_id": "sensor.kladkammare_inverter_energy_4",
+      "platform": "huawei_solar",
+      "unique_id": "HW0000000001_cumulative_dc_energy_yield_mppt4",
+      "device_id": "dev-huawei-inverter"
+    }
+  ],
+  "config_entries": [
+    {
+      "entry_id": "entry-solcast-001",
+      "domain": "solcast_solar",
+      "title": "solcast_solar",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "entry-nordpool-001",
+      "domain": "nordpool",
+      "title": "nordpool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "01KTGYHC6DXMSSPPYR7ZP2E5ZE",
+      "domain": "huawei_solar",
+      "title": "huawei_solar",
+      "state": "loaded"
+    }
+  ],
+  "devices": [
+    {
+      "id": "dev-huawei-inverter",
+      "name": "Inverter",
+      "manufacturer": "Huawei",
+      "model": "SUN2000",
+      "identifiers": [
+        [
+          "huawei_solar",
+          "HW0000000001"
+        ]
+      ],
+      "config_entries": []
+    },
+    {
+      "id": "dev-huawei-battery",
+      "name": "Batteries",
+      "manufacturer": "Huawei",
+      "model": "LUNA2000",
+      "identifiers": [
+        [
+          "huawei_solar",
+          "HW0000000001_battery"
+        ]
+      ],
+      "config_entries": []
+    },
+    {
+      "id": "dev-huawei-meter",
+      "name": "Power meter",
+      "manufacturer": "Huawei",
+      "model": null,
+      "identifiers": [
+        [
+          "huawei_solar",
+          "HW0000000001_meter"
+        ]
+      ],
+      "config_entries": []
+    },
+    {
+      "id": "dev-nordpool-001",
+      "name": "Nord Pool SE3",
+      "manufacturer": "Nord Pool",
+      "model": null,
+      "identifiers": [
+        [
+          "nordpool",
+          "SE3"
+        ]
+      ],
+      "config_entries": [
+        "entry-nordpool-001"
+      ]
+    }
+  ],
+  "services": {
+    "huawei_solar": {
+      "set_tou_periods": {}
+    },
+    "switch": {
+      "turn_on": {},
+      "turn_off": {}
+    }
+  },
+  "price_data": {
+    "today": [
+      1.31563,
+      1.26954,
+      1.26943,
+      1.20354,
+      1.24666,
+      1.23753,
+      1.22158,
+      1.20277,
+      1.18638,
+      1.19914,
+      1.20321,
+      1.19177,
+      1.17571,
+      1.18033,
+      1.19166,
+      1.19166,
+      1.1668,
+      1.21267,
+      1.28252,
+      1.31519,
+      1.22774,
+      1.27768,
+      1.31332,
+      1.44599,
+      1.33851,
+      1.39989,
+      1.41793,
+      1.58107,
+      1.46887,
+      1.45105,
+      1.45864,
+      1.42993,
+      1.53476,
+      1.49527,
+      1.43103,
+      1.30793,
+      1.37855,
+      1.21498,
+      1.10223,
+      0.87991,
+      0.88959,
+      0.78641,
+      0.80599,
+      0.86462,
+      1.0832,
+      0.7434,
+      0.59346,
+      0.51184,
+      0.59104,
+      0.53967,
+      0.60325,
+      0.58796,
+      0.63934,
+      0.56156,
+      0.52548,
+      0.45882,
+      0.52339,
+      0.51008,
+      0.53967,
+      0.62614,
+      0.55452,
+      0.55617,
+      0.65892,
+      0.85384,
+      0.63648,
+      0.78608,
+      0.90565,
+      1.2878,
+      1.21003,
+      1.36667,
+      1.50374,
+      1.59944,
+      1.55907,
+      1.70174,
+      1.9751,
+      2.261,
+      2.17519,
+      1.96476,
+      2.60717,
+      2.5294,
+      2.75106,
+      1.80415,
+      1.6683,
+      1.5825,
+      1.93044,
+      1.69778,
+      1.64421,
+      1.36865,
+      1.54136,
+      1.40913,
+      1.3252,
+      1.25205,
+      1.42993,
+      1.16911,
+      1.10014,
+      1.07055
+    ],
+    "tomorrow": []
+  },
+  "time_segments": [
+    {
+      "start_time": "13:45",
+      "end_time": "13:59",
+      "enabled": true,
+      "is_default": false,
+      "strategic_intent": "GRID_CHARGING",
+      "segment_id": 1
+    },
+    {
+      "start_time": "17:00",
+      "end_time": "17:14",
+      "enabled": true,
+      "is_default": false,
+      "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
+      "segment_id": 2
+    },
+    {
+      "start_time": "17:45",
+      "end_time": "18:29",
+      "enabled": true,
+      "is_default": false,
+      "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
+      "segment_id": 3
+    },
+    {
+      "start_time": "18:45",
+      "end_time": "22:59",
+      "enabled": true,
+      "is_default": false,
+      "strategic_intent": "LOAD_SUPPORT/BATTERY_EXPORT",
+      "segment_id": 4
+    }
+  ],
+  "expected_discovery": {
+    "growatt_found": false,
+    "solax_found": false,
+    "solis_found": false,
+    "huawei_found": true,
+    "nordpool_found": true,
+    "nordpool_area": "SE3",
+    "nordpool_config_entry_id": "entry-nordpool-001",
+    "octopus_found": false,
+    "detected_platform": "huawei_solar_luna2000",
+    "detected_inverter_platforms": [
+      "huawei_solar_luna2000"
+    ],
+    "required_sensors": [
+      "battery_soc",
+      "battery_charge_power",
+      "battery_discharge_power",
+      "battery_charging_power_rate",
+      "battery_discharging_power_rate",
+      "battery_charge_stop_soc",
+      "battery_discharge_stop_soc",
+      "grid_charge",
+      "huawei_working_mode",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "local_load_power",
+      "lifetime_solar_energy",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_import_from_grid",
+      "lifetime_export_to_grid"
+    ],
+    "phase_currents": {
+      "current_l1": "sensor.power_meter_phase_a_current",
+      "current_l2": "sensor.power_meter_phase_b_current",
+      "current_l3": "sensor.power_meter_phase_c_current"
+    }
+  },
+  "inverter_platform": "huawei_solar_luna2000"
+}

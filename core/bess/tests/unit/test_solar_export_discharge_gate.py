@@ -22,10 +22,7 @@ import numpy as np
 import pytest
 
 from core.bess import time_utils
-from core.bess.battery_system_manager import (
-    BatterySystemManager,
-    intra_period_discharge_gate,
-)
+from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import (
     _interpolate_value,
     _record_marginal_value,
@@ -33,6 +30,7 @@ from core.bess.dp_battery_algorithm import (
     optimize_battery_schedule,
 )
 from core.bess.dp_constants import SOE_STEP_KWH
+from core.bess.execution_model import intra_period_discharge_gate
 from core.bess.models import (
     DecisionData,
     EconomicData,

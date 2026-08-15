@@ -65,6 +65,7 @@ from core.bess.dp_constants import (
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
+from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
 from core.bess.models import (
     EconomicData,
     EconomicSummary,
@@ -1173,7 +1174,7 @@ def _run_dynamic_programming(
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     import_cap_kwh: float | None = None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
@@ -1204,7 +1205,7 @@ def _run_dynamic_programming(
     # for the reward/transition primitives, so a top-level import would be
     # circular -- the same arrangement pwl_window_dp already has with this
     # file.
-    from core.bess.action_selector import _discharge_rate_step_kw, _residual_cover_p
+    from core.bess.action_selector import _residual_cover_p
 
     # Set defaults if not provided
     if solar_production is None:
@@ -1248,7 +1249,6 @@ def _run_dynamic_programming(
     discharge_feasible = ~is_discharge | (np.abs(power_row) <= max_discharge_power)
 
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
-    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
 
     # Backward induction
     for t in reversed(range(horizon)):
@@ -1376,7 +1376,7 @@ def _run_dynamic_programming(
         # space. Same feasibility masks as the main grid: available energy,
         # AC-stage headroom, SOE bounds, import cap.
         cover_p = _residual_cover_p(
-            home_consumption[t], solar_production[t], dt, rate_step
+            home_consumption[t], solar_production[t], dt, capabilities, battery_settings
         )
         if cover_p is not None:
             cover_col = np.full_like(soe_col, -cover_p)
@@ -1546,7 +1546,7 @@ def _best_action_at_continuous_state(
     sell_price: list[float],
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float, PeriodFlows, float, float]:
@@ -1597,7 +1597,7 @@ def _best_action_at_continuous_state(
             dt=dt,
             max_charge_power_per_period=max_charge_power_per_period,
             import_cap_kwh=import_cap_kwh,
-            discharge_resolution_kw=discharge_resolution_kw,
+            capabilities=capabilities,
             sell_price_floored=sell_price_floored,
         ),
         battery_settings=battery_settings,
@@ -1872,7 +1872,7 @@ def optimize_battery_schedule(
     terminal_value_per_kwh: float = 0.0,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
@@ -1906,8 +1906,17 @@ def optimize_battery_schedule(
             curtailment will happen on a platform/config that can't actually
             do it would make outcomes worse than leaving the feature off
             (the plan forgoes real defenses against a loss that never gets
-            neutralized). Same call-site pattern as discharge_resolution_kw
-            below. Defaults to False.
+            neutralized). Same call-site pattern as `capabilities` below:
+            the caller reads the platform, the DP is told. Defaults to False.
+        capabilities: What the executing platform can express -- discharge
+            lattice, whether a discharge rate is a ceiling or a target, mode
+            vocabulary, minimum gear (`execution_model.PlatformCapabilities`,
+            Phase 4a / D2). `BatterySystemManager` builds it from the live
+            controller; the default describes the TOU-register platform the DP
+            assumed before 4a, so a caller without hardware plans exactly as
+            it did before. It is one object rather than a kwarg per fact on
+            purpose: two construction sites for the same platform is how the
+            planner and the executor drifted apart in #282/#497/#511/#537.
         home_settings: Home electrical settings (fuse limit, voltage, phases). When
             `power_monitoring_enabled` is set, the DP derives a per-period grid-import
             energy cap and treats it as a hard physical constraint (#429): total import
@@ -1994,7 +2003,7 @@ def optimize_battery_schedule(
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
         import_cap_kwh=import_cap_kwh,
-        discharge_resolution_kw=discharge_resolution_kw,
+        capabilities=capabilities,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -2051,7 +2060,7 @@ def optimize_battery_schedule(
             sell_price=reward_sell_price,
             cost_basis=current_cost_basis,
             max_charge_power_per_period=max_charge_power_per_period,
-            discharge_resolution_kw=discharge_resolution_kw,
+            capabilities=capabilities,
             import_cap_kwh=import_cap_kwh,
             sell_price_floored=sell_price_floored,
         )
@@ -2180,7 +2189,7 @@ def optimize_battery_schedule(
                 dt=dt,
                 end_soe_target=soe_trajectory[window.end],
                 max_charge_power_per_period=window_max_charge,
-                discharge_resolution_kw=discharge_resolution_kw,
+                capabilities=capabilities,
                 import_cap_kwh=import_cap_kwh,
             )
             window_floored = (
@@ -2198,7 +2207,7 @@ def optimize_battery_schedule(
                 dt=dt,
                 cost_basis=cost_basis_trajectory[window.start],
                 max_charge_power_per_period=window_max_charge,
-                discharge_resolution_kw=discharge_resolution_kw,
+                capabilities=capabilities,
                 import_cap_kwh=import_cap_kwh,
                 sell_price_floored=window_floored,
             )

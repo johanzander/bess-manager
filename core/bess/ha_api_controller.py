@@ -10,6 +10,7 @@ import re
 import ssl
 import time
 import urllib.parse
+from functools import partial
 from typing import ClassVar
 
 import requests
@@ -877,8 +878,8 @@ class HomeAssistantAPIController:
     # f"{device.serial_number}_{register_key}" — verified against
     # wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200.
     # Lifetime energy register keys verified against
-    # wlcrs/huawei-solar-lib register_names.py/sensor.py: accumulated_yield_energy
-    # (inverter), storage_total_charge/storage_total_discharge (battery),
+    # wlcrs/huawei-solar-lib register_names.py/sensor.py: total_dc_input_power
+    # (inverter PV total, see #569 below), storage_total_charge/storage_total_discharge (battery),
     # grid_exported_energy/grid_accumulated_energy (separate power-meter device,
     # so these two resolve to "not configured" on meterless installs).
     # input_power (inverter, real-time PV) and power_meter_active_power
@@ -900,7 +901,17 @@ class HomeAssistantAPIController:
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
         "active_power": "local_load_power",
-        "accumulated_yield_energy": "lifetime_solar_energy",
+        # PV production, NOT accumulated_yield_energy (#569).  That register
+        # (32106, "Total yield") is the inverter's accumulated AC *output*:
+        # on a LUNA2000 hybrid it rises while the battery discharges and
+        # misses whatever charged it, so feeding it to
+        # derive_load_consumption inflates home consumption by
+        # (battery_discharged - solar_to_battery) with no visible error.
+        # 32108 "Total DC input energy" is the lifetime integral of 32064,
+        # which is already mapped to pv_power below -- DC-side, so it
+        # excludes conversion losses, but Huawei exposes no AC-side PV
+        # total at all (wlcrs/huawei_solar README FAQ).
+        "total_dc_input_power": "lifetime_solar_energy",
         "storage_total_charge": "lifetime_battery_charged",
         "storage_total_discharge": "lifetime_battery_discharged",
         "grid_exported_energy": "lifetime_export_to_grid",
@@ -980,6 +991,46 @@ class HomeAssistantAPIController:
             return False
         return True
 
+    def _signed_split_state(self, method_name: str, state):
+        """Apply the signed split to a raw entity state, for diagnostics.
+
+        get_method_sensor_info reads /api/states/{entity_id} directly rather
+        than going through the getters, so on a platform whose charge and
+        discharge (or import and export) keys resolve to ONE signed entity it
+        would report the same raw signed value for both — e.g. -800 for both
+        "Battery Charging Power" and "Battery Discharging Power" on a native
+        SolaX discharging at 800 W. Reuses the getters' own split predicates
+        instead of re-deriving the polarity here.
+
+        Returns the state unchanged for every other method, for a platform
+        with two real entities, or for a state that isn't numeric.
+        """
+        if method_name in ("get_battery_charge_power", "get_battery_discharge_power"):
+            if not self._is_shared_signed_battery_power():
+                return state
+            split = partial(
+                self._split_signed_battery_power,
+                charging=method_name == "get_battery_charge_power",
+            )
+        elif method_name in ("get_import_power", "get_export_power"):
+            if not self._is_shared_signed_grid_power():
+                return state
+            split = partial(
+                self._split_signed_grid_power,
+                importing=method_name == "get_import_power",
+            )
+        else:
+            return state
+
+        try:
+            raw = float(state)
+        except (TypeError, ValueError):
+            return state
+        # .10g, not .g: the default 6 significant digits would round a raw
+        # state like "12345.678" to "12345.7" and switch to scientific
+        # notation above 1e6, silently degrading a diagnostic reading.
+        return f"{split(raw):.10g}"
+
     def get_method_sensor_info(self, method_name: str) -> dict:
         """Get sensor configuration info for a controller method."""
         method_info = self.METHOD_SENSOR_MAP.get(method_name)
@@ -1040,7 +1091,17 @@ class HomeAssistantAPIController:
                     }
                 )
             else:
-                result.update({"status": "ok", "current_value": response.get("state")})
+                state = response.get("state")
+                # Caught separately from the outer handler: an unknown polarity
+                # is a configuration fault, and reporting it as a connectivity
+                # error ("Failed to check entity") would hide exactly the loud
+                # failure _split_signed_battery_power raises to produce.
+                try:
+                    current_value = self._signed_split_state(method_name, state)
+                except ValueError as e:
+                    result.update({"status": "error", "error": str(e)})
+                else:
+                    result.update({"status": "ok", "current_value": current_value})
         except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
@@ -1095,10 +1156,11 @@ class HomeAssistantAPIController:
             context: Optional dict of contextual parameters for failure diagnostics
             optional: If True, a 404 is expected (e.g. probing a legacy/disabled
                 entity) and is logged at debug level instead of error
-            suppress_retry_warnings: If True, retry/failure logging is downgraded
-                to debug/info (e.g. Nordpool tomorrow-price calls before the
+            suppress_retry_warnings: If True, the failure is an expected
+                condition (e.g. Nordpool tomorrow-price calls before the
                 provider has published data — an expected daily condition, not
-                an error)
+                an error): retry/failure logging is downgraded to debug/info and
+                no runtime failure is recorded
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -1169,8 +1231,11 @@ class HomeAssistantAPIController:
                         str(e),
                     )
 
-                    # Record runtime failure if failure tracker is available
-                    if self.failure_tracker:
+                    # Record runtime failure if failure tracker is available.
+                    # A suppressed failure is an expected condition (see
+                    # suppress_retry_warnings above) — recording it would surface
+                    # a routine daily event as a user-visible failure (#583).
+                    if self.failure_tracker and not suppress_retry_warnings:
                         # Use provided operation/category or fall back to generic description
                         operation_description = operation or f"{method.upper()} {path}"
                         operation_category = category or "other"
@@ -1474,13 +1539,31 @@ class HomeAssistantAPIController:
             and charge_entity == discharge_entity
         )
 
+    def _split_signed_battery_power(self, raw: float, *, charging: bool) -> float:
+        """Split one signed battery reading into the requested direction.
+
+        Branches on battery_power_polarity rather than assuming it, so that an
+        unimplemented or typo'd entry in PLATFORM_BATTERY_POWER_POLARITY fails
+        loudly instead of reporting every charge as a discharge and vice versa.
+        "charge_positive" is the only value that map holds today.
+
+        Raises:
+            ValueError: If battery_power_polarity is not a recognised value.
+        """
+        if self.battery_power_polarity != "charge_positive":
+            raise ValueError(
+                f"Unknown battery_power_polarity '{self.battery_power_polarity}' — "
+                "cannot split the signed battery power sensor"
+            )
+        return max(0.0, raw if charging else -raw)
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
         if self._is_shared_signed_battery_power():
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, raw)  # charge_positive
+            return self._split_signed_battery_power(raw, charging=True)
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
@@ -1489,7 +1572,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("battery_charge_power")
             if raw is None:
                 return None
-            return max(0.0, -raw)  # charge_positive
+            return self._split_signed_battery_power(raw, charging=False)
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -2564,15 +2647,22 @@ class HomeAssistantAPIController:
             and import_entity == export_entity
         )
 
+    def _split_signed_grid_power(self, raw: float, *, importing: bool) -> float:
+        """Split one signed grid reading into the requested direction.
+
+        Anything that is not "import_positive" is treated as
+        "export_positive" — the two values PLATFORM_GRID_POWER_POLARITY holds.
+        """
+        positive_is_import = self.grid_power_polarity == "import_positive"
+        return max(0.0, raw if importing == positive_is_import else -raw)
+
     def get_import_power(self):
         """Get current grid import power in watts."""
         if self._is_shared_signed_grid_power():
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, raw)
-            return max(0.0, -raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=True)
         return self._get_sensor_value("import_power")
 
     def get_export_power(self):
@@ -2581,9 +2671,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, -raw)
-            return max(0.0, raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=False)
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):
@@ -3266,7 +3354,56 @@ class HomeAssistantAPIController:
         """Discover phase current sensor entity IDs.
 
         Scans entity states for sensors with device_class 'current' that
-        match household phase current naming (L1/L2/L3).
+        match household phase current naming, in two conventions:
+
+        - ``current_l1``/``l2``/``l3`` (Tibber Pulse, Shelly 3EM, ...).
+        - ``phase_a``/``b``/``c`` on a *metering* device (#120). huawei_solar
+          names its three-phase meter's currents "Phase A/B/C current"
+          (register keys ``active_grid_{A,B,C}_current``), which yields
+          ``sensor.power_meter_phase_a_current``. The inverter's own AC output
+          currents carry the identical display name and differ only by device
+          prefix, so the phase_a/b/c form is only accepted on an entity whose
+          id also marks it as a meter — binding fuse protection to the
+          inverter's output instead of the house feed would silently protect
+          the wrong circuit.
+
+        Candidates are grouped by the device their entity_id belongs to (the
+        entity id with its phase token blanked, see
+        ``_phase_current_group_id``), and one group supplies every phase. Only
+        groups exposing a set the rest of the system can act on —
+        ``USABLE_PHASE_SETS`` — are eligible; the alternative is handing the
+        wizard a two-phase count it rejects, or a set without L1 that makes
+        PowerMonitor raise on every quarter. ``meter`` is a bare substring, so a
+        sub-circuit meter (heat pump, EV charger) passes the gate too;
+        selecting per phase independently would mix two devices into a reading
+        set describing no real circuit. Preference, in order:
+
+        1. The most phases. A one-phase EV-charger clamp must never beat a
+           complete three-phase meter — the wizard derives the install's
+           phase count from this result, so a short group silently configures
+           single-phase fuse protection on a three-phase house.
+        2. The explicit ``current_lN`` convention over inferred ``phase_a/b/c``
+           naming. This matters on upgrade: an install with a dedicated clamp
+           meter keeps it rather than repointing at a newly-discovered smart
+           meter.
+        3. A grid-side name (``GRID_ID_MARKERS``). Between two equally
+           complete meters, ``power_meter`` is the house feed and
+           ``easee_meter``/``heatpump_meter`` a sub-circuit carrying a
+           fraction of it — binding to the latter under-protects the main
+           fuse, which then trips without BESS ever throttling.
+        4. Lowest group id, purely so the result is reproducible — never
+           ``/api/states`` order, which is arbitrary and varies across
+           restarts.
+
+        A lone sub-circuit meter can still win when it is the only complete
+        set and its name carries no grid marker; the wizard lets the user
+        correct that, and such entities cannot be told apart by name alone on
+        a discovery path with no unique_id suffix map. Phase count is
+        deliberately ranked above the grid-side name, so a grid-named
+        *single-phase* clamp loses to a complete three-phase sub-circuit set:
+        the two orderings cannot both hold, and the alternative reinstates the
+        worse failure — a one-phase group setting the wizard's phase count on
+        a three-phase house.
 
         Args:
             states: List of state dicts from /api/states
@@ -3275,7 +3412,8 @@ class HomeAssistantAPIController:
             dict mapping phase key ('current_l1', 'current_l2', 'current_l3') ->
             entity_id for detected sensors. Empty dict if none found.
         """
-        result: dict[str, str] = {}
+        # group_id -> (convention_rank, {phase_key: entity_id})
+        groups: dict[str, tuple[int, dict[str, str]]] = {}
         for state in states:
             entity_id = str(state.get("entity_id", ""))
             if not entity_id.startswith("sensor."):
@@ -3284,15 +3422,118 @@ class HomeAssistantAPIController:
             if attrs.get("device_class") != "current":
                 continue
             lower_id = entity_id.lower()
-            if "current_l1" in lower_id and "current_l1" not in result:
-                result["current_l1"] = entity_id
-            elif "current_l2" in lower_id and "current_l2" not in result:
-                result["current_l2"] = entity_id
-            elif "current_l3" in lower_id and "current_l3" not in result:
-                result["current_l3"] = entity_id
+            matched = self._match_phase_current_key(lower_id)
+            if not matched:
+                continue
+            key, pattern, rank = matched
+            group_id = self._phase_current_group_id(lower_id, pattern)
+            _, phases = groups.setdefault(group_id, (rank, {}))
+            phases.setdefault(key, entity_id)
 
+        usable = {
+            gid: value
+            for gid, value in groups.items()
+            if set(value[1]) in self.USABLE_PHASE_SETS
+        }
+        if not usable:
+            if groups:
+                logger.info(
+                    "Phase currents: %d candidate device(s), none exposing a "
+                    "usable phase set (L1, or L1+L2+L3): %s",
+                    len(groups),
+                    ", ".join(sorted(groups)),
+                )
+            logger.info("Discovered 0 phase current sensor(s)")
+            return {}
+
+        group_id, (_, result) = min(
+            usable.items(),
+            key=lambda kv: (
+                -len(kv[1][1]),
+                kv[1][0],
+                self._grid_side_rank(kv[0]),
+                kv[0],
+            ),
+        )
+        if len(usable) > 1:
+            logger.info(
+                "Phase currents: %d candidate device(s), selected %s",
+                len(usable),
+                group_id,
+            )
         logger.info("Discovered %d phase current sensor(s)", len(result))
-        return result
+        return dict(result)
+
+    # Household phase-current naming conventions: (pattern, phase key,
+    # meter-gated, convention rank). Lower rank wins when one install exposes
+    # both conventions — the explicit current_lN form is a deliberate
+    # household-phase naming, phase_a/b/c is inferred from a meter's own
+    # per-phase registers. The phase_a/b/c form is meter-gated; see
+    # discover_current_sensors.
+    PHASE_CURRENT_PATTERNS: ClassVar[tuple[tuple[str, str, bool, int], ...]] = (
+        ("current_l1", "current_l1", False, 0),
+        ("current_l2", "current_l2", False, 0),
+        ("current_l3", "current_l3", False, 0),
+        ("phase_a", "current_l1", True, 1),
+        ("phase_b", "current_l2", True, 1),
+        ("phase_c", "current_l3", True, 1),
+    )
+
+    # Entity-id marker identifying a metering device, used to keep the
+    # phase_a/b/c form off the inverter's own output currents.
+    METER_ID_MARKER: ClassVar[str] = "meter"
+
+    # Entity-id markers naming the *house feed* rather than a sub-circuit.
+    # Only used to break a tie between equally complete candidate groups; see
+    # discover_current_sensors.
+    GRID_ID_MARKERS: ClassVar[tuple[str, ...]] = ("power_meter", "grid")
+
+    # The only phase sets the rest of the system can act on: the wizard
+    # accepts a detected phase count of 1 or 3 and nothing else, and
+    # PowerMonitor reads current_l1 unconditionally. A group missing L1, or
+    # holding exactly two phases, would configure fuse protection that raises
+    # on every quarter — reporting nothing found is the honest outcome.
+    USABLE_PHASE_SETS: ClassVar[tuple[frozenset[str], ...]] = (
+        frozenset({"current_l1"}),
+        frozenset({"current_l1", "current_l2", "current_l3"}),
+    )
+
+    def _grid_side_rank(self, group_id: str) -> int:
+        """0 when a candidate group's id names the house feed, else 1."""
+        return 0 if any(m in group_id for m in self.GRID_ID_MARKERS) else 1
+
+    def _phase_current_group_id(self, lower_id: str, pattern: str) -> str:
+        """Identify the device a phase-current entity belongs to.
+
+        The entity id with its phase token blanked out. HA appends ``_2`` to
+        an entity id that collides with an existing one, which happens per
+        entity and so can hit a single phase of an otherwise uniform set
+        (``..._current_l3_2``); that suffix is stripped, or the meter would
+        split into two groups and lose the phases it really has.
+        """
+        return re.sub(r"_\d+$", "", lower_id.replace(pattern, "*"))
+
+    def _match_phase_current_key(self, lower_id: str) -> tuple[str, str, int] | None:
+        """Match a current sensor's entity_id to a phase.
+
+        Returns (phase_key, matched_pattern, convention_rank), or None. The
+        pattern is returned so the caller can derive the owning device's group
+        id by blanking it out of the entity_id.
+
+        Patterns match on token boundaries, not bare substrings: a meter that
+        exposes line-to-line currents names them ``phase_ab``, which must not
+        be read as phase A.
+        """
+        is_meter = self.METER_ID_MARKER in lower_id
+        for pattern, key, meter_only, rank in self.PHASE_CURRENT_PATTERNS:
+            if not re.search(
+                rf"(?<![a-z0-9]){re.escape(pattern)}(?![a-z0-9])", lower_id
+            ):
+                continue
+            if meter_only and not is_meter:
+                continue
+            return key, pattern, rank
+        return None
 
     def _match_optional_sensor(
         self, entity_id: str, lower_id: str

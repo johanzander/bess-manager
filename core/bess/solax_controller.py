@@ -55,6 +55,12 @@ class SolaxController(InverterController):
     # never a load-following ceiling. See #324.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    # LOAD_SUPPORT is a forced -(rate% x max_discharge) here: SolaX never
+    # received the #413 remote-control release that makes solax_modbus's VPP
+    # mode load-follow that intent (see _vpp_display_state's gap note), so a
+    # planned partial cover is NOT delivered as min(plan, actual load).
+    load_support_delivers_exact_cover: ClassVar[bool] = False
+
     CONTROL_MODEL: ClassVar[str] = "vpp_power"
 
     def __init__(self, battery_settings: BatterySettings) -> None:

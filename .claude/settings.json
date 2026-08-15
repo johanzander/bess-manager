@@ -1,5 +1,26 @@
 {
+  "sandbox": {
+    "enabled": true,
+    "autoAllowBashIfSandboxed": true,
+    "enableWeakerNetworkIsolation": true,
+    "network": {
+      "allowLocalBinding": true,
+      "allowMachLookup": [
+        "com.apple.SecurityServer",
+        "com.apple.securityd",
+        "com.apple.trustd",
+        "com.apple.trustd.agent"
+      ]
+    },
+    "filesystem": {
+      "allowWrite": [
+        ".",
+        "~/GitHub/bess-manager"
+      ]
+    }
+  },
   "permissions": {
+    "defaultMode": "auto",
     "allow": [
       "Read",
       "Skill",
@@ -19,7 +40,6 @@
       "Bash(podman machine stop)",
       "Bash(podman-compose *)",
       "Bash(git commit *)",
-      "Bash(git push *)",
       "Bash(git merge --ff-only *)",
       "Bash(gh issue view *)",
       "Bash(gh issue edit *)",
@@ -34,16 +54,72 @@
       "Bash(podman machine rm *)",
       "Bash(podman machine rm)",
       "Bash(podman system reset *)",
-      "Bash(podman system reset)"
+      "Bash(podman system reset)",
+      "Bash(git stash)",
+      "Bash(git stash push)",
+      "Bash(git stash push *)",
+      "Bash(git stash save)",
+      "Bash(git stash save *)",
+      "Bash(git stash pop)",
+      "Bash(git stash pop *)",
+      "Bash(git stash apply)",
+      "Bash(git stash apply *)",
+      "Bash(git stash drop)",
+      "Bash(git stash drop *)",
+      "Bash(git stash clear)",
+      "Bash(git stash branch *)",
+      "Bash(git stash create)",
+      "Bash(git stash store *)",
+      "Bash(git stash -*)",
+      "Bash(git stash --*)",
+      "Bash(git -* stash)",
+      "Bash(git -* stash -*)",
+      "Bash(git -* stash --*)",
+      "Bash(git -* stash push*)",
+      "Bash(git -* stash save*)",
+      "Bash(git -* stash pop*)",
+      "Bash(git -* stash apply*)",
+      "Bash(git -* stash drop*)",
+      "Bash(git -* stash clear*)",
+      "Bash(git -* stash branch*)",
+      "Bash(git -* stash create*)",
+      "Bash(git -* stash store*)"
     ],
     "ask": [
-      "Bash(git reset *)",
-      "Bash(git rebase *)",
-      "Bash(git merge *)",
-      "Bash(rm *)",
-      "Bash(rm -rf *)",
-      "Bash(git push --force *)",
-      "Bash(git reset --hard *)"
+      "Bash(git push)",
+      "Bash(git push *)",
+      "Bash(git -* push*)",
+      "Bash(gh api)",
+      "Bash(gh api *)",
+      "Bash(gh pr merge*)",
+      "Bash(gh release*)",
+      "Bash(gh repo edit*)",
+      "Bash(gh repo delete*)",
+      "Bash(gh pr close*)",
+      "Bash(gh issue delete*)",
+      "Bash(gh cache delete*)",
+      "Bash(gh secret*)",
+      "Bash(gh workflow run*)",
+      "Bash(git gc*)",
+      "Bash(git prune*)",
+      "Bash(git repack*)",
+      "Bash(git maintenance*)",
+      "Bash(git reflog expire*)",
+      "Bash(git reflog delete*)",
+      "Bash(git update-ref*)",
+      "Bash(git tag -d*)",
+      "Bash(git tag --delete*)",
+      "Bash(git tag -f*)",
+      "Bash(git -* gc*)",
+      "Bash(git -* repack*)",
+      "Bash(git -* maintenance*)",
+      "Bash(git -* reflog expire*)",
+      "Bash(git -* reflog delete*)",
+      "Bash(git -* update-ref*)",
+      "Bash(git -* tag -d*)",
+      "Bash(git -* tag --delete*)",
+      "Bash(git -* tag -f*)",
+      "Bash(sudo *)"
     ]
   },
   "enabledPlugins": {
@@ -57,10 +133,6 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/pretest-on-commit.sh\""
-          },
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/auto-allow-worktree-destructive.sh\""
           }
         ]
       },
@@ -75,27 +147,6 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/optimizer_core_principles.py\"",
             "statusMessage": "Checking optimizer-core principles"
-          }
-        ]
-      }
-    ],
-    "WorktreeCreate": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/link-worktree-local-settings.sh\"",
-            "statusMessage": "Linking local settings into the worktree"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || echo .)}/.claude/hooks/link-worktree-local-settings.sh\""
           }
         ]
       }

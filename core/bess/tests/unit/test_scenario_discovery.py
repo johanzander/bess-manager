@@ -234,6 +234,23 @@ class TestScenarioDiscovery:
                 f"entity_id {entity_id!r}"
             )
 
+    # -- Phase current sensors (states-based, not registry-based) -------------
+
+    def test_phase_currents_discovered(self, scenario_name, monkeypatch):
+        """Household phase currents resolve exactly as the scenario declares.
+
+        Opt-in via an ``expected_discovery.phase_currents`` map. Equality, not
+        containment: a scenario whose states also carry the *inverter's* own
+        output currents (huawei_solar gives both the identical display name)
+        must not pick those up for grid-fuse protection — issue #120.
+        """
+        expected, _, _, _, states = self._run(scenario_name, monkeypatch)
+        if "phase_currents" not in expected:
+            pytest.skip("no phase_currents defined")
+
+        ctrl = HomeAssistantAPIController.__new__(HomeAssistantAPIController)
+        assert ctrl.discover_current_sensors(states) == expected["phase_currents"]
+
 
 # ---------------------------------------------------------------------------
 # Huawei LUNA2000: full discover_integrations() end-to-end test

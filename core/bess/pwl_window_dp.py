@@ -16,7 +16,6 @@ import numpy as np
 from core.bess.action_selector import (
     PeriodInputs,
     _discharge_is_unexecutable,
-    _discharge_rate_step_kw,
     _residual_cover_p,
     select_action,
 )
@@ -34,6 +33,7 @@ from core.bess.dp_constants import (
     SOE_STEP_KWH,
 )
 from core.bess.exceptions import PWLEndSoeOutOfRangeError, PWLWindowUnderRefinedError
+from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -80,7 +80,7 @@ def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):
 
 def _backward_discharge_levels(
     battery_settings: BatterySettings,
-    discharge_resolution_kw: float | None,
+    capabilities: PlatformCapabilities,
 ) -> np.ndarray:
     """Discharge power levels (kW, positive) for the backward pass: the same
     hardware-true integer-percent grid `_discharge_candidates` enumerates at
@@ -88,9 +88,9 @@ def _backward_discharge_levels(
     set in both passes is what makes the replayed schedule achieve exactly
     the value the backward pass promised (no snap/interpolation residual for
     replay to fall short of)."""
-    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
+    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     max_pct = int(np.floor(battery_settings.max_discharge_power_kw / rate_step + 1e-9))
-    min_pct = int(np.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step)) + 1
+    min_pct = capabilities.min_discharge_gear_index(battery_settings)
     return np.array([pct * rate_step for pct in range(min_pct, max_pct + 1)])
 
 
@@ -104,7 +104,7 @@ def _pwl_candidate_values_at(
     dt: float,
     period_max_charge: float | None,
     import_cap_kwh: float | None = None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
 ) -> np.ndarray:
     """Best achievable value at each SOE in `X` for period `t`: max over the
     shared action set (IDLE, STORE, discharge grid) plus the
@@ -121,7 +121,7 @@ def _pwl_candidate_values_at(
     max_soe = battery_settings.max_soe_kwh
     soe_col = X.reshape(-1, 1)
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
-    rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
+    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
 
     # Residual load-cover candidate (#466 follow-up): the replay's
     # `_discharge_candidates` offers it per period, so this pass must value
@@ -129,7 +129,9 @@ def _pwl_candidate_values_at(
     # and the `_discharge_is_unexecutable` mask below exist to uphold. It is
     # per-period (the deficit is), so it extends the window-wide `power_row`
     # here rather than in `_backward_discharge_levels`.
-    cover_p = _residual_cover_p(home_consumption[t], solar_production[t], dt, rate_step)
+    cover_p = _residual_cover_p(
+        home_consumption[t], solar_production[t], dt, capabilities, battery_settings
+    )
     power_row = np.asarray(power_row).reshape(1, -1)
     is_cover_row = np.zeros((1, power_row.shape[1] + (cover_p is not None)), dtype=bool)
     if cover_p is not None:
@@ -325,7 +327,7 @@ def _pwl_best_action_at_continuous_state(
     sell_price: list[float],
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float, PeriodFlows]:
@@ -365,7 +367,7 @@ def _pwl_best_action_at_continuous_state(
             dt=dt,
             max_charge_power_per_period=max_charge_power_per_period,
             import_cap_kwh=import_cap_kwh,
-            discharge_resolution_kw=discharge_resolution_kw,
+            capabilities=capabilities,
             sell_price_floored=sell_price_floored,
         ),
         battery_settings=battery_settings,
@@ -424,7 +426,7 @@ def _end_soe_pin_tolerance(
     end_soe_tolerance: float,
     battery_settings: BatterySettings,
     dt: float,
-    discharge_resolution_kw: float | None,
+    capabilities: PlatformCapabilities,
 ) -> float:
     """The pin's half-width, floored at half the discharge action lattice's
     SOE step.
@@ -441,11 +443,7 @@ def _end_soe_pin_tolerance(
     land inside the band, so the penalty is exactly 0 across the whole
     reachable region and economics decides, as intended.
     """
-    rate_step = (
-        discharge_resolution_kw
-        if discharge_resolution_kw is not None
-        else battery_settings.max_discharge_power_kw / 100
-    )
+    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     lattice_step_kwh = rate_step * dt / battery_settings.efficiency_discharge
     return max(float(end_soe_tolerance), lattice_step_kwh / 2)
 
@@ -512,7 +510,7 @@ def _pwl_window_seed_points(
     dt: float,
     home_consumption: list[float],
     solar_production: list[float],
-    discharge_resolution_kw: float | None,
+    capabilities: PlatformCapabilities,
 ) -> np.ndarray:
     """Initial breakpoint candidates for V[t]: V[t+1]'s breakpoints and their
     one-step preimages under the translation-like actions (STORE, IDLE with
@@ -561,16 +559,15 @@ def _pwl_window_seed_points(
         )
     )
     discharge_energy = (
-        _backward_discharge_levels(battery_settings, discharge_resolution_kw)
+        _backward_discharge_levels(battery_settings, capabilities)
         * dt
         / battery_settings.efficiency_discharge
     )
     # The residual load-cover candidate (#466 follow-up) is one more
     # translation-like discharge this period may offer -- seed its preimage
     # kinks too, for the same speed reason as the lattice levels below.
-    seed_rate_step = _discharge_rate_step_kw(discharge_resolution_kw, battery_settings)
     cover_p = _residual_cover_p(
-        home_consumption[t], solar_production[t], dt, seed_rate_step
+        home_consumption[t], solar_production[t], dt, capabilities, battery_settings
     )
     if cover_p is not None:
         discharge_energy = np.append(
@@ -613,7 +610,7 @@ def run_pwl_window_backward_induction(
     end_soe_target: float,
     end_soe_tolerance: float = 1e-6,
     max_charge_power_per_period: list[float] | None = None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     import_cap_kwh: float | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Exact PWL backward induction over a short sub-horizon window whose end
@@ -667,7 +664,7 @@ def run_pwl_window_backward_induction(
     power_row = np.concatenate(
         (
             [0.0],
-            _backward_discharge_levels(battery_settings, discharge_resolution_kw) * -1,
+            _backward_discharge_levels(battery_settings, capabilities) * -1,
             # Single representative STORE candidate: charge physics are
             # binary (see `_charge_candidate`), and POWER_STEP_KW is the
             # exact value replay's `_charge_candidate` returns.
@@ -678,9 +675,7 @@ def run_pwl_window_backward_induction(
     V: list[tuple[np.ndarray, np.ndarray]] = [None] * (window_horizon + 1)  # type: ignore[list-item]
     V[window_horizon] = _pinned_terminal_row(
         end_soe_target,
-        _end_soe_pin_tolerance(
-            end_soe_tolerance, battery_settings, dt, discharge_resolution_kw
-        ),
+        _end_soe_pin_tolerance(end_soe_tolerance, battery_settings, dt, capabilities),
         battery_settings,
     )
 
@@ -703,7 +698,7 @@ def run_pwl_window_backward_induction(
                 dt,
                 _pmc,
                 import_cap_kwh,
-                discharge_resolution_kw,
+                capabilities,
             )
 
         X = _pwl_window_seed_points(
@@ -713,7 +708,7 @@ def run_pwl_window_backward_induction(
             dt,
             home_consumption,
             solar_production,
-            discharge_resolution_kw,
+            capabilities,
         )
         V_t = values_at(X)
         converged = False
@@ -818,7 +813,7 @@ def resolve_pwl_window(
     dt: float,
     cost_basis: float,
     max_charge_power_per_period: list[float] | None = None,
-    discharge_resolution_kw: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> list[tuple[float, float, PeriodFlows]]:
@@ -868,7 +863,7 @@ def resolve_pwl_window(
             sell_price=sell_price,
             cost_basis=basis,
             max_charge_power_per_period=max_charge_power_per_period,
-            discharge_resolution_kw=discharge_resolution_kw,
+            capabilities=capabilities,
             import_cap_kwh=import_cap_kwh,
             sell_price_floored=sell_price_floored,
         )

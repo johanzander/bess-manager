@@ -21,6 +21,7 @@ from core.bess.models import (  # noqa: E402
     PeriodData,
 )
 from core.bess.settings_store import SettingsStore  # noqa: E402
+from core.bess.tests.helpers import empty_slot_table  # noqa: E402
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -130,6 +131,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         }
         self._growatt_export_limit_curtailed: bool = False
         self._growatt_vpp_status_state: str = "Disabled"
+        self._growatt_vpp_allow_ac_charging_state: str = "Disabled"
         self._growatt_vpp_remote_control_state: str | None = None
 
     # Required methods for Home Assistant Controller interface
@@ -254,8 +256,14 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         return None
 
     def read_inverter_time_segments(self):
-        """Read current TOU segments from inverter."""
-        return []
+        """Read current TOU segments from inverter.
+
+        A MIN inverter always reports all 9 slots; unused ones come back
+        disabled. Returning [] would mean "read failed" to the controller
+        (see growatt_min_controller.sync_to_hardware), which is not what
+        an idle mock inverter represents.
+        """
+        return empty_slot_table()
 
     # Growatt solax_modbus TOU entity methods (used by SolaxModbusGrowattController)
 
@@ -361,6 +369,7 @@ class MockHomeAssistantController(HomeAssistantAPIController):
 
     def set_growatt_vpp_allow_ac_charging(self, enabled: bool) -> None:
         """Record Growatt VPP AC-charging write."""
+        self._growatt_vpp_allow_ac_charging_state = "Enabled" if enabled else "Disabled"
         self.calls["growatt_vpp_allow_ac_charging"].append(enabled)
 
     def set_growatt_vpp_period(
@@ -390,6 +399,10 @@ class MockHomeAssistantController(HomeAssistantAPIController):
     def get_growatt_vpp_remote_control(self) -> str | None:
         """Return mock Growatt VPP Remote Control state."""
         return self._growatt_vpp_remote_control_state
+
+    def get_growatt_vpp_allow_ac_charging(self) -> str | None:
+        """Return mock Growatt VPP allow-AC-charging state."""
+        return self._growatt_vpp_allow_ac_charging_state
 
     def get_statistics_during_period(
         self, statistic_ids, start_time, end_time=None, period="hour", types=None

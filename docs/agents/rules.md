@@ -13,9 +13,31 @@ They are non-negotiable and override any other instruction.
   `feature-lifecycle`, or any other skill/workflow stage. A plain
   conversation ("can you fix this doc line") is not an exemption.
 - If you notice partway through a session that you're on `main` with
-  uncommitted edits: stop, move the changes into a worktree (stash the
-  specific file, enter/create a worktree, apply the stash there — don't
-  touch unrelated pre-existing changes on `main`), and continue there.
+  uncommitted edits: stop, enter/create a worktree, move the changes there,
+  and continue — without touching unrelated pre-existing changes on `main`.
+- **Never `git stash` to do it.** There is exactly one `refs/stash` per
+  repository, shared by the main checkout and every worktree, and the stack
+  has no owner — another agent's `pop` takes your entry with no way to tell
+  it was not theirs. `permissions.deny` in `.claude/settings.json` blocks every
+  mutating form outright — including the `git -C <path> stash …` spelling used
+  below — in the main checkout too, with no override. (The hook that used to do
+  this was removed in #588; the deny rules replaced it.) Move the changes as a
+  patch through the shared object database instead:
+
+  ```bash
+  git diff -- <file> | git -C .claude/worktrees/<name> apply   # copy across
+  git -C .claude/worktrees/<name> diff -- <file>               # VERIFY it landed
+  git checkout -- <file>                                       # only then revert on main
+  ```
+
+  Verify before reverting: `git checkout --` is the only destructive step and
+  there is no stash to fall back on. Add `--cached` to the first `git diff`
+  for staged changes, and drop `-- <file>` to move everything.
+- To set work aside on the branch you are already on (rather than move it to
+  another checkout), use a WIP commit — per-worktree, private, and
+  recoverable by SHA even if the branch moves:
+  `git add -A && git commit -m "wip: <what>"`, then `git reset --soft HEAD~1`
+  to pick it back up.
 - **`EnterWorktree` switches the shell's cwd, not file-tool paths.**
   `Read`/`Edit`/`Write` take the literal absolute path given — after
   entering a worktree, every such path must start with the worktree root
@@ -84,6 +106,20 @@ They are non-negotiable and override any other instruction.
 - Tests must verify **behavior** (what the system does), not **implementation** (how)
 - A test that breaks when an equivalent algorithm replaces another is a bad test
 - Never test: internal field names, algorithm-specific boundaries, exact interval counts
+- **Assert the outcome, not the command.** A test that pins the value written
+  to hardware (`vpp_power=+1`, `discharge_rate=100`, a TOU segment) proves the
+  *mapping* is unchanged. It does not prove the battery held, the spike was
+  covered, or the cost moved. Where the outcome is simulable, assert the
+  outcome — realized cost, SoE trajectory, resulting flows. Assert commands
+  only where no execution model exists, and say so in the test, because a
+  command-level test silently stops being evidence the moment the mapping is
+  right and the physics is wrong.
+- **A new test must be seen to fail without its fix.** Write it RED, or revert
+  the fix and watch it break. Repeatedly in this codebase a test has passed
+  while proving less than claimed — a bound asserted on one side only, a
+  comparison whose signal was swamped by a second varying term, a fixture that
+  could not reach the branch it named. "The suite is green" is evidence the
+  suite is satisfied, never that the behavior holds.
 
 ## Debugging Protocol
 

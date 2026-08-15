@@ -13,7 +13,7 @@ communication.
 | Growatt SPH (Cloud) | Growatt SPH | [Growatt Server](https://www.home-assistant.io/integrations/growatt_server/) | Cloud API | AC charge/discharge periods | — |
 | Growatt MIX/SPH (Local) | Growatt MIX/SPA/SPH | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) Growatt plugin | Local Modbus | Mode-specific time slots | GEN3 |
 | SolaX | SolaX hybrid | [solax_modbus](https://github.com/wills106/homeassistant-solax-modbus) | Local Modbus | VPP active-power commands | — |
-| Solis (EXPERIMENTAL) | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
+| Solis | Solis hybrid | [solis_modbus](https://github.com/Pho3niX90/solis_modbus) | Local Modbus | Grid Time of Use v2 (6 charge + 6 discharge periods) | — |
 | Huawei LUNA2000 (Local) | Huawei LUNA2000 | [huawei_solar](https://github.com/wlcrs/huawei_solar) | Local Modbus | TOU period-list writes | — |
 
 > **solax_modbus generation mapping:** The `wills106/homeassistant-solax-modbus`
@@ -74,7 +74,7 @@ declares which it supports, mapped to BESS sensor keys): **charge window**
 | `solax_modbus_growatt_min` | TX-Modbus | SM-TOU-numbered (single-segment) | `SolaxModbusGrowattController` | `_GROWATT_TOU_MARKER_SUFFIX` (`time_1_enabled`) | `SOLAX_GROWATT_MIN_SUFFIX_MAP` |
 | `solax_modbus_growatt_sph` | TX-Modbus | SM-Mode-slots (GEN3, monitoring-only) | `SolaxModbusGrowattController` | `_GROWATT_GEN3_MARKER_SUFFIX` | `SOLAX_GROWATT_SPH_SUFFIX_MAP` |
 | `solax_modbus_native` | TX-Modbus | SM-Ephemeral (VPP) | `SolaxController` | `_SOLAX_NATIVE_MARKER_SUFFIX` (`remotecontrol_power_control`) | `SOLAX_NATIVE_SUFFIX_MAP` |
-| `solis_modbus` (EXPERIMENTAL) | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
+| `solis_modbus` | TX-Modbus | SM-Period-lists (6 charge + 6 discharge) | `SolisModbusController` | `_SOLIS_TOU_MARKER_SUFFIX` (`time_entity_43711`) | `SOLIS_SUFFIX_MAP` + `SOLIS_DICT_EMBEDDED_SUFFIX_MAP` |
 | `huawei_solar_luna2000` | TX-Vendor-service | SM-Period-lists | `HuaweiController` | `_HUAWEI_BATTERY_MARKER_SUFFIX` (`storage_working_mode_settings`) | `HUAWEI_SUFFIX_MAP` |
 
 ### Bring-your-own integration
@@ -170,10 +170,11 @@ that mode. Writes only occur on mode transitions, not every period.
 - Grid charge: `switch.turn_on` / `switch.turn_off` on charger_switch entity
 - Charge/discharge rate: `number.set_value` on EMS rate entities
 
-**Lifetime energy notes (GEN4):** GEN4 has no native load consumption
-register (`total_load` is GEN3, `home_consumption_energy` is SPF). BESS
-derives `lifetime_load_consumption` as `solar + grid_import − grid_export`.
-`total_yield` maps to `lifetime_system_production`.
+**Lifetime energy notes (GEN4):** GEN4 *does* have a native load consumption
+register — `total_yield` (register 3077, "Total Load Energy") maps to
+`lifetime_load_consumption`, and `total_power_generation` (register 3051) maps
+to `lifetime_system_production`. GEN4 therefore never takes the derived-load
+path. (`total_load` is GEN3, `home_consumption_energy` is SPF.)
 
 ### Export-limit curtailment (GEN2/GEN3/GEN4) — *(optional, opt-in)*
 
@@ -203,6 +204,12 @@ floor`, independent of strategic intent) but the actuation itself is
 gated by the `supports_export_limit_control` capability flag — currently
 only `SolaxModbusGrowattController` implements it. `growatt_server` (cloud)
 has no equivalent HA service to hook into and stays a safe no-op.
+
+This same condition is also computed at planning time (mirrored, not
+re-derived at dispatch) and exposed as `PeriodData.decision.curtailed`
+(#501), so the UI can show a period the plan expects to curtail as
+distinct from a genuinely profitable export — see
+`core/bess/dp_battery_algorithm.py`'s `_build_period_data`.
 
 ### Growatt MIX/SPH (Local) — `growatt_solax_modbus_gen3` (GEN3)
 
@@ -409,7 +416,7 @@ button.press(trigger)
 
 **Idle/solar mode:** Disables VPP, inverter reverts to self-use.
 
-### Solis — `solis_modbus` (EXPERIMENTAL)
+### Solis — `solis_modbus`
 
 Solis hybrids, connected via the community
 [`Pho3niX90/solis_modbus`](https://github.com/Pho3niX90/solis_modbus)
@@ -500,6 +507,48 @@ targets whichever domain `inverter.service_domain` resolves to (default
 `huawei_solar`) — see "Bring-your-own integration" above for when and how to
 change it.
 
+**Schedule readback (optional, #431).** `huawei_solar` has no
+`read_tou_periods` service, but its TOU period sensor publishes the
+programmed periods as `Period N` extra state attributes, in the very text
+format `set_tou_periods` accepts (`HuaweiSolarTOUSensorEntity`, sensor.py).
+When the `huawei_tou_periods` sensor is mapped, BESS reads those in two
+places, the same read-compare-write shape Growatt MIN adopted in #551/#552:
+
+- at startup, to initialise the period list from what the battery actually
+  holds, so a restart doesn't rewrite a schedule already running. The periods
+  carry no strategic intent (the battery reports only charge/discharge
+  flags), so they display as `existing_schedule` until the first optimization.
+- before every write, comparing the plan against a fresh read rather than
+  against BESS's own model of the battery — a model can only ever claim what
+  BESS *meant* to write. `set_tou_periods` rewrites the whole list atomically
+  and cannot update just what moved, so every skipped write is a flash-wear
+  event spared. Paths that write without consulting `evaluate_intents` (a
+  retried write, the corruption flag, the 23:55 next-day preparation) go
+  through this check too.
+
+An empty plan still writes: the empty string is how BESS clears periods the
+battery is otherwise left running.
+
+Readback is enabled by the sensor being *mapped*, never by attempting the
+read and catching failure. Installs whose integration exposes no such entity
+keep the original behaviour: start with an empty period list, converge on the
+first cycle. If the entity is mapped but unreadable, that raises rather than
+reading as "no periods programmed" — the two must not look alike, or BESS
+would skip a write it genuinely needs. That read is the *first* thing
+`sync_to_hardware` does, ahead of the working-mode and grid-charge writes, so
+a failed read aborts the cycle with the battery untouched instead of arming
+grid charging against the period list the old plan left behind; BSM's
+`_hardware_write_pending` then retries the whole sync next cycle.
+
+`days` is part of a period's identity in that comparison. BESS always writes
+all-days (`1234567`) periods, so a period programmed elsewhere for a subset
+of weekdays is not a match for BESS's own period even at identical times.
+
+EMMA's equivalent register (`emma_tou_periods`) uses the same period format
+but its entity is disabled by default upstream, so it is deliberately left
+out of `HUAWEI_SUFFIX_MAP` — auto-discovery would otherwise map a disabled,
+stateless entity. EMMA users who enable it can map it by hand in Settings.
+
 **Scheduling model:** Charge periods are flagged `GRID_CHARGING` intents;
 discharge periods are flagged `LOAD_SUPPORT` or `BATTERY_EXPORT` intents.
 Periods without an explicit flag (SOLAR_STORAGE, SOLAR_EXPORT, IDLE) use the
@@ -519,6 +568,25 @@ for design rationale and open items.
 ---
 
 ## Required Entities by Platform
+
+### Derived load consumption
+
+**SolaX native, Solis and Huawei LUNA2000** expose no lifetime load-consumption
+register. For those three, BESS derives it from the energy balance:
+
+```
+load = solar + grid_import + battery_discharged − battery_charged − grid_export
+```
+
+All three map both battery counters, so the derivation is always computable
+where it is used. If any of the five inputs is unmapped, BESS returns *no
+value* rather than a partial one — dropping the battery terms would report
+load plus net battery charge, a kWh-scale error on every period the battery is
+active (issue #528). The identity lives in one place,
+`core/bess/energy_balance.py`, and is shared by the lifetime-sensor path
+(`ha_api_controller`) and the per-period flow path (`energy_flow_calculator`).
+
+Every Growatt variant maps a native load register and never takes this path.
 
 ### Growatt MIN (Cloud) — `growatt_server` integration
 
@@ -629,8 +697,8 @@ actively uses slot 1. A `time_N_clear` button also exists in the plugin
 | `lifetime_solar_energy` | `total_solar_energy` | |
 | `lifetime_import_from_grid` | `total_grid_import` | |
 | `lifetime_export_to_grid` | `total_grid_export` | |
-| `lifetime_system_production` | `total_yield` | GEN4 register 3077 |
-| `lifetime_load_consumption` | — | **No native register.** BESS derives: solar + grid_import − grid_export |
+| `lifetime_system_production` | `total_power_generation` | GEN4 register 3051 |
+| `lifetime_load_consumption` | `total_yield` | GEN4 register 3077, "Total Load Energy" |
 
 **Export-limit curtailment (GEN4, optional):**
 
@@ -681,8 +749,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | BESS Sensor Key | Entity Type | solax_modbus Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `battery_capacity` | Current battery level |
-| `battery_charge_power` | sensor | `battery_power_charge` | Charge power (W) |
-| `battery_discharge_power` | sensor | `battery_power_discharge` | Discharge power (W) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `battery_power_charge` (signed) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `import_power` | sensor | `measured_power` | Grid import (W) |
 | `export_power` | sensor | `grid_export` | Grid export (W) |
 | `pv_power` | sensor | `pv_power_1` | Solar production (W) |
@@ -698,7 +765,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | `lifetime_import_from_grid` | `grid_import_total` | |
 | `lifetime_export_to_grid` | `grid_export_total` | |
 | `lifetime_system_production` | `total_yield` | Register 0x52, "Total Yield" (production) |
-| `lifetime_load_consumption` | — | **No native register.** Derived from other sensors |
+| `lifetime_load_consumption` | — | **No native register.** BESS derives it — see [Derived load consumption](#derived-load-consumption) |
 
 **VPP control (required for SolaX):**
 
@@ -711,7 +778,7 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | `solax_battery_min_soc` | number | `battery_minimum_capacity` | Min battery SOC (%) |
 | `solax_charger_use_mode` | select | `charger_use_mode` | Charger use mode (optional) |
 
-### Solis — `solis_modbus` integration (EXPERIMENTAL)
+### Solis — `solis_modbus` integration
 
 **Monitoring:**
 
@@ -755,21 +822,51 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | BESS Sensor Key | Entity Type | huawei_solar Suffix | Purpose |
 |-----------------|-------------|---------------------|---------|
 | `battery_soc` | sensor | `storage_state_of_capacity` | Current battery level (%) |
-| `battery_charge_power` | sensor | `storage_charge_discharge_power` | Net power (W; positive=charging) |
+| `battery_charge_power` / `battery_discharge_power` | sensor | `storage_charge_discharge_power` (signed, reg 37765) | Battery power (W); both keys map to this entity, split by sign at read time (`battery_power_polarity`, `"charge_positive"` — issue #542) |
 | `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
 | `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
 | `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |
 | `battery_discharge_stop_soc` | number | `storage_grid_charge_cutoff_state_of_charge` | Discharge stop SOC (%) |
 | `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
 | `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
+| `huawei_tou_periods` | sensor | `storage_huawei_luna2000_time_of_use_charging_and_discharging_periods` | Optional: programmed TOU periods, read back at startup (#431) |
 | `local_load_power` | sensor | `active_power` | Home consumption (W) |
 | `pv_power` | sensor | `input_power` | Real-time solar PV power (W) |
 | `import_power` / `export_power` | sensor | `power_meter_active_power` (separate power-meter device, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`, `"export_positive"` — issue #438) |
 
-**Lifetime energy (optional):** see `HUAWEI_SUFFIX_MAP` in `ha_api_controller.py`
-for the five lifetime-energy suffixes added in #471/#473 (not reproduced here
-to avoid duplicating a list that will drift — the suffix map is the source of
-truth).
+**Lifetime energy:** see `HUAWEI_SUFFIX_MAP` in `ha_api_controller.py` for the
+five lifetime-energy suffixes added in #471/#473 (not reproduced here to
+avoid duplicating a list that will drift — the suffix map is the source of
+truth). These map to the same five core energy sensors `EnergyFlowCalculator`
+requires on every platform (`energy_flow_calculator.py`), so they're required
+for BESS to compute energy flows on Huawei too, same as elsewhere — not
+optional. `grid_exported_energy`/`grid_accumulated_energy` specifically come
+from the separate power-meter device (see the real-time grid-power row
+above); an install with no power meter genuinely cannot report them, and the
+health check correctly reports that as an error rather than silently
+reporting OK.
+
+**`lifetime_solar_energy` is `total_dc_input_power`, not `accumulated_yield_energy`
+(#569) — do not "correct" it back.** The obvious-looking candidate,
+`accumulated_yield_energy` (reg 32106, entity "Total yield"), is the inverter's
+accumulated AC *output*: on a LUNA2000 hybrid it rises while the battery
+discharges and misses everything used to charge it, which upstream states
+outright in its README FAQ. Feeding that to `derive_load_consumption`'s
+five-term balance inflates home consumption — and therefore `grid_only_cost`
+and reported savings — by `battery_discharged - solar_to_battery`, silently,
+because the lifetime total stays positive and the health check still passes.
+`total_dc_input_power` (reg 32108, entity "Total DC input energy") is the
+lifetime integral of reg 32064, already mapped to `pv_power` above. It is
+DC-side, so it excludes inverter conversion losses (a systematic ~2-3% bias on
+the solar term); Huawei exposes no AC-side PV total at all, so that residual is
+irreducible. FusionSolar's own reconstruction
+(`yield - discharge + charge`) is **not** a valid alternative here: it assumes
+all battery charge came from PV, and BESS grid-charges for arbitrage, so it
+would report grid-charged energy as solar production.
+
+Note the suffix collision this creates: `..._total_dc_input_power` also ends in
+`_input_power`. The two stay apart only because `_map_registry_entities` sorts
+suffixes longest-first before breaking on the first match.
 
 **Auto-detection:** `HUAWEI_SUFFIX_MAP` is wired into `discover_sensors_from_registry`
 (the same production entity-registry scan every other platform uses — fixed

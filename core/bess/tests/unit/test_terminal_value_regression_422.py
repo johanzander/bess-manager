@@ -142,16 +142,14 @@ def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
     # than a regression in this fix.
     dt = inp["period_duration_hours"]
     settings = inp["battery_settings"]
-    buy_price = inp["buy_price"]
     commands = [
         derive_control_command(
             pd.decision.strategic_intent,
             pd.decision.battery_action / dt,
             settings,
-            shadow_price=pd.decision.shadow_price,
-            buy_price=buy_price[i],
+            intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
         )
-        for i, pd in enumerate(result.period_data)
+        for pd in result.period_data
     ]
     sim = simulate(
         commands,

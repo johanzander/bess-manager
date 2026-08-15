@@ -47,7 +47,9 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 7. Confirm gate 2 | Replaced by the draft PR itself — the owner reviews the draft before anything merges. |
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
 | 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
-| 10. Hard constraints | Apply verbatim. |
+| 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
+| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. |
+| 12. Hard constraints | Apply verbatim. |
 
 ## Process
 
@@ -98,12 +100,55 @@ implementation on a wrong diagnosis *or* a wrong placement.
 
 ### 4. Worktree + branch
 
-`git fetch origin main` first — `using-git-worktrees`' git fallback branches
+**Prune merged worktrees FIRST — this is the cleanup step, and it lives here
+on purpose.** The "After Merge" section at the bottom also removes a
+worktree, but it is defined as a separate later invocation, so it depends on
+someone choosing to come back — and nobody does. That postcondition ran zero
+times in ~40 issues and left 39 worktrees on disk, 24 of them long merged.
+Running the prune as a *precondition* of the next issue needs no memory: the
+next person to do issue work cleans up the last one's mess automatically.
+
+```bash
+# Worktrees whose PR has merged. NOTE: `git branch --merged` / `rev-list
+# origin/main..branch` DO NOT WORK here -- this repo squash-merges, so a
+# merged branch's commits are never reachable from main and every worktree
+# looks unmerged forever. PR state is the only authoritative signal.
+merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName')
+git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
+  b=$(git -C "$wt" branch --show-current 2>/dev/null)
+  [ -n "$b" ] || continue                                   # detached: leave alone
+  echo "$merged" | grep -qx "$b" || continue                # not merged: leave alone
+  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then # tracked edits: never auto-delete
+    echo "KEEP (uncommitted changes): $wt"; continue
+  fi
+  git worktree remove "$wt" && git branch -D "$b"
+done
+git fetch origin --prune
+```
+
+Two guards that matter: never remove a worktree with **uncommitted tracked
+changes** — report it and let a human decide (one such worktree held a
+375-line module that existed nowhere else) — and never touch a **detached or
+locked** worktree, which is usually another agent's live session.
+
+Then `git fetch origin main` — `using-git-worktrees`' git fallback branches
 from the current local `HEAD`, not `origin/main`, so a stale local checkout
 silently cuts the branch behind main (missed release cuts, changelog
 rewrites, other merged fixes), surfacing later as an avoidable merge
 conflict. Then invoke `superpowers:using-git-worktrees`, basing the new
 branch on `origin/main`.
+
+Then run `./scripts/worktree-setup.sh` in the new worktree — once, before any
+test, build or `verify` step. It shares `.venv` and both `node_modules` trees
+with the main checkout and repairs a stale Playwright browser cache. Skipping
+it means paying ~35 minutes of reinstall against ~5 minutes of real testing,
+which is what makes Step 8 feel skippable (#556).
+
+**Do not change the session's worktree while a background agent spawned from
+it is still running.** The agent's isolation follows the session, so
+switching drags it into the new worktree mid-run — observed in practice: a
+`code-review` invocation resolved against the wrong worktree and reviewed an
+unrelated docs file instead of the diff. Finish or await the agent first.
 
 ### 5. TDD implementation
 
@@ -135,6 +180,28 @@ DP-produced schedule — that is exactly the coverage gap that shipped
 undetected in PR #385 (`docs/agents/simulator.md`). Add such a unit test only
 as a supplement, never as the sole RED test, for this category of fix.
 
+**Assert the outcome, not the command.** The same rule stated the way it
+usually fails: a test that pins the value written to hardware —
+`vpp_power=+1`, `discharge_rate=100`, a TOU segment — proves the *mapping* is
+unchanged. It does not prove the battery held, the spike was covered, or the
+cost moved. Assert realized cost, SoE trajectory, or resulting flows wherever
+an execution model exists.
+
+Command-level assertions are legitimate **only** where no execution model
+does exist — Growatt VPP before #539, for instance, where
+`inverter_simulator` is TOU-only. When you write one, say in the test *why*
+the outcome could not be asserted. That note is what stops the next reader
+treating a mapping check as behavioural evidence, and it is the seam where
+the coverage should later be upgraded.
+
+**Verify the test fails without the fix.** Write it RED first, or revert the
+fix and watch it break — then say which you did in the PR body. This is not
+ceremony: in this codebase tests have repeatedly passed while proving less
+than claimed. A bound asserted on one side only missed the realistic middle;
+a whole-day comparison had its signal swamped by a second varying term; a
+fixture named a branch it could not reach. Each looked green. "The suite
+passes" is evidence the suite is satisfied, never that the behavior holds.
+
 If the diagnosis's evidence is a user-supplied debug log/bundle, build the
 scenario from that real data instead of a hand-assembled fixture:
 
@@ -160,10 +227,34 @@ trusting it. Reserve a standalone test file for what that harness genuinely
 can't express: a private method's internal formula, or plan-faithfulness
 (`R == P`) — `test_all_scenarios` never runs the inverter simulator.
 
+**Adding a fixture also means regenerating two artefacts (since #544).** Two
+meta-tests will fail the moment a new `*.json` lands in
+`core/bess/tests/unit/data/`, by design — they exist so a fixture cannot
+silently escape the pins:
+
+```bash
+.venv/bin/python scripts/capture_selector_goldens.py       # test_every_fixture_has_a_golden
+.venv/bin/python scripts/capture_vpp_baseline.py --add-new # test_every_fixture_has_a_vpp_baseline
+```
+
+`--add-new` records only the new fixture's plan. **Never run a full VPP
+re-baseline to make that test go green** — the script warns about this
+because a full re-baseline regenerates both halves of every entry, collapsing
+the recorded v10.0.2 drift to zero and destroying the signal
+`test_drift_from_the_released_version_is_recorded` exists to hold.
+
+Note what the goldens now pin per period, because it changes what counts as a
+behaviour change: `actions`, `strategic_intent`, `intra_period_discharge_allowed`
+and the SoE trajectory, all bit-exact, plus cost at 1e-9. So a fix that
+reclassifies an intent or flips the discharge gate — without moving a single
+kWh — is a golden diff and must be re-pinned deliberately, with the measured
+delta stated in the PR. That is the intended behaviour, not a broken test.
+
 ### 6. Quality gate + code review (background)
 
 Every PR must pass both the fast and slow suites, plus code review. This is
-the long-wait step (slow suite is ~30min) — per `CLAUDE.md`'s Cost
+the long-wait step (slow suite ~4 min, measured 2026-08-11; the "~30 min"
+this used to claim predates the vectorized backward pass) — per `CLAUDE.md`'s Cost
 Discipline, do NOT hold the session open watching it run. Always a
 background `Agent` — this is not a choice to put to the user; asking
 "subagent or inline?" is itself the thing to stop doing (no `isolation` —
@@ -248,6 +339,20 @@ to guess whether it was checked.
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
 explaining WHY).
 
+**Then bring the branch up to date before pushing — not after.**
+
+```bash
+git fetch origin && git merge origin/main
+```
+
+Resolve any conflicts here, in the worktree, where you have the context; if
+the merge brought changes in, re-run `./scripts/quality-check.sh` before
+pushing. Step 4 cut this branch from a current `origin/main`, but Steps 5–8
+take hours (slow suite, `verify`) and other PRs merge during them. Opening a
+PR that is already `CONFLICTING` is worse than it sounds: GitHub creates **no
+workflow run at all** for it, so the PR shows no checks rather than a
+conflict, and the first reader concludes CI dropped the event.
+
 **Frontend diffs only:** before pushing, show the user the diff and the
 Step 8 verification output (screenshot/dev-server observation) and wait for
 explicit go-ahead. This is the one point in the fully-automatic flow where a
@@ -272,10 +377,139 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - [ ] `./scripts/quality-check.sh` passes locally (already done)
 - [ ] <what you actually observed in Step 8 — be concrete>
 
+## Evidence the test discriminates
+<REQUIRED. Not "the suite passes". The mutation you ran and what broke:>
+- Reverted: <the exact line/behaviour you undid>
+- Result: `<test name>` FAILED, <N> test(s) total
+- Restored: tree clean
+
+## Outcome-level coverage
+<REQUIRED. Which outcome pin now covers this behaviour:>
+- <expected_results on fixture X | intents/gate in the goldens | R == P via
+  run_scenario_realized | none, because …>
+
 Closes #<n>
 ```
 
-### 10. Hard constraints
+**These two sections are the point of the PR, not paperwork.** A reviewer
+cannot tell a real guard from a vacuous one by reading it — three times in
+this codebase a test has passed while proving nothing (#399 asserted an
+internal flag instead of a write count; #302 asserted nothing at all; a
+gate-outcome test written during the 2026-08-11 audit went green on its first
+run while catching neither of the two mutations it claimed to catch). Every
+one of those looked fine in review. The mutation result is the only cheap
+thing that separates them, so it is stated where the reviewer reads, not left
+in a terminal scrollback.
+
+If you cannot produce a mutation that reddens your test, you have not
+demonstrated the bug — say so in the PR and stop, rather than filling the
+section in with the suite result.
+
+### 10. Watch this PR to green (and only this PR)
+
+The draft PR is open, but CI has not run yet. Local `quality-check.sh` and
+the slow suite are not the same as the CI matrix, and a PR left red or
+`CONFLICTING` is a PR the user cannot review.
+
+```bash
+gh pr checks <n> --watch --fail-fast     # blocks until the run settles
+gh pr view <n> --json mergeable,mergeStateStatus
+```
+
+**`no checks reported on the '<branch>' branch` is not a result.** It has
+two entirely different causes and you must tell them apart before doing
+anything else:
+
+```bash
+gh pr view <n> --json mergeable,mergeStateStatus   # CONFLICTING -> merge origin/main
+gh run list --branch <branch> --limit 3            # in_progress -> --watch just raced it
+gh run watch <run-id> --exit-status                # then wait on the run directly
+```
+
+If `mergeable` is `CONFLICTING`, there is genuinely no run and never will
+be — GitHub does not build a conflicted PR. If a run is `in_progress`,
+`--watch` simply returned before the run was registered (observed on this
+skill's own PR, ~8s after the push) and you wait on the run id instead.
+Reading "no checks" as green is how a red PR gets handed over as finished.
+
+Then, on this PR only:
+
+- **Checks fail:** read `gh run view --log-failed`, fix in the worktree,
+  re-run `./scripts/quality-check.sh`, push. This is your diff, so a real
+  test failure is yours to fix — not merely to report.
+- **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
+  `git merge origin/main`, resolve, `quality-check.sh`, push.
+- **Green and mergeable:** continue to Step 11's review loop — a green PR is
+  the precondition for asking the bot to review it, not the finish line. Do
+  not merge, do not take it out of draft — Step 12 still holds.
+
+**Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
+`gh pr list` shows other PRs red or conflicted, that is not this session's
+job — hand it to the `sweep-prs` skill, which owns fleet-wide maintenance
+and has the ownership skip gate needed to touch a worktree another agent may
+be sitting in. Widening a single-issue session into fleet cleanup is how two
+sessions end up pushing to the same branch.
+
+`gh pr checks --watch` blocks rather than polls, so this costs one wait, not
+a re-read of the whole session context every 60s. If CI is badly backed up,
+say so and leave the PR — don't hold the session open indefinitely.
+
+### 11. Independent review loop (never skip this)
+
+Step 6's `code-review` is your own review of your own diff, and it is not
+enough on its own — in practice this PR needs two to four rounds of the
+independent Stage 4 bot before only nits remain. That loop is mechanical, so
+run it here rather than leaving it to a second session.
+
+**Only enter this loop once Step 10 says the PR is green and mergeable.**
+Asking for a review of a red or `CONFLICTING` PR burns a paid review round on
+a diff that is about to change.
+
+Each round:
+
+```bash
+scripts/request-pr-review.sh <n>     # run_in_background: true
+```
+
+The script posts `@claude-bot review` as `bess-agent` and blocks until a new
+review lands, printing `VERDICT <STATE> <submittedAt> <author>` (exit 2 on a
+15-minute timeout, after dumping recent `PR Review` runs). Like Step 10's
+`--watch`, it blocks rather than polls — so **do not poll it and do not
+re-touch the diagnosis/TDD context while it runs.** You are notified once,
+when it exits. This is a hard session boundary, same as Step 6.
+
+On the verdict:
+
+- **`APPROVED`** — the loop is done. Report the PR link and stop.
+- **`CHANGES_REQUESTED` / `COMMENTED`** — collect the findings:
+
+  ```bash
+  gh api repos/johanzander/bess-manager/pulls/<n>/comments \
+    --jq '.[] | select(.created_at > "<submittedAt from the round before>") | "\(.path):\(.line) \(.body)"'
+  ```
+
+  Then invoke `superpowers:receiving-code-review`. This is the reason the loop
+  lives in the main session and not in a subagent: you still hold the Step 2
+  diagnosis and the Step 3 scope assessment, so you can tell a real finding
+  from one that contradicts a decision already made deliberately. Verify each
+  finding against the code before acting on it. Where the reviewer is wrong,
+  reply on the PR saying why — do not silently implement it, and do not
+  silently ignore it either.
+- **A review from the maintainer rather than the bot** (the `<author>` field):
+  treat it as authoritative and stop the loop — a human has taken over.
+
+Fix the blockers, park genuine nits in `TODO.md`, run
+`./scripts/quality-check.sh`, commit, and push. Step 9's frontend rule carries
+over unchanged: if the diff touches `frontend/**` or `*.tsx`/`*.jsx`/`*.css`,
+show the user the fixes and wait for go-ahead before pushing. Then start the
+next round.
+
+**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, or on any script
+timeout, stop and hand the outstanding findings to the user verbatim. Three
+rounds of disagreement means the reviewer and you disagree about the design,
+not about a bug, and another round will not settle it.
+
+### 12. Hard constraints
 
 - Draft PR only. Never auto-merge.
 - Never push directly to `main`.
@@ -295,7 +529,13 @@ Closes #<n>
 
 A **separate, later invocation** — often a different session, sometimes days
 later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at draft-PR-open per the Step 10 constraints.
+flow above, which stops at a green, bot-reviewed draft PR per the Step 12
+constraints.
+
+**Treat this as best-effort, not the cleanup mechanism.** Because it depends
+on someone returning after the merge, it reliably does not happen; Step 4's
+prune is the one that actually runs. If you are here, do it — but the safety
+net is upstream, not this section.
 
 1. Confirm the merge:
 
@@ -327,13 +567,24 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 
 | Excuse | Reality |
 |---|---|
+| "the test asserts the exact command we write to hardware, that's precise" | Precise about the mapping, silent about the outcome. It stays green when the mapping is right and the physics is wrong. Assert realized cost / SoE / flows wherever an execution model exists. |
+| "it's green, so the fix works" | Green means the suite is satisfied. Revert the fix and watch the test fail — if it doesn't, it was never evidence. |
+| "I can see the assertion is right, no need to run it red" | Assertions that look right have repeatedly bounded only one side, or compared a quantity a second varying term swamped. Seeing it fail is the cheap part. |
 | "quality-check.sh passed, that's enough" | Green tests prove the suite is satisfied, not that the fix behaves correctly against the real scenario. Step 8 requires observed output, every time. |
 | "the diagnosis is obviously right, skip the confirm gate" | Wrong diagnoses are exactly when confidence is highest. One message, cheap insurance. |
 | "I'll clean up this other thing while I'm in here" | Out of scope. Minimal fix only. |
 | "code review can wait until after I've verified it works" | Reordered on purpose — catch cheap issues before spending time on manual verification, not after. |
 | "there's already a bot diagnosis, let me re-derive it anyway to be safe" | Re-verify the cited evidence; don't redo the whole investigation. |
+| "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
+| "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
+| "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
+| "Step 6's code review already covered this, skip Step 11" | Step 6 is you reviewing your own diff with the reasoning that produced it. The Stage 4 bot reads the diff cold against the checklist, and in practice takes two to four rounds to run out of real findings. |
+| "the reviewer asked for it, so change it" | The reviewer has the diff, not the diagnosis. A finding that contradicts a deliberate Step 3 scope decision gets a reply explaining why, not a commit. |
 | "the plan doc is useful context, keep it in the PR" | Once code and tests exist, the plan only drifts — it's not the source of truth. Delete it before Step 9; keep the spec if one exists. |
 | "the user is in a hurry, just open the PR" | Time pressure from the user is not permission to skip Step 8 — it's the reason to say so explicitly and give a real ETA instead. |
+| "I'll clean up the worktree after it merges" | You won't — that's the postcondition that already failed 24 times. Prune at Step 4, before creating the next one. |
+| "`git branch --merged` will tell me what's safe to delete" | Not in this repo. Squash-merge means a merged branch is never an ancestor of main, so that check reports *everything* as unmerged and the cleanup silently never fires. Use `gh pr list --state merged`. |
+| "I'll just hop into the other worktree for a second" | Not while a background agent spawned from this session is running — its isolation follows you and its tooling starts resolving against the wrong checkout. |
 | "I'll just watch the background agent run" | Defeats the point — the whole reason it's backgrounded is so the session isn't held open through the slow suite. Let the notification bring you back. |
 | "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
 | "a unit test on the changed function is enough" | Not for DP/intent/control-mapping changes — a synthetic-input unit test can pass while the new branch is unreachable by any real optimizer-derived scenario. `docs/agents/simulator.md` requires `R == P` for exactly this class of change. |
@@ -357,6 +608,16 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
 - About to write only a synthetic-input unit test for a DP/intent/control-
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
+- About to push the branch without having merged `origin/main` since Step 4.
+- About to stop at "draft PR opened" without watching CI settle (Step 10).
+- About to stop at "CI is green" without running the Step 11 review loop.
+  Your own Step 6 review is not the independent one.
+- About to implement a review finding because the bot said so, without
+  checking it against the Step 2 diagnosis and the Step 3 scope assessment.
+- About to read `no checks reported` as green. It means either a conflict
+  or a run that hasn't registered yet — distinguish before reporting.
+- About to touch another PR or another worktree from inside this session —
+  that is `sweep-prs`, not this skill.
 - About to write a repro test from hand-built data when a user debug log/
   bundle is available and `from_debug_log.py` could build it from real data.
 
@@ -372,4 +633,6 @@ flow above, which stops at draft-PR-open per the Step 10 constraints.
 | 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
 | 7. Confirm gate 2 | — | Conditional (auto-continue if backend-only + clean; otherwise No) |
 | 8. Local run & observe | `verify` | **Never** |
-| 9. Commit + PR | `finishing-a-development-branch` | No |
+| 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
+| 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |
+| 11. Independent review loop | `scripts/request-pr-review.sh` (background) + `receiving-code-review`, max 3 rounds | No |

@@ -59,9 +59,11 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
     bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
 
 
-def _store_shadow_price(
-    bsm: BatterySystemManager, period: int, intent: str, shadow_price: float
+def _store_authorization(
+    bsm: BatterySystemManager, period: int, intent: str, allowed: bool
 ) -> None:
+    """Store a period carrying the DP's sub-period discharge authorization
+    (#526 -- the BSM reads the decision, not the shadow price behind it)."""
     energy = EnergyData(
         solar_production=0.0,
         home_consumption=0.0,
@@ -72,7 +74,9 @@ def _store_shadow_price(
         battery_soe_start=10.0,
         battery_soe_end=10.0,
     )
-    decision = DecisionData(strategic_intent=intent, shadow_price=shadow_price)
+    decision = DecisionData(
+        strategic_intent=intent, intra_period_discharge_allowed=allowed
+    )
     period_data = PeriodData(
         period=period,
         energy=energy,
@@ -89,14 +93,14 @@ class TestVppModeDischargeGateExcluded:
     an immediate forced-power command, not a load-following ceiling."""
 
     def test_solar_export_gate_open_does_not_force_vpp_discharge(self):
-        """Same economics that open the gate on TOU (buy high, shadow low)
+        """The same DP authorization that opens the gate on TOU
         must NOT produce a forced discharge command in VPP mode -- power
         must stay 0. remote_control_enabled is True (grid-first hold, #355)
         rather than a forced discharge, blocking passive solar charging
         instead of falling back to self-use."""
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96, control_mode="vpp")
         _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
-        _store_shadow_price(bsm, PERIOD, "SOLAR_EXPORT", shadow_price=0.5)
+        _store_authorization(bsm, PERIOD, "SOLAR_EXPORT", allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -107,7 +111,7 @@ class TestVppModeDischargeGateExcluded:
     def test_solar_storage_gate_open_does_not_force_vpp_discharge(self):
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96, control_mode="vpp")
         _set_intent(bsm, PERIOD, "SOLAR_STORAGE")
-        _store_shadow_price(bsm, PERIOD, "SOLAR_STORAGE", shadow_price=0.5)
+        _store_authorization(bsm, PERIOD, "SOLAR_STORAGE", allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -123,7 +127,7 @@ class TestTouModeDischargeGateUnaffected:
     def test_solar_export_gate_still_opens_in_tou_mode(self):
         bsm, controller = _make_bsm(buy_prices=[2.0] * 96, control_mode="tou")
         _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
-        _store_shadow_price(bsm, PERIOD, "SOLAR_EXPORT", shadow_price=0.5)
+        _store_authorization(bsm, PERIOD, "SOLAR_EXPORT", allowed=True)
 
         bsm._apply_period_schedule(PERIOD)
 

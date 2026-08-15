@@ -3,7 +3,8 @@ import api from '../lib/api';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { FormattedValue, ControlModel } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
-import { getIntent } from '../utils/intent';
+import { getIntent, isCurtailed } from '../utils/intent';
+import { formatFixed } from '../utils/format';
 import { 
   DollarSign, 
   Battery, 
@@ -171,7 +172,7 @@ interface SystemStatusCardProps {
 const formatDelta = (full?: FormattedValue | null, today?: FormattedValue): string | undefined => {
   if (!full || !today) return undefined;
   const delta = full.value - today.value;
-  return `${delta.toFixed(2)} ${today.unit}`;
+  return `${formatFixed(delta, 2)} ${today.unit}`;
 };
 
 const DASHBOARD_REFRESH_MS = 60000;
@@ -286,7 +287,12 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       IDLE: 'Standby',
     };
     const rawIntent = getIntent(currentHourData).toUpperCase().replace(/ /g, '_');
-    const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
+    // Curtailment doesn't replace the intent (a curtailed period can still
+    // be charging, e.g. SOLAR_STORAGE) -- keep the intent and mark it.
+    const intentName = intentDisplayNames[rawIntent] ?? rawIntent;
+    const strategicIntent = isCurtailed(currentHourData)
+      ? `${intentName} — Curtailed (No Export)`
+      : intentName;
 
     return {
       strategicIntent,

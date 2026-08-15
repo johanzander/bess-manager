@@ -340,33 +340,31 @@ class TestApplyPeriodVpp:
 
 
 class TestWriteScheduleToHardwareVpp:
-    """VPP has no persistent/bulk schedule to push — write_to_hardware is a
+    """VPP has no persistent/bulk schedule to push — sync_to_hardware is a
     no-op for power (like SolaxController's), same as its class docstring
     already claims. The real per-period power command always comes from
     apply_period via BatterySystemManager._apply_period_schedule, which runs
-    immediately after write_to_hardware in the same update_battery_schedule
+    immediately after sync_to_hardware in the same update_battery_schedule
     cycle (#421)."""
 
     def test_returns_zero_writes_zero_disables(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
-        writes, disables = controller.write_to_hardware(
-            mock_ha, effective_period=8, current_tou=[]
-        )
+        writes, disables = controller.sync_to_hardware(mock_ha, effective_period=8)
 
         assert writes == 0
         assert disables == 0
 
     def test_no_vpp_power_command_written(self, controller, mock_ha):
-        """#421: write_to_hardware previously computed power from a
+        """#421: sync_to_hardware previously computed power from a
         hardcoded battery_action_kw=0.0 stub, sending a spurious power=0%
         command that briefly preceded the correct value written moments
         later by apply_period. It must not write any VPP power at all."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
-        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
+        controller.sync_to_hardware(mock_ha, effective_period=8)
 
         assert mock_ha.calls["growatt_vpp_periods"] == []
 
@@ -376,24 +374,24 @@ class TestWriteScheduleToHardwareVpp:
         """Reproduces the exact #421 scenario: a BATTERY_EXPORT period with a
         real nonzero planned discharge (period 77, -2.48 kWh / -9.90 kW in
         the reported debug log) must not produce a spurious power=0% write
-        from write_to_hardware — the stub battery_action_kw=0.0 previously
+        from sync_to_hardware — the stub battery_action_kw=0.0 previously
         made this look like "no action", forcing discharge_rate=0."""
         intents = hourly_to_quarterly({19: "BATTERY_EXPORT"})
         actions = [0.0] * 96
         actions[77] = -2.48
         controller.apply_intents(make_schedule(intents, actions), current_period=77)
 
-        controller.write_to_hardware(mock_ha, effective_period=77, current_tou=[])
+        controller.sync_to_hardware(mock_ha, effective_period=77)
 
         assert mock_ha.calls["growatt_vpp_periods"] == []
 
-    def test_vpp_status_enabled_via_write_to_hardware(self, controller, mock_ha):
+    def test_vpp_status_enabled_via_sync_to_hardware(self, controller, mock_ha):
         """The one-time VPP Status/AC-charging enable sequence is still
-        write_to_hardware's job, per the class docstring."""
+        sync_to_hardware's job, per the class docstring."""
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         controller.apply_intents(make_schedule(intents), current_period=0)
 
-        controller.write_to_hardware(mock_ha, effective_period=8, current_tou=[])
+        controller.sync_to_hardware(mock_ha, effective_period=8)
 
         assert len(mock_ha.calls["growatt_vpp_status"]) == 1
         assert len(mock_ha.calls["growatt_vpp_allow_ac_charging"]) == 1
@@ -402,20 +400,24 @@ class TestWriteScheduleToHardwareVpp:
 class TestReadAndInitializeVpp:
     def test_seeds_state_from_hardware(self, controller, mock_ha):
         mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = "Enabled"
         mock_ha._growatt_vpp_remote_control_state = "Enabled"
 
         controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
 
         assert controller._vpp_status_confirmed is True
+        assert controller._vpp_ac_charging_confirmed is True
         assert controller._last_written_vpp_remote_control is True
 
     def test_seeds_disabled_state(self, controller, mock_ha):
         mock_ha._growatt_vpp_status_state = "Disabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = "Disabled"
         mock_ha._growatt_vpp_remote_control_state = "Disabled"
 
         controller.read_and_initialize_from_hardware(mock_ha, current_hour=10)
 
         assert controller._vpp_status_confirmed is False
+        assert controller._vpp_ac_charging_confirmed is False
         assert controller._last_written_vpp_remote_control is False
 
     def test_no_hardware_writes_on_read(self, controller, mock_ha):
@@ -423,6 +425,127 @@ class TestReadAndInitializeVpp:
 
         assert mock_ha.calls["growatt_vpp_status"] == []
         assert mock_ha.calls["growatt_vpp_periods"] == []
+
+    def test_restart_with_status_already_enabled_writes_no_flash_registers(
+        self, controller, mock_ha
+    ):
+        """#399 (ridax67), the symptom as reported: *"at startup allow ac grid
+        charging and vpp_status are always set. In most cases these writes are
+        not needed as they don't reset between runs, so if you test if they
+        need to be set first, you will avoid a lot of flash writes for frequent
+        restarters."*
+
+        `test_seeds_state_from_hardware` above asserts the read-back sets
+        `_vpp_status_confirmed`. That is the mechanism, not the symptom — it
+        stays green if the flag is seeded correctly and then ignored. This
+        asserts the outcome ridax measured: a **fresh controller** (what a
+        restart produces) that reads back an already-enabled inverter performs
+        **zero** writes to either flash register while going on to command a
+        normal period.
+
+        #329's `TestNoRedundantWritesAcrossCycles` covers the adjacent case —
+        the same instance applying twice — which never exercises the read-back
+        path at all, because that instance already has the flag set from its
+        own first write.
+        """
+        mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = "Enabled"
+        mock_ha._growatt_vpp_remote_control_state = "Enabled"
+
+        # A restart: a brand-new controller, as BESS constructs each cycle.
+        restarted = type(controller)(controller.battery_settings, control_mode="vpp")
+        restarted.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+
+        restarted.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+        _apply_at_period(restarted, mock_ha, 8, grid_charge=True, discharge_rate=0)
+
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "restart re-wrote VPP Status although the inverter already "
+            "reported Enabled — this is #399's flash wear"
+        )
+        assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [], (
+            "restart re-wrote allow-AC-charging although VPP was already "
+            "enabled — this is #399's flash wear"
+        )
+        assert mock_ha.calls["growatt_vpp_periods"], (
+            "the period command itself must still be written, or this test "
+            "passes by the controller doing nothing at all"
+        )
+
+    def test_restart_repairs_ac_charging_when_only_status_is_enabled(
+        self, controller, mock_ha
+    ):
+        """The other half of #399's skip: it must not skip a write the
+        inverter still needs.
+
+        `_ensure_vpp_status_enabled` writes *both* flash registers, and they
+        can drift apart -- a user toggle, a firmware reset, or a write that
+        failed after the first of the two. An earlier revision gated both
+        writes on one flag seeded from VPP Status alone, so an inverter
+        reporting Status Enabled + AC charging Disabled was treated as fully
+        configured on every restart, the AC-charging write never happened
+        again, and GRID_CHARGING periods silently drew nothing from the grid.
+
+        The repair is per register: the drifted one is rewritten and the
+        healthy one is left alone, or the repair path itself reintroduces
+        #399's wear on every restart of a half-drifted install.
+
+        The flash-wear guard above and this one are the same mechanism read
+        from both sides: skip when nothing is needed, repair when something
+        is.
+        """
+        mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = "Disabled"
+        mock_ha._growatt_vpp_remote_control_state = "Enabled"
+
+        restarted = type(controller)(controller.battery_settings, control_mode="vpp")
+        restarted.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+
+        restarted.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+        _apply_at_period(restarted, mock_ha, 8, grid_charge=True, discharge_rate=0)
+
+        assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [True], (
+            "an inverter that cannot AC-charge was left that way: "
+            "GRID_CHARGING would draw nothing from the grid"
+        )
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "the healthy VPP Status register was rewritten while repairing "
+            "AC charging — #399's flash wear, moved into the repair path"
+        )
+
+    def test_restart_repairs_only_the_register_it_could_not_read(
+        self, controller, mock_ha
+    ):
+        """An unreadable register is *unknown*, not "Disabled".
+
+        `_get_raw_state` returns None for a transient API error or a
+        momentarily `unavailable` entity just as it does for one that is not
+        configured. Unknown still has to be repaired -- assuming Enabled would
+        leave VPP unable to execute its plan with no further chance to fix it
+        -- but the repair must stay scoped to the register that could not be
+        read, or one flaky read at startup rewrites both flash registers.
+        """
+        mock_ha._growatt_vpp_status_state = "Enabled"
+        mock_ha._growatt_vpp_allow_ac_charging_state = None
+        mock_ha._growatt_vpp_remote_control_state = "Enabled"
+
+        restarted = type(controller)(controller.battery_settings, control_mode="vpp")
+        restarted.read_and_initialize_from_hardware(mock_ha, current_hour=10)
+
+        restarted.apply_intents(
+            make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"})), current_period=0
+        )
+        _apply_at_period(restarted, mock_ha, 8, grid_charge=True, discharge_rate=0)
+
+        assert mock_ha.calls["growatt_vpp_allow_ac_charging"] == [True]
+        assert mock_ha.calls["growatt_vpp_status"] == [], (
+            "a failed read of one register rewrote the other, which was known "
+            "to be Enabled — #399's flash wear on a flaky read"
+        )
 
 
 class TestNoRedundantWritesAcrossCycles:

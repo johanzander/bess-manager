@@ -652,6 +652,123 @@ class TestPatchSettingsSensorValidation:
 
 
 # ===========================================================================
+# PATCH /api/settings — power monitoring sensor gating
+# ===========================================================================
+
+
+class TestPatchSettingsPowerMonitoringValidation:
+    """Enabling power monitoring via PATCH must be rejected server-side when
+    the phase-current sensors its phase_count requires aren't mapped — the
+    same gap that let power_monitoring_enabled=True crash-loop in production
+    (2026-08-07 debug bundle) because nothing validated it server-side."""
+
+    def test_rejects_power_monitoring_without_phase_sensors(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 3}},
+        )
+        assert response.status_code == 422
+        detail = response.json()["detail"]
+        assert "current_l1" in detail or "phase" in detail.lower()
+        # The invalid combination must never be persisted, even though the
+        # request was rejected — a prior bug wrote power_monitoring_enabled
+        # to disk BEFORE running this validation, so the 422 error message
+        # was returned but the crash-loop-inducing config was still saved.
+        assert not mock_controller.settings_store.data["home"].get(
+            "power_monitoring_enabled"
+        )
+
+    def test_rejects_single_phase_without_l1_sensor(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 1}},
+        )
+        assert response.status_code == 422
+
+    def test_allows_power_monitoring_when_phase_sensors_mapped(self, mock_controller):
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "current_l1": "sensor.current_l1",
+            "current_l2": "sensor.current_l2",
+            "current_l3": "sensor.current_l3",
+            "battery_charging_power_rate": "sensor.charge_rate",
+        }
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, "phaseCount": 3}},
+        )
+        assert response.status_code == 200
+
+    def test_allows_disabling_power_monitoring_without_sensors(self, mock_controller):
+        """Turning power monitoring off must never be blocked by this check."""
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": False}},
+        )
+        assert response.status_code == 200
+
+
+# ===========================================================================
+# PATCH /api/settings — consumption strategy gating
+# ===========================================================================
+
+
+class TestPatchSettingsConsumptionStrategyValidation:
+    """Selecting the "sensor" consumption strategy without its sensor leaves
+    the system unable to build any schedule at all, so the dashboard never
+    leaves "Initializing" (#558). The UI hides the option, but PATCH is what
+    persists it, so the check has to exist here too."""
+
+    def test_rejects_sensor_strategy_without_its_sensor(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "sensor"}},
+        )
+        assert response.status_code == 422
+        assert "48h_avg_grid_import" in response.json()["detail"]
+        # Never persisted — a rejected request must not leave the stalling
+        # config on disk.
+        assert (
+            mock_controller.settings_store.data["home"]["consumption_strategy"]
+            == "fixed"
+        )
+
+    def test_allows_sensor_strategy_when_its_sensor_is_mapped(self, mock_controller):
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "48h_avg_grid_import": "sensor.avg_grid_import",
+        }
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "sensor"}},
+        )
+        assert response.status_code == 200
+
+    def test_rejects_unknown_strategy(self, mock_controller):
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"consumptionStrategy": "bogus_strategy"}},
+        )
+        assert response.status_code == 422
+
+    def test_rejects_unmapping_the_sensor_the_active_strategy_needs(
+        self, mock_controller
+    ):
+        """Removing 48h_avg_grid_import while the sensor strategy is active
+        breaks the system exactly as selecting the strategy without it does —
+        the same shape as the power-monitoring sensor-removal guard."""
+        mock_controller.settings_store.data["home"]["consumption_strategy"] = "sensor"
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "48h_avg_grid_import": "sensor.avg_grid_import",
+        }
+
+        response = _client.patch(
+            "/api/settings",
+            json={"sensors": {"shared": {"48h_avg_grid_import": ""}}},
+        )
+
+        assert response.status_code == 422
+
+
+# ===========================================================================
 # PATCH /api/settings — response shape
 # ===========================================================================
 

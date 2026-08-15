@@ -257,16 +257,14 @@ class TestApplyPeriod:
 
 
 class TestWriteScheduleToHardware:
-    """Test write_to_hardware initialises segment 1."""
+    """Test sync_to_hardware initialises segment 1."""
 
     def test_sets_initial_mode(self, controller, mock_ha):
         intents = hourly_to_quarterly({2: "GRID_CHARGING"})
         schedule = make_schedule(intents)
         controller.apply_intents(schedule, current_period=0)
 
-        writes, _disables = controller.write_to_hardware(
-            mock_ha, effective_period=8, current_tou=[]
-        )
+        writes, _disables = controller.sync_to_hardware(mock_ha, effective_period=8)
 
         assert writes == 1
         seg = mock_ha.calls["tou_segments"][-1]
@@ -281,7 +279,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.apply_intents(schedule, current_period=0)
 
-        controller.write_to_hardware(mock_ha, effective_period=0, current_tou=[])
+        controller.sync_to_hardware(mock_ha, effective_period=0)
 
         seg = mock_ha.calls["tou_segments"][-1]
         assert seg["enabled"] is False
@@ -291,7 +289,7 @@ class TestWriteScheduleToHardware:
         schedule = make_schedule(intents)
         controller.apply_intents(schedule, current_period=0)
 
-        controller.write_to_hardware(mock_ha, effective_period=20, current_tou=[])
+        controller.sync_to_hardware(mock_ha, effective_period=20)
 
         assert controller._last_written_tou_mode == "grid_first"
 
@@ -473,3 +471,34 @@ class TestDisplayMethods:
         # Verify battery_first group exists for hour 2
         battery_first_segs = [s for s in segments if s["batt_mode"] == "battery_first"]
         assert len(battery_first_segs) > 0
+
+
+class TestNoGrowattCloudReadOnThisPlatform:
+    """This controller subclasses GrowattMinController but talks modbus.
+
+    It overrides every method that would otherwise reach the growatt_server
+    cloud services, so anything added to the parent that reads the inverter
+    that way is inherited straight into a SystemConfigurationError here —
+    there is no Growatt device_id on a solax_modbus install. That killed the
+    whole schedule update, not just the read (issue #554).
+    """
+
+    class _ExplodingReader(MockHomeAssistantController):
+        def read_inverter_time_segments(self):
+            raise AssertionError(
+                "growatt_server read attempted on a solax_modbus platform"
+            )
+
+    @pytest.mark.parametrize("control_mode", ["tou", "vpp"])
+    def test_reconciliation_does_not_read_the_growatt_cloud(
+        self, battery_settings, control_mode
+    ):
+        controller = SolaxModbusGrowattController(
+            battery_settings, control_mode=control_mode
+        )
+
+        writes, disables = controller.reconcile_hardware(
+            self._ExplodingReader(), effective_period=34
+        )
+
+        assert (writes, disables) == (0, 0), "Wrote through a path it cannot use"

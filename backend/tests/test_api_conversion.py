@@ -146,3 +146,48 @@ class TestAPIConversion:
 
         # Period should be int
         assert isinstance(api_data.period, int)
+
+
+class TestCreateFormattedValueNegativeZero:
+    """A value that rounds to zero must never display as "-0.00" -- e.g. a
+    curtailed period's export revenue, which can be a tiny negative FP
+    residual (grid_exported ~1e-16 kWh * a negative sell price) rather than
+    a real cost. round() preserves the sign of a negative value that rounds
+    to zero, so naive f-string formatting reproduces the negative sign."""
+
+    def test_currency_never_shows_negative_zero(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-0.0004, "currency", "SEK")
+        assert result.display == "0.00"
+        assert result.text == "0.00 SEK"
+
+    def test_energy_never_shows_negative_zero(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-0.00001, "energy_kwh_only", "SEK")
+        assert result.display == "0.0"
+
+    def test_percentage_never_shows_negative_zero(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-0.001, "percentage", "SEK")
+        assert result.display == "0"
+
+    def test_price_never_shows_negative_zero(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-0.0004, "price", "SEK")
+        assert result.display == "0.00"
+
+    def test_real_negative_value_is_unaffected(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-1.5, "currency", "SEK")
+        assert result.display == "-1.50"
+
+    def test_raw_value_field_stays_unrounded_for_sorting(self):
+        from api_dataclasses import create_formatted_value
+
+        result = create_formatted_value(-0.0004, "currency", "SEK")
+        assert result.value == -0.0004

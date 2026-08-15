@@ -63,31 +63,6 @@ SHARED_SENSOR_KEYS = frozenset(
 # real choice (see issue #118).
 VALID_CONTROL_MODES = ("tou", "vpp")
 
-# All valid inverter platform IDs.
-VALID_PLATFORMS = (
-    "growatt_server_min",
-    "growatt_server_sph",
-    "solax_modbus_growatt_min",
-    "solax_modbus_growatt_sph",
-    "solax_modbus_native",
-    "solis_modbus",
-    "huawei_solar_luna2000",
-)
-
-# Sensor keys that are shared across all platforms (not inverter-specific).
-SHARED_SENSOR_KEYS = frozenset(
-    {
-        "solar_forecast_today",
-        "solar_forecast_tomorrow",
-        "48h_avg_grid_import",
-        "current_l1",
-        "current_l2",
-        "current_l3",
-        "discharge_inhibit",
-        "weather_entity",
-    }
-)
-
 # The HA integration domain each platform's *vendor* service calls target.
 # Only two platforms make any: huawei_solar.set_tou_periods and the
 # growatt_server TOU/AC-charge services. Every other service call BESS makes
@@ -119,6 +94,67 @@ PLATFORM_GRID_POWER_POLARITY = {
     "solis_modbus": "import_positive",  # Grid Power Net register 33263/33264
     "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
 }
+
+# Same idea, one layer down: platforms exposing BATTERY power as a single
+# signed register instead of separate charge/discharge entities (#542). Also a
+# fixed integration fact, not install-overridable. "" (the default) means the
+# platform publishes two real entities and needs no split.
+#
+# "charge_positive": positive raw value = charging, negative = discharging.
+#
+# Both listed platforms are charge_positive, verified against their register
+# definitions:
+#   solax_modbus           plugin_solax.py key="battery_power_charge",
+#                          REGISTER_S16, register 0x16 — no discharge key
+#                          exists anywhere in the integration.
+#   huawei_solar_luna2000  huawei-solar-lib registers.py:1193,
+#                          STORAGE_CHARGE_DISCHARGE_POWER: I32Register("W", 1,
+#                          37765). Reg 37765 itself documents no sign, but its
+#                          writable twin — reg 47321, "Battery charge and
+#                          discharge power", same INT32/W/gain 1 — states the
+#                          vendor convention in Huawei's SUN2000MA Modbus
+#                          Interface Definitions (Issue 08, 2024-11-07):
+#                          "> 0: charging; < 0: discharging". evcc's
+#                          huawei-sun2000-hybrid template independently
+#                          corroborates it, reading 37765 with scale: -1 to
+#                          reach its own positive=discharging convention.
+PLATFORM_BATTERY_POWER_POLARITY = {
+    "solax_modbus_native": "charge_positive",
+    "huawei_solar_luna2000": "charge_positive",
+}
+
+
+def flatten_sensors(sensors: dict) -> dict:
+    """Flatten a per-platform sensors dict into a flat sensor_key -> entity_id dict.
+
+    Handles both storage shapes:
+    - Legacy flat format (no "platform" key): returned as-is (string values only).
+    - Per-platform format: {"platform": <id>, "shared": {...}, "<platform>": {...}}
+      -> shared sensors merged with the active platform's sensors (platform wins
+      on key collision).
+
+    Shared module-level logic so both ``SettingsStore.get_active_sensors`` and
+    any caller validating a not-yet-persisted payload (e.g. the setup wizard's
+    ``sensors`` field, which is always in the per-platform shape) can flatten
+    consistently instead of assuming the flat shape.
+    """
+    if not isinstance(sensors, dict):
+        return {}
+
+    # Legacy flat format (no "platform" key) — return as-is
+    if "platform" not in sensors:
+        return {k: v for k, v in sensors.items() if isinstance(v, str)}
+
+    platform = sensors.get("platform", "")
+    platform_sensors = sensors.get(platform, {})
+    shared_sensors = sensors.get("shared", {})
+
+    result = {}
+    if isinstance(shared_sensors, dict):
+        result.update(shared_sensors)
+    if isinstance(platform_sensors, dict):
+        result.update(platform_sensors)
+    return result
 
 
 class SettingsStore:
@@ -229,6 +265,16 @@ class SettingsStore:
         inverter = self.data.get("inverter", {})
         return PLATFORM_GRID_POWER_POLARITY.get(inverter.get("platform", ""), "")
 
+    def get_battery_power_polarity(self) -> str:
+        """Return the sign convention for this platform's battery power sensor.
+
+        "" for platforms with separate charge/discharge entities (no split
+        needed) and for an unconfigured install. Not user-overridable —
+        see PLATFORM_BATTERY_POWER_POLARITY.
+        """
+        inverter = self.data.get("inverter", {})
+        return PLATFORM_BATTERY_POWER_POLARITY.get(inverter.get("platform", ""), "")
+
     def get_active_sensors(self) -> dict:
         """Return a flat sensor dict merging the active platform's sensors with shared sensors.
 
@@ -236,24 +282,7 @@ class SettingsStore:
         dict of sensor_key → entity_id without needing to know about the
         per-platform storage structure.
         """
-        sensors = self.data.get("sensors", {})
-        if not isinstance(sensors, dict):
-            return {}
-
-        # Legacy flat format (no "platform" key) — return as-is
-        if "platform" not in sensors:
-            return {k: v for k, v in sensors.items() if isinstance(v, str)}
-
-        platform = sensors.get("platform", "")
-        platform_sensors = sensors.get(platform, {})
-        shared_sensors = sensors.get("shared", {})
-
-        result = {}
-        if isinstance(shared_sensors, dict):
-            result.update(shared_sensors)
-        if isinstance(platform_sensors, dict):
-            result.update(platform_sensors)
-        return result
+        return flatten_sensors(self.data.get("sensors", {}))
 
     def apply_discovered(
         self,
@@ -462,7 +491,7 @@ class SettingsStore:
             "home": {
                 "default_hourly": HOME_HOURLY_CONSUMPTION_KWH,
                 "currency": DEFAULT_CURRENCY,
-                "consumption_strategy": "sensor",
+                "consumption_strategy": "fixed",
                 "max_fuse_current": HOUSE_MAX_FUSE_CURRENT_A,
                 "voltage": HOUSE_VOLTAGE_V,
                 "safety_margin": SAFETY_MARGIN_FACTOR,

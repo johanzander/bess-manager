@@ -46,6 +46,18 @@ horizon.
 
 **Actions**: Charge, discharge, or idle at various power levels — filtered
 by physical constraints (available energy, remaining capacity, power limits).
+Discharge candidates enumerate the inverter's integer-percent rate grid,
+plus one deliberate off-lattice candidate (#466 follow-up): discharging
+exactly the forecast net-load residual when that residual is smaller than
+the smallest percent candidate (typical at solar/load crossovers around
+sunrise/sunset). Load-first hardware delivers `min(actual load, ceiling)`,
+so this action executes exactly as planned; it is gated so it always
+classifies as LOAD_SUPPORT and rounds to a nonzero rate register
+(`_residual_cover_p` in `dp_battery_algorithm.py`). Without it, those
+crossover periods had no executable discharge at all — sub-residual
+lattice candidates don't exist and overshooting ones are excluded as
+unexecutable (#497 below) — so IDLE won by default and the home imported
+the residual: the "morning IDLE" pattern users saw pre-fix.
 
 **Transition**: Each action updates SOE accounting for charge/discharge
 efficiency losses and updates the **cost basis** of stored energy.
@@ -101,16 +113,40 @@ impossible to store surplus solar for post-horizon use (issue #359). On any
 market with genuine price variation (Nordic, Belpex, UK variable-export),
 this carve-out is inert and the cap applies exactly as described above.
 
-**Self-throttling near self-consumption (issue #240)**: In `_compute_reward`,
-a discharge whose overshoot above `home_consumption` is
-`<= BATTERY_EXPORT_THRESHOLD_KWH` (0.01 kWh,
-`core/bess/dp_battery_algorithm.py:96`) has its `grid_exported` forced to
-zero for reward purposes — the DP treats it as pure self-consumption, not an
-export sale, because load-first hardware doesn't reliably deliver a trivial
-overshoot to the grid in practice. When evaluating whether a small discharge
-was "worth" `sell_price`, check this threshold first: below it, the relevant
-alternative-value comparison is against the buy price avoided, not the sell
-price (`core/bess/dp_battery_algorithm.py:511-522`).
+**The DP only proposes executable discharges (issues #240, #497)**:
+`_discharge_candidates` excludes any discharge that would overshoot the home
+deficit by less than `GRID_FLOW_RESOLUTION_KWH` (0.1 kWh,
+`core/bess/dp_constants.py`). Such a discharge is not executable on any
+platform: load-following firmware throttles it back to the deficit, and on
+hardware that would deliver it the resulting export is below the resolution of
+the counters that measure exports. So no planned period can contain a
+sub-resolution battery export, and every planned flow set balances exactly.
+
+When judging whether a small discharge was "worth" `sell_price`, the answer is
+that the DP was never offered that action -- the relevant comparison is between
+covering load exactly and a genuinely larger, measurable export.
+
+This replaced #240's approach, which let the DP propose the action and then
+zeroed the export *credit* in `_compute_reward` while leaving
+`battery_discharged` and `next_soe` carrying the full commanded setpoint. That
+booked export revenue load-following hardware never earns, and
+`EnergyData._calculate_detailed_flows` folded the orphaned export back into
+`battery_to_home` (#350), producing periods whose flows did not add up (#497:
+182 of 1875 fixture periods). Consequences of removing it, all measured:
+
+- Planned flows always balance -- `assert_flow_coherence` checks this on every
+  period of every fixture.
+- Plan and execution agree exactly: realized cost equals planned cost on all 33
+  fixtures, where 20 of them previously disagreed by up to 0.73 SEK.
+- The DP's own objective and the reported `battery_solar_cost` now agree
+  exactly, removing a long-documented reporting drift.
+- Realized cost improved by a net 1.04 SEK across the corpus, because the DP had
+  been optimising against revenue it could not collect.
+
+The trade-off: when a deficit is smaller than the smallest discharge the
+hardware can be commanded to perform, the DP proposes no discharge and the home
+imports it. There is no platform-specific self-throttle threshold any more --
+`self_throttle_export_threshold_kwh` was deleted along with its plumbing.
 
 **Cost basis tracking (weighted average)**: When the battery charges at
 different prices over time, the system tracks the cost of stored energy as a
@@ -281,6 +317,24 @@ decided per period from the **shadow price** (above):
 > (The efficiency factor applies only to the buy side — the shadow price is
 > already per-kWh-of-stored-energy.)
 
+**Where that comparison happens (#526).** It is made *inside the DP*, in
+`_record_marginal_value`, at the point where the value function `V` is still in
+hand — not downstream in `battery_system_manager.py`. The result is recorded as
+`DecisionData.intra_period_discharge_allowed`, a plain boolean, and every
+consumer (the BSM apply path and the inverter simulator) reads that boolean
+rather than re-deriving the comparison.
+
+The reason is that `shadow_price` is a *backward difference* between adjacent
+SoE grid levels, so it does not exist at the bottom level — and a SoE at or
+below the reserve floor clamps there. The DP used to skip the assignment in
+that case, leaving the field at its `0.0` default, which is also what a
+genuinely worthless kWh produces. Any consumer comparing against the scalar
+therefore read "never computed" as "worth nothing", and `0.0` satisfies the
+inequality for any positive buy price — so the ceiling opened on data nothing
+had computed. **`shadow_price` is now reporting-only; do not derive a decision
+from it.** Where no shadow price is computable there is no removable kWh below
+that state, so the authorization is `False`: absence is not permission.
+
 What this works out to in practice — important for analysis:
 - During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal
   kWh is only worth the **export (sell) price** — the surplus refills it for
@@ -299,37 +353,88 @@ actual house deficit, and at 15-minute resolution a SOLAR_EXPORT period is net
 surplus (deficit 0), so planned vs realized economics are unchanged.  The gate
 only affects *sub-15-minute* hardware behaviour.
 
-**LOAD_SUPPORT does NOT use this gate (#393 — reverted #384/#385).** #384
-briefly extended this gate to LOAD_SUPPORT (`discharge_rate =
-max(planned_rate, gate_result)`, raising but never lowering the plan-scaled
-ceiling), reasoning that `load_first`'s physical self-limiting to the real
-house deficit made an open ceiling safe. Two problems surfaced:
+**LOAD_SUPPORT uses this gate too, on TOU/register platforms (#520).** House
+load exceeding the period forecast is the normal condition, not an edge case,
+and there is nothing platform-specific in the DP's authorization — so the same
+economic test applies:
 
-- #385's own validation against the reporting user's real captured data found
-  the gate does **not** open during the sustained overnight near-tie regime it
-  was built to fix — `shadow_price` sits within a cent or two of `buy_price`
-  for the whole stretch there (that near-tie is close to the defining
-  condition for choosing LOAD_SUPPORT at all), so the strict inequality rarely
-  trips in exactly the case that motivated the change.
-- Replaying a full day of real captured data from a second, independent
-  report showed the same gate condition evaluating **true for the large
-  majority of LOAD_SUPPORT periods (51/67, ~76%)** — not the rare "reserve
-  genuinely not needed elsewhere" case the gate was designed for. In
-  practice this meant a broad, mostly-untested override of the #147
-  reservation pacing (LOAD_SUPPORT deliberately reserves battery for a
-  later, pricier period rather than dumping at full rate).
+```
+discharge_rate = max(
+    plan_scaled,
+    intra_period_discharge_gate(decision.intra_period_discharge_allowed),
+)
+```
 
-LOAD_SUPPORT is back to its plan-scaled cap unconditionally, matching
-pre-#384/v9.9.0b23 behavior — no shadow-price gate at all. The original
-overnight-leak problem #381/#384 described (small real grid imports, 0.1–0.2
-kWh/night, while SOE has ample headroom above the floor) remains open and
-tracked in #393, to be revisited with a mechanism actually validated against
-real captured data across representative regimes (not just the motivating
-case) before it ships again. See
-`core/bess/tests/unit/test_load_support_gate_regression_393.py`, which
-replays real captured data (`regression_2026_07_26_203726.json`) reproducing
-the 76% figure and asserting LOAD_SUPPORT's discharge_rate never exceeds the
-plan-scaled baseline regardless of shadow_price.
+Raising, never lowering, the plan-scaled ceiling: gate closed → plan-scaled cap
+and the deficit is imported; gate open → ceiling raised and the deficit is
+covered from the battery.
+
+This settles a change that flipped twice (#384/#385 shipped it, #393 reverted
+it, #520 re-landed it). **Do not re-revert on #393's reasoning**, which was:
+"a broad override of the #147 reservation pacing." That double-counts the
+reservation. The authorization the gate reads **is** a dV/dSoE comparison, made
+by the DP against its own marginal value of stored energy — the future value the
+pacing protects is already inside it:
+
+- Energy genuinely needed for a later peak → high `shadow_price` → gate
+  **closed** → import. Reservation protected, by construction.
+- Gate **open** → the energy is worth more used now than saved. There is
+  nothing being reserved.
+
+The gate does not override reservation pacing; it *evaluates* it. #393's
+headline "the gate evaluates true for 51/67 (~76%) of LOAD_SUPPORT periods"
+measured **gate-openness**, not pacing-override: it means that in 76% of those
+periods battery-now genuinely beat grid-now.
+
+The breadth is real and corpus-wide — re-measured post-#526 over the 36-fixture
+corpus (603 LOAD_SUPPORT periods) the gate is open in **431 (71.5%)** and raises
+the ceiling above the DP's plan-scaled rate in **427** of them. That is expected
+under the argument above, and it is what makes the gate's correctness an
+argument about what the DP's authorization *means* rather than a claim that it
+rarely fires. (#520 also quotes an overlap of "9 periods — 1.5%" between
+gate-open and "a genuine reservation the plan is holding"; that figure could not
+be reproduced from the corpus under any definition tried when the TOU half
+landed — treat the 71.5%/427 numbers above as the measured ones.)
+
+Two limits to keep in mind when analysing this:
+
+- `shadow_price` is the marginal value *at the planned SoE*. It is accurate for
+  a modest overshoot; for a large one the true value of stored energy rises as
+  SoE falls, so the test flatters battery use. That bounds *how much* extra to
+  cover, not the direction of the rule — and it is why the gate is evaluated
+  fresh each period.
+- **The corpus cannot measure this gate's benefit.** Fixtures are 15-minute
+  averages from point forecasts, where a sub-period spike is arithmetically
+  invisible; only the *cost* (covering more of a planned partial cover from
+  battery) is representable. The simulator therefore deliberately does **not**
+  mirror the gate for LOAD_SUPPORT (`inverter_simulator._map_rates`) — doing so
+  moves 27 of 36 fixtures by +25.67 SEK of realized cost in total (largest
+  single fixture `historical_2025_01_12_evening_peak_no_solar` at +8.420 SEK;
+  range −0.340 .. +8.420; re-measured post-#526), which is the unmeasurable
+  trade-off's cost half alone, not a real result. For
+  SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
+  is why the simulator does mirror the gate for those.
+
+**VPP platforms are still excluded** (`discharge_rate_is_load_following` is
+False there): their `discharge_rate` is an immediate forced power command, not
+a load-following ceiling (#324), so opening the gate would command a full-power
+discharge rather than permit a gentle cover. The VPP half of #520 maps the
+gate's *decision* (release control / hold) rather than its rate, and is
+deferred to candidate-scoring work.
+
+The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
+inherited (an uncomputed bottom-grid-level value opening the ceiling
+unconditionally) no longer exists: #526 moved the decision into the DP and
+withholds authorization where no shadow price is computable. See the "Where
+that comparison happens" note above.
+
+See `core/bess/tests/unit/test_load_support_discharge_gate.py` and
+`test_load_support_gate_regression_393.py` (real captured data,
+`regression_2026_07_26_203726.json`) — both assert the ceiling follows the
+gate. Their assertions were deliberately inverted by #520. That fixture is
+still in the majority-gate-open regime #393 identified, though the exact figure
+has drifted with the DP: 41/68 (60.3%) on the current grid versus #393's 51/67
+(76%).
 
 ### The inverter AC output cap (solar clipping avoidance)
 
@@ -345,6 +450,17 @@ battery has room.  With the cap set:
   (reported per period on `EnergyData` and as `clippedSolar` in the API).
   A full battery during above-cap solar is therefore genuinely costly, which
   is what pushes the optimizer to reserve headroom for the midday peak.
+  `clipped_solar` also absorbs export-limit-curtailed PV (#269/#502) — same
+  field, second cause: when `export_curtailment_enabled` and a period would
+  export below `export_curtailment_price_floor`, the solar-sourced share of
+  that export (never the battery-sourced share, since the hardware
+  export-limit only throttles PV) is reported as unharvested here rather
+  than at its honest negative-price cost, since it will be curtailed to
+  zero at runtime. Applied only at reporting seams
+  (`apply_export_curtailment_to_period_data` in `models.py`) — the
+  `PeriodData` BSM actually stores stays at the honest price, since the
+  execution-time curtailment trigger and the DP's own guardrail comparison
+  both require it.
 - **Deferring absorption uses the SOLAR_EXPORT-below-max bypass (#313)**:
   normally IDLE passively absorbs surplus, so a reward change alone cannot
   defer charging.  The existing bypass candidate (SoE held exactly unchanged,
@@ -424,6 +540,36 @@ configured.
   regulatory concept), and any change to `HomePowerMonitor`'s own runtime
   behavior — it remains the real-time safety net; this constraint just makes
   the *plan* agree with it.
+
+### Export curtailment and the charge-early tie-break (#269)
+
+When export curtailment is active (enabled AND the platform supports
+export-limit control), periods priced below the curtailment floor get an
+effective sell price of 0.0 for the DP's reward calculation only
+(`optimize_battery_schedule`'s `reward_sell_price`); reported economics
+and the execution-time trigger still use the real price. Execution-side,
+BSM writes the hardware export limit (Growatt "Meter 1" + 0%) on any
+period with planned export below the floor and releases it otherwise
+(`battery_system_manager.py`, `_export_limit_curtailed`).
+
+Flooring the sell price creates *exact reward ties by construction*:
+whenever the remaining below-floor solar surplus exceeds battery headroom,
+"charge now, curtail later" and "curtail now, charge later" earn identical
+reward (signature in a bundle: `shadow_price == cycle_cost_per_kwh` in
+those periods). The replay therefore applies a charge-early tie-break -- the tie
+policy's charge-early row (`tie_policy.py`, row 4), applied once for both
+the grid and PWL replays: among candidates within the #466 epsilon, prefer the highest
+`next_soe`, but never one that imports more grid energy than the argmax
+winner, and never overriding a discharge winner. Charge-early is
+stochastically dominant — equal model reward, strictly better under
+forecast error in either direction (captures above-forecast PV that
+curtailment would otherwise clip at the panel; preserves slack toward the
+next positive-price block).
+
+**General invariant**: any reward shaping that flattens the objective
+(floors, caps, zeroing) manufactures indifference regions and MUST ship
+with an explicit tie-break policy stating which physically-preferred
+action wins inside the flat region — float noise is not a policy.
 
 
 ## Execution Layer: What Can Override the Schedule

@@ -38,10 +38,20 @@ from loguru import logger
 from core.bess import time_utils
 from core.bess.health_check import describe_failing_checks, run_system_health_checks
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
-from core.bess.settings_store import VALID_PLATFORMS
+from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
+
+#: The wizard payload field each energy provider cannot work without.
+#: Mirrors BatterySystemManager._create_price_source, which needs exactly
+#: these to construct a usable PriceSource (#549).
+_PROVIDER_REQUIRED_FIELD: dict[str, str] = {
+    "nordpool_official": "nordpoolConfigEntryId",
+    "nordpool_hacs": "nordpoolEntity",
+    "octopus": "octopusImportTodayEntity",
+    "entsoe": "entsoeEntity",
+}
 
 
 def _get_hourly_settings_from_periods(schedule_manager, hour: int) -> dict:
@@ -111,6 +121,79 @@ def _strip_empty_sensor_values(sensors: dict) -> dict:
         else:
             result[key] = value
     return result
+
+
+def _validate_power_monitoring_sensors(
+    home_section: dict, active_sensors: dict
+) -> None:
+    """Raise HTTPException(422) if power monitoring is being enabled without
+    the phase-current sensors its phase_count requires.
+
+    Mirrors the frontend gating in HomeFormSection.tsx/SetupWizardPage.tsx —
+    this is the server-side backstop so the API itself refuses the invalid
+    combination regardless of which client called it.
+    """
+    if not home_section.get("power_monitoring_enabled"):
+        return
+    phase_count = home_section.get("phase_count", 3)
+    required_keys = (
+        ["current_l1"]
+        if phase_count == 1
+        else [
+            "current_l1",
+            "current_l2",
+            "current_l3",
+        ]
+    )
+    required_keys = [*required_keys, "battery_charging_power_rate"]
+    missing = [k for k in required_keys if not active_sensors.get(k)]
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Cannot enable power monitoring: missing required sensor(s) "
+                f"for {phase_count}-phase: {', '.join(missing)}. "
+                "Configure them in Settings → Sensors first."
+            ),
+        )
+
+
+_CONSUMPTION_STRATEGIES = ("fixed", "sensor", "influxdb_7d_avg", "ha_statistics")
+
+
+def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> None:
+    """Raise HTTPException(422) for a consumption strategy that cannot work.
+
+    Mirrors the frontend gating in HomeFormSection.tsx — the server-side
+    backstop so the API refuses the combination regardless of which client
+    called it. Only ``sensor`` is checked against its sensor: it is the one
+    strategy with no fallback, so without ``48h_avg_grid_import`` every
+    optimization run aborts, no schedule is ever built, and the dashboard
+    sits on "Initializing" forever (#558). ``ha_statistics`` and
+    ``influxdb_7d_avg`` are left alone — they degrade to the fixed profile
+    and report it, rather than stalling.
+    """
+    strategy = home_section.get("consumption_strategy")
+    if strategy is None:
+        return
+    if strategy not in _CONSUMPTION_STRATEGIES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown consumption strategy '{strategy}'. Valid values: "
+                f"{', '.join(_CONSUMPTION_STRATEGIES)}."
+            ),
+        )
+    if strategy == "sensor" and not active_sensors.get("48h_avg_grid_import"):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Consumption strategy 'sensor' requires the "
+                "'48h_avg_grid_import' sensor, which is not configured. "
+                "Configure it in Settings → Sensors first, or choose a "
+                "strategy that does not need it."
+            ),
+        )
 
 
 def _require_configured_system(bess_controller) -> None:
@@ -273,6 +356,28 @@ async def patch_settings(updates: dict):
             if store_key == "sensors":
                 section = _strip_empty_sensor_values(section)
 
+            # Validate power-monitoring sensor requirements BEFORE persisting —
+            # must run ahead of save_section so an invalid combination is never
+            # written to disk, even though the client still gets a 422.
+            if store_key == "home":
+                effective_sensors = {
+                    **bess_controller.settings_store.get_active_sensors(),
+                    **flatten_sensors(updates.get("sensors") or {}),
+                }
+                _validate_power_monitoring_sensors(section, effective_sensors)
+                _validate_consumption_strategy(section, effective_sensors)
+
+            if store_key == "sensors":
+                # A sensor removal (e.g. unmapping a phase-current sensor) can
+                # break an already-enabled power-monitoring config just as
+                # much as an explicit disable-without-sensors on the home
+                # section can — validate against the persisted home config.
+                persisted_home = bess_controller.settings_store.get_section("home")
+                _validate_power_monitoring_sensors(
+                    persisted_home, flatten_sensors(section)
+                )
+                _validate_consumption_strategy(persisted_home, flatten_sensors(section))
+
             bess_controller.settings_store.save_section(store_key, section)
 
             # Apply in-memory updates for sections that drive live behaviour
@@ -294,6 +399,8 @@ async def patch_settings(updates: dict):
                 # successor if a migration was ever interrupted (see
                 # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
                 # straight through would raise AttributeError.
+                # (Power-monitoring sensor validation already ran above, before
+                # save_section, so the invalid combination is never persisted.)
                 in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
                 bess_controller.system.update_settings({"home": in_mem})
 
@@ -346,12 +453,13 @@ async def patch_settings(updates: dict):
                 bess_controller.system.set_demo_mode(enabled)
 
         # Any of the sections above (sensors directly, or growatt/inverter via
-        # a platform switch) can change service_domain/grid_power_polarity —
-        # refresh those unconditionally rather than only on a key match.
+        # a platform switch) can change service_domain and the grid/battery
+        # signed-sensor polarities — refresh those unconditionally rather
+        # than only on a key match.
         # ha_controller.sensors is a live settings_store view (#334) and
         # needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarities()
         _refresh_health(bess_controller)
         return await get_settings()
 
@@ -389,6 +497,15 @@ def _aggregate_quarterly_to_hourly(
         "IDLE": 1,
     }
 
+    def dominant_intent(intents: list[str]) -> str:
+        """Most common intent among the 4 quarters; ties broken by priority."""
+        intent_counts: dict[str, int] = {}
+        for intent_item in intents:
+            intent_counts[intent_item] = intent_counts.get(intent_item, 0) + 1
+        max_count = max(intent_counts.values())
+        candidates = [i for i, c in intent_counts.items() if c == max_count]
+        return max(candidates, key=lambda x: intent_priority.get(x, 0))
+
     hourly_periods = []
     num_hours = (len(quarterly_periods) + 3) // 4  # Round up to handle DST
 
@@ -406,20 +523,42 @@ def _aggregate_quarterly_to_hourly(
 
         # Determine dominant strategic intent (most common in the 4 periods)
         # If there's a tie, prioritize action over inaction
-        period_intents = [p.strategicIntent for p in quarter_periods]
-        intent_counts = {}
-        for intent_item in period_intents:
-            intent_counts[intent_item] = intent_counts.get(intent_item, 0) + 1
+        dominant_strategic_intent = dominant_intent(
+            [p.strategicIntent for p in quarter_periods]
+        )
 
-        # Find max count, then use priority as tie-breaker
-        max_count = max(intent_counts.values())
-        candidates = [i for i, c in intent_counts.items() if c == max_count]
-        dominant_intent = max(candidates, key=lambda x: intent_priority.get(x, 0))
+        # Curtailment (#501) is independent of intent -- a curtailed quarter
+        # can classify as SOLAR_STORAGE (battery still charging at its rate
+        # limit while the surplus above it curtails), so never filter by the
+        # dominant intent. If any quarter was curtailed, the hour as
+        # displayed is (at least partly) a curtailed export, not a purely
+        # profitable one.
+        hour_curtailed = any(p.curtailed for p in quarter_periods)
+
+        # Observed intent must aggregate across all 4 quarters too, not just
+        # the last one — a re-plan only updates strategicIntent going
+        # forward, so a stale strategicIntent can persist for an elapsed hour
+        # even though most/all of its quarters were genuinely observed
+        # executing something else (#486). dataSource itself stays tied to
+        # the last quarter (unchanged) — actualSavingsSoFar/predictedRemaining
+        # Savings (api_dataclasses.py) bucket a whole hour's summed
+        # hourlySavings by this field, so flipping it to "actual" as soon as
+        # any one quarter is actual would count still-predicted quarters'
+        # costs as realized.
+        actual_quarters = [p for p in quarter_periods if p.dataSource == "actual"]
+        observed_intents = [
+            p.observedIntent for p in actual_quarters if p.observedIntent
+        ]
+        hour_observed_intent = (
+            dominant_intent(observed_intents)
+            if observed_intents
+            else last_period.observedIntent
+        )
 
         # Sum energy values across the 4 quarters
         hourly_period = APIDashboardHourlyData(
             period=hour,
-            dataSource=last_period.dataSource,  # Use last period's data source
+            dataSource=last_period.dataSource,
             timestamp=last_period.timestamp,
             # Sum energy flows
             solarProduction=create_formatted_value(
@@ -570,8 +709,9 @@ def _aggregate_quarterly_to_hourly(
                 sum(p.netSavings.value for p in quarter_periods), "currency", currency
             ),
             # Use dominant strategic intent with tie-breaking (same logic as Growatt schedule)
-            strategicIntent=dominant_intent,
-            observedIntent=last_period.observedIntent,
+            strategicIntent=dominant_strategic_intent,
+            observedIntent=hour_observed_intent,
+            curtailed=hour_curtailed,
             directSolar=sum(p.directSolar for p in quarter_periods),
         )
 
@@ -1117,6 +1257,7 @@ async def get_growatt_detailed_schedule():
         try:
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
+            today_curtailed: list[bool] = []
             today_reconciled_intents: list[str] | None = None
             if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
@@ -1152,14 +1293,17 @@ async def get_growatt_detailed_schedule():
                             if pd_today.data_source == "actual" and observed_intent
                             else planned_intent
                         )
+                        today_curtailed.append(pd_today.decision.curtailed)
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
                         today_reconciled_intents.append(planned_intent)
+                        today_curtailed.append(False)
             raw_groups = schedule_manager.get_detailed_period_groups(
                 intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
+                curtailed=today_curtailed if today_curtailed else None,
             )
             prev_soc: float | None = None
             for group in raw_groups:
@@ -1200,6 +1344,7 @@ async def get_growatt_detailed_schedule():
                         "total_action_kwh": group["total_action_kwh"],
                         "soc_end_pct": soc_end,
                         "soc_delta_kwh": soc_delta_kwh,
+                        "curtailed": group["curtailed"],
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1216,6 +1361,7 @@ async def get_growatt_detailed_schedule():
                 tomorrow_intents: list[str] = []
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
+                tomorrow_curtailed: list[bool] = []
                 # Resolved by exact timestamp (not positional index -
                 # optimization_period) so a standalone next-day schedule
                 # (period_data[0] anchored to tomorrow 00:00 despite
@@ -1237,13 +1383,16 @@ async def get_growatt_detailed_schedule():
                             if battery_settings.total_capacity > 0
                             else None
                         )
+                        tomorrow_curtailed.append(pd.decision.curtailed)
                     else:
                         tomorrow_soc_values.append(None)
+                        tomorrow_curtailed.append(False)
                 if tomorrow_intents:
                     raw_tomorrow_groups = schedule_manager.get_detailed_period_groups(
                         intents=tomorrow_intents,
                         actions=tomorrow_actions,
                         soc_values=tomorrow_soc_values,
+                        curtailed=tomorrow_curtailed,
                     )
                     tomorrow_period_groups = []
                     prev_soc_tmr: float | None = None
@@ -1291,6 +1440,7 @@ async def get_growatt_detailed_schedule():
                                 "total_action_kwh": group["total_action_kwh"],
                                 "soc_end_pct": soc_end,
                                 "soc_delta_kwh": soc_delta_kwh_tmr,
+                                "curtailed": group["curtailed"],
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:
@@ -1852,7 +2002,7 @@ async def get_savings_aggregate(
             now = time_utils.now()
             current_period = now.hour * 4 + now.minute // 15
             today_view = bess_controller.system.daily_view_builder.build_daily_view(
-                current_period
+                current_period, bess_controller.system.export_curtailment_active
             )
 
         buckets = build_buckets(
@@ -1942,7 +2092,7 @@ async def get_prediction_comparison(
 
         # Build current daily view
         current_daily_view = bess_controller.system.daily_view_builder.build_daily_view(
-            current_period
+            current_period, bess_controller.system.export_curtailment_active
         )
 
         # Get current Growatt schedule
@@ -2738,9 +2888,13 @@ async def run_setup_discovery():
 
         # Registry-based discovery (robust against entity renaming)
         registry = ha.fetch_entity_registry()
-        platform_sensors, detected_platform = ha.discover_sensors_from_registry(
-            registry
-        )
+        (
+            platform_sensors,
+            detected_platform,
+            platform_disabled,
+        ) = ha.discover_sensors_from_registry(registry)
+        disabled_sensors: dict[str, str] = {}
+        platform_disabled_sensors: dict[str, dict[str, str]] = platform_disabled
         if platform_sensors:
             # When local modbus is detected alongside cloud, use modbus as
             # the primary sensor source (it provides TOU control entities).
@@ -2758,6 +2912,7 @@ async def run_setup_discovery():
             ):
                 effective_platform = "solax_modbus_growatt_sph"
             sensors = dict(platform_sensors.get(effective_platform, {}))
+            disabled_sensors = dict(platform_disabled.get(effective_platform, {}))
             _suffix_maps = {
                 "growatt_server_min": ha.GROWATT_MIN_SUFFIX_MAP,
                 "growatt_server_sph": ha.GROWATT_SPH_SUFFIX_MAP,
@@ -2774,7 +2929,14 @@ async def run_setup_discovery():
                     for k in all_bess_keys
                     if not (k.startswith("tou_time_") and k[9:10] in "23456789")
                 ]
-            missing_sensors = [k for k in all_bess_keys if k not in sensors]
+            # A disabled sensor is not "missing" — the entity exists and the
+            # user only has to switch it on.  Keep the two conditions apart
+            # so the wizard can give the actionable message (#549).
+            missing_sensors = [
+                k
+                for k in all_bess_keys
+                if k not in sensors and k not in disabled_sensors
+            ]
 
         current_sensors = ha.discover_current_sensors(states)
         for phase_key, entity_id in current_sensors.items():
@@ -2830,6 +2992,14 @@ async def run_setup_discovery():
         # Attach sensor dicts without key conversion
         result["sensors"] = sensors
         result["platformSensors"] = platform_sensors
+        # Sensor keys left unmapped because their only registry match is
+        # disabled in HA — the wizard blocks on these and names the entity
+        # to enable, rather than persisting a mapping that 404s (#549).
+        # Per-platform like platformSensors, because the user can switch the
+        # inverter tab away from the auto-detected platform and the gate has
+        # to follow that choice.
+        result["disabledSensors"] = disabled_sensors
+        result["platformDisabledSensors"] = platform_disabled_sensors
         # Suggested spot-multiplier defaults for the auto-detected provider —
         # already camelCase, attach after conversion to avoid double-conversion.
         result["pricingDefaults"] = _pricing_defaults_for_discovery(integrations)
@@ -2853,6 +3023,24 @@ async def setup_complete(payload: APISetupCompletePayload):
     from app import bess_controller
 
     try:
+        # A provider without its own required configuration can never fetch
+        # a price, so the whole optimizer aborts every cycle with "No price
+        # data available".  Reject it here rather than persisting a config
+        # that is guaranteed to fail (#549).  This runs before
+        # apply_discovered_config below, which persists on its own.
+        if payload.provider is not None:
+            required_field = _PROVIDER_REQUIRED_FIELD.get(payload.provider)
+            if required_field and not getattr(payload, required_field, None):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"Energy provider '{payload.provider}' requires "
+                        f"'{required_field}', which is empty. Select the "
+                        f"provider you actually have configured in Home "
+                        f"Assistant, or install the integration first."
+                    ),
+                )
+
         sections: dict = {}
 
         # --- sensors & discovery ---
@@ -2919,6 +3107,12 @@ async def setup_complete(payload: APISetupCompletePayload):
             for field, key in _HOME_MAP.items():
                 if getattr(payload, field) is not None:
                     home[key] = getattr(payload, field)
+            effective_sensors = {
+                **bess_controller.settings_store.get_active_sensors(),
+                **flatten_sensors(sections.get("sensors") or {}),
+            }
+            _validate_power_monitoring_sensors(home, effective_sensors)
+            _validate_consumption_strategy(home, effective_sensors)
             sections["home"] = home
 
         # --- electricity price ---
@@ -3018,10 +3212,10 @@ async def setup_complete(payload: APISetupCompletePayload):
         # Apply settings to live system so BESS starts immediately without
         # requiring a restart. Unconditional, not gated on payload.sensors:
         # an inverter platform switch above also changes service_domain and
-        # grid_power_polarity. ha_controller.sensors is a live settings_store
+        # the power polarities. ha_controller.sensors is a live settings_store
         # view (#334) and needs no equivalent refresh.
         bess_controller.refresh_service_domain()
-        bess_controller.refresh_grid_power_polarity()
+        bess_controller.refresh_power_polarities()
         if payload.growattDeviceId:
             bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
         if payload.huaweiDeviceId:
@@ -3124,6 +3318,10 @@ async def setup_complete(payload: APISetupCompletePayload):
 
         logger.info(f"Setup complete: saved sections {list(sections.keys())}")
         return {"success": True, "saved_sections": list(sections.keys())}
+    except HTTPException:
+        # Preserve the original status code (e.g. 422 from sensor/platform
+        # validation) instead of masking it as a generic 500 below.
+        raise
     except Exception as e:
         logger.error(f"Error completing setup: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

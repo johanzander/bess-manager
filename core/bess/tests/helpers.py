@@ -8,7 +8,10 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.dp_battery_algorithm import (
+    _period_flows,
+    optimize_battery_schedule,
+)
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import (
     ADDITIONAL_COSTS,
@@ -44,6 +47,10 @@ def _scenario_inputs(scenario: dict):
         cycle_cost_per_kwh=battery["cycle_cost_per_kwh"],
         inverter_max_ac_power_kw=battery.get("inverter_max_ac_power_kw", 0.0),
         inverter_ac_power_margin=battery.get("inverter_ac_power_margin", 0.0),
+        export_curtailment_enabled=battery.get("export_curtailment_enabled", False),
+        export_curtailment_price_floor=battery.get(
+            "export_curtailment_price_floor", 0.0
+        ),
     )
 
     if "buy_price" in scenario and "sell_price" in scenario:
@@ -96,6 +103,14 @@ def _scenario_inputs(scenario: dict):
     }
     if "terminal_value_per_kwh" in scenario:
         inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+    # export_curtailment_active is capability-aware in production (enabled
+    # AND the platform supports export-limit control, resolved in
+    # battery_system_manager.py) -- fixtures record the resolved flag
+    # explicitly rather than this helper inferring it from the enabled
+    # setting, so a fixture from a non-curtailing platform replays the
+    # same DP path it ran live.
+    if battery.get("export_curtailment_active", False):
+        inputs["export_curtailment_active"] = True
     if "home" in scenario:
         inputs["home_settings"] = HomeSettings(**scenario["home"])
     return inputs
@@ -118,16 +133,14 @@ def run_scenario_realized(scenario: dict) -> tuple:
     result = optimize_battery_schedule(**inp)
     dt = inp["period_duration_hours"]
     settings = inp["battery_settings"]
-    buy_price = inp["buy_price"]
     commands = [
         derive_control_command(
             pd.decision.strategic_intent,
             pd.decision.battery_action / dt,
             settings,
-            shadow_price=pd.decision.shadow_price,
-            buy_price=buy_price[i],
+            intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
         )
-        for i, pd in enumerate(result.period_data)
+        for pd in result.period_data
     ]
     sim = simulate(
         commands,
@@ -195,6 +208,8 @@ def assert_physical_constraints(result, battery: dict) -> None:
     Checks:
     - SOE stays within [min_soe_kwh, max_soe_kwh]
     - Charge/discharge power respects limits
+    - Every period's detailed flows are internally coherent (see
+      assert_flow_coherence)
     """
     tolerance = 1e-6
 
@@ -243,6 +258,121 @@ def assert_physical_constraints(result, battery: dict) -> None:
                     abs(action) <= battery["max_discharge_power_kw"] + power_tolerance
                 ), f"Period {pd.period}: discharge {abs(action):.2f} kW > max {battery['max_discharge_power_kw']} kW"
 
+        assert_flow_coherence(pd)
+
+
+# Detailed-flow invariants for DP-PLANNED periods.
+#
+# They exist because the DP had accumulated a number of independently-tuned
+# constants (export thresholds, noise folds, power tolerances, SOE grid steps)
+# that each behaved correctly in isolation but twice drifted into disagreeing on
+# a narrow band of inputs, producing periods whose reported flows did not add up
+# (#350 vs #240, diagnosed and fixed in #497). Nothing in the suite checked that
+# a period's numbers were self-consistent, so those only ever surfaced when a
+# human read a schedule by hand.
+#
+# All six hold for every period of every fixture. Two of them -- exports having
+# a source, and the home being supplied exactly what it consumed -- were
+# violated in 182 of 1875 periods before #497 and were pinned separately while
+# that debt stood; they are ordinary assertions now.
+#
+# IMPORTANT -- planned periods only. `_calculate_detailed_flows` deliberately
+# refuses to invent a flow to reconcile independent lifetime counters, so on
+# MEASURED data these balances legitimately fail: leftover `grid_imported`
+# beyond what the home and battery took is dropped rather than attributed
+# (models.py:142), and `battery_to_grid` is capped by `grid_exported` rather
+# than forced to absorb the discharge remainder (models.py:149). Both are
+# cross-sensor noise, not defects. A DP plan has no sensors and no noise, so it
+# has no such excuse. Do not point this helper at historical/measured
+# EnergyData -- it will fail by design.
+#
+def assert_flow_coherence(pd) -> None:
+    """Assert one DP-planned period's detailed flows add up to its totals."""
+    tolerance = 1e-6
+    e = pd.energy
+
+    assert abs(e.grid_exported - e.solar_to_grid - e.battery_to_grid) < tolerance, (
+        f"Period {pd.period}: exported energy has no source -- solar_to_grid "
+        f"{e.solar_to_grid:.4f} + battery_to_grid {e.battery_to_grid:.4f} != "
+        f"grid_exported {e.grid_exported:.4f}"
+    )
+    assert (
+        abs(e.solar_to_home + e.battery_to_home + e.grid_to_home - e.home_consumption)
+        < tolerance
+    ), (
+        f"Period {pd.period}: what reached the home does not match what it "
+        f"consumed -- solar_to_home {e.solar_to_home:.4f} + battery_to_home "
+        f"{e.battery_to_home:.4f} + grid_to_home {e.grid_to_home:.4f} != "
+        f"home_consumption {e.home_consumption:.4f}"
+    )
+    assert (
+        abs(e.battery_to_home + e.battery_to_grid - e.battery_discharged) < tolerance
+    ), (
+        f"Period {pd.period}: battery discharge does not split into its "
+        f"destinations -- battery_to_home {e.battery_to_home:.4f} + "
+        f"battery_to_grid {e.battery_to_grid:.4f} != battery_discharged "
+        f"{e.battery_discharged:.4f}"
+    )
+    assert (
+        abs(e.solar_to_battery + e.grid_to_battery - e.battery_charged) < tolerance
+    ), (
+        f"Period {pd.period}: battery charge does not split into its sources -- "
+        f"solar_to_battery {e.solar_to_battery:.4f} + grid_to_battery "
+        f"{e.grid_to_battery:.4f} != battery_charged {e.battery_charged:.4f}"
+    )
+    assert abs(e.grid_to_home + e.grid_to_battery - e.grid_imported) < tolerance, (
+        f"Period {pd.period}: imported energy has no destination -- grid_to_home "
+        f"{e.grid_to_home:.4f} + grid_to_battery {e.grid_to_battery:.4f} != "
+        f"grid_imported {e.grid_imported:.4f}"
+    )
+
+    for flow_name in (
+        "solar_to_home",
+        "solar_to_battery",
+        "solar_to_grid",
+        "grid_to_home",
+        "grid_to_battery",
+        "battery_to_home",
+        "battery_to_grid",
+    ):
+        value = getattr(e, flow_name)
+        assert value >= -tolerance, (
+            f"Period {pd.period}: {flow_name} is negative ({value:.4f}) -- a flow "
+            f"between two entities cannot run backwards"
+        )
+
+
+def flows_for(
+    power: float,
+    soe: float,
+    next_soe: float,
+    home_consumption: float,
+    solar_production: float,
+    battery_settings,
+    dt: float,
+    import_cap_kwh: float | None = None,
+):
+    """The `PeriodFlows` record for one action, for tests that call
+    `_build_period_data` directly.
+
+    `_build_period_data` takes the flows as a required argument (Phase 3, P4)
+    so that reporting cannot re-derive physics the objective already priced.
+    Tests exercising it therefore have to produce the record the same way
+    production does -- through `_period_flows` -- rather than hand-building
+    one, which would reintroduce exactly the second derivation the signature
+    exists to prevent. This wrapper only fills in the AC cap.
+    """
+    return _period_flows(
+        power=power,
+        soe=soe,
+        next_soe=next_soe,
+        home_consumption=home_consumption,
+        solar_production=solar_production,
+        battery_settings=battery_settings,
+        dt=dt,
+        import_cap_kwh=import_cap_kwh,
+    )
+
 
 def make_battery_settings(**overrides):
     """Create a BatterySettings instance with sensible test defaults.
@@ -271,3 +401,23 @@ def assert_savings_positive(result) -> None:
         f"Grid-only: {result.economic_summary.grid_only_cost:.2f}, "
         f"Optimized: {result.economic_summary.battery_solar_cost:.2f}"
     )
+
+
+def empty_slot_table() -> list[dict]:
+    """A Growatt MIN inverter with nothing programmed.
+
+    The hardware always reports all 9 slots; unused ones come back disabled.
+    An empty list means the read itself failed, which GrowattMinController
+    treats as fatal (issue #551) — so mocks representing an idle inverter must
+    return this, not [].
+    """
+    return [
+        {
+            "segment_id": slot_id,
+            "start_time": "00:00",
+            "end_time": "00:00",
+            "batt_mode": "load_first",
+            "enabled": False,
+        }
+        for slot_id in range(1, 10)
+    ]

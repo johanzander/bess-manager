@@ -4,11 +4,15 @@ Tests cover:
 - _map_registry_entities: unique_id-based suffix matching
 - discover_sensors_from_registry: single suffix map per platform
 - Robustness against user entity renaming (unique_id is immutable)
-- Derived lifetime sensor fallbacks (GEN3/GEN4)
+- Derived lifetime sensors (SolaX native/Solis/Huawei lack a load register;
+  GEN3 lacks a system-production one)
 """
 
+import logging
 from typing import ClassVar
 from unittest.mock import patch
+
+import pytest
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.settings_store import SettingsStore
@@ -228,15 +232,16 @@ def _solax_native_registry() -> list[dict]:
         _entity(
             "sensor.solax_battery_capacity", "solax_modbus", "solax_battery_capacity"
         ),
+        # The ONLY battery power entity solax_modbus publishes: a signed
+        # register (plugin_solax.py, key="battery_power_charge", REGISTER_S16,
+        # reg 0x16) that goes negative while discharging. There is no
+        # "battery_power_discharge" key anywhere in the integration — an
+        # earlier version of this fixture invented one, which is why #542
+        # shipped with a discharge sensor that never resolved.
         _entity(
             "sensor.solax_battery_power_charge",
             "solax_modbus",
             "solax_battery_power_charge",
-        ),
-        _entity(
-            "sensor.solax_battery_power_discharge",
-            "solax_modbus",
-            "solax_battery_power_discharge",
         ),
         _entity("sensor.solax_measured_power", "solax_modbus", "solax_measured_power"),
         _entity("sensor.solax_grid_export", "solax_modbus", "solax_grid_export"),
@@ -351,6 +356,15 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             "sensor.huawei_meter_grid_accumulated_energy",
             "huawei_solar",
             f"{serial}_grid_accumulated_energy",
+        ),
+        # Deliberately listed BEFORE input_power: "SN_total_dc_input_power"
+        # also ends with "_input_power", so registry order alone would let
+        # this entity claim pv_power.  Only _map_registry_entities' longest-
+        # suffix-first ordering keeps the two apart (#569).
+        _entity(
+            "sensor.huawei_inverter_total_dc_input_energy",
+            "huawei_solar",
+            f"{serial}_total_dc_input_power",
         ),
         _entity(
             "sensor.huawei_inverter_input_power",
@@ -859,7 +873,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_standard_entities(self):
         """Standard Growatt entities match via unique_id suffix."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -891,7 +905,7 @@ class TestMapRegistryEntities:
             "growatt_server",
             "rkm0d7n04x_battery_discharge_soc_limit",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -900,7 +914,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_sph_entities(self):
         """SPH entities match via mix_* unique_id sensor keys."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_sph_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_SPH_SUFFIX_MAP,
@@ -939,7 +953,7 @@ class TestMapRegistryEntities:
 
     def test_min_map_does_not_match_sph_entities(self):
         """MIN suffix map should not match SPH mix_* unique_ids."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_sph_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -953,7 +967,7 @@ class TestMapRegistryEntities:
 
     def test_sph_map_does_not_match_min_entities(self):
         """SPH suffix map should not match MIN tlx_* unique_ids."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_SPH_SUFFIX_MAP,
@@ -965,7 +979,7 @@ class TestMapRegistryEntities:
 
     def test_growatt_renamed_entities_still_match(self):
         """User-renamed entity IDs still match via unique_id."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_renamed_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -979,7 +993,7 @@ class TestMapRegistryEntities:
 
     def test_solax_native_entities(self):
         """Native SolaX entities match via SOLAX_NATIVE_SUFFIX_MAP."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _solax_native_registry(),
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
@@ -1007,7 +1021,7 @@ class TestMapRegistryEntities:
             "solax_modbus",
             "solax_battery_minimum_capacity",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_NATIVE_SUFFIX_MAP,
@@ -1016,7 +1030,7 @@ class TestMapRegistryEntities:
 
     def test_solax_growatt_entities(self):
         """Growatt GEN4 inverter via solax_modbus matches via SOLAX_GROWATT_MIN_SUFFIX_MAP."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _solax_growatt_registry(),
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1066,7 +1080,7 @@ class TestMapRegistryEntities:
             "solax_modbus",
             "solax_ems_discharging_stop_soc",
         )
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [off_grid_entity],
             ["solax_modbus", "solax"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1075,7 +1089,7 @@ class TestMapRegistryEntities:
 
     def test_platform_filter_excludes_other_integrations(self):
         """Entities from non-matching platforms are excluded."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["solax_modbus"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1084,7 +1098,7 @@ class TestMapRegistryEntities:
 
     def test_nordpool_entity_not_matched(self):
         """Nordpool entities are excluded by platform filter."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _growatt_registry(),
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1092,7 +1106,7 @@ class TestMapRegistryEntities:
         assert "nordpool_kwh_se4_sek" not in result.values()
 
     def test_empty_registry(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             [],
             ["growatt_server"],
             self.ctrl.GROWATT_MIN_SUFFIX_MAP,
@@ -1126,7 +1140,7 @@ class TestMapRegistryEntities:
                 "solax_total_reverse_power",
             ),
         ]
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             entities,
             ["solax_modbus"],
             self.ctrl.SOLAX_GROWATT_MIN_SUFFIX_MAP,
@@ -1151,7 +1165,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_growatt_min_only(self):
         """MIN registry → detected_platform is growatt_server_min, MIN has more sensors."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_registry()
         )
         assert platform == "growatt_server_min"
@@ -1165,7 +1179,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_growatt_sph_only(self):
         """SPH registry → detected_platform is growatt_server_sph, all 12 sensors mapped."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_sph_registry()
         )
         assert platform == "growatt_server_sph"
@@ -1181,16 +1195,32 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_native_only(self):
         """When only native SolaX entities exist, detected_platform is solax."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_native_registry()
         )
         assert platform == "solax_modbus_native"
         assert "solax_modbus_native" in sensors
         assert len(sensors["solax_modbus_native"]) >= 10
 
+    def test_solax_native_pairs_discharge_to_the_signed_charge_sensor(self):
+        """issue #542: solax_modbus has one signed battery power entity.
+
+        Without the pairing, battery_discharge_power resolves to nothing —
+        check_battery_health (is_required=True) errors on it, and the reporter
+        has to hand-build two template sensors. Same fix as the Solis/Huawei
+        grid pairing (#475/#438): point both keys at the one entity and let
+        HAApiController split it via battery_power_polarity.
+        """
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solax_native_registry()
+        )
+        solax = sensors["solax_modbus_native"]
+        assert solax["battery_charge_power"] == "sensor.solax_battery_power_charge"
+        assert solax["battery_discharge_power"] == "sensor.solax_battery_power_charge"
+
     def test_solax_growatt_min(self):
         """Growatt GEN4 inverter via solax_modbus with TOU slots → solax_modbus_growatt_min."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_tou_registry()
         )
         assert platform == "solax_modbus_growatt_min"
@@ -1205,7 +1235,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_growatt_with_tou(self):
         """Growatt with TOU entities detected as solax_modbus_growatt_min platform."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_tou_registry()
         )
         assert platform == "solax_modbus_growatt_min"
@@ -1224,7 +1254,9 @@ class TestDiscoverSensorsFromRegistry:
     def test_both_growatt_and_solax_native_present(self):
         """When both integrations exist, both are mapped; growatt_server_min is primary."""
         combined = _growatt_registry() + _solax_native_registry()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(combined)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            combined
+        )
         assert platform == "growatt_server_min"
         assert "growatt_server_min" in sensors
         assert "solax_modbus_native" in sensors
@@ -1232,7 +1264,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_renamed_growatt_entities_discovered(self):
         """User-renamed entities still discovered via unique_id."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _growatt_renamed_registry()
         )
         assert platform == "growatt_server_min"
@@ -1241,7 +1273,7 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solax_growatt_gen3(self):
         """GEN3 Growatt (MIX/SPA/SPH) detected as solax_modbus_growatt_sph platform."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
             _solax_growatt_gen3_registry()
         )
         assert platform == "solax_modbus_growatt_sph"
@@ -1267,7 +1299,9 @@ class TestDiscoverSensorsFromRegistry:
 
     def test_solis_modbus_only(self):
         """Solis hybrid via solis_modbus → detected_platform is solis_modbus."""
-        sensors, platform = self.ctrl.discover_sensors_from_registry(_solis_registry())
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solis_registry()
+        )
         assert platform == "solis_modbus"
         assert "solis_modbus" in sensors
         solis = sensors["solis_modbus"]
@@ -1341,7 +1375,9 @@ class TestDiscoverSensorsFromRegistry:
             ),
         ]
 
-        sensors, platform = self.ctrl.discover_sensors_from_registry(monitoring_only)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            monitoring_only
+        )
 
         assert "solis_modbus" in sensors
         assert sensors["solis_modbus"]["battery_soc"] == "sensor.solis_battery_soc"
@@ -1361,15 +1397,20 @@ class TestDiscoverSensorsFromRegistry:
             _solis_dict_embedded_unique_id("solis_modbus_inverter_battery_soc"),
         )
 
-        mapped = self.ctrl._match_solis_dict_embedded_entities(
+        mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
             [disabled_entity, enabled_entity]
         )
 
         assert mapped["battery_soc"] == "sensor.solis_battery_soc"
+        assert "battery_soc" not in disabled
 
-    def test_solis_dict_embedded_matcher_falls_back_to_disabled_if_only_match(self):
-        """A disabled-only match is still returned (with a warning), per the
-        same deferral behavior as _map_registry_entities."""
+    def test_solis_dict_embedded_matcher_reports_disabled_only_match(self):
+        """A disabled-only match is reported, never mapped (#549).
+
+        Mapping it would persist an entity that has no state, so every
+        later read 404s — the same failure this matcher's sibling
+        ``_map_registry_entities`` used to produce.
+        """
         disabled_entity = _entity(
             "sensor.solis_battery_soc_old",
             "solis_modbus",
@@ -1377,9 +1418,12 @@ class TestDiscoverSensorsFromRegistry:
         )
         disabled_entity["disabled_by"] = "user"
 
-        mapped = self.ctrl._match_solis_dict_embedded_entities([disabled_entity])
+        mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
+            [disabled_entity]
+        )
 
-        assert mapped["battery_soc"] == "sensor.solis_battery_soc_old"
+        assert "battery_soc" not in mapped
+        assert disabled["battery_soc"] == "sensor.solis_battery_soc_old"
 
     def test_solax_growatt_gen4_vpp_entities_discovered(self):
         """GEN4 VPP entities are mapped alongside TOU entities (issue #118).
@@ -1388,7 +1432,9 @@ class TestDiscoverSensorsFromRegistry:
         control_mode BESS uses — detection still keys off the TOU marker.
         """
         registry = _solax_growatt_tou_registry() + _solax_growatt_vpp_entities()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_min"
         growatt_min = sensors["solax_modbus_growatt_min"]
         assert (
@@ -1416,7 +1462,9 @@ class TestDiscoverSensorsFromRegistry:
     def test_solax_growatt_gen3_vpp_entities_discovered(self):
         """GEN3 VPP entities are mapped — GEN3's only working control path."""
         registry = _solax_growatt_gen3_registry() + _solax_growatt_vpp_entities()
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_sph"
         growatt_sph = sensors["solax_modbus_growatt_sph"]
         assert (
@@ -1433,7 +1481,9 @@ class TestDiscoverSensorsFromRegistry:
         registry = (
             _solax_growatt_tou_registry() + _solax_growatt_export_limit_entities()
         )
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_min"
         growatt_min = sensors["solax_modbus_growatt_min"]
         assert (
@@ -1451,7 +1501,9 @@ class TestDiscoverSensorsFromRegistry:
         registry = (
             _solax_growatt_gen3_registry() + _solax_growatt_export_limit_entities()
         )
-        sensors, platform = self.ctrl.discover_sensors_from_registry(registry)
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
         assert platform == "solax_modbus_growatt_sph"
         growatt_sph = sensors["solax_modbus_growatt_sph"]
         assert (
@@ -1489,6 +1541,79 @@ class TestDiscoverSensorsFromRegistry:
 
 
 # ---------------------------------------------------------------------------
+# Tests: Disabled entities are reported, never mapped (issue #549)
+# ---------------------------------------------------------------------------
+
+
+class TestDisabledEntitiesAreNotMapped:
+    """A disabled entity has no state in HA, so mapping one guarantees a 404.
+
+    Issue #549: solax_modbus ships its ``Total *`` lifetime counters
+    disabled_by=integration.  The mapper used to map them anyway (warning
+    only), which sailed through the wizard's non-empty check and surfaced
+    at runtime as "Sensor not found (404)" plus SYSTEM DEGRADED.
+    """
+
+    SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        "total_grid_import": "lifetime_import_from_grid",
+    }
+
+    def setup_method(self):
+        self.ctrl = _make_controller()
+
+    def _disabled(self, entity_id: str, unique_id: str) -> dict:
+        entity = _entity(entity_id, "solax_modbus", unique_id)
+        entity["disabled_by"] = "integration"
+        return entity
+
+    def test_disabled_only_match_is_reported_not_mapped(self):
+        entity = self._disabled(
+            "sensor.solaxgrowatt_inverter_total_grid_import",
+            "SolaxGrowatt_total_grid_import",
+        )
+
+        mapped, disabled = self.ctrl._map_registry_entities(
+            [entity], ["solax_modbus"], self.SUFFIX_MAP
+        )
+
+        assert "lifetime_import_from_grid" not in mapped
+        assert (
+            disabled["lifetime_import_from_grid"]
+            == "sensor.solaxgrowatt_inverter_total_grid_import"
+        )
+
+    def test_enabled_match_wins_and_is_not_reported_disabled(self):
+        entities = [
+            self._disabled("sensor.old_total_grid_import", "Old_total_grid_import"),
+            _entity(
+                "sensor.new_total_grid_import",
+                "solax_modbus",
+                "New_total_grid_import",
+            ),
+        ]
+
+        mapped, disabled = self.ctrl._map_registry_entities(
+            entities, ["solax_modbus"], self.SUFFIX_MAP
+        )
+
+        assert mapped["lifetime_import_from_grid"] == "sensor.new_total_grid_import"
+        assert "lifetime_import_from_grid" not in disabled
+
+    def test_discover_reports_disabled_sensors_per_platform(self):
+        """The wizard needs the disabled keys per platform, not just a log line."""
+        registry = _solax_growatt_tou_registry()
+        for entity in registry:
+            if entity["unique_id"].endswith("_total_grid_import"):
+                entity["disabled_by"] = "integration"
+
+        _sensors, _platform, disabled = self.ctrl.discover_sensors_from_registry(
+            registry
+        )
+
+        assert "lifetime_import_from_grid" in disabled["solax_modbus_growatt_min"]
+
+
+# ---------------------------------------------------------------------------
 # Tests: Derived lifetime sensor fallbacks
 # ---------------------------------------------------------------------------
 
@@ -1513,8 +1638,69 @@ class TestDerivedLifetimeSensors:
         with self._mock_sensor({"lifetime_load_consumption": 1234.5}):
             assert self.ctrl.get_load_consumption_lifetime() == 1234.5
 
-    def test_load_consumption_derived_for_gen4(self):
-        """When no direct sensor, derive from solar + import - export."""
+    @pytest.mark.parametrize(
+        (
+            "solar_to_home,solar_to_battery,solar_to_grid,"
+            "grid_to_home,grid_to_battery,battery_to_home,battery_to_grid"
+        ),
+        [
+            # Overnight discharge: battery serves the house.
+            (0.0, 0.0, 0.0, 0.40, 0.0, 1.60, 0.0),
+            # Midday charging from solar.
+            (1.00, 2.00, 0.0, 0.0, 0.0, 0.0, 0.0),
+            # Battery idle, house on grid only.
+            (0.0, 0.0, 0.0, 2.00, 0.0, 0.0, 0.0),
+            # Battery exporting to grid: the case the old clamp hid.
+            (0.30, 0.0, 0.0, 0.50, 0.0, 0.0, 1.70),
+            # Mixed: solar splits three ways while the grid also charges.
+            (1.20, 0.80, 0.60, 0.40, 0.90, 0.0, 0.0),
+        ],
+        ids=["discharge", "charge", "idle", "export", "mixed"],
+    )
+    def test_derived_load_equals_actual_load_whatever_the_battery_does(
+        self,
+        solar_to_home,
+        solar_to_battery,
+        solar_to_grid,
+        grid_to_home,
+        grid_to_battery,
+        battery_to_home,
+        battery_to_grid,
+    ):
+        """Derived lifetime load must equal real house consumption (issue #528).
+
+        The counters are built up from the seven physical flows rather than
+        from the derivation formula, so this asserts the energy balance
+        itself, not an arithmetic restatement of the implementation. The old
+        ``solar + import - export`` formula returns ``actual + net battery
+        charge`` and fails every case here except ``idle``.
+        """
+        counters = {
+            "lifetime_solar_energy": solar_to_home + solar_to_battery + solar_to_grid,
+            "lifetime_import_from_grid": grid_to_home + grid_to_battery,
+            "lifetime_export_to_grid": solar_to_grid + battery_to_grid,
+            "lifetime_battery_charged": solar_to_battery + grid_to_battery,
+            "lifetime_battery_discharged": battery_to_home + battery_to_grid,
+        }
+        actual_load = solar_to_home + battery_to_home + grid_to_home
+
+        with self._mock_sensor(counters):
+            assert self.ctrl.get_load_consumption_lifetime() == pytest.approx(
+                actual_load
+            )
+
+    def test_load_consumption_none_when_missing_sources(self):
+        """Returns None when derivation sources are incomplete."""
+        with self._mock_sensor({"lifetime_solar_energy": 5000.0}):
+            assert self.ctrl.get_load_consumption_lifetime() is None
+
+    def test_load_consumption_none_when_battery_counters_missing(self):
+        """No battery counters means no honest answer, so return None.
+
+        Per ``docs/agents/rules.md`` (no silent fallbacks): deriving without
+        the battery terms would return a wrong-but-plausible number, which is
+        exactly the defect in issue #528.
+        """
         with self._mock_sensor(
             {
                 "lifetime_solar_energy": 5000.0,
@@ -1522,23 +1708,49 @@ class TestDerivedLifetimeSensors:
                 "lifetime_export_to_grid": 1500.0,
             }
         ):
-            assert self.ctrl.get_load_consumption_lifetime() == 6500.0
-
-    def test_load_consumption_none_when_missing_sources(self):
-        """Returns None when derivation sources are incomplete."""
-        with self._mock_sensor({"lifetime_solar_energy": 5000.0}):
             assert self.ctrl.get_load_consumption_lifetime() is None
 
-    def test_load_consumption_clamps_negative(self):
-        """Derived value is clamped to 0 to guard against rounding."""
+    def test_load_consumption_names_the_missing_counter_in_the_log(self, caplog):
+        """An N/A in the health check must be traceable to a specific sensor.
+
+        Returning ``None`` silently would leave a user with a degraded
+        Energy Monitoring component and nothing naming the cause.
+        """
+        with self._mock_sensor(
+            {
+                "lifetime_solar_energy": 5000.0,
+                "lifetime_import_from_grid": 3000.0,
+                "lifetime_export_to_grid": 1500.0,
+                "lifetime_battery_charged": 2000.0,
+                # lifetime_battery_discharged deliberately absent
+            }
+        ):
+            with caplog.at_level(logging.WARNING):
+                assert self.ctrl.get_load_consumption_lifetime() is None
+
+        assert "lifetime_battery_discharged" in caplog.text
+        assert "lifetime_solar_energy" not in caplog.text
+
+    def test_load_consumption_none_when_balance_is_negative(self):
+        """A negative balance means the counters disagree, so report nothing.
+
+        Lifetime totals are large and monotonic, so the balance cannot go
+        negative through rounding — only through a stalled or under-reporting
+        counter. Returning the negative would surface as a healthy "OK"
+        reading (``health_check.py`` treats any float as OK), which is the
+        silent degradation ``docs/agents/rules.md`` forbids. ``None`` drives
+        the Energy Monitoring check to WARNING instead.
+        """
         with self._mock_sensor(
             {
                 "lifetime_solar_energy": 100.0,
                 "lifetime_import_from_grid": 50.0,
                 "lifetime_export_to_grid": 200.0,
+                "lifetime_battery_charged": 40.0,
+                "lifetime_battery_discharged": 30.0,
             }
         ):
-            assert self.ctrl.get_load_consumption_lifetime() == 0.0
+            assert self.ctrl.get_load_consumption_lifetime() is None
 
     def test_system_production_direct_sensor(self):
         """Direct sensor is returned when available."""
@@ -1805,6 +2017,21 @@ class TestDiscoverEntsoeEntity:
 # Frontend ↔ backend sensor key consistency
 # ---------------------------------------------------------------------------
 
+#: Frontend integration IDs in sensorDefinitions.ts that are inverter
+#: platforms — everything else there is an auxiliary integration
+#: (pricing, forecast, phase current, weather) with no suffix map.
+_INVERTER_PLATFORM_IDS: frozenset[str] = frozenset(
+    {
+        "growatt_server_min",
+        "growatt_server_sph",
+        "solax_modbus_native",
+        "solax_modbus_growatt_min",
+        "solax_modbus_growatt_sph",
+        "solis_modbus",
+        "huawei_solar_luna2000",
+    }
+)
+
 
 class TestFrontendSensorKeysMatchBackend:
     """Every sensor key shown in the frontend UI must exist in the backend suffix map.
@@ -1962,6 +2189,127 @@ class TestFrontendSensorKeysMatchBackend:
             )
 
 
+class TestEnergyFlowSensorsRequiredOnEveryPlatform:
+    """The sensors that energy-flow calculation reads must be required
+    everywhere the wizard offers them, and the derived one must not be.
+
+    Issue #549: the flags were exactly inverted.  All five flow sensors
+    were ``required: false`` on every modbus platform, so the wizard
+    happily completed without them and the runtime then reported
+    "Energy Monitoring [ERROR] — SYSTEM DEGRADED".  Meanwhile
+    ``lifetime_load_consumption`` — which ``get_load_consumption_lifetime``
+    derives from the five flow sensors when unmapped (issue #528:
+    ``solar + import + discharged - charged - export``) — was
+    ``required: true`` on both cloud platforms, demanding a sensor BESS
+    can compute for itself.
+    """
+
+    #: Read directly by energy-flow calculation; no derivation exists.
+    FLOW_SENSORS: ClassVar[set[str]] = {
+        "lifetime_solar_energy",
+        "lifetime_import_from_grid",
+        "lifetime_export_to_grid",
+        "lifetime_battery_charged",
+        "lifetime_battery_discharged",
+    }
+
+    #: Derived from the three grid/solar flow sensors when unmapped.
+    DERIVED_SENSORS: ClassVar[set[str]] = {"lifetime_load_consumption"}
+
+    @staticmethod
+    def _parse_required_flags() -> dict[str, dict[str, bool]]:
+        """Parse sensorDefinitions.ts into platform_id -> {key: required}."""
+        import re
+        from pathlib import Path
+
+        ts_path = (
+            Path(__file__).parents[4]
+            / "frontend"
+            / "src"
+            / "lib"
+            / "sensorDefinitions.ts"
+        )
+        source = ts_path.read_text()
+
+        def _flags(text: str) -> dict[str, bool]:
+            return {
+                key: required == "true"
+                for key, required in re.findall(
+                    r"key:\s*'([^']+)'[^\n]*?required:\s*(true|false)", text
+                )
+            }
+
+        result: dict[str, dict[str, bool]] = {}
+        blocks = re.split(r"\{\s*\n\s*id:\s*'", source)
+        for block in blocks[1:]:
+            platform_match = re.match(r"([^']+)'", block)
+            if not platform_match:
+                continue
+            platform_id = platform_match.group(1)
+            if platform_id not in _INVERTER_PLATFORM_IDS:
+                continue
+
+            groups_ref = re.search(r"sensorGroups:\s*(\w+)", block)
+            search_text = block
+            if groups_ref:
+                const_match = re.search(
+                    rf"const\s+{groups_ref.group(1)}.*?=\s*\[(.*?)\];",
+                    source,
+                    re.DOTALL,
+                )
+                if const_match:
+                    search_text = const_match.group(1)
+                    for ref in re.findall(
+                        r"\b([A-Z_]+(?:_MONITORING|_LIFETIME))\b", search_text
+                    ):
+                        ref_match = re.search(
+                            rf"const\s+{ref}.*?sensors:\s*\[(.*?)\]",
+                            source,
+                            re.DOTALL,
+                        )
+                        if ref_match:
+                            search_text += ref_match.group(1)
+
+            flags = _flags(search_text)
+            if flags:
+                result[platform_id] = flags
+        return result
+
+    def test_flow_sensors_are_required_on_every_platform_offering_them(self):
+        flags = self._parse_required_flags()
+        assert flags, "No platforms parsed — parser broken?"
+
+        optional_anywhere = {
+            f"{platform}.{key}"
+            for platform, keys in flags.items()
+            for key in self.FLOW_SENSORS & keys.keys()
+            if not keys[key]
+        }
+
+        assert not optional_anywhere, (
+            "Energy-flow sensors must be required — the optimizer cannot "
+            "derive them and the runtime health check treats Energy "
+            "Monitoring as a required component: "
+            f"{sorted(optional_anywhere)}"
+        )
+
+    def test_derived_load_consumption_is_never_required(self):
+        flags = self._parse_required_flags()
+
+        required_anywhere = {
+            f"{platform}.{key}"
+            for platform, keys in flags.items()
+            for key in self.DERIVED_SENSORS & keys.keys()
+            if keys[key]
+        }
+
+        assert not required_anywhere, (
+            "lifetime_load_consumption is derived from the five flow sensors "
+            "when unmapped, so requiring it blocks the wizard on a sensor "
+            f"BESS can compute itself: {sorted(required_anywhere)}"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Solcast entity-registry discovery (#218): unique_id matching instead of
 # entity_id substrings, so detection survives non-English HA locale renames.
@@ -2025,7 +2373,7 @@ class TestHuaweiDiscovery:
         assert detected["huawei"] is True
 
     def test_huawei_map_matches_registry(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
@@ -2036,19 +2384,19 @@ class TestHuaweiDiscovery:
         """issue #438: real-time PV power and signed grid power (single
         power-meter register, split by HAApiController.grid_power_polarity —
         see #475's mechanism, reused here with export_positive polarity)."""
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert result["pv_power"] == "sensor.huawei_inverter_input_power"
         assert result["import_power"] == "sensor.huawei_meter_power_meter_active_power"
 
     def test_huawei_lifetime_energy_sensors_mapped(self):
-        result = self.ctrl._map_registry_entities(
+        result, _disabled = self.ctrl._map_registry_entities(
             _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
         )
         assert (
             result["lifetime_solar_energy"]
-            == "sensor.huawei_inverter_accumulated_yield_energy"
+            == "sensor.huawei_inverter_total_dc_input_energy"
         )
         assert (
             result["lifetime_battery_charged"] == "sensor.huawei_battery_total_charge"
@@ -2066,6 +2414,61 @@ class TestHuaweiDiscovery:
             == "sensor.huawei_meter_grid_accumulated_energy"
         )
 
+    def test_huawei_solar_energy_is_pv_input_not_inverter_yield(self):
+        """issue #569: lifetime_solar_energy must be PV production.
+
+        accumulated_yield_energy is register 32106, the inverter's
+        accumulated *AC output* yield.  On a LUNA2000 hybrid that counter
+        rises while the battery discharges and misses everything used to
+        charge it, which upstream states outright ("The Daily Yield/Total
+        Yield is incorrect: it also goes up when the battery is
+        discharging" -- wlcrs/huawei_solar README FAQ).
+
+        Every consumer of lifetime_solar_energy treats it as PV
+        production: both feed derive_load_consumption's five-term balance
+        (ha_api_controller.get_load_consumption_lifetime and
+        energy_flow_calculator._calculate_derived_flows), so mapping AC
+        yield there reports home consumption inflated by
+        (battery_discharged - solar_to_battery) -- silently, since the
+        lifetime total stays positive and the health check passes.
+
+        total_dc_input_power is register 32108, "Total DC input energy":
+        the lifetime integral of register 32064, which this same map
+        already points at pv_power.  It is DC-side, so it excludes
+        inverter conversion losses -- but no Huawei register gives PV
+        production on the AC side at all, and this is the counter
+        upstream names as the panels' input.
+        """
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert "accumulated_yield_energy" not in self.ctrl.HUAWEI_SUFFIX_MAP
+        # The AC-yield entity is still present in the registry -- a real
+        # install exposes both.  It must simply never be chosen.
+        assert "sensor.huawei_inverter_accumulated_yield_energy" not in result.values()
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_total_dc_input_energy"
+        )
+
+    def test_huawei_dc_input_energy_does_not_steal_pv_power(self):
+        """issue #569: "_total_dc_input_power" also ends with "_input_power".
+
+        Both suffixes are in HUAWEI_SUFFIX_MAP and the matcher is an
+        endswith, so the two keys are separated only by
+        _map_registry_entities sorting suffixes longest-first before
+        breaking on the first hit.  The fixture lists the DC-energy entity
+        first precisely so registry order cannot mask that.
+        """
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert result["pv_power"] == "sensor.huawei_inverter_input_power"
+        assert (
+            result["lifetime_solar_energy"]
+            == "sensor.huawei_inverter_total_dc_input_energy"
+        )
+
     def test_huawei_wired_into_discover_sensors_from_registry(self):
         """Huawei must be auto-discovered like every other platform.
 
@@ -2074,7 +2477,9 @@ class TestHuaweiDiscovery:
         only. This is the production entry point the setup wizard actually
         calls (backend/api.py), not _map_registry_entities in isolation.
         """
-        sensors, platform = self.ctrl.discover_sensors_from_registry(_huawei_registry())
+        sensors, platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
         assert platform == "huawei_solar_luna2000"
         assert "huawei_solar_luna2000" in sensors
         huawei = sensors["huawei_solar_luna2000"]
@@ -2085,3 +2490,20 @@ class TestHuaweiDiscovery:
         # Single signed power-meter register backs both keys (same pattern
         # as Solis, #475) — HAApiController splits it via grid_power_polarity.
         assert huawei["export_power"] == "sensor.huawei_meter_power_meter_active_power"
+
+    def test_huawei_pairs_discharge_to_the_signed_battery_sensor(self):
+        """issue #542: storage_charge_discharge_power (I32Register, reg 37765)
+        is Huawei's only battery power register — same one-signed-sensor shape
+        as native SolaX, so battery_discharge_power must resolve to it too."""
+        sensors, _, _disabled = self.ctrl.discover_sensors_from_registry(
+            _huawei_registry()
+        )
+        huawei = sensors["huawei_solar_luna2000"]
+        assert (
+            huawei["battery_charge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )
+        assert (
+            huawei["battery_discharge_power"]
+            == "sensor.huawei_battery_charge_discharge_power"
+        )

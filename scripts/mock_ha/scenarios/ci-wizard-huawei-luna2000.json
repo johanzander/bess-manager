@@ -1,0 +1,911 @@
+{
+  "name": "ci-wizard-huawei-luna2000",
+  "description": "Fresh install with a Huawei LUNA2000 battery via huawei_solar (local Modbus) + official Nordpool SE3. Source-derived fixture: unique_ids are f\"{serial_number}_{register_key}\" (wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200), register keys per wlcrs/huawei-solar-lib register_names.py \u2014 see core/bess/ha_api_controller.py HUAWEI_SUFFIX_MAP for the per-key citations. The battery holds two TOU periods, published as 'Period N' attributes by HuaweiSolarTOUSensorEntity (sensor.py:2510), which is what #431 reads back so BESS stops rewriting a schedule the battery already runs. huawei_solar splits one config entry across several devices (inverter, battery, power meter); the battery device is the one carrying storage_working_mode_settings.",
+  "mock_time": "@2026-05-21 17:17:48",
+  "timezone": "Europe/Stockholm",
+  "bess_config": {
+    "battery": {
+      "total_capacity": 15.0,
+      "min_soc": 10,
+      "max_soc": 100,
+      "max_charge_power_kw": 5.0,
+      "max_discharge_power_kw": 5.0,
+      "cycle_cost_per_kwh": 0.4,
+      "efficiency_charge": 0.97,
+      "efficiency_discharge": 0.95
+    },
+    "home": {
+      "default_hourly": 4.6,
+      "currency": "SEK",
+      "consumption_strategy": "fixed",
+      "max_fuse_current": 25,
+      "voltage": 230,
+      "safety_margin": 1.0,
+      "phase_count": 1,
+      "power_monitoring_enabled": false
+    },
+    "electricity_price": {
+      "markup_rate": 0.08,
+      "vat_multiplier": 1.25,
+      "additional_costs": 0.773,
+      "tax_reduction": 0.1988,
+      "area": "SE3"
+    },
+    "energy_provider": {
+      "provider": "nordpool_official",
+      "nordpool_official": {
+        "config_entry_id": ""
+      },
+      "nordpool": {
+        "entity": ""
+      },
+      "octopus": {}
+    },
+    "growatt": {
+      "inverter_type": "",
+      "device_id": ""
+    },
+    "inverter": {
+      "platform": "",
+      "device_id": ""
+    },
+    "sensors": {}
+  },
+  "sensors": {
+    "sensor.inverter_phase_a_current": {
+      "state": "2.1",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.inverter_phase_b_current": {
+      "state": "2.0",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.inverter_phase_c_current": {
+      "state": "2.2",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.power_meter_phase_a_current": {
+      "state": "6.4",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.power_meter_phase_b_current": {
+      "state": "5.1",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.power_meter_phase_c_current": {
+      "state": "7.2",
+      "attributes": {
+        "unit_of_measurement": "A",
+        "device_class": "current",
+        "state_class": "measurement"
+      }
+    },
+    "sensor.batteries_state_of_capacity": {
+      "state": "62",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.batteries_charge_discharge_power": {
+      "state": "-900",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.batteries_tou_charging_and_discharging_periods": {
+      "state": "2",
+      "attributes": {
+        "Period 1": "02:00-05:59/1234567/+",
+        "Period 2": "18:00-19:59/1234567/-",
+        "friendly_name": "Batteries TOU charging and discharging periods",
+        "icon": "mdi:calendar-text"
+      }
+    },
+    "select.batteries_working_mode": {
+      "state": "time_of_use_luna2000",
+      "attributes": {
+        "options": [
+          "adaptive",
+          "fixed_charge_discharge",
+          "maximise_self_consumption",
+          "time_of_use_luna2000",
+          "fully_fed_to_grid"
+        ]
+      }
+    },
+    "switch.batteries_charge_from_grid": {
+      "state": "on",
+      "attributes": {}
+    },
+    "number.batteries_maximum_charging_power": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.batteries_maximum_discharging_power": {
+      "state": "5000",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "number.batteries_charging_cutoff_capacity": {
+      "state": "100",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.batteries_grid_charge_cutoff_soc": {
+      "state": "10",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.inverter_active_power": {
+      "state": "3100",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.inverter_input_power": {
+      "state": "2200",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.power_meter_active_power": {
+      "state": "-1500",
+      "attributes": {
+        "unit_of_measurement": "W"
+      }
+    },
+    "sensor.inverter_total_yield": {
+      "state": "8600",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.inverter_total_dc_input_energy": {
+      "state": "9250",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.batteries_total_charge": {
+      "state": "4200",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.batteries_total_discharge": {
+      "state": "3900",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.power_meter_exported": {
+      "state": "2100",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.power_meter_consumption": {
+      "state": "7400",
+      "attributes": {
+        "unit_of_measurement": "kWh"
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_today": {
+      "state": "37.4",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "detailedHourly": [
+          {
+            "period_start": "2026-05-21T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T01:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T02:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T03:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T04:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-05-21T05:00:00+02:00",
+            "pv_estimate": 0.4
+          },
+          {
+            "period_start": "2026-05-21T06:00:00+02:00",
+            "pv_estimate": 1.0
+          },
+          {
+            "period_start": "2026-05-21T07:00:00+02:00",
+            "pv_estimate": 1.8
+          },
+          {
+            "period_start": "2026-05-21T08:00:00+02:00",
+            "pv_estimate": 2.6
+          },
+          {
+            "period_start": "2026-05-21T09:00:00+02:00",
+            "pv_estimate": 3.4
+          },
+          {
+            "period_start": "2026-05-21T10:00:00+02:00",
+            "pv_estimate": 4.0
+          },
+          {
+            "period_start": "2026-05-21T11:00:00+02:00",
+            "pv_estimate": 4.3
+          },
+          {
+            "period_start": "2026-05-21T12:00:00+02:00",
+            "pv_estimate": 4.4
+          },
+          {
+            "period_start": "2026-05-21T13:00:00+02:00",
+            "pv_estimate": 4.2
+          },
+          {
+            "period_start": "2026-05-21T14:00:00+02:00",
+            "pv_estimate": 3.7
+          },
+          {
+            "period_start": "2026-05-21T15:00:00+02:00",
+            "pv_estimate": 3.0
+          },
+          {
+            "period_start": "2026-05-21T16:00:00+02:00",
+            "pv_estimate": 2.2
+          },
+          {
+            "period_start": "2026-05-21T17:00:00+02:00",
+            "pv_estimate": 1.4
+          },
+          {
+            "period_start": "2026-05-21T18:00:00+02:00",
+            "pv_estimate": 0.7
+          },
+          {
+            "period_start": "2026-05-21T19:00:00+02:00",
+            "pv_estimate": 0.2
+          },
+          {
+            "period_start": "2026-05-21T20:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T21:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T22:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-21T23:00:00+02:00",
+            "pv_estimate": 0.0
+          }
+        ]
+      }
+    },
+    "sensor.solcast_pv_forecast_forecast_tomorrow": {
+      "state": "37.4",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "detailedHourly": [
+          {
+            "period_start": "2026-05-22T00:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T01:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T02:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T03:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T04:00:00+02:00",
+            "pv_estimate": 0.1
+          },
+          {
+            "period_start": "2026-05-22T05:00:00+02:00",
+            "pv_estimate": 0.4
+          },
+          {
+            "period_start": "2026-05-22T06:00:00+02:00",
+            "pv_estimate": 1.0
+          },
+          {
+            "period_start": "2026-05-22T07:00:00+02:00",
+            "pv_estimate": 1.8
+          },
+          {
+            "period_start": "2026-05-22T08:00:00+02:00",
+            "pv_estimate": 2.6
+          },
+          {
+            "period_start": "2026-05-22T09:00:00+02:00",
+            "pv_estimate": 3.4
+          },
+          {
+            "period_start": "2026-05-22T10:00:00+02:00",
+            "pv_estimate": 4.0
+          },
+          {
+            "period_start": "2026-05-22T11:00:00+02:00",
+            "pv_estimate": 4.3
+          },
+          {
+            "period_start": "2026-05-22T12:00:00+02:00",
+            "pv_estimate": 4.4
+          },
+          {
+            "period_start": "2026-05-22T13:00:00+02:00",
+            "pv_estimate": 4.2
+          },
+          {
+            "period_start": "2026-05-22T14:00:00+02:00",
+            "pv_estimate": 3.7
+          },
+          {
+            "period_start": "2026-05-22T15:00:00+02:00",
+            "pv_estimate": 3.0
+          },
+          {
+            "period_start": "2026-05-22T16:00:00+02:00",
+            "pv_estimate": 2.2
+          },
+          {
+            "period_start": "2026-05-22T17:00:00+02:00",
+            "pv_estimate": 1.4
+          },
+          {
+            "period_start": "2026-05-22T18:00:00+02:00",
+            "pv_estimate": 0.7
+          },
+          {
+            "period_start": "2026-05-22T19:00:00+02:00",
+            "pv_estimate": 0.2
+          },
+          {
+            "period_start": "2026-05-22T20:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T21:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T22:00:00+02:00",
+            "pv_estimate": 0.0
+          },
+          {
+            "period_start": "2026-05-22T23:00:00+02:00",
+            "pv_estimate": 0.0
+          }
+        ]
+      }
+    }
+  },
+  "entity_registry": [
+    {
+      "entity_id": "sensor.batteries_state_of_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_state_of_capacity",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "sensor.batteries_charge_discharge_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_charge_discharge_power",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "sensor.batteries_tou_charging_and_discharging_periods",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_huawei_luna2000_time_of_use_charging_and_discharging_periods",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "select.batteries_working_mode",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_working_mode_settings",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "switch.batteries_charge_from_grid",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_charge_from_grid_function",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "number.batteries_maximum_charging_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_maximum_charging_power",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "number.batteries_maximum_discharging_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_maximum_discharging_power",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "number.batteries_charging_cutoff_capacity",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_charging_cutoff_capacity",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "number.batteries_grid_charge_cutoff_soc",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_grid_charge_cutoff_state_of_charge",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "sensor.inverter_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_active_power",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_total_dc_input_energy",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_total_dc_input_power",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_input_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_input_power",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_total_yield",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_accumulated_yield_energy",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.batteries_total_charge",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_total_charge",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "sensor.batteries_total_discharge",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_storage_total_discharge",
+      "device_id": "dev-huawei-battery-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_active_power",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_power_meter_active_power",
+      "device_id": "dev-huawei-meter-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_exported",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_grid_exported_energy",
+      "device_id": "dev-huawei-meter-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_consumption",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_grid_accumulated_energy",
+      "device_id": "dev-huawei-meter-001"
+    },
+    {
+      "entity_id": "sensor.nord_pool_se3_current_price",
+      "platform": "nordpool",
+      "unique_id": "SE3-current_price",
+      "device_id": "dev-nordpool-001",
+      "config_entry_id": "entry-nordpool-001"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_a_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_phase_A_current",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_b_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_phase_B_current",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.inverter_phase_c_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_phase_C_current",
+      "device_id": "dev-huawei-inverter-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_a_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_active_grid_A_current",
+      "device_id": "dev-huawei-meter-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_b_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_active_grid_B_current",
+      "device_id": "dev-huawei-meter-001"
+    },
+    {
+      "entity_id": "sensor.power_meter_phase_c_current",
+      "platform": "huawei_solar",
+      "unique_id": "SN2024HUAWEI01_active_grid_C_current",
+      "device_id": "dev-huawei-meter-001"
+    }
+  ],
+  "config_entries": [
+    {
+      "entry_id": "entry-nordpool-001",
+      "domain": "nordpool",
+      "title": "Nord Pool",
+      "state": "loaded"
+    },
+    {
+      "entry_id": "entry-huawei-001",
+      "domain": "huawei_solar",
+      "title": "Huawei Solar",
+      "state": "loaded"
+    }
+  ],
+  "devices": [
+    {
+      "id": "dev-huawei-inverter-001",
+      "name": "SUN2000",
+      "manufacturer": "Huawei",
+      "model": "SUN2000-10KTL-M1",
+      "identifiers": [
+        [
+          "huawei_solar",
+          "SN2024HUAWEI01"
+        ]
+      ],
+      "config_entries": [
+        "entry-huawei-001"
+      ]
+    },
+    {
+      "id": "dev-huawei-battery-001",
+      "name": "Batteries",
+      "manufacturer": "Huawei",
+      "model": "LUNA2000",
+      "identifiers": [
+        [
+          "huawei_solar",
+          "SN2024HUAWEI01_batteries"
+        ]
+      ],
+      "config_entries": [
+        "entry-huawei-001"
+      ]
+    },
+    {
+      "id": "dev-huawei-meter-001",
+      "name": "Power meter",
+      "manufacturer": "Huawei",
+      "model": "DDSU666-H",
+      "identifiers": [
+        [
+          "huawei_solar",
+          "SN2024HUAWEI01_meter"
+        ]
+      ],
+      "config_entries": [
+        "entry-huawei-001"
+      ]
+    },
+    {
+      "id": "dev-nordpool-001",
+      "name": "Nord Pool SE3",
+      "manufacturer": "Nord Pool",
+      "model": null,
+      "identifiers": [
+        [
+          "nordpool",
+          "SE3"
+        ]
+      ],
+      "config_entries": [
+        "entry-nordpool-001"
+      ]
+    }
+  ],
+  "services": {
+    "select": {
+      "select_option": {}
+    },
+    "switch": {
+      "turn_on": {},
+      "turn_off": {}
+    },
+    "number": {
+      "set_value": {}
+    },
+    "huawei_solar": {
+      "set_tou_periods": {}
+    }
+  },
+  "price_data": {
+    "today": [
+      0.45,
+      0.45,
+      0.45,
+      0.45,
+      0.38,
+      0.38,
+      0.38,
+      0.38,
+      0.32,
+      0.32,
+      0.32,
+      0.32,
+      0.28,
+      0.28,
+      0.28,
+      0.28,
+      0.25,
+      0.25,
+      0.25,
+      0.25,
+      0.3,
+      0.3,
+      0.3,
+      0.3,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.82,
+      0.82,
+      0.82,
+      0.82,
+      1.05,
+      1.05,
+      1.05,
+      1.05,
+      1.15,
+      1.15,
+      1.15,
+      1.15,
+      1.08,
+      1.08,
+      1.08,
+      1.08,
+      0.95,
+      0.95,
+      0.95,
+      0.95,
+      0.85,
+      0.85,
+      0.85,
+      0.85,
+      0.78,
+      0.78,
+      0.78,
+      0.78,
+      0.72,
+      0.72,
+      0.72,
+      0.72,
+      0.8,
+      0.8,
+      0.8,
+      0.8,
+      0.92,
+      0.92,
+      0.92,
+      0.92,
+      1.25,
+      1.25,
+      1.25,
+      1.25,
+      1.55,
+      1.55,
+      1.55,
+      1.55,
+      1.42,
+      1.42,
+      1.42,
+      1.42,
+      1.1,
+      1.1,
+      1.1,
+      1.1,
+      0.75,
+      0.75,
+      0.75,
+      0.75,
+      0.58,
+      0.58,
+      0.58,
+      0.58,
+      0.48,
+      0.48,
+      0.48,
+      0.48
+    ],
+    "tomorrow": [
+      0.42,
+      0.42,
+      0.42,
+      0.42,
+      0.35,
+      0.35,
+      0.35,
+      0.35,
+      0.3,
+      0.3,
+      0.3,
+      0.3,
+      0.26,
+      0.26,
+      0.26,
+      0.26,
+      0.23,
+      0.23,
+      0.23,
+      0.23,
+      0.28,
+      0.28,
+      0.28,
+      0.28,
+      0.5,
+      0.5,
+      0.5,
+      0.5,
+      0.78,
+      0.78,
+      0.78,
+      0.78,
+      1.0,
+      1.0,
+      1.0,
+      1.0,
+      1.1,
+      1.1,
+      1.1,
+      1.1,
+      1.02,
+      1.02,
+      1.02,
+      1.02,
+      0.9,
+      0.9,
+      0.9,
+      0.9,
+      0.8,
+      0.8,
+      0.8,
+      0.8,
+      0.74,
+      0.74,
+      0.74,
+      0.74,
+      0.68,
+      0.68,
+      0.68,
+      0.68,
+      0.76,
+      0.76,
+      0.76,
+      0.76,
+      0.88,
+      0.88,
+      0.88,
+      0.88,
+      1.2,
+      1.2,
+      1.2,
+      1.2,
+      1.48,
+      1.48,
+      1.48,
+      1.48,
+      1.35,
+      1.35,
+      1.35,
+      1.35,
+      1.05,
+      1.05,
+      1.05,
+      1.05,
+      0.7,
+      0.7,
+      0.7,
+      0.7,
+      0.55,
+      0.55,
+      0.55,
+      0.55,
+      0.45,
+      0.45,
+      0.45,
+      0.45
+    ]
+  },
+  "time_segments": [],
+  "expected_discovery": {
+    "growatt_found": false,
+    "solax_found": false,
+    "solis_found": false,
+    "huawei_found": true,
+    "huawei_device_id": "dev-huawei-battery-001",
+    "nordpool_found": true,
+    "nordpool_area": "SE3",
+    "nordpool_custom_area": null,
+    "nordpool_config_entry_id": "entry-nordpool-001",
+    "octopus_found": false,
+    "currency": "SEK",
+    "vat_multiplier": 1.25,
+    "detected_platform": "huawei_solar_luna2000",
+    "required_sensors": [
+      "battery_soc",
+      "battery_charge_power",
+      "huawei_working_mode",
+      "huawei_tou_periods",
+      "battery_charge_stop_soc",
+      "battery_discharge_stop_soc",
+      "import_power",
+      "export_power",
+      "pv_power",
+      "local_load_power",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_solar_energy",
+      "lifetime_import_from_grid",
+      "lifetime_export_to_grid"
+    ],
+    "detected_inverter_platforms": [
+      "huawei_solar_luna2000"
+    ],
+    "phase_currents": {
+      "current_l1": "sensor.power_meter_phase_a_current",
+      "current_l2": "sensor.power_meter_phase_b_current",
+      "current_l3": "sensor.power_meter_phase_c_current"
+    }
+  },
+  "inverter_platform": "huawei_solar_luna2000"
+}

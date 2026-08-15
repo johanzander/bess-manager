@@ -19,8 +19,12 @@ interface Props {
 
 export function HomeFormSection({ form, onChange, sensors }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
+  const avgGridImportSensorConfigured = Boolean(sensors?.['48h_avg_grid_import']);
   const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
   const chargeRateSensorConfigured = Boolean(sensors?.['battery_charging_power_rate']);
+  const currentSensorsConfigured = form.phaseCount === 1
+    ? Boolean(sensors?.['current_l1'])
+    : Boolean(sensors?.['current_l1']) && Boolean(sensors?.['current_l2']) && Boolean(sensors?.['current_l3']);
   return (
     <div className="space-y-3">
       <SectionCard
@@ -31,7 +35,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           'Data source',
           [
             { value: 'fixed', label: 'Fixed value' },
-            { value: 'sensor', label: 'Home Assistant sensor' },
+            { value: 'sensor', label: 'Home Assistant sensor', disabled: !avgGridImportSensorConfigured },
             { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)', disabled: !localLoadSensorConfigured },
             { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
           ],
@@ -42,6 +46,12 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
             InfluxDB requires the <strong>Local Load Power</strong> sensor to be configured in the{' '}
             <strong>Sensors</strong> tab. This sensor is not available on all inverter platforms (e.g. Growatt SPH).
+          </p>
+        )}
+        {!avgGridImportSensorConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
+            Home Assistant sensor requires the <strong>48h Avg Grid Import</strong> sensor to be
+            configured in the <strong>Sensors</strong> tab under Consumption Forecast.
           </p>
         )}
         {!haStatsSensorConfigured && (
@@ -91,38 +101,40 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             available on all inverter platforms (e.g. Growatt SPH).
           </p>
         )}
+        {chargeRateSensorConfigured && !currentSensorsConfigured && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            Fuse protection requires {form.phaseCount === 1 ? 'the' : 'all three'} phase current
+            sensor{form.phaseCount === 1 ? '' : 's'} ({form.phaseCount === 1 ? 'Current L1' : 'Current L1/L2/L3'})
+            to be configured in the <strong>Sensors</strong> tab under Phase Current Monitoring first.
+          </p>
+        )}
         {toggle('Enable fuse protection', form.powerMonitoringEnabled,
           v => onChange({ ...form, powerMonitoringEnabled: v }),
-          { disabled: !chargeRateSensorConfigured })}
+          { disabled: !form.powerMonitoringEnabled && (!chargeRateSensorConfigured || !currentSensorsConfigured) })}
+        <div className="pt-1">
+          {radioGroup(
+            'Phase count',
+            [{ value: '1', label: '1-phase' }, { value: '3', label: '3-phase' }],
+            String(form.phaseCount),
+            v => onChange({ ...form, phaseCount: parseInt(v, 10) }),
+          )}
+          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+            Used by the day-ahead scheduler for grid-import planning regardless of fuse
+            protection: the scheduler assumes load is spread evenly across phases, so 3-phase
+            raises how much it will plan to import before discharging the battery to compensate.
+            When fuse protection is enabled, real-time monitoring also watches each phase
+            individually and can throttle charging further if one phase runs hot.
+          </p>
+        </div>
         {form.powerMonitoringEnabled && (
-          <>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
-              {numField('Fuse Current', form.maxFuseCurrent,
-                v => onChange({ ...form, maxFuseCurrent: Math.round(v) }), { unit: 'A', min: 1, step: 1 })}
-              {numField('Voltage', form.voltage,
-                v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
-              {numField('Safety Margin Factor', form.safetyMarginFactor,
-                v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
-            </div>
-            <div className="pt-1">
-              {radioGroup(
-                'Phase count',
-                [{ value: '1', label: '1-phase' }, { value: '3', label: '3-phase' }],
-                String(form.phaseCount),
-                v => onChange({ ...form, phaseCount: parseInt(v, 10) }),
-              )}
-              <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-                The scheduler assumes load is spread evenly across phases when planning grid
-                import, so 3-phase raises how much it will plan to import before discharging the
-                battery to compensate. Real-time fuse protection still watches each phase
-                individually and can throttle charging further if one phase runs hot.
-              </p>
-            </div>
-            <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-              Configure per-phase current sensor entity IDs in the <strong>Sensors</strong> tab
-              under Phase Current Monitoring.
-            </p>
-          </>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 pt-1">
+            {numField('Fuse Current', form.maxFuseCurrent,
+              v => onChange({ ...form, maxFuseCurrent: Math.round(v) }), { unit: 'A', min: 1, step: 1 })}
+            {numField('Voltage', form.voltage,
+              v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
+            {numField('Safety Margin Factor', form.safetyMarginFactor,
+              v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
+          </div>
         )}
       </SectionCard>
     </div>

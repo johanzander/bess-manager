@@ -6,7 +6,6 @@ import math
 from dataclasses import dataclass
 
 from core.bess.dp_battery_algorithm import (
-    BATTERY_EXPORT_THRESHOLD_KWH,
     POWER_STEP_KW,
     POWER_TOLERANCE_KW,
     _compute_reward,
@@ -260,7 +259,6 @@ def replay_schedule(
     dt: float,
     initial_soe: float,
     initial_cost_basis: float | None,
-    self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None,
 ) -> tuple[list[float], list[float]]:
     """Per-period objective cost and per-period opening cost basis of an
@@ -308,7 +306,7 @@ def replay_schedule(
             power = 0.0
         next_soe = period.energy.battery_soe_end
         cost_bases.append(cost_basis)
-        reward, cost_basis, _grid_imported = _compute_reward(
+        reward, cost_basis, _flows = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
@@ -320,7 +318,6 @@ def replay_schedule(
             sell_price=sell_price,
             solar_production=solar_production[t],
             cost_basis=cost_basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         period_costs.append(-reward)
@@ -338,7 +335,6 @@ def segment_reference_cost(
     dt: float,
     soe_trajectory: list[float],
     cost_basis: float,
-    self_throttle_export_threshold_kwh: float,
     import_cap_kwh: float | None,
 ) -> float:
     """Objective cost over `segment` as re-solved by the continuous-SOE PWL
@@ -446,7 +442,6 @@ def segment_reference_cost(
         battery_settings=battery_settings,
         dt=dt,
         end_soe_target=soe_trajectory[segment.end],
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
     actions = resolve_pwl_window(
@@ -460,15 +455,14 @@ def segment_reference_cost(
         battery_settings=battery_settings,
         dt=dt,
         cost_basis=cost_basis,
-        self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
         import_cap_kwh=import_cap_kwh,
     )
 
     soe = start_soe
     basis = cost_basis
     reference_cost = 0.0
-    for t, (power, next_soe) in enumerate(actions):
-        reward, basis, _grid_imported = _compute_reward(
+    for t, (power, next_soe, _flows) in enumerate(actions):
+        reward, basis, _flows_out = _compute_reward(
             power=power,
             soe=soe,
             next_soe=next_soe,
@@ -480,7 +474,6 @@ def segment_reference_cost(
             sell_price=segment_sell,
             solar_production=segment_solar[t],
             cost_basis=basis,
-            self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
             import_cap_kwh=import_cap_kwh,
         )
         reference_cost -= reward
@@ -587,7 +580,6 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
         dt=inputs["period_duration_hours"],
         initial_soe=inputs["initial_soe"],
         initial_cost_basis=inputs["initial_cost_basis"],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
     # The identity every SEK number below rests on: the replay must reproduce
@@ -621,7 +613,6 @@ def measure_scenario(scenario: dict) -> ScenarioMeasurement:
         dt=inputs["period_duration_hours"],
         soe_trajectory=post_splice_soe_trajectory(result, inputs["initial_soe"]),
         cost_basis=cost_bases[segment.start],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
 

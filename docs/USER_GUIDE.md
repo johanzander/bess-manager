@@ -275,7 +275,7 @@ For UK users on the Octopus Energy Agile tariff.
 
 #### Provider: ENTSO-e / Belpex (Transparency Platform)
 
-For European users on a day-ahead dynamic tariff that follows the ENTSO-e Transparency Platform — including Belgian **Belpex** prices (Luminus dynamic and others). *Experimental: not yet real-world validated — see [issue #126](https://github.com/johanzander/bess-manager/issues/126).*
+For European users on a day-ahead dynamic tariff that follows the ENTSO-e Transparency Platform — including Belgian **Belpex** prices (Luminus dynamic and others).
 
 - **Prerequisites**: The [ENTSO-e Transparency Platform](https://github.com/JaccoR/hass-entso-e) HACS integration installed and configured with your area (e.g. Belgium). It creates an "Average electricity price" sensor, e.g. `sensor.belpex_h_average_electricity_price`.
 - **How it works**: BESS reads the `prices_today` and `prices_tomorrow` attributes from that single sensor. Each is a list of `{"time", "price"}` entries. Hourly data (PT60M, 24/day) is expanded to the internal 15-minute resolution; native quarterly data (PT15M, 96/day) is used as-is.
@@ -302,7 +302,9 @@ For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, V
 
 BESS needs a forecast of your home consumption to plan the battery schedule. Four strategies are available, configured via `home.consumption_strategy` in your add-on settings:
 
-#### Strategy 1: `sensor` (default)
+#### Strategy 1: `sensor` (legacy)
+
+This strategy is selectable only once the `48h_avg_grid_import` sensor is configured: it is the one strategy with no fallback, so choosing it without that sensor means no schedule can be built at all and the dashboard never leaves "Initializing". New installs default to `fixed`; `ha_statistics` is the recommended choice (see [INSTALLATION.md](INSTALLATION.md), Step 3).
 
 BESS reads a Home Assistant sensor named `*48h_avg*grid_import*` (the exact entity ID is auto-discovered by name pattern). This sensor should be a 48-hour rolling average of your grid import power, filtered to exclude periods when the battery is active. See [INSTALLATION.md](INSTALLATION.md), Step 3 for how to create it.
 

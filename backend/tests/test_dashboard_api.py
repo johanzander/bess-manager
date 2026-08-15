@@ -6,11 +6,12 @@ in _aggregate_quarterly_to_hourly.
 """
 
 import sys
+from dataclasses import replace
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
-from api import router
+from api import _aggregate_quarterly_to_hourly, router
 from api_dataclasses import APIDashboardHourlyData, APIDashboardSummary
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -334,6 +335,102 @@ class TestDashboardAvailableDates:
         sys.modules["app"].bess_controller = _unconfigured_controller()
         resp = _client.get("/api/dashboard/available-dates")
         assert resp.status_code == 503
+
+
+def test_aggregate_hourly_uses_observed_intent_from_all_quarters_not_just_last():
+    """Regression test for #486.
+
+    The per-quarter observedIntent captures real execution, but the old
+    aggregation only forwarded the *last* quarter's observedIntent, so if
+    the last quarter's observed execution disagreed with the other 3
+    (all genuinely recorded as "actual"), the majority's real outcome was
+    silently discarded in favor of that one quarter's value.
+    """
+    quarters = []
+    for i in range(4):
+        period = _make_period(i)
+        # All 4 quarters genuinely executed and were recorded as actual;
+        # 3 of them ran LOAD_SUPPORT, only the last ran BATTERY_EXPORT.
+        period = replace(
+            period,
+            data_source="actual",
+            decision=DecisionData(
+                strategic_intent="BATTERY_EXPORT",
+                observed_intent="BATTERY_EXPORT" if i == 3 else "LOAD_SUPPORT",
+            ),
+        )
+        quarters.append(
+            APIDashboardHourlyData.from_internal(
+                period, battery_capacity=15.0, currency="SEK"
+            )
+        )
+
+    [hourly] = _aggregate_quarterly_to_hourly(quarters, 15.0, "SEK")
+
+    # dataSource stays tied to the last quarter (unchanged) — it feeds
+    # actualSavingsSoFar/predictedRemainingSavings bucketing and must not
+    # be widened to "any quarter actual", or a still-predicted quarter's
+    # cost gets counted as realized.
+    assert hourly.dataSource == "actual"
+    assert hourly.observedIntent == "LOAD_SUPPORT"
+
+
+def test_aggregate_hourly_data_source_stays_last_quarter_even_if_earlier_quarters_are_actual():
+    """dataSource must not flip to "actual" just because SOME quarter is —
+    only the last quarter's value counts, matching the pre-existing contract
+    that api_dataclasses.py's actual/predicted savings split relies on.
+    """
+    quarters = []
+    for i in range(4):
+        period = _make_period(i)
+        period = replace(
+            period,
+            data_source="actual" if i < 3 else "predicted",
+            decision=DecisionData(
+                strategic_intent="LOAD_SUPPORT",
+                observed_intent="LOAD_SUPPORT" if i < 3 else None,
+            ),
+        )
+        quarters.append(
+            APIDashboardHourlyData.from_internal(
+                period, battery_capacity=15.0, currency="SEK"
+            )
+        )
+
+    [hourly] = _aggregate_quarterly_to_hourly(quarters, 15.0, "SEK")
+
+    assert hourly.dataSource == "predicted"
+
+
+def test_aggregate_hourly_curtailed_not_filtered_by_dominant_intent():
+    """Curtailment (#501) is intent-independent: a curtailed quarter can
+    classify as SOLAR_STORAGE (battery charging at rate limit, surplus above
+    it curtailed). An hour whose curtailed quarters lose the dominant-intent
+    vote must still report curtailed=True.
+    """
+    quarters = []
+    for i in range(4):
+        period = _make_period(i)
+        # 2 GRID_CHARGING + 2 curtailed SOLAR_STORAGE quarters: the 2-2 tie
+        # resolves to GRID_CHARGING on priority, so any intent-filtered
+        # aggregation would look only at the un-curtailed quarters.
+        period = replace(
+            period,
+            decision=DecisionData(
+                strategic_intent="GRID_CHARGING" if i < 2 else "SOLAR_STORAGE",
+                curtailed=i >= 2,
+            ),
+        )
+        quarters.append(
+            APIDashboardHourlyData.from_internal(
+                period, battery_capacity=15.0, currency="SEK"
+            )
+        )
+
+    [hourly] = _aggregate_quarterly_to_hourly(quarters, 15.0, "SEK")
+
+    assert hourly.strategicIntent == "GRID_CHARGING"
+    assert hourly.curtailed is True
 
 
 def test_net_grid_cost_excludes_battery_wear():

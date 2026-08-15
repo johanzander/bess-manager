@@ -1,14 +1,14 @@
-"""Regression for issue #380: discharge-rate shadow-price gate must not be
+"""Regression for issue #380: the intra-period discharge gate must not be
 fooled by a standalone next-day schedule.
 
 Around 23:55 every day, BatterySystemManager stores a next-day-only
 schedule (optimization_period=0, period_data[0] timestamped tomorrow
 00:00). The SOLAR_EXPORT/SOLAR_STORAGE intra-period discharge gate
-(_apply_period_schedule) looks up the current period's shadow_price via
+(_apply_period_schedule) looks up the current period's DP decision via
 schedule_store.get_latest_schedule() + positional arithmetic -- during that
-window this silently pulled tomorrow's shadow_price into today's gate
-decision instead of today's real value, live-affecting battery hardware
-control, not just the dashboard.
+window this silently pulled tomorrow's decision into today's gate instead of
+today's real value, live-affecting battery hardware control, not just the
+dashboard.
 """
 
 from datetime import timedelta
@@ -48,7 +48,7 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
     bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
 
 
-def _period_data(period: int, timestamp, shadow_price: float) -> PeriodData:
+def _period_data(period: int, timestamp, allowed: bool) -> PeriodData:
     return PeriodData(
         period=period,
         energy=EnergyData(
@@ -64,35 +64,35 @@ def _period_data(period: int, timestamp, shadow_price: float) -> PeriodData:
         timestamp=timestamp,
         economic=EconomicData(),
         decision=DecisionData(
-            strategic_intent="SOLAR_EXPORT", shadow_price=shadow_price
+            strategic_intent="SOLAR_EXPORT", intra_period_discharge_allowed=allowed
         ),
     )
 
 
-def test_gate_uses_todays_shadow_price_not_next_day_schedules():
-    # buy_price * efficiency_discharge (0.95 default) is comfortably above
-    # today's real shadow_price (0.5) -> gate should OPEN (100).
+def test_gate_uses_todays_decision_not_next_day_schedules():
+    # Today's real decision authorizes sub-period discharge -> gate should
+    # OPEN (100).
     bsm, controller = _make_bsm(buy_prices=[2.0] * 96)
     _set_intent(bsm, PERIOD, "SOLAR_EXPORT")
 
-    # Today's real schedule, made moments earlier, with a low shadow_price.
+    # Today's real schedule, made moments earlier, authorizing the gate.
     today_ts = time_utils.period_index_to_timestamp(PERIOD)
     bsm.schedule_store.store_schedule(
         OptimizationResult(
             input_data={},
-            period_data=[_period_data(PERIOD, today_ts, shadow_price=0.5)],
+            period_data=[_period_data(PERIOD, today_ts, allowed=True)],
         ),
         optimization_period=PERIOD,
     )
 
     # The prepare_next_day schedule stored at 23:55: optimization_period=0,
-    # period_data[0] anchored to tomorrow 00:00, with a high shadow_price
+    # period_data[0] anchored to tomorrow 00:00, withholding authorization --
     # that would close the gate (0) if wrongly read as today's period 95.
     tomorrow_ts = time_utils.period_index_to_timestamp(96) + timedelta(minutes=15 * 95)
     bsm.schedule_store.store_schedule(
         OptimizationResult(
             input_data={},
-            period_data=[_period_data(95, tomorrow_ts, shadow_price=4.0)],
+            period_data=[_period_data(95, tomorrow_ts, allowed=False)],
         ),
         optimization_period=0,
     )

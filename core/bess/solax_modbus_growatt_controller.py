@@ -81,7 +81,7 @@ class SolaxModbusGrowattController(GrowattMinController):
     mode each period when needed. ``control_mode="vpp"`` issues per-period VPP
     power commands instead, with no persistent TOU schedule — analogous to
     how ``SolaxController`` applies per-period VPP commands for real SolaX
-    hardware, with ``write_to_hardware`` doing only the one-time VPP
+    hardware, with ``sync_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
 
@@ -118,7 +118,11 @@ class SolaxModbusGrowattController(GrowattMinController):
         # rather than persisted as class-level statics — controllers are
         # recreated each optimization cycle, so state must survive via
         # read-back, the same pattern TOU mode already uses.
+        # One flag per flash register, not one for both: they are written
+        # together but can drift apart, and repairing the drifted one must not
+        # cost a redundant flash write on the healthy one (#399).
         self._vpp_status_confirmed: bool = False
+        self._vpp_ac_charging_confirmed: bool = False
         self._last_written_vpp_remote_control: bool | None = None
         self._last_written_vpp_power: int | None = None
 
@@ -398,18 +402,28 @@ class SolaxModbusGrowattController(GrowattMinController):
         )
 
     def _ensure_vpp_status_enabled(self, controller) -> None:
-        """Enable the VPP Status register once, if not already confirmed.
+        """Enable the two VPP flash registers, each only if not already confirmed.
 
         VPP Remote Control has no effect while VPP Status is disabled — this
         must be written (with a settle delay) before the first Remote Control
-        write, per real-hardware testing on issue #118.
+        write, per real-hardware testing on issue #118. AC charging is the
+        second register of the pair: without it GRID_CHARGING periods draw
+        nothing from the grid.
+
+        Confirmed **per register**. They are written together but can drift
+        apart (a user toggle, a firmware reset, a write that failed after the
+        first of the two), and both are flash — so when only one has drifted,
+        rewriting the healthy one is exactly the wear #399 asked to eliminate.
         """
-        if self._vpp_status_confirmed:
+        if self._vpp_status_confirmed and self._vpp_ac_charging_confirmed:
             return
-        controller.set_growatt_vpp_status(True)
-        controller.set_growatt_vpp_allow_ac_charging(True)
+        if not self._vpp_status_confirmed:
+            controller.set_growatt_vpp_status(True)
+            self._vpp_status_confirmed = True
+        if not self._vpp_ac_charging_confirmed:
+            controller.set_growatt_vpp_allow_ac_charging(True)
+            self._vpp_ac_charging_confirmed = True
         time.sleep(1)
-        self._vpp_status_confirmed = True
 
     def leave_control_mode(self, controller) -> None:
         """Disable VPP Status when switching away from VPP mode (#479).
@@ -468,11 +482,10 @@ class SolaxModbusGrowattController(GrowattMinController):
             logger.error("FAILED: Growatt VPP period write: %s", e)
             return False, str(e)
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Initialise hardware for the current control mode.
 
@@ -492,7 +505,6 @@ class SolaxModbusGrowattController(GrowattMinController):
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Period (0-95) from which to start applying changes
-            current_tou: TOU intervals currently active on the inverter (unused)
 
         Returns:
             Tuple of (segments_updated, segments_disabled)
@@ -537,14 +549,46 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         if self.control_mode == "vpp":
             status = controller.get_growatt_vpp_status()
+            allow_ac_charging = controller.get_growatt_vpp_allow_ac_charging()
+            # Both registers, each seeding its own flag, because
+            # _ensure_vpp_status_enabled writes them independently. Seeding a
+            # single flag from VPP Status alone made Status a proxy for a
+            # register that was never read: an inverter with Status Enabled
+            # but AC charging Disabled was treated as fully configured on
+            # every restart, so the AC-charging write never happened again and
+            # GRID_CHARGING periods silently drew nothing from the grid.
+            #
+            # A read that returns None (transient API error, entity
+            # momentarily unavailable, or the entity not configured at all) is
+            # *unknown*, not "Disabled" — but unknown still cannot be assumed
+            # good, since a wrongly-assumed Enabled leaves VPP unable to
+            # execute its plan with no further chance to repair. It is
+            # therefore repaired like a known-wrong register, and logged as
+            # unknown so the flash write has a visible cause. Per-register
+            # confirmation keeps that to the one register that could not be
+            # read.
+            for register, state in (
+                ("status", status),
+                ("allow_ac_charging", allow_ac_charging),
+            ):
+                if state is None:
+                    logger.warning(
+                        "Growatt VPP: could not read %s (unknown, not "
+                        "necessarily disabled) — it will be rewritten on the "
+                        "next VPP command",
+                        register,
+                    )
             self._vpp_status_confirmed = status == "Enabled"
+            self._vpp_ac_charging_confirmed = allow_ac_charging == "Enabled"
             remote_control = controller.get_growatt_vpp_remote_control()
             self._last_written_vpp_remote_control = (
                 remote_control == "Enabled" if remote_control is not None else None
             )
             logger.info(
-                "Growatt VPP: initialised from hardware — status=%s remote_control=%s",
+                "Growatt VPP: initialised from hardware — status=%s "
+                "allow_ac_charging=%s remote_control=%s",
                 status,
+                allow_ac_charging,
                 remote_control,
             )
             return
@@ -639,6 +683,22 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         logger.info("DECISION: Modbus schedules match")
         return False, ""
+
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Nothing to re-assert — and specifically not the parent's version.
+
+        The parent reconciles by re-running its own sync, which reads the
+        inverter's segment table over the growatt_server cloud services. This
+        platform is modbus: there is no Growatt device_id to address, so
+        inheriting that raises SystemConfigurationError and takes the whole
+        schedule update with it (issue #554).
+
+        It is also unnecessary here. TOU mode drives a single segment whose
+        mode is rewritten whenever it differs, and VPP mode issues per-period
+        commands, so neither skips a write while the plan holds steady the way
+        the parent does — there is no window in which drift could go unnoticed.
+        """
+        return 0, 0
 
     def evaluate_intents(
         self, schedule: DPSchedule, current_period: int = 0

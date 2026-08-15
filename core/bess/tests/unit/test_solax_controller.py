@@ -88,7 +88,7 @@ class TestApplyIntents:
         assert controller.current_schedule is schedule
 
 
-# ── write_to_hardware ────────────────────────────────────────────────
+# ── sync_to_hardware ────────────────────────────────────────────────
 
 
 class TestWriteScheduleToHardware:
@@ -96,7 +96,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        writes, disables = controller.write_to_hardware(mock_hw, 0, [])
+        writes, disables = controller.sync_to_hardware(mock_hw, 0)
 
         assert writes == 0
         assert disables == 0
@@ -105,7 +105,7 @@ class TestWriteScheduleToHardware:
         self, controller: SolaxController
     ) -> None:
         mock_hw = MagicMock()
-        controller.write_to_hardware(mock_hw, 0, [])
+        controller.sync_to_hardware(mock_hw, 0)
 
         mock_hw.assert_not_called()
 

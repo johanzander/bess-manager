@@ -123,10 +123,13 @@ class TestScenarioDiscovery:
 
         integrations, states = ctrl.discover_integrations()
         registry = ctrl.fetch_entity_registry()
-        platform_sensors, detected_platform = ctrl.discover_sensors_from_registry(
-            registry
-        )
+        (
+            platform_sensors,
+            detected_platform,
+            platform_disabled,
+        ) = ctrl.discover_sensors_from_registry(registry)
 
+        self._platform_disabled = platform_disabled
         return expected, integrations, platform_sensors, detected_platform, states
 
     # -- Integration detection -----------------------------------------------
@@ -169,6 +172,33 @@ class TestScenarioDiscovery:
             f"{detected_platform!r}: {missing}"
         )
 
+    # -- Disabled entities (#549) --------------------------------------------
+
+    def test_disabled_sensors_reported_and_not_mapped(self, scenario_name, monkeypatch):
+        """Keys whose only entity is disabled are reported, never mapped.
+
+        A disabled entity has no state, so mapping it guarantees a runtime
+        404 — the failure the reporter of #549 saw as SYSTEM DEGRADED.
+        """
+        expected, _, platform_sensors, detected_platform, _ = self._run(
+            scenario_name, monkeypatch
+        )
+        if "disabled_sensors" not in expected:
+            pytest.skip("no disabled_sensors defined")
+
+        disabled = self._platform_disabled.get(detected_platform, {})
+        sensors = platform_sensors.get(detected_platform, {})
+
+        assert sorted(disabled) == expected["disabled_sensors"], (
+            f"{scenario_name}: disabled sensors for {detected_platform!r} = "
+            f"{sorted(disabled)}, expected {expected['disabled_sensors']}"
+        )
+        still_mapped = [k for k in expected["disabled_sensors"] if k in sensors]
+        assert not still_mapped, (
+            f"{scenario_name}: disabled entities were mapped anyway "
+            f"(guaranteed 404 at runtime): {still_mapped}"
+        )
+
     # -- Platform-specific sensor lists ----------------------------------------
 
     def test_platform_specific_sensors(self, scenario_name, monkeypatch):
@@ -203,6 +233,23 @@ class TestScenarioDiscovery:
                 f"{scenario_name}: sensor {key!r} has invalid "
                 f"entity_id {entity_id!r}"
             )
+
+    # -- Phase current sensors (states-based, not registry-based) -------------
+
+    def test_phase_currents_discovered(self, scenario_name, monkeypatch):
+        """Household phase currents resolve exactly as the scenario declares.
+
+        Opt-in via an ``expected_discovery.phase_currents`` map. Equality, not
+        containment: a scenario whose states also carry the *inverter's* own
+        output currents (huawei_solar gives both the identical display name)
+        must not pick those up for grid-fuse protection — issue #120.
+        """
+        expected, _, _, _, states = self._run(scenario_name, monkeypatch)
+        if "phase_currents" not in expected:
+            pytest.skip("no phase_currents defined")
+
+        ctrl = HomeAssistantAPIController.__new__(HomeAssistantAPIController)
+        assert ctrl.discover_current_sensors(states) == expected["phase_currents"]
 
 
 # ---------------------------------------------------------------------------

@@ -20,9 +20,8 @@ from core.bess.dp_battery_algorithm import (
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.tests.helpers import (
     _scenario_inputs,
-    assert_intent_absent,
+    assert_flow_coherence,
     assert_intent_at_hour,
-    assert_intent_present,
     assert_physical_constraints,
     assert_savings_positive,
     get_intent_distribution,
@@ -55,6 +54,29 @@ def get_all_scenario_files():
     return sorted(scenario_files)
 
 
+def build_scenario_optimizer_inputs(scenario_name):
+    """Load a scenario file and return `(scenario, full optimizer kwargs)`.
+
+    Use this, not `build_scenario_inputs`, whenever the next thing you do is
+    call `optimize_battery_schedule` (changed 2026-08-11).
+
+    `build_scenario_inputs` returns five of the eleven keys `_scenario_inputs`
+    produces, so every caller that wanted to run the optimizer had to rebuild
+    the argument list by hand -- and each of them dropped the same fixture
+    inputs on the floor: `initial_cost_basis`, `export_curtailment_active` and
+    `home_settings`. A fixture then replayed under conditions it was never
+    captured under, silently, while its pins stayed green. `golden_capture.py`
+    was fixed for exactly this in Phase 1 and the copies here were left
+    standing.
+
+    Returning the kwargs whole removes the hand-listing step that caused it:
+    `optimize_battery_schedule(**inputs)` cannot drop an input, and a new
+    optimizer argument reaches these call sites without touching them.
+    """
+    scenario = load_test_scenario(scenario_name)
+    return scenario, _scenario_inputs(scenario)
+
+
 def build_scenario_inputs(scenario_name):
     """Load a scenario file and derive battery settings + buy/sell prices.
 
@@ -63,6 +85,10 @@ def build_scenario_inputs(scenario_name):
     derivation path -- including the buy_price/sell_price direct-input and
     spot_multiplier handling added for debug-log-derived regression
     fixtures.
+
+    For the four values it returns only. If you are about to call
+    `optimize_battery_schedule`, use `build_scenario_optimizer_inputs`
+    instead -- see its docstring for what hand-listing the arguments cost.
     """
     scenario = load_test_scenario(scenario_name)
     inputs = _scenario_inputs(scenario)
@@ -119,17 +145,22 @@ def test_all_scenarios(scenario_name):
         len(solar_production) == horizon
     ), f"solar_production length {len(solar_production)} != base_prices length {horizon}"
 
-    # Run optimization
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
-        terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
-    )
+    # Run optimization.
+    #
+    # Pass `_scenario_inputs` through whole rather than re-listing keys
+    # (changed 2026-08-11). Re-listing dropped three inputs the fixtures
+    # actually set: `export_curtailment_active`, `initial_cost_basis` and
+    # `home_settings`. That is the same defect `golden_capture.py` was fixed
+    # for in Phase 1 -- its docstring even names the fixture -- and it was
+    # left standing here, so the corpus's own canonical suite kept replaying
+    # a different solve than the goldens did.
+    #
+    # It mattered most where it was least visible:
+    # `regression_2026_08_08_143843` exists to pin #510's charge-early
+    # tie-break *under the export-curtailment price floor*, sets
+    # `export_curtailment_active: True`, and was asserted here with
+    # curtailment OFF -- the one condition it was captured for.
+    result = optimize_battery_schedule(**_scenario_inputs(scenario))
 
     # Validate results using new data structures
     assert isinstance(result.period_data, list)
@@ -177,23 +208,71 @@ def test_all_scenarios(scenario_name):
         expected_results = scenario["expected_results"]
         economic_results = result.economic_summary
 
-        # Compare expected vs actual results with rounding to account for small numerical differences
-        # Map scenario field names to EconomicSummary field names
-        assert round(economic_results.grid_only_cost, 1) == round(
-            expected_results["base_cost"], 1
-        ), f"Grid-only cost mismatch: {economic_results.grid_only_cost:.2f} != {expected_results['base_cost']:.2f}"
+        # Tolerance, not rounding to 1 decimal (changed 2026-08-11).
+        #
+        # `round(x, 1)` compared costs at 0.1 SEK, which is far coarser than
+        # anything these fixtures actually vary by: measured across the 33
+        # pinned fixtures, the median |actual - pinned| is 0.000002 SEK and 32
+        # of 33 sit within 0.000005. The rounding was therefore not absorbing
+        # float noise -- it was hiding whole behaviour changes. It hid a real
+        # one: `regression_2026_08_08_143843` had drifted 0.0214 SEK from its
+        # recorded value (an improvement, from a later grid/tie change nobody
+        # re-pinned) and no test could see it.
+        #
+        # 0.001 SEK is ~500x the observed float spread and ~100x finer than
+        # the old gate, so it stays quiet on numerical noise while a genuine
+        # behavioural change has to be re-pinned deliberately -- which is the
+        # point of a pin.
+        COST_TOLERANCE_SEK = 0.001
+        PCT_TOLERANCE = 0.01
 
-        assert round(economic_results.battery_solar_cost, 1) == round(
-            expected_results["battery_solar_cost"], 1
-        ), f"Battery solar cost mismatch: {economic_results.battery_solar_cost:.2f} != {expected_results['battery_solar_cost']:.2f}"
+        assert economic_results.grid_only_cost == pytest.approx(
+            expected_results["base_cost"], abs=COST_TOLERANCE_SEK
+        ), f"Grid-only cost mismatch: {economic_results.grid_only_cost:.6f} != {expected_results['base_cost']:.6f}"
 
-        assert round(economic_results.grid_to_battery_solar_savings, 1) == round(
-            expected_results["base_to_battery_solar_savings"], 1
-        ), f"Savings mismatch: {economic_results.grid_to_battery_solar_savings:.2f} != {expected_results['base_to_battery_solar_savings']:.2f}"
+        assert economic_results.battery_solar_cost == pytest.approx(
+            expected_results["battery_solar_cost"], abs=COST_TOLERANCE_SEK
+        ), f"Battery solar cost mismatch: {economic_results.battery_solar_cost:.6f} != {expected_results['battery_solar_cost']:.6f}"
 
-        assert round(economic_results.grid_to_battery_solar_savings_pct, 1) == round(
-            expected_results["base_to_battery_solar_savings_pct"], 1
-        ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.2f}% != {expected_results['base_to_battery_solar_savings_pct']:.2f}%"
+        assert economic_results.grid_to_battery_solar_savings == pytest.approx(
+            expected_results["base_to_battery_solar_savings"], abs=COST_TOLERANCE_SEK
+        ), f"Savings mismatch: {economic_results.grid_to_battery_solar_savings:.6f} != {expected_results['base_to_battery_solar_savings']:.6f}"
+
+        assert economic_results.grid_to_battery_solar_savings_pct == pytest.approx(
+            expected_results["base_to_battery_solar_savings_pct"], abs=PCT_TOLERANCE
+        ), f"Savings percentage mismatch: {economic_results.grid_to_battery_solar_savings_pct:.4f}% != {expected_results['base_to_battery_solar_savings_pct']:.4f}%"
+
+        # Energy throughput, not just money (added 2026-08-11, audit Pass 3
+        # F3). 27 fixtures have carried these two values since they were
+        # written and no test ever read them -- measured at the time of
+        # wiring, all 27 were still accurate to <0.001 kWh, so this pins
+        # what was already true rather than re-pinning anything.
+        #
+        # Worth asserting because the four scalars above are all money, and
+        # money is lossy: two plans can cost the same to within a fraction of
+        # an öre while cycling the battery differently -- the same energy
+        # bought at a different hour, or a round trip added and another
+        # removed. Wear is charged per kWh stored, so throughput is a
+        # physical quantity the cost pins genuinely cannot express.
+        # 27 of the 33 fixtures carry these. The 6 that do not are all
+        # debug-log-derived regression fixtures (`regression_*`), whose
+        # generator records economics but not throughput -- so this is
+        # conditional on the key rather than on a default, which would
+        # silently pin 0.0 for them.
+        ENERGY_TOLERANCE_KWH = 0.001
+        if "total_charged" in expected_results:
+            total_charged = sum(pd.energy.battery_charged for pd in result.period_data)
+            assert total_charged == pytest.approx(
+                expected_results["total_charged"], abs=ENERGY_TOLERANCE_KWH
+            ), f"Total charged mismatch: {total_charged:.6f} != {expected_results['total_charged']:.6f} kWh"
+        if "total_discharged" in expected_results:
+            total_discharged = sum(
+                pd.energy.battery_discharged for pd in result.period_data
+            )
+            assert total_discharged == pytest.approx(
+                expected_results["total_discharged"], abs=ENERGY_TOLERANCE_KWH
+            ), f"Total discharged mismatch: {total_discharged:.6f} != {expected_results['total_discharged']:.6f} kWh"
+
     else:
         logger.info(
             f"No expected results for scenario {scenario_name}, skipping validation"
@@ -243,18 +322,35 @@ def test_all_scenarios(scenario_name):
                     abs(battery_action) <= battery["max_discharge_power_kw"] + tolerance
                 ), f"Battery discharging action {abs(battery_action):.2f} kW exceeds max discharge power {battery['max_discharge_power_kw']} kW"
 
+    # ── Flow coherence (unconditional) ──
+    # Not gated on expected_behavior. Whether a period's flows add up is not a
+    # per-fixture expectation a scenario author opts into -- it holds for every
+    # plan or the plan is wrong. Gating it the way soe_within_bounds is gated
+    # would silently exempt the three fixtures that declare no constraints
+    # block, which is exactly the kind of hole this check exists to close.
+    for pd in result.period_data:
+        assert_flow_coherence(pd)
+
     # ── Behavioral assertions (from expected_behavior in scenario JSON) ──
     if "expected_behavior" in scenario:
         behavior = scenario["expected_behavior"]
         dist = get_intent_distribution(result)
         logger.info(f"Intent distribution: {dist}")
 
-        for intent in behavior.get("intents_present", []):
-            assert_intent_present(result, intent)
-
-        for intent in behavior.get("intents_absent", []):
-            assert_intent_absent(result, intent)
-
+        # `intents_present` / `intents_absent` are no longer asserted here
+        # (changed 2026-08-11, audit Pass 3 F5). They were existence checks:
+        # `intents_present` passed on a single period out of up to 134, so it
+        # could only detect an intent class disappearing outright, and several
+        # `intents_absent` entries could not fail at all -- SOLAR_STORAGE
+        # declared absent on a fixture with no solar is unfalsifiable by
+        # construction, not a guarantee.
+        #
+        # Every period's intent is now pinned exactly, for all 36 fixtures
+        # (2168 periods), by the `intents` field in the action-selector
+        # goldens. That is strictly stronger and it is deterministic: a
+        # reclassification fails by name and period instead of surviving
+        # because one other period still carries the intent. The keys remain
+        # in the fixtures as scenario documentation.
         if behavior.get("savings_positive"):
             assert_savings_positive(result)
 
@@ -314,19 +410,9 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
     (a no-op resolve), so it no longer exercises the fast path. This one
     flags none, and the pinned values below are the grid DP's own output."""
 
-    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("synthetic_consumption_ev_charging")
-    )
+    _, inputs = build_scenario_optimizer_inputs("synthetic_consumption_ev_charging")
     with caplog.at_level(logging.INFO, logger="core.bess.dp_battery_algorithm"):
-        result = optimize_battery_schedule(
-            buy_price=buy_prices,
-            sell_price=sell_prices,
-            home_consumption=scenario["home_consumption"],
-            solar_production=scenario["solar_production"],
-            initial_soe=scenario["battery"]["initial_soe"],
-            battery_settings=battery_settings,
-            period_duration_hours=period_duration_hours,
-        )
+        result = optimize_battery_schedule(**inputs)
 
     # Pinned costs alone would keep passing if the detector drifted and this
     # fixture started resolving windows that happen to be no-ops -- which is
@@ -337,10 +423,10 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
     ], "fixture now trips the tie detector -- it no longer exercises the fast path"
 
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        158.52645, abs=1e-4
+        158.2466715789474, abs=1e-4
     )
     assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
-        62.58805, abs=1e-3
+        62.8678, abs=1e-3
     )
 
 
@@ -358,24 +444,103 @@ def test_466_near_tied_evening_periods_discharge_instead_of_idle():
     reported economics exactly (grid_only_cost 5.764893562499999,
     battery_solar_cost -2.094315584625) with periods 32 and 45 IDLE."""
 
-    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("regression_2026_08_06_466")
-    )
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=scenario["home_consumption"],
-        solar_production=scenario["solar_production"],
-        initial_soe=scenario["battery"]["initial_soe"],
-        initial_cost_basis=scenario["battery"]["initial_cost_basis"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
-    )
+    scenario, inputs = build_scenario_optimizer_inputs("regression_2026_08_06_466")
+    result = optimize_battery_schedule(**inputs)
 
-    assert_intent_at_hour(result, 32, "LOAD_SUPPORT")  # 19:00
     assert_intent_at_hour(result, 45, "LOAD_SUPPORT")  # 22:15
+
+    # Period 32 (19:00) tracks the grid resolution, correctly each time
+    # (same story as test_idle_tie_break's guardrail test): IDLE under #497's
+    # rule at the 0.2 kW grid because its 0.0431 kWh deficit sat below the
+    # smallest commandable discharge (0.05 kWh), back to LOAD_SUPPORT at
+    # #512's finer grid, whose halved classification threshold makes a
+    # smaller under-covering discharge commandable and executable exactly as
+    # planned. Realized cost on this fixture improved 0.0181 SEK at the
+    # finer grid, with R == P still exact.
+    assert_intent_at_hour(result, 32, "LOAD_SUPPORT")  # 19:00
 
     expected = scenario["expected_results"]
     assert result.economic_summary.battery_solar_cost == pytest.approx(
         expected["battery_solar_cost"], abs=1e-3
+    )
+
+
+def test_466_sunrise_crossover_covers_residual_load_instead_of_idle():
+    """Replays the exact optimizer input recorded in #466's second debug
+    bundle (bess-debug-2026-08-07-232503.md, run at optimization_period 93,
+    horizon 99 starting 23:15). The sunrise-crossover periods 27-30
+    (06:00-06:45) forecast solar 0.1461 kWh against home 0.1675 kWh -- an
+    ~86 W residual, below the smallest discharge the percent lattice can
+    command even at #512's finer grid (0.1 kW). Pre-fix those periods sat
+    IDLE and imported the residual at ~0.64 SEK/kWh while the battery held
+    4.34 kWh above reserve at a local shadow price of ~0.55 -- i.e. the
+    DP's own economics said covering it was cheaper (buy * eta_discharge =
+    0.607 > 0.549), but no executable action expressed it: sub-residual
+    lattice candidates do not exist, and every overshooting one is removed
+    by #497's executable-only rule.
+
+    Post-fix the residual-cover candidate (discharge exactly the forecast
+    net load, no export) is in the action space, so these periods plan
+    LOAD_SUPPORT with zero grid flows. Executability is asserted per
+    period rather than assumed: load-first delivers min(actual load,
+    ceiling), which at forecast equals the planned residual exactly, so
+    R == P holds to numerical noise -- the invariant #282/#497 exist to
+    protect and the reason this candidate plans a delivery rather than a
+    rate-step command."""
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
+    )
+
+    scenario = load_test_scenario("regression_bess_debug_2026_08_07")
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+    dt = inp["period_duration_hours"]
+    commands = [
+        derive_control_command(
+            pd.decision.strategic_intent,
+            pd.decision.battery_action / dt,
+            inp["battery_settings"],
+            intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+        )
+        for pd in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        inp["solar_production"],
+        inp["home_consumption"],
+        inp["buy_price"],
+        inp["sell_price"],
+        scenario["battery"]["initial_soe"],
+        inp["battery_settings"],
+        dt,
+    )
+
+    for t in range(27, 31):  # 06:00, 06:15, 06:30, 06:45
+        assert_intent_at_hour(result, t, "LOAD_SUPPORT")
+        pd = result.period_data[t]
+        assert pd.energy.grid_imported == pytest.approx(0.0, abs=1e-6), (
+            f"period {t}: expected residual fully covered from battery, "
+            f"got grid import {pd.energy.grid_imported:.4f} kWh"
+        )
+        assert pd.energy.grid_exported == pytest.approx(0.0, abs=1e-6), (
+            f"period {t}: residual-cover must not export, "
+            f"got {pd.energy.grid_exported:.4f} kWh"
+        )
+        # Executed exactly as planned (R == P per period).
+        rp = sim.period_data[t]
+        assert rp.decision.battery_action == pytest.approx(
+            pd.decision.battery_action, abs=1e-6
+        ), (
+            f"period {t}: simulator delivered {rp.decision.battery_action:.4f} "
+            f"kWh vs planned {pd.decision.battery_action:.4f} kWh"
+        )
+        assert rp.economic.hourly_cost == pytest.approx(
+            pd.economic.hourly_cost, abs=1e-6
+        )
+
+    # Whole-horizon R == P: the cover candidate plans delivery, not a
+    # rate-step command, so execution reproduces the planned economics.
+    assert sim.realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=1e-6
     )

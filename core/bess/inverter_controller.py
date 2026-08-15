@@ -6,9 +6,11 @@ implement hardware-specific schedule conversion and deployment.
 
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
+from .execution_model import INTENT_TO_MODE
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -57,14 +59,13 @@ class InverterController(ABC):
     }
 
     # Map strategic intents to battery modes (shared across Growatt MIN and SPH).
-    INTENT_TO_MODE: ClassVar[dict[str, str]] = {
-        "GRID_CHARGING": "battery_first",
-        "SOLAR_STORAGE": "load_first",
-        "LOAD_SUPPORT": "load_first",
-        "BATTERY_EXPORT": "grid_first",
-        "SOLAR_EXPORT": "load_first",
-        "IDLE": "load_first",
-    }
+    # Defined in `execution_model` -- the same vocabulary the optimizer scores
+    # commands against (Phase 4a, D1) -- and referenced here so the controllers
+    # and the execution model cannot drift apart.
+    # Typed `Mapping`, not `dict`: the object is a read-only view (see
+    # execution_model), so a `dict` annotation would type-check an in-place
+    # write that fails at runtime.
+    INTENT_TO_MODE: ClassVar[Mapping[str, str]] = INTENT_TO_MODE
 
     # Human-readable descriptions of strategic intents.
     INTENT_DESCRIPTIONS: ClassVar[dict[str, str]] = {
@@ -115,6 +116,22 @@ class InverterController(ABC):
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
 
+    # Whether a planned LOAD_SUPPORT discharge is delivered as
+    # min(plan, actual load). Related to the flag above but NOT the same
+    # question, and the answers differ on solax_modbus VPP mode: there the
+    # rate register is a forced power (flag above False), yet LOAD_SUPPORT
+    # writes no rate at all -- #413 disables remote control for that intent
+    # and lets the inverter's own load-following self-use run the period, so
+    # a cover plan is delivered exactly (this flag True). True by default
+    # (TOU-register control, where the rate is a ceiling); False on native
+    # SolaX, which never received #413, and on the period-list platforms,
+    # which have no per-period control to deliver a partial cover with.
+    # Read by the optimizer through
+    # execution_model.PlatformCapabilities.load_support_delivers_exact_cover
+    # to decide whether the off-lattice exact-cover candidate (#466) is
+    # executable here (#580).
+    load_support_delivers_exact_cover: ClassVar[bool] = True
+
     # Whether the default _write_period_to_hardware() should skip re-sending
     # a register (grid_charge/discharge_rate) that already matches the last
     # value it successfully wrote (#402: unguarded resends from the 15-min
@@ -146,15 +163,6 @@ class InverterController(ABC):
         (core/bess/simulation/inverter_simulator.py::_map_rates, postmortem
         #282). Override on a platform whose hardware resolution differs."""
         return max_discharge_power_kw / 100
-
-    @property
-    def self_throttle_export_threshold_kwh(self) -> float:
-        """Discharge overshoot (kWh) below which this platform silently
-        delivers only what the home needs rather than exporting the excess
-        (Growatt MIN's `load_first` behavior, #240). Default: 0.01 kWh.
-        Override on a platform with no such self-throttle (e.g. one that
-        always writes an exact watt target)."""
-        return 0.01
 
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize shared inverter controller state."""
@@ -713,11 +721,13 @@ class InverterController(ABC):
         intents: list[str] | None = None,
         actions: list[float] | None = None,
         soc_values: list[float | None] | None = None,
+        curtailed: list[bool] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
         Groups consecutive 15-minute periods ONLY when ALL parameters are identical:
-        strategic intent, battery mode, grid charge, charge rate, and discharge rate.
+        strategic intent, battery mode, grid charge, charge rate, discharge
+        rate, and planned curtailment (#501).
 
         Args:
             intents: Optional list of strategic intents to group. If None,
@@ -727,6 +737,10 @@ class InverterController(ABC):
                      is also None or the period is out of range, action defaults to 0.0.
             soc_values: Optional per-period SOC end values (%). The last period's value
                         in each group is exposed as soc_end_pct in the result.
+            curtailed: Optional per-period planned-curtailment flags (#501),
+                       from PeriodData.decision.curtailed. Defaults to all
+                       False when omitted -- callers without curtailment
+                       data get the pre-#501 grouping behavior unchanged.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -750,6 +764,11 @@ class InverterController(ABC):
                 intent,
                 {"grid_charge": False, "charge_rate": 100, "discharge_rate": 0},
             )
+            period_curtailed = (
+                curtailed[period]
+                if curtailed is not None and period < len(curtailed)
+                else False
+            )
 
             action_kwh = 0.0
             if schedule_actions is not None and period < len(schedule_actions):
@@ -772,6 +791,7 @@ class InverterController(ABC):
                     "charge_rate": charge_rate,
                     "discharge_rate": discharge_rate,
                     "action_kwh": action_kwh,
+                    "curtailed": period_curtailed,
                 }
             )
 
@@ -787,6 +807,7 @@ class InverterController(ABC):
                 and ps["grid_charge"] == current_group["grid_charge"]
                 and ps["charge_rate"] == current_group["charge_rate"]
                 and ps["discharge_rate"] == current_group["discharge_rate"]
+                and ps["curtailed"] == current_group["curtailed"]
             ):
                 current_group["end_period"] = ps["period"]
                 current_group["count"] += 1
@@ -802,6 +823,7 @@ class InverterController(ABC):
                     "grid_charge": ps["grid_charge"],
                     "charge_rate": ps["charge_rate"],
                     "discharge_rate": ps["discharge_rate"],
+                    "curtailed": ps["curtailed"],
                     "count": 1,
                     "total_action_kwh": ps["action_kwh"],
                 }
@@ -836,6 +858,7 @@ class InverterController(ABC):
                     "duration_minutes": group["count"] * 15,
                     "total_action_kwh": group["total_action_kwh"],
                     "soc_end_pct": soc_end,
+                    "curtailed": group["curtailed"],
                 }
             )
         return result
@@ -862,13 +885,16 @@ class InverterController(ABC):
         """
 
     @abstractmethod
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write schedule to inverter hardware.
+
+        Implementations that need to know what the inverter currently holds
+        must read it from the inverter themselves — there is no caller-supplied
+        snapshot, because one that drifted out of sync caused issue #551.
 
         Returns:
             Tuple of (writes, disables)
@@ -885,6 +911,19 @@ class InverterController(ABC):
         strategic_intents, etc.) — only self.corruption_detected may be set
         as an accepted diagnostic side effect on platforms that support it.
         """
+
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Re-assert the committed plan on a cycle that changed nothing.
+
+        Default: do nothing. A platform that rewrites its whole control state
+        whenever it runs cannot drift undetected — the next cycle overwrites
+        whatever it finds. Only a platform that *skips* the write while its
+        plan holds steady has a window in which the inverter can lose a
+        segment, or restore one, without anybody looking.
+
+        Returns (writes, disables).
+        """
+        return 0, 0
 
     @abstractmethod
     def read_and_initialize_from_hardware(self, controller, current_hour: int) -> None:

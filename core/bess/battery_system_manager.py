@@ -26,6 +26,7 @@ from .exceptions import (
     HistoricalDataUnavailableError,
     SystemConfigurationError,
 )
+from .execution_model import PlatformCapabilities, intra_period_discharge_gate
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
@@ -40,6 +41,7 @@ from .models import (
     EconomicData,
     EconomicSummary,
     PeriodData,
+    apply_export_curtailment_to_period_data,
     infer_intent_from_flows,
 )
 from .octopus_energy_source import OctopusEnergySource
@@ -68,30 +70,6 @@ from .time_utils import (
 from .weather import fetch_temperature_forecast
 
 logger = logging.getLogger(__name__)
-
-
-def intra_period_discharge_gate(
-    buy_price: float, shadow_price: float, eff_d: float
-) -> int:
-    """Intra-period discharge gate for a SOLAR_EXPORT, SOLAR_STORAGE, or
-    LOAD_SUPPORT period.
-
-    All three intents map to load_first; SOLAR_EXPORT/SOLAR_STORAGE plan
-    discharge_rate=0, LOAD_SUPPORT plans a nonzero plan-scaled rate. In every
-    case the battery can additionally cover an actual (sub-period) solar/load
-    deficit beyond whatever was planned. Whether it SHOULD is economic: cover
-    from battery only when the stored energy is worth less than buying from
-    grid now.
-
-    Using 1 kWh of SoE delivers ``eff_d`` kWh to the home, avoiding
-    ``eff_d * buy_price``; ``shadow_price`` is the marginal opportunity value of
-    that kWh of SoE (dV/dSoE), already in per-kWh-of-SoE units with future
-    efficiencies baked in — so ``eff_d`` multiplies only the buy side.
-
-    Returns 100 (allow discharge) when ``buy_price * eff_d >= shadow_price``,
-    else 0 (hold the reserve, buy the dip from grid).
-    """
-    return 100 if buy_price * eff_d >= shadow_price else 0
 
 
 class BatterySystemManager:
@@ -309,6 +287,41 @@ class BatterySystemManager:
         if not self._inverter_controller:
             return False
         return self._inverter_controller.supports_charge_rate_control
+
+    @property
+    def platform_capabilities(self) -> PlatformCapabilities:
+        """What the active platform can express (Phase 4a, D2).
+
+        The single place these facts are read off the controller, so the
+        planner and the hardware-write path cannot answer the same question
+        two different ways -- the drift shape #282/#497/#511/#537 are all
+        instances of. Without a controller the defaults describe the
+        TOU-register platform the DP has always assumed, which is what the
+        pre-4a `discharge_resolution_kw=None` meant.
+        """
+        if self._inverter_controller is None:
+            return PlatformCapabilities()
+        return PlatformCapabilities.from_controller(
+            self._inverter_controller, self.battery_settings
+        )
+
+    @property
+    def export_curtailment_active(self) -> bool:
+        """Whether export curtailment is actually in effect for planning.
+
+        Capability-aware, not just the raw user setting (#459 review):
+        planning for curtailment on a platform that can't actually do it
+        makes outcomes worse than leaving the feature off (see
+        optimize_battery_schedule's export_curtailment_active docstring).
+        Entity misconfiguration on a supported platform is a separate,
+        self-correcting case surfaced by the runtime failure banner in
+        _apply_period_schedule, not checked here.
+        """
+        return (
+            self.battery_settings.export_curtailment_enabled
+            and self._inverter_controller is not None
+            and self._inverter_controller.supports_export_limit_control
+        )
 
     def _create_inverter_controller(self) -> InverterController | None:
         """Create an inverter controller for ``self.inverter_platform``.
@@ -713,6 +726,29 @@ class BatterySystemManager:
                 # every per-period hardware write, even on a not-apply cycle
                 # where the DP re-optimized battery-action magnitudes without
                 # changing which TOU/VPP mode is active.
+                # Nothing in the plan changed, but the inverter may still have
+                # lost a segment we programmed or restored one we did not
+                # (issue #551). Since #554 the write path is skipped on cycles
+                # like this one, so without re-asserting here nothing would
+                # look at the inverter again until the plan itself changed.
+                # A no-op on platforms that rewrite everything anyway, and a
+                # no-op here too when the inverter already agrees.
+                if self._controller is not None and not prepare_next_day:
+                    try:
+                        self._inverter_controller.reconcile_hardware(
+                            self._controller, current_period
+                        )
+                    except Exception as e:
+                        # Same handling as a failed apply: record it so the
+                        # next cycle retries, and let the optimization stand —
+                        # it needs no inverter at all.
+                        self._hardware_write_pending = True
+                        logger.error(
+                            "Could not re-assert the schedule on the inverter: "
+                            "%s — will retry next cycle",
+                            e,
+                        )
+
                 self._current_schedule = temp_schedule
                 self._inverter_controller.strategic_intents = (
                     temp_schedule.strategic_intents
@@ -777,7 +813,9 @@ class BatterySystemManager:
             return
         try:
             # Build daily view (merges actuals + predictions)
-            daily_view = self.daily_view_builder.build_daily_view(optimization_period)
+            daily_view = self.daily_view_builder.build_daily_view(
+                optimization_period, self.export_curtailment_active
+            )
 
             # Get current Growatt schedule
             growatt_schedule = self._inverter_controller.tou_intervals.copy()
@@ -2140,30 +2178,6 @@ class BatterySystemManager:
             )
 
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
-            discharge_resolution_kw = (
-                self._inverter_controller.discharge_resolution_kw(
-                    self.battery_settings.max_discharge_power_kw
-                )
-                if self._inverter_controller is not None
-                else None
-            )
-            self_throttle_export_threshold_kwh = (
-                self._inverter_controller.self_throttle_export_threshold_kwh
-                if self._inverter_controller is not None
-                else None
-            )
-            # Capability-aware, not just the raw user setting (#459 review):
-            # planning for curtailment on a platform that can't actually do
-            # it makes outcomes worse than leaving the feature off (see
-            # optimize_battery_schedule's export_curtailment_active
-            # docstring). Entity misconfiguration on a supported platform is
-            # a separate, self-correcting case surfaced by the runtime
-            # failure banner in _apply_period_schedule, not checked here.
-            export_curtailment_active = (
-                self.battery_settings.export_curtailment_enabled
-                and self._inverter_controller is not None
-                and self._inverter_controller.supports_export_limit_control
-            )
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
                 sell_price=sell_prices,
@@ -2176,9 +2190,8 @@ class BatterySystemManager:
                 terminal_value_per_kwh=terminal_value,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
-                discharge_resolution_kw=discharge_resolution_kw,
-                self_throttle_export_threshold_kwh=self_throttle_export_threshold_kwh,
-                export_curtailment_active=export_curtailment_active,
+                capabilities=self.platform_capabilities,
+                export_curtailment_active=self.export_curtailment_active,
                 home_settings=self.home_settings,
             )
 
@@ -2406,11 +2419,30 @@ class BatterySystemManager:
                 today_base_cost = sum(
                     pd.economic.grid_only_cost for pd in today_result_periods
                 )
+                # Reported cost must reflect what will actually happen at
+                # runtime, not the honest physics-only price PeriodData
+                # itself keeps (#502) -- see the matching comment in
+                # dp_battery_algorithm.py's own battery_solar_cost
+                # aggregation for why the raw period_data_list stays
+                # untouched. today_solar_only_cost must come from the SAME
+                # curtailment-adjusted copies as today_optimized_cost, not
+                # the honest periods, or the battery-vs-solar-only savings
+                # subtraction below mixes a curtailed total against an
+                # uncurtailed baseline (code review finding).
+                today_curtailment_adjusted_periods = [
+                    apply_export_curtailment_to_period_data(
+                        pd,
+                        self.export_curtailment_active,
+                        self.battery_settings.export_curtailment_price_floor,
+                    )
+                    for pd in today_result_periods
+                ]
                 today_solar_only_cost = sum(
-                    pd.economic.solar_only_cost for pd in today_result_periods
+                    pd.economic.solar_only_cost
+                    for pd in today_curtailment_adjusted_periods
                 )
                 today_optimized_cost = sum(
-                    pd.economic.hourly_cost for pd in today_result_periods
+                    pd.economic.hourly_cost for pd in today_curtailment_adjusted_periods
                 )
                 today_charged = sum(
                     pd.energy.battery_charged for pd in today_result_periods
@@ -2558,10 +2590,6 @@ class BatterySystemManager:
         logger.info("Schedule update required: %s", reason)
         self._current_schedule = temp_schedule
 
-        # Read the currently-active TOU intervals BEFORE apply_intents
-        # rebuilds them, so write_to_hardware still sees what's on hardware
-        # right now (used for stale-segment cleanup on some platforms).
-        current_tou = self._inverter_controller.active_tou_intervals.copy()
         effective_period = 0 if prepare_next_day else period
         self._inverter_controller.apply_intents(temp_schedule, effective_period)
 
@@ -2569,8 +2597,11 @@ class BatterySystemManager:
             if self._controller is None:
                 logger.error("Cannot apply schedule: controller is not available")
             else:
-                self._inverter_controller.write_to_hardware(
-                    self._controller, effective_period, current_tou
+                # No snapshot of "what's on hardware" is passed in: platforms
+                # that need it read the inverter themselves. Passing our own
+                # pre-apply model let the two drift apart (issue #551).
+                self._inverter_controller.sync_to_hardware(
+                    self._controller, effective_period
                 )
 
             # Clear corruption flag after successful hardware write
@@ -2630,35 +2661,47 @@ class BatterySystemManager:
             )
         )
 
-        # SOLAR_EXPORT/SOLAR_STORAGE discharge gate: the optimizer's planned
-        # rate is a 15-min average, but load_first lets the battery cover an
-        # intra-period solar/load dip beyond that average. Allow that only
-        # when the stored energy is worth less than buying from grid now
-        # (shadow_price = DP marginal value of stored SoE). This is a
-        # sub-period hardware-robustness behaviour, invisible to the 15-min
-        # plan/sim. Only valid where discharge_rate is a load-following
-        # ceiling -- on platforms where it's an immediate forced power
-        # command (VPP-style control), opening the gate would force a
-        # full-power discharge instead of gently covering a dip (#324).
+        # Intra-period discharge gate: the optimizer's planned rate is a
+        # 15-min average, but load_first lets the battery cover an
+        # intra-period solar/load deficit beyond that average. Allow that only
+        # when the stored energy is worth less than buying from grid now --
+        # a comparison the DP makes where it owns the value function and
+        # records as `decision.intra_period_discharge_allowed` (#526). Only
+        # valid where discharge_rate is a load-following ceiling -- on
+        # platforms where it's an immediate forced power command (VPP-style
+        # control), opening the gate would force a full-power discharge
+        # instead of gently covering a deficit (#324).
         #
-        # For SOLAR_EXPORT/SOLAR_STORAGE the planned baseline is always 0, so
-        # the gate fully determines the outcome.
+        # `max(planned, gate)` -- the gate may only raise the ceiling, never
+        # lower an already-committed plan. For SOLAR_EXPORT/SOLAR_STORAGE the
+        # planned baseline is always 0, so the gate fully determines the
+        # outcome; LOAD_SUPPORT has a nonzero plan-scaled baseline to protect.
         #
-        # LOAD_SUPPORT deliberately does NOT use this gate (#393): #384/#385
-        # added it here, but #385's own validation against the reporting
-        # user's real captured data found the gate doesn't open during the
-        # sustained overnight near-tie regime it was built for (shadow_price
-        # sits within a cent or two of buy_price there), while a second,
-        # independent real-world report (different day, different price
-        # shape) showed the same gate condition evaluating true for the
-        # large majority of LOAD_SUPPORT periods -- a broad, mostly-untested
-        # override of the #147 reservation pacing, not the narrow safety
-        # valve it was meant to be. Reverted until a mechanism is validated
-        # against real captured data before shipping. LOAD_SUPPORT keeps its
-        # plan-scaled cap unconditionally, same as pre-#384.
+        # LOAD_SUPPORT was removed from this gate by #393 as "a broad override
+        # of the #147 reservation pacing" and re-landed by #520, because that
+        # reasoning double-counts the reservation. The DP's authorization IS
+        # a dV/dSoE comparison -- the future value the pacing protects is
+        # already inside it. Gate closed -> import, reservation protected by
+        # construction. Gate open -> the energy is worth more now than later,
+        # so there is nothing being reserved. The gate does not override
+        # reservation pacing; it evaluates it. #393's headline "the gate
+        # evaluates true for 76% of LOAD_SUPPORT periods" measured
+        # gate-OPENNESS, not pacing-override: it means that in 76% of those
+        # periods battery-now genuinely beat grid-now. (Corpus-wide, measured
+        # post-#526: the gate is open in 431/603 = 71.5% of LOAD_SUPPORT
+        # periods and raises the ceiling above the plan-scaled rate in 427 of
+        # them -- this is a broad behaviour by design, and the argument above
+        # is why that breadth is correct rather than alarming.)
+        # Read through the capability object, not off the controller
+        # directly: it is the one place the platform is interpreted, and for
+        # Solis the two used to disagree -- it declares `period_list` (no
+        # per-period rate) while inheriting the base class's load-following
+        # True, so the planner and this write path read the same hardware two
+        # different ways. Solis now declares both explicitly; routing through
+        # the capability is what keeps a future platform from re-opening it.
         if (
-            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE")
-            and self._inverter_controller.discharge_rate_is_load_following
+            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT")
+            and self.platform_capabilities.discharge_rate_is_load_following
         ):
             # Resolved by exact timestamp (not positional index -
             # optimization_period) so the standalone next-day schedule
@@ -2667,17 +2710,12 @@ class BatterySystemManager:
             target_timestamp = time_utils.period_index_to_timestamp(period)
             period_data = self.schedule_store.get_period_data_at(target_timestamp)
             if period_data is not None:
-                shadow = period_data.decision.shadow_price
-                buy_prices, _ = self.price_manager.get_available_prices()
-                if period < len(buy_prices):
-                    discharge_rate = max(
-                        discharge_rate,
-                        intra_period_discharge_gate(
-                            buy_prices[period],
-                            shadow,
-                            self.battery_settings.efficiency_discharge,
-                        ),
-                    )
+                discharge_rate = max(
+                    discharge_rate,
+                    intra_period_discharge_gate(
+                        period_data.decision.intra_period_discharge_allowed
+                    ),
+                )
 
         # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
         # decision — curtail whenever this period is exporting at a sell
@@ -2703,10 +2741,9 @@ class BatterySystemManager:
             if period_data is not None and (
                 period_data.energy.grid_exported > 0 or self._export_limit_curtailed
             ):
-                should_curtail = (
-                    period_data.energy.grid_exported > 0
-                    and period_data.economic.sell_price
-                    < self.battery_settings.export_curtailment_price_floor
+                should_curtail = self.battery_settings.should_curtail_export(
+                    period_data.energy.grid_exported,
+                    period_data.economic.sell_price,
                 )
                 try:
                     self._inverter_controller.apply_export_limit(
@@ -2972,13 +3009,21 @@ class BatterySystemManager:
 
             # Handle charging using stored facts
             if event.energy.battery_charged > 0:
-                # Simple calculation using stored energy flows
-                solar_to_battery = min(
-                    event.energy.battery_charged, event.energy.solar_production
-                )
-                grid_to_battery = max(
-                    0, event.energy.battery_charged - solar_to_battery
-                )
+                # Read the split `EnergyData` already derived; never re-derive
+                # it. This site used to compute its own
+                # `min(battery_charged, solar_production)`, which ignores the
+                # house load and so counts solar the home already consumed as
+                # having charged the battery -- booking grid energy as free.
+                # Measured over the fixture corpus before the fix: 31 of 419
+                # charging periods disagreed, 36.16 kWh of grid charging
+                # booked as solar across 10 of 36 fixtures, worst single
+                # period 5.2 kWh (solar 5.8, home 5.2, charged 6.0 -- the
+                # whole 5.8 kWh of solar counted to the battery while the home
+                # was consuming 5.2 of it). The understated basis then fed
+                # `optimize_battery_schedule(initial_cost_basis=...)`, making
+                # stored energy look cheaper to discharge than it was.
+                solar_to_battery = event.energy.solar_to_battery
+                grid_to_battery = event.energy.grid_to_battery
 
                 # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
@@ -2986,7 +3031,69 @@ class BatterySystemManager:
                     event.economic.buy_price + self.battery_settings.cycle_cost_per_kwh
                 )
 
-                new_energy_cost = solar_cost + grid_cost
+                # On exact (planned/simulated) data the two attributed flows
+                # sum to battery_charged exactly. On measured data
+                # `grid_to_battery` is capped by the grid counter's own
+                # reading (`EnergyData`'s non-invention rule), so the two can
+                # sum to LESS than what the battery recorded taking in.
+                #
+                # That remainder is priced at the GRID price, not at cycle
+                # cost. A battery charges from solar or from the grid; there is
+                # no third source. If `solar_to_battery` cannot account for the
+                # energy then the grid supplied it and the grid *counter*
+                # under-read, so what it cost is what grid energy costs.
+                #
+                # Pricing it at cycle cost instead (an earlier revision of this
+                # fix) is strictly worse than the formula being replaced here:
+                # the retired split assigned every kWh above solar to the grid
+                # at buy price, so on a period with an under-reading counter
+                # that "fix" priced the energy CHEAPER than the bug did --
+                # understating the basis, which is the exact failure Task 4
+                # exists to close. Degenerately, a reset grid counter during
+                # grid charging would have booked the whole charge as nearly
+                # free. Caught in review on this repo's own evidence bundle,
+                # `historical_2026_07_18_charge_attribution.json` period 39.
+                #
+                # Known limitation, measured rather than assumed: during
+                # DELIBERATE grid charging (`battery_first`) this split is the
+                # wrong way round. `EnergyData` allocates solar to the home
+                # first, which is right for load_first surplus charging, but in
+                # battery_first the PV is DC-coupled straight to the battery and
+                # the house runs off the grid -- so solar that really did charge
+                # the battery gets booked to the home, and the battery's charge
+                # gets booked entirely to the grid. The retired formula happened
+                # to be the accurate one in that regime.
+                #
+                # Not fixed here because the trade is measured and lopsided.
+                # Across the 30 debug bundles in `docs/`: load_first charging is
+                # 264 periods / 191.1 kWh where this correction ADDS 55.15 SEK
+                # of correctly-attributed cost, against 26 GRID_CHARGING periods
+                # / 30.3 kWh where it overstates by 3.85 SEK -- and overstating
+                # makes the DP more reluctant to discharge, which forfeits
+                # margin rather than losing money. Making the split regime-aware
+                # (keying off `decision.strategic_intent`) is the real fix and a
+                # modelling decision in its own right, not a Phase 3 consolidation.
+                #
+                # Second known asymmetry: this can only push the basis UP.
+                # A grid counter that under-reads leaves a positive remainder
+                # priced here at buy price, while one that over-reads is
+                # absorbed into `grid_to_home` upstream and leaves nothing, so
+                # rounding never nets out. Measured on that bundle the bias is
+                # +0.003 SEK/kWh (0.9844 -> 0.9875) over a day, but it scales
+                # with charging periods and with buy price. Accepted because
+                # the direction is the safe one -- an overstated basis makes
+                # the DP more reluctant to discharge, never less -- and because
+                # the retired formula priced the same energy at buy price too,
+                # uncapped, so this is not a regression against it.
+                unattributed = max(
+                    0.0,
+                    event.energy.battery_charged - solar_to_battery - grid_to_battery,
+                )
+                unattributed_cost = unattributed * (
+                    event.economic.buy_price + self.battery_settings.cycle_cost_per_kwh
+                )
+
+                new_energy_cost = solar_cost + grid_cost + unattributed_cost
                 running_total_cost += new_energy_cost
                 running_energy += event.energy.battery_charged
 
@@ -3083,14 +3190,16 @@ class BatterySystemManager:
 
             if critical_failures:
                 logger.error(
-                    f"⚠️ SYSTEM DEGRADED: Critical sensor failures detected in required components: {', '.join(critical_failures)}"
+                    f"⚠️ SYSTEM DEGRADED: required components failing: {', '.join(critical_failures)}"
                 )
                 logger.error(
                     "⚠️ System will start in degraded mode. Some functionality may not work correctly."
                 )
-                logger.error(
-                    "⚠️ Please fix sensor configuration for full functionality."
-                )
+                # Deliberately does not tell the user to fix their configuration:
+                # a required component also fails when an upstream source is
+                # temporarily unavailable, and blaming the config sent a user
+                # hunting a Nordpool misconfiguration that did not exist (#583).
+                logger.error("⚠️ See the Health page for which check failed and why.")
                 # Store critical failures for UI to display
                 self._critical_sensor_failures = critical_failures
             else:
@@ -3302,7 +3411,9 @@ class BatterySystemManager:
                 )
 
         # Build daily view with current period
-        return self.daily_view_builder.build_daily_view(current_period)
+        return self.daily_view_builder.build_daily_view(
+            current_period, self.export_curtailment_active
+        )
 
     def _persist_today_view(self) -> None:
         """Best-effort snapshot of today's merged view to disk.
@@ -3559,6 +3670,8 @@ class BatterySystemManager:
                     "grid_export": period_info.energy.grid_exported,
                     "battery_charged": period_info.energy.battery_charged,
                     "battery_discharged": period_info.energy.battery_discharged,
+                    "solar_to_battery": period_info.energy.solar_to_battery,
+                    "grid_to_battery": period_info.energy.grid_to_battery,
                     "battery_soe_end": period_info.energy.battery_soe_end,
                     "battery_net_change": (
                         period_info.energy.battery_charged
@@ -3617,9 +3730,13 @@ class BatterySystemManager:
         for data in period_data:
             energy_in = data["grid_import"] + data["solar_production"]
 
-            # Estimate solar to battery (simplified)
-            solar_to_battery = min(data["battery_charged"], data["solar_production"])
-            grid_to_battery = max(0, data["battery_charged"] - solar_to_battery)
+            # The split `EnergyData` derived, not a second estimate of it.
+            # This column used to re-derive `min(battery_charged,
+            # solar_production)`, which ignores the house load and so showed
+            # grid charging as solar -- the same defect the cost basis
+            # carried, displayed to the user.
+            solar_to_battery = data["solar_to_battery"]
+            grid_to_battery = data["grid_to_battery"]
 
             # Mark predictions with ★ (periods >= current_period)
             indicator = "★" if data["period"] >= current_period else " "

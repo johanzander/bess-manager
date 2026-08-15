@@ -10,6 +10,7 @@ but don't test specific optimization results.
 import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.execution_model import PlatformCapabilities
 from core.bess.models import EconomicSummary, PeriodData
 from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import assert_physical_constraints, make_battery_settings
@@ -492,9 +493,10 @@ def test_grid_charges_during_solar_surplus_when_price_is_cheaper():
 
 
 def test_optimize_battery_schedule_accepts_capability_parameters():
-    """#320: optimize_battery_schedule must accept discharge_resolution_kw
-    and self_throttle_export_threshold_kwh without erroring, and produce the
-    exact same result as today when they're left at their defaults (None)."""
+    """#320: optimize_battery_schedule must accept the platform's capabilities
+    without erroring, and produce the exact same result as today when they are
+    left at the default platform (Phase 4a: a `PlatformCapabilities` carrying
+    the discharge lattice, replacing the bare `discharge_resolution_kw`)."""
     settings = make_battery_settings(max_discharge_power_kw=5.0)
     horizon = 8
     kwargs = {
@@ -509,8 +511,9 @@ def test_optimize_battery_schedule_accepts_capability_parameters():
     baseline = optimize_battery_schedule(**kwargs)
     with_explicit_defaults = optimize_battery_schedule(
         **kwargs,
-        discharge_resolution_kw=settings.max_discharge_power_kw / 100,
-        self_throttle_export_threshold_kwh=0.01,
+        capabilities=PlatformCapabilities(
+            discharge_resolution_kw=settings.max_discharge_power_kw / 100
+        ),
     )
     assert [p.decision.strategic_intent for p in baseline.period_data] == [
         p.decision.strategic_intent for p in with_explicit_defaults.period_data

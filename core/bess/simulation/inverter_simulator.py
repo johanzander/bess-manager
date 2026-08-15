@@ -7,12 +7,13 @@ so that faithful control yields cent-exact equality with the plan.
 
 from dataclasses import dataclass, field
 
-from core.bess.battery_system_manager import intra_period_discharge_gate
 from core.bess.dp_battery_algorithm import (
     _build_period_data,
     _effective_ac_cap_kwh,
+    _period_flows,
     _state_transition,
 )
+from core.bess.execution_model import intra_period_discharge_gate
 from core.bess.inverter_controller import InverterController
 from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings
@@ -32,23 +33,28 @@ def derive_control_command(
     strategic_intent: str,
     battery_action_kw: float,
     settings: BatterySettings,
-    shadow_price: float | None = None,
-    buy_price: float | None = None,
+    intra_period_discharge_allowed: bool | None = None,
 ) -> ControlCommand:
     """Map a plan period (intent + planned battery power) to the applied command,
     reusing the production controller mappings so the simulator executes exactly
     what the real controller would write.
 
-    ``shadow_price``/``buy_price`` feed the SOLAR_EXPORT/SOLAR_STORAGE
-    intra-period discharge gate (mirrors
-    ``BatterySystemManager._apply_period_schedule``). LOAD_SUPPORT does NOT
-    use this gate (#393 -- reverted #384/#385's extension, see
-    test_load_support_discharge_gate.py). Omit both to leave the gate closed
-    -- callers that don't care about it (most existing tests) see unchanged,
-    pre-gate behavior."""
+    ``intra_period_discharge_allowed`` is the DP's decision for this period
+    (``DecisionData.intra_period_discharge_allowed``) and feeds the
+    SOLAR_EXPORT/SOLAR_STORAGE intra-period discharge gate. Production also
+    gates LOAD_SUPPORT since #520; that is deliberately not reproduced here --
+    see ``_map_rates`` -- so this is a mirror of
+    ``BatterySystemManager._apply_period_schedule`` for the two solar intents,
+    not for all three.
+
+    ``None`` means "this caller is not exercising the gate" and leaves it
+    closed -- distinct from ``False``, which is the DP deciding against opening
+    it. Keeping the opt-out its own value is what stops the parameter from
+    re-acquiring the two-meanings-one-value defect that #526 removed from
+    ``shadow_price``."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
-        strategic_intent, battery_action_kw, settings, shadow_price, buy_price
+        strategic_intent, battery_action_kw, settings, intra_period_discharge_allowed
     )
     return ControlCommand(
         battery_mode=battery_mode,
@@ -60,35 +66,27 @@ def derive_control_command(
 
 def _gated_discharge_rate(
     baseline: int,
-    settings: BatterySettings,
-    shadow_price: float | None,
-    buy_price: float | None,
+    intra_period_discharge_allowed: bool | None,
 ) -> int:
-    """Apply the shadow-price intra-period discharge gate on top of a planned
+    """Apply the DP's intra-period discharge decision on top of a planned
     baseline rate, mirroring `BatterySystemManager._apply_period_schedule`'s
     `max(baseline, gate)` -- the gate may only raise the ceiling, never lower
-    an already-committed plan. No-op (returns baseline) when the caller
-    didn't supply shadow_price/buy_price.
+    an already-committed plan. No-op (returns baseline) when the caller opted
+    out by passing None.
 
     Omits production's `discharge_rate_is_load_following` platform guard --
     this simulator is Growatt MIN/cloud only (see module docstring), which is
     always load-following, so the guard would always be true here."""
-    if shadow_price is None or buy_price is None:
+    if intra_period_discharge_allowed is None:
         return baseline
-    return max(
-        baseline,
-        intra_period_discharge_gate(
-            buy_price, shadow_price, settings.efficiency_discharge
-        ),
-    )
+    return max(baseline, intra_period_discharge_gate(intra_period_discharge_allowed))
 
 
 def _map_rates(
     intent: str,
     action_kw: float,
     settings: BatterySettings,
-    shadow_price: float | None = None,
-    buy_price: float | None = None,
+    intra_period_discharge_allowed: bool | None = None,
 ) -> tuple[bool, int, int]:
     """Mirror of InverterController._map_intent_to_rates without needing a live
     controller instance. Returns (grid_charge, discharge_rate_pct, charge_rate_pct)."""
@@ -104,17 +102,30 @@ def _map_rates(
     if intent == "IDLE":
         return False, 0, 100
     if intent == "SOLAR_STORAGE":
-        rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
+        rate = _gated_discharge_rate(0, intra_period_discharge_allowed)
         return False, rate, 100
     if intent == "SOLAR_EXPORT":
         # #313: charge_rate=0 blocks passive solar->battery charging so solar
         # bypasses to grid even below max SOE -- unlike IDLE/SOLAR_STORAGE.
-        rate = _gated_discharge_rate(0, settings, shadow_price, buy_price)
+        rate = _gated_discharge_rate(0, intra_period_discharge_allowed)
         return False, rate, 0
     if intent == "LOAD_SUPPORT":
-        # No shadow-price gate (#393): reverted #384/#385's extension -- see
-        # test_load_support_discharge_gate.py for why. Plan-scaled cap only,
-        # same as BATTERY_EXPORT.
+        # Production gates LOAD_SUPPORT since #520; this simulator deliberately
+        # does not, and that is not an oversight to "fix" by mirroring it.
+        #
+        # The gate is a sub-period ceiling: it lets the battery cover load that
+        # exceeds the period's forecast average. This simulator runs point
+        # forecasts at 15-min resolution, where no such excess exists by
+        # construction -- so it can only ever model the gate's cost (covering
+        # more of a *planned* partial cover from battery than the DP chose),
+        # never its benefit. For SOLAR_EXPORT/SOLAR_STORAGE that cost is zero
+        # (planned deficit is zero, so an open gate is a no-op here), which is
+        # why mirroring them is safe. For LOAD_SUPPORT it is not: mirroring the
+        # gate moves 27 of 36 corpus fixtures, +25.67 SEK of realized cost in
+        # total, purely from the unmodellable half of the trade-off. Modelling
+        # it would pin a number the simulator cannot interpret.
+        #
+        # Plan-scaled cap only, same as BATTERY_EXPORT.
         if action_kw < -0.01:
             rate = min(
                 100,
@@ -245,7 +256,17 @@ def simulate(
                 solar_production=solar_production[t],
                 home_consumption=home_consumption[t],
             )
+        flows = _period_flows(
+            power=power,
+            soe=soe,
+            next_soe=next_soe,
+            home_consumption=home_consumption[t],
+            solar_production=solar_production[t],
+            battery_settings=settings,
+            dt=dt,
+        )
         pd = _build_period_data(
+            flows=flows,
             power=power,
             soe=soe,
             next_soe=next_soe,

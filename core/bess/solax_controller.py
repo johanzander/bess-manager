@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 class SolaxController(InverterController):
     """SolaX inverter controller using VPP active-power commands.
 
-    SolaX does not use a persistent TOU schedule.  ``write_to_hardware``
+    SolaX does not use a persistent TOU schedule.  ``sync_to_hardware``
     is a no-op; the actual hardware writes happen period-by-period via
     ``_write_period_to_hardware``, called from
     ``BatterySystemManager._apply_period_schedule``.
@@ -54,6 +54,12 @@ class SolaxController(InverterController):
     # immediate forced watt-level command (_write_period_to_hardware),
     # never a load-following ceiling. See #324.
     discharge_rate_is_load_following: ClassVar[bool] = False
+
+    # LOAD_SUPPORT is a forced -(rate% x max_discharge) here: SolaX never
+    # received the #413 remote-control release that makes solax_modbus's VPP
+    # mode load-follow that intent (see _vpp_display_state's gap note), so a
+    # planned partial cover is NOT delivered as min(plan, actual load).
+    load_support_delivers_exact_cover: ClassVar[bool] = False
 
     CONTROL_MODEL: ClassVar[str] = "vpp_power"
 
@@ -182,11 +188,10 @@ class SolaxController(InverterController):
             return 100, True
         return -discharge_rate, True
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """No-op for SolaX — schedule is applied period-by-period via VPP.
 
@@ -196,7 +201,7 @@ class SolaxController(InverterController):
         Returns:
             (0, 0) — no writes or disables performed.
         """
-        logger.debug("SolaX: write_to_hardware is a no-op (per-period VPP)")
+        logger.debug("SolaX: sync_to_hardware is a no-op (per-period VPP)")
         return 0, 0
 
     def initialize_hardware(self, controller) -> None:

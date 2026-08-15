@@ -11,7 +11,7 @@ from core.bess.dp_battery_algorithm import (
 )
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import (
-    build_scenario_inputs,
+    build_scenario_optimizer_inputs,
     get_all_scenario_files,
 )
 
@@ -44,35 +44,45 @@ def test_discharge_no_longer_blocked_by_cost_basis_floor():
     ), "discharge was vetoed by a profitability floor that no longer exists"
 
 
-def test_small_discharge_overshoot_not_credited_as_export():
-    """#240: load-first hardware self-throttles -- a discharge that
-    overshoots home_consumption by less than the BATTERY_EXPORT
-    classification threshold (0.01 kWh, reconciled with
-    classify_strategic_intent's own boundary) never actually reaches the
-    grid, so it must not be credited as export revenue."""
-    settings = make_battery_settings()
-    dt = 1.0
-    home_consumption = 1.0
-    power = -1.005  # discharges 1.005 kWh -- 0.005 kWh over consumption
-    next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
-    reward, _, _ = _compute_reward(
-        power=power,
-        soe=5.0,
-        next_soe=next_soe,
-        period=0,
-        home_consumption=home_consumption,
+def test_dp_never_plans_a_sub_resolution_export():
+    """#497: the optimizer never produces a period that exports less than
+    GRID_FLOW_RESOLUTION_KWH from the battery while also serving the home.
+
+    Supersedes #240's version of this test, which asserted that
+    `_compute_reward` zeroed the export *credit* for such an overshoot. That
+    only ever patched the revenue: `battery_discharged` and `next_soe` still
+    carried energy the hardware never moved, so the period's reported flows
+    did not add up and the plan was not executable as written. The guarantee
+    now lives one level up -- `_discharge_candidates` does not offer the
+    action at all -- which is why this asserts on an optimized schedule
+    rather than on a hand-built call to the reward function.
+
+    The home consumption below is deliberately off the discharge rate grid
+    (5 kW max -> 0.05 kW steps), so exact load cover is unreachable and the
+    DP is maximally tempted to overshoot slightly.
+    """
+    settings = make_battery_settings(max_discharge_power_kw=5.0)
+    horizon = 6
+    result = optimize_battery_schedule(
+        buy_price=[2.0] * horizon,
+        sell_price=[1.9] * horizon,  # high sell price: overshooting is tempting
+        home_consumption=[1.234] * horizon,
+        solar_production=[0.0] * horizon,
+        initial_soe=15.0,
         battery_settings=settings,
-        dt=dt,
-        buy_price=[1.0],
-        sell_price=[1.0],
-        solar_production=0.0,
-        cost_basis=0.1,
+        period_duration_hours=1.0,
     )
-    # No import (fully covered) and no export credit for the 0.005 kWh
-    # overshoot: net cost should be exactly zero, not a phantom profit.
-    assert reward == pytest.approx(
-        0.0, abs=1e-9
-    ), f"expected zero net cost (no import, no phantom export credit), got {reward}"
+
+    offenders = [
+        (pd.period, pd.energy.grid_exported, pd.energy.battery_to_home)
+        for pd in result.period_data
+        if 0
+        < pd.energy.grid_exported - pd.energy.solar_to_grid - pd.energy.battery_to_grid
+    ]
+    assert not offenders, (
+        f"periods export energy attributed to no source -- the DP proposed a "
+        f"discharge the inverter cannot execute as commanded: {offenders}"
+    )
 
 
 def test_large_discharge_overshoot_still_credited_as_export():
@@ -164,24 +174,31 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
     optimizer's returned cost must never exceed the all-IDLE baseline,
     across every pinned fixture. This is the property the whole redesign
     rests on (docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md).
+
+    Skipped where export curtailment is active: there, production deliberately
+    judges the guardrail at the floored `reward_sell_price` -- the objective
+    the DP was actually asked to optimize -- and the returned schedule carries
+    #507's curtailed-period reporting adjustment, which `_create_idle_schedule`
+    (real prices, no such adjustment) does not. Comparing the two at real
+    prices is not the invariant the guardrail enforces, so a pass or a failure
+    here would say nothing about it either way.
     """
-    scenario, battery_settings, buy_prices, sell_prices, dt = build_scenario_inputs(
-        scenario_name
-    )
+    scenario, inputs = build_scenario_optimizer_inputs(scenario_name)
+    if inputs.get("export_curtailment_active"):
+        pytest.skip(
+            "curtailment-active fixture: production compares the guardrail at "
+            "reward_sell_price, not at the real sell_price this test uses"
+        )
+    battery_settings = inputs["battery_settings"]
+    buy_prices = inputs["buy_price"]
+    sell_prices = inputs["sell_price"]
+    dt = inputs["period_duration_hours"]
     home_consumption = scenario["home_consumption"]
     solar_production = scenario["solar_production"]
     battery = scenario["battery"]
     horizon = len(buy_prices)
 
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=home_consumption,
-        solar_production=solar_production,
-        initial_soe=battery["initial_soe"],
-        battery_settings=battery_settings,
-        period_duration_hours=dt,
-    )
+    result = optimize_battery_schedule(**inputs)
     idle_result = _create_idle_schedule(
         horizon=horizon,
         buy_price=buy_prices,
@@ -191,6 +208,7 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
         initial_soe=battery["initial_soe"],
         battery_settings=battery_settings,
         dt=dt,
+        currency="SEK",
     )
     assert result.economic_summary.battery_solar_cost <= (
         idle_result.economic_summary.battery_solar_cost + 1e-6
@@ -201,27 +219,20 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
     )
 
 
-def test_battery_export_threshold_matches_classification_boundary():
-    """_compute_reward's export-credit threshold must match
-    classify_strategic_intent's classification threshold (both 0.01 kWh) --
-    a discharge that gets classified BATTERY_EXPORT (and therefore actually
-    executes as a real export via grid_first) must also be credited as a
-    real export in the reward the DP's own search used to choose it.
-    Regression for the mismatch found during the final whole-branch review:
-    the two thresholds disagreed (0.1 vs 0.01) after Task 8b changed only
-    the classification side."""
-    from core.bess.dp_battery_algorithm import (
-        BATTERY_EXPORT_THRESHOLD_KWH,
-        _compute_reward,
-    )
+def test_compute_reward_credits_export_threshold_free():
+    """_compute_reward has no export-credit threshold (#497): it prices
+    whatever flows _ac_flows reports. Keeping sub-resolution overshoots out
+    of the plan is _discharge_is_unexecutable's job, applied to the action
+    set before anything is priced -- so this reward, computed for an action
+    the DP can never propose, still credits the export rather than zeroing
+    it (the old #240/#320 self-throttle band is gone, not relocated here)."""
+    from core.bess.dp_battery_algorithm import _compute_reward
     from core.bess.tests.helpers import make_battery_settings
-
-    assert BATTERY_EXPORT_THRESHOLD_KWH == 0.01
 
     settings = make_battery_settings()
     dt = 1.0
     home_consumption = 1.0
-    power = -1.05  # 0.05 kWh overshoot -- in the (0.01, 0.1] gap band
+    power = -1.05  # 0.05 kWh overshoot -- inside the old self-throttle band
     next_soe = 5.0 - (abs(power) * dt / settings.efficiency_discharge)
     reward, _, _ = _compute_reward(
         power=power,

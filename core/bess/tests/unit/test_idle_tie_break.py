@@ -9,7 +9,6 @@ from core.bess.dp_battery_algorithm import (
     SOE_STEP_KWH,
     _best_action_at_continuous_state,
     _discretize_state_action_space,
-    _prefer_load_covering_discharge,
     optimize_battery_schedule,
 )
 from core.bess.pwl_window_dp import (
@@ -17,106 +16,16 @@ from core.bess.pwl_window_dp import (
     _pwl_local_value_slope,
 )
 from core.bess.settings import BatterySettings
-from core.bess.tests.unit.test_scenarios import build_scenario_inputs
+from core.bess.tests.unit.test_scenarios import (
+    build_scenario_optimizer_inputs,
+)
+from core.bess.tie_detection import TIE_NOISE_FACTOR
 
-# Candidate tuple: (value, power, next_soe, new_cost_basis, reward, grid_imported)
-IDLE = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
-COVER = (9.995, -1.0, 5.74, 0.0, 0.25, 0.0)  # discharges 1 kW, covers 1 kW net load
-OVER = (9.999, -3.0, 5.21, 0.0, 0.30, 0.0)  # discharges past load -> would export
-CHARGE = (9.99, 2.0, 6.5, 0.0, -0.5, 0.75)
-
-
-def _pick(candidates, best_index, epsilon=0.01, home=0.25, solar=0.0):
-    return _prefer_load_covering_discharge(
-        candidates,
-        best_index,
-        epsilon=epsilon,
-        home_consumption=home,
-        solar_production=solar,
-        dt=0.25,
-        rate_step=0.05,  # 5 kW battery / 100
-    )
-
-
-def test_near_tied_idle_swaps_to_load_covering_discharge():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    # IDLE wins argmax; COVER is 0.005 behind, inside epsilon=0.01 -> swap.
-    assert _pick(candidates, best_index=0) == 1
-
-
-def test_decisive_idle_margin_is_never_swapped():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    # COVER is 0.005 behind; with epsilon below that the hold is deliberate.
-    assert _pick(candidates, best_index=0, epsilon=0.004) == 0
-
-
-def test_never_swaps_into_exporting_discharge():
-    # Only the over-load discharge is within epsilon -> no eligible swap.
-    candidates = [IDLE, (9.90, -1.0, 5.74, 0.0, 0.25, 0.0), OVER, CHARGE]
-    assert _pick(candidates, best_index=0) == 0
-
-
-def test_export_cap_bounded_by_export_threshold():
-    # rate_step=0.1 makes the old half-step admission (0.05 kW) exceed
-    # BATTERY_EXPORT_THRESHOLD_KWH/dt (0.04 kW at dt=0.25) -- with the
-    # tightened cap, eligibility is governed by the export threshold, not
-    # the rate-step half-step. balance_zero_p is 1.0 kW (home=0.25 kWh,
-    # dt=0.25h), so the cap admits discharge up to 1.04 kW.
-    home, solar, dt, rate_step = 0.25, 0.0, 0.25, 0.1
-    idle = (10.00, 0.0, 6.0, 0.0, 0.0, 0.25)
-    # Overshoot = (1.045 - 1.0) * 0.25h = 0.01125 kWh > 0.01 threshold ->
-    # real export -> must NOT be selected.
-    just_over = (9.999, -1.045, 5.74, 0.0, 0.30, 0.0)
-    # Overshoot = (1.03 - 1.0) * 0.25h = 0.0075 kWh < 0.01 threshold -> may
-    # be selected.
-    just_under = (9.995, -1.03, 5.76, 0.0, 0.28, 0.0)
-
-    only_over = _prefer_load_covering_discharge(
-        [idle, just_over],
-        best_index=0,
-        epsilon=0.01,
-        home_consumption=home,
-        solar_production=solar,
-        dt=dt,
-        rate_step=rate_step,
-    )
-    assert only_over == 0, "overshoot past the export threshold must not swap"
-
-    with_under = _prefer_load_covering_discharge(
-        [idle, just_over, just_under],
-        best_index=0,
-        epsilon=0.01,
-        home_consumption=home,
-        solar_production=solar,
-        dt=dt,
-        rate_step=rate_step,
-    )
-    assert with_under == 2, "overshoot within the export threshold may swap"
-
-
-def test_non_idle_winner_is_untouched():
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=3) == 3
-
-
-def test_no_net_load_means_no_swap():
-    # Solar covers the house: balance_zero_p <= 0, nothing to fail-safe.
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=0, home=0.10, solar=0.50) == 0
-
-
-def test_zero_epsilon_is_a_no_op():
-    # Flat value function (dV/dSoE == 0) -> epsilon 0 -> tie-break disabled,
-    # mirroring tie_detection's documented blind spot.
-    candidates = [IDLE, COVER, OVER, CHARGE]
-    assert _pick(candidates, best_index=0, epsilon=0.0) == 0
-
-
-def test_picks_largest_eligible_coverage_among_ties():
-    partial = (9.997, -0.5, 5.87, 0.0, 0.12, 0.12)  # covers half the load
-    candidates = [IDLE, partial, COVER]
-    # Both discharges are inside epsilon; the fuller cover (1.0 kW) wins.
-    assert _pick(candidates, best_index=0) == 2
+# The candidate-level cases for this tie-break now live in
+# `test_tie_policy.py`, alongside the rest of the P2 preference table --
+# they moved with the rule itself, unchanged. What stays here is the
+# end-to-end evidence: the same preference observed through the real grid
+# and PWL replays, and through #466's own regression fixture.
 
 
 def _lossless_battery() -> BatterySettings:
@@ -192,7 +101,7 @@ def test_replay_tie_margin_is_non_negative_when_swap_fires():
     )
     V_next = 1.0 * (soe_levels - settings.min_soe_kwh)  # slope == buy -> exact tie
     _, power_levels = _discretize_state_action_space(settings)
-    action, _next_soe, _cost_basis, _reward, tie_margin, _value_slope = (
+    action, _next_soe, _cost_basis, _reward, _flows, tie_margin, _value_slope = (
         _best_action_at_continuous_state(
             soe=6.0,
             t=0,
@@ -266,12 +175,15 @@ def test_pwl_replay_full_swap_at_soe_ceiling():
     # but np.interp clamps flat above xs[-1], so a naive central difference
     # straddling the ceiling averages in that flat segment and reports half
     # the true one-sided slope, understating epsilon exactly here (#466
-    # review finding). At slope=1.02 (just above buy=1.0) that halving is
-    # enough to shrink epsilon below the tie margin and only swap a partial
-    # discharge; the correctly one-sided slope keeps epsilon large enough to
-    # swap the full load-covering discharge.
+    # review finding). The slope is chosen so the full cover's margin
+    # (0.25 kWh x (slope-1) = 0.75x epsilon) swaps under the correct
+    # one-sided slope but not under the halved flat-clamped estimate --
+    # expressed via the live constants so the engineered margin tracks
+    # grid-resolution changes (#512) instead of hardcoding the 0.05 kWh
+    # era's slope=1.02.
     settings = _lossless_battery()
-    action = _pwl_replay_choice(value_slope=1.02, soe=settings.max_soe_kwh)
+    slope = 1.0 + 3.0 * TIE_NOISE_FACTOR * SOE_STEP_KWH
+    action = _pwl_replay_choice(value_slope=slope, soe=settings.max_soe_kwh)
     assert action < 0, f"expected load-covering discharge, got {action}"
     assert -action == pytest.approx(1.0, abs=0.05)
 
@@ -303,23 +215,24 @@ def test_466_tie_break_does_not_trip_idle_guardrail():
     observed margin 0.119 SEK vs worst forfeiture 0.032 SEK), but the
     fixture that exercises the tie-break most directly is #466's own
     regression scenario -- pin that it still doesn't trip here."""
-    scenario, battery_settings, buy_prices, sell_prices, period_duration_hours = (
-        build_scenario_inputs("regression_2026_08_06_466")
-    )
-    result = optimize_battery_schedule(
-        buy_price=buy_prices,
-        sell_price=sell_prices,
-        home_consumption=scenario["home_consumption"],
-        solar_production=scenario["solar_production"],
-        initial_soe=scenario["battery"]["initial_soe"],
-        initial_cost_basis=scenario["battery"]["initial_cost_basis"],
-        battery_settings=battery_settings,
-        period_duration_hours=period_duration_hours,
-    )
+    _, inputs = build_scenario_optimizer_inputs("regression_2026_08_06_466")
+    result = optimize_battery_schedule(**inputs)
 
     actions = [pd.decision.battery_action for pd in result.period_data]
     assert any(
         abs(a) > 1e-9 for a in actions
     ), "guardrail appears to have fired -- schedule is all-IDLE"
-    assert result.period_data[32].decision.strategic_intent == "LOAD_SUPPORT"
     assert result.period_data[45].decision.strategic_intent == "LOAD_SUPPORT"
+
+    # Period 32's intent tracks the grid resolution, correctly each time. It
+    # was LOAD_SUPPORT until #497, then IDLE: its 0.0431 kWh deficit sat below
+    # the smallest commandable discharge under the 0.2 kW grid (0.05 kWh =
+    # 0.2 kW * 0.25 h, the first step above POWER_CLASSIFICATION_THRESHOLD_KW),
+    # every candidate overshot by less than the export resolution, and #497's
+    # rule rightly declined all of them. #512's finer grid halves the
+    # classification threshold, so a smaller under-covering discharge is now
+    # commandable and executable exactly as planned -- the period flips back
+    # to LOAD_SUPPORT, covering part of the deficit instead of importing all
+    # of it. Measured, not assumed: realized cost on this fixture improved by
+    # 0.0181 SEK under the finer grid, and R == P still holds corpus-wide.
+    assert result.period_data[32].decision.strategic_intent == "LOAD_SUPPORT"

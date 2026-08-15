@@ -66,6 +66,7 @@ ROBUST RECOVERY: When TOU corruption detected (overlaps, wrong order, duplicates
 
 import io
 import logging
+from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -132,6 +133,22 @@ class GrowattMinController(InverterController):
     home before excess flows to the battery.
     """
 
+    # How far ahead of its start time a TOU segment becomes eligible to be
+    # written to hardware. Cycles run at :00/:15/:30/:45, so at 45 minutes a
+    # segment is eligible on four of them before it takes effect.
+    #
+    # Those are opportunities to repair, not four attempts: the segment is
+    # written on the first of them and the rest are no-ops while the plan and
+    # the inverter agree. A write that raises is retried via
+    # _hardware_write_pending; one that vanishes without raising is caught by
+    # reconcile_hardware, which re-runs the sync on every quiet cycle and is
+    # what makes the remaining cycles worth having. Lowering this shrinks the
+    # window for both, so do not lower it without re-checking those two paths.
+    #
+    # It also caps how many segments can be eligible at once, floor(45/15) + 1
+    # = 4, comfortably under the 9 hardware slots.
+    WRITE_HORIZON_MINUTES = 45
+
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialize the MIN controller with required battery settings for power calculations."""
         super().__init__(battery_settings)
@@ -168,6 +185,13 @@ class GrowattMinController(InverterController):
                 intents when called from _build_candidate for comparison).
             start_period: Period to start from (0-95), typically current_period
 
+        The group covering start_period is reported from its *true* start, not
+        from start_period. A segment that is already running keeps the same
+        start_time on every cycle, so the differential update recognises it as
+        unchanged. Clamping it to "now" instead renamed it every 15 minutes,
+        and each rename cost a disable plus a write for no behavioural
+        difference — 16 writes for a stable two-hour window (issue #554).
+
         Returns:
             List of period groups:
             [
@@ -182,6 +206,29 @@ class GrowattMinController(InverterController):
         """
         if not intents:
             return []
+
+        # current_period is derived from the wall clock, so on a spring-forward
+        # day it reaches 95 while the schedule holds only 92 periods. There is
+        # nothing left to group past the end of the day.
+        if start_period >= len(intents):
+            return []
+
+        def mode_at(period: int) -> str:
+            return self.INTENT_TO_MODE.get(intents[period], "load_first")
+
+        # Walk back over periods the running segment already covers.
+        #
+        # This relies on past periods carrying forward the intents that were
+        # actually planned for them (battery_system_manager.py). On the first
+        # cycle after a restart there is no previous schedule to carry, so past
+        # periods are initialised to IDLE -> load_first and the walk-back stops
+        # immediately: a window already running is truncated to "now" for that
+        # one cycle, costing a disable plus a rewrite. It is stable from the
+        # next cycle on, because that cycle carries forward this one's intents.
+        # Reconstructing the missing past from actuals is deliberately not done
+        # — inferring intent from measured export feeds back into the plan.
+        while start_period > 0 and mode_at(start_period - 1) == mode_at(start_period):
+            start_period -= 1
 
         groups = []
         current_mode = None
@@ -300,31 +347,66 @@ class GrowattMinController(InverterController):
     def _select_hardware_intervals(
         self, intervals: list[dict], current_period: int
     ) -> list[dict]:
-        """Select the next 9 non-expired intervals for hardware programming.
+        """Select the imminent, non-expired intervals for hardware programming.
 
         Instead of dropping segments permanently, this keeps ALL intervals in
-        tou_intervals but selects only the first 9 non-expired ones for writing
-        to the inverter. As time passes and segments expire, slots free up and
-        later segments get programmed on the next optimization cycle.
+        tou_intervals but selects only the ones eligible to be programmed right
+        now for writing to the inverter. Two things make an interval ineligible:
+
+        - it starts more than WRITE_HORIZON_MINUTES from now, or
+        - the first 9 eligible intervals already fill the hardware slots.
+
+        As time passes, segments expire and later segments come within the
+        horizon, so ineligible intervals get programmed on a later cycle.
+
+        Deferring far-future segments is what stops a marginal period flipping
+        in and out of the plan from rewriting a segment hours before it starts
+        (issue #554). A segment has no effect on the inverter until it starts,
+        so delaying its write cannot change behaviour — while every rewrite
+        costs a cloud API call, and Growatt 500s on this endpoint under load.
 
         Args:
             intervals: All TOU intervals (may exceed max_intervals).
             current_period: Current 15-minute period (0-95).
 
         Returns:
-            List of up to 9 non-expired intervals for hardware programming.
+            List of up to 9 imminent, non-expired intervals for hardware.
         """
         # Calculate current time in minutes from the period
         current_hour = current_period // 4
         current_minute = (current_period % 4) * 15
         current_minutes = current_hour * 60 + current_minute
+        horizon_minutes = current_minutes + self.WRITE_HORIZON_MINUTES
 
-        # Filter to non-expired intervals (end_time >= current time)
-        non_expired = [
-            interval
-            for interval in intervals
-            if self._time_to_minutes(interval["end_time"]) >= current_minutes
-        ]
+        # An already-active interval has start_time <= now, so it is always
+        # inside the horizon and can never be deferred.
+        non_expired: list[dict] = []
+        deferred: list[dict] = []
+        for interval in intervals:
+            if self._time_to_minutes(interval["end_time"]) < current_minutes:
+                continue
+            if self._time_to_minutes(interval["start_time"]) <= horizon_minutes:
+                non_expired.append(interval)
+            else:
+                deferred.append(interval)
+
+        if deferred:
+            logger.info(
+                "TOU DEFERRED: %d interval(s) start more than %d minutes out; "
+                "each is written on the cycle that brings it within range",
+                len(deferred),
+                self.WRITE_HORIZON_MINUTES,
+            )
+            # Per-interval detail at DEBUG: deferral is the normal state on
+            # every cycle, so at INFO this alone would be thousands of lines a
+            # day in the logs and debug bundles this system is diagnosed from.
+            for interval in deferred:
+                logger.debug(
+                    "  DEFERRED: %s-%s (%s)",
+                    interval["start_time"],
+                    interval["end_time"],
+                    interval["batt_mode"],
+                )
 
         # Sort chronologically and take first 9
         non_expired.sort(key=lambda x: x["start_time"])
@@ -356,7 +438,7 @@ class GrowattMinController(InverterController):
         return hardware_intervals
 
     def _assign_hardware_slots(
-        self, new_tou: list[dict], current_tou: list[dict]
+        self, new_tou: list[dict], current_tou: list[dict], planned_tou: list[dict]
     ) -> None:
         """Stamp each new_tou entry with a hardware slot id in 1..max_intervals.
 
@@ -366,7 +448,14 @@ class GrowattMinController(InverterController):
         target a slot that is either unoccupied or being freed in this cycle.
         Otherwise the write would overwrite a still-needed segment.
 
-        Mutates new_tou in place. current_tou is read-only.
+        A slot counts as spoken for when it holds anything in planned_tou, not
+        merely anything in new_tou. Since #554 those differ: new_tou is only
+        the subset eligible to be written now, while the disable side spares
+        every hardware segment the plan still wants. Reserving only new_tou's
+        slots would hand a deferred-but-planned segment's slot to an imminent
+        write, destroying that window with no disable ever issued.
+
+        Mutates new_tou in place. current_tou and planned_tou are read-only.
         """
 
         def content_key(segment: dict) -> tuple:
@@ -377,37 +466,67 @@ class GrowattMinController(InverterController):
                 segment.get("enabled", True),
             )
 
-        new_keys = {content_key(s) for s in new_tou}
+        def start_minute(segment: dict) -> int:
+            hours, minutes = segment["start_time"].split(":")
+            return int(hours) * 60 + int(minutes)
 
-        # Current segments whose content survives into new_tou keep their slot.
+        keep_keys = {content_key(s) for s in planned_tou}
+
+        # Current segments the plan still wants keep their slot, whether or not
+        # they are eligible to be written this cycle.
         preserved_slot_by_key: dict[tuple, int] = {}
-        occupied_slots: set[int] = set()
+        slot_start_minute: dict[int, int] = {}
         for current in current_tou:
             slot = current.get("segment_id")
             if not isinstance(slot, int) or not (1 <= slot <= self.max_intervals):
                 continue
             key = content_key(current)
-            if key in new_keys and key not in preserved_slot_by_key:
+            if key in keep_keys and key not in preserved_slot_by_key:
                 preserved_slot_by_key[key] = slot
-                occupied_slots.add(slot)
+                slot_start_minute[slot] = start_minute(current)
 
         needs_slot: list[dict] = []
+        slots_in_use_by_new: set[int] = set()
         for segment in new_tou:
             key = content_key(segment)
             if key in preserved_slot_by_key:
                 segment["segment_id"] = preserved_slot_by_key[key]
+                slots_in_use_by_new.add(segment["segment_id"])
             else:
                 needs_slot.append(segment)
 
+        occupied_slots = set(slot_start_minute)
         free_slots = sorted(set(range(1, self.max_intervals + 1)) - occupied_slots)
+
         if len(needs_slot) > len(free_slots):
-            # active_tou_intervals is capped at max_intervals, so this should
-            # never trigger. Surfacing it rather than silently skipping keeps
-            # the hardware invariant visible.
-            raise RuntimeError(
-                f"Not enough hardware slots: need {len(needs_slot)}, "
-                f"have {len(free_slots)} (occupied={sorted(occupied_slots)})"
+            # The table can be full of still-planned segments on the first
+            # cycle after upgrading from the always-write behaviour. Reclaim
+            # the furthest-out ones: they have the most cycles left to be
+            # written again before they take effect. Slots already handed to a
+            # segment being written now are never reclaimable.
+            reclaimable = sorted(
+                (slot for slot in occupied_slots if slot not in slots_in_use_by_new),
+                key=lambda slot: slot_start_minute[slot],
+                reverse=True,
             )
+            shortfall = len(needs_slot) - len(free_slots)
+            reclaimed = reclaimable[:shortfall]
+            if len(reclaimed) < shortfall:
+                raise RuntimeError(
+                    f"Not enough hardware slots: need {len(needs_slot)}, "
+                    f"have {len(free_slots)} free and {len(reclaimed)} "
+                    f"reclaimable (occupied={sorted(occupied_slots)})"
+                )
+            for slot in reclaimed:
+                logger.info(
+                    "Reclaiming slot %d (holds a segment starting %02d:%02d) — "
+                    "the table is full and a nearer segment needs a slot",
+                    slot,
+                    slot_start_minute[slot] // 60,
+                    slot_start_minute[slot] % 60,
+                )
+            free_slots = sorted(free_slots + reclaimed)
+
         for segment, slot in zip(needs_slot, free_slots, strict=False):
             segment["segment_id"] = slot
 
@@ -654,6 +773,13 @@ class GrowattMinController(InverterController):
         """Compare TOU intervals a candidate schedule would produce against
         what's currently applied, from a specific period onwards.
 
+        "Currently applied" covers both the daily plan and the subset of it
+        that is eligible for hardware right now. The two move independently:
+        an interval deferred as far-future, or held back by the 9-slot limit,
+        becomes eligible purely because time passed, with the daily plan
+        unchanged. Comparing only the daily plan would report no change and
+        skip the cycle that was supposed to write it (issue #554).
+
         Uses 15-minute period granularity to match TOU segment resolution.
         """
         from_period = current_period
@@ -668,7 +794,7 @@ class GrowattMinController(InverterController):
         )
 
         candidate_intents = schedule.original_dp_results["strategic_intent"]
-        candidate_intervals, _active = self._build_candidate(
+        candidate_intervals, candidate_active = self._build_candidate(
             candidate_intents, current_period
         )
 
@@ -684,37 +810,66 @@ class GrowattMinController(InverterController):
             )
             return True, "Corruption detected - forcing hardware write to clear"
 
+        # The candidate was built at from_period with expired intervals already
+        # dropped, while the committed set was built on an earlier cycle and
+        # still holds whatever has since ended. Both sides are filtered here so
+        # the comparison cannot report a difference that is only the clock
+        # moving — that fired on every segment's expiry and cost a hardware
+        # read producing no writes.
+        from_minute = from_period * 15
+
+        def eligible_content(intervals: list[dict]) -> set[tuple]:
+            return {
+                (i["start_time"], i["end_time"], i["batt_mode"], i.get("enabled", True))
+                for i in intervals
+                if self._time_to_minutes(i["end_time"]) >= from_minute
+            }
+
+        if eligible_content(candidate_active) != eligible_content(
+            self.active_tou_intervals
+        ):
+            logger.info(
+                "DECISION: Schedules differ - hardware-eligible intervals changed "
+                "(%d applied, %d eligible now)",
+                len(self.active_tou_intervals),
+                len(candidate_active),
+            )
+            return True, "Hardware-eligible TOU intervals changed"
+
         current_tou = self.get_daily_TOU_settings()
         new_tou = self._format_daily_tou(candidate_intervals)
 
         return self._diff_tou_intervals(current_tou, new_tou, from_period)
+
+    def reconcile_hardware(self, controller, effective_period: int) -> tuple[int, int]:
+        """Put the inverter back in line with the committed plan.
+
+        Differential update means a segment is written once and then never
+        looked at again while the plan holds steady. That leaves both halves
+        of issue #551 uncovered on a quiet cycle: a write the inverter
+        silently dropped, and a slot it restored that the plan does not
+        contain — the second of which runs the battery on a window nobody
+        planned.
+
+        This is sync_to_hardware itself rather than a separate drift check,
+        because sync already reads the inverter once and diffs both
+        directions against that read. A bespoke check would need its own read
+        (doubling the load on the endpoint this change exists to relieve) and
+        its own comparison, which would then be a second place for the two to
+        disagree. Deferral still applies, so a quiet cycle writes nothing.
+        """
+        return self.sync_to_hardware(controller, effective_period)
 
     def initialize_from_tou_segments(self, tou_segments, current_hour=0):
         """Initialize GrowattMinController with TOU intervals from the inverter."""
         self.current_hour = current_hour
         self.tou_intervals = []
 
-        for segment in tou_segments:
-            segment_id = segment.get("segment_id")
-            is_enabled = segment.get("enabled", False)
-            raw_batt_mode = segment.get("batt_mode")
-
-            # Convert integer to string representation if needed
-            if isinstance(raw_batt_mode, int):
-                batt_mode_map = {0: "load_first", 1: "battery_first", 2: "grid_first"}
-                batt_mode = batt_mode_map.get(raw_batt_mode, "battery_first")
-            else:
-                batt_mode = raw_batt_mode if raw_batt_mode else "load_first"
-
+        # Normalization is shared with the differential-diff path so the two
+        # cannot disagree on field types or missing-key defaults (issue #551).
+        for segment in self._normalize_segments(tou_segments):
             self.tou_intervals.append(
-                {
-                    "segment_id": segment_id,
-                    "batt_mode": batt_mode,
-                    "start_time": segment.get("start_time", "00:00"),
-                    "end_time": segment.get("end_time", "23:59"),
-                    "enabled": is_enabled,
-                    "strategic_intent": "existing_schedule",
-                }
+                {**segment, "strategic_intent": "existing_schedule"}
             )
 
         # Validate intervals read from inverter (log only, no recovery here).
@@ -789,12 +944,17 @@ class GrowattMinController(InverterController):
                 }
             ]
 
-        # Calculate current time in minutes for expiry checks
+        # Calculate current time in minutes for expiry checks. Floored to the
+        # period so this matches _select_hardware_intervals, which measures the
+        # write horizon from the period. An unfloored wall clock puts the two
+        # up to 15 minutes apart, and a segment inside that band is deferred by
+        # the write path while the display path calls it pending — the amber
+        # "Pending Write" badge this change exists to clear.
         if current_period is not None:
             current_minutes = (current_period // 4) * 60 + (current_period % 4) * 15
         else:
             now = time_utils.now()
-            current_minutes = now.hour * 60 + now.minute
+            current_minutes = ((now.hour * 60 + now.minute) // 15) * 15
 
         # Get only active/enabled intervals and sort by start time
         active_intervals = [
@@ -835,11 +995,24 @@ class GrowattMinController(InverterController):
                 segment["segment_id"] = len(result) + 1
             is_expired = interval_end_minutes < current_minutes
             segment["is_expired"] = is_expired
-            segment["pending_write"] = not is_expired and not any(
-                a["start_time"] == interval["start_time"]
-                and a["end_time"] == interval["end_time"]
-                and a["batt_mode"] == interval["batt_mode"]
-                for a in self.active_tou_intervals
+            # A segment past the write horizon is not "pending" — it is simply
+            # not due yet, and will be written on the cycle that brings it
+            # within range (issue #554). Only a segment that should already be
+            # on hardware and is not — the 9-slot overflow this flag was added
+            # for — is worth surfacing, since the dashboard paints it amber and
+            # replaces the mode badge with a "Pending Write" warning.
+            is_deferred = (
+                interval_start_minutes > current_minutes + self.WRITE_HORIZON_MINUTES
+            )
+            segment["pending_write"] = (
+                not is_expired
+                and not is_deferred
+                and not any(
+                    a["start_time"] == interval["start_time"]
+                    and a["end_time"] == interval["end_time"]
+                    and a["batt_mode"] == interval["batt_mode"]
+                    for a in self.active_tou_intervals
+                )
             )
             result.append(segment)
             current_time_minutes = interval_end_minutes + 1
@@ -1098,52 +1271,84 @@ class GrowattMinController(InverterController):
             enabled=segment["enabled"],
         )
 
+    # Growatt reports batt_mode as an int on some firmware/API paths.
+    _BATT_MODE_BY_CODE: ClassVar[dict[int, str]] = {
+        0: "load_first",
+        1: "battery_first",
+        2: "grid_first",
+    }
+
+    @classmethod
+    def _normalize_segments(cls, segments) -> list[dict]:
+        """Put a vendor segment payload into this class's internal shape.
+
+        Applied once at the read boundary so every consumer — the startup
+        initializer and the differential diff — sees the same field types and
+        the same defaults. When only the initializer normalized, the diff
+        compared an int batt_mode against our strings, matched nothing, and
+        rewrote every segment blind while echoing the raw int back to the
+        inverter.
+        """
+        normalized = []
+        for segment in segments:
+            raw_mode = segment.get("batt_mode")
+            if isinstance(raw_mode, int):
+                batt_mode = cls._BATT_MODE_BY_CODE.get(raw_mode, "battery_first")
+            else:
+                batt_mode = raw_mode or "load_first"
+
+            normalized.append(
+                {
+                    "segment_id": segment.get("segment_id"),
+                    "batt_mode": batt_mode,
+                    "start_time": segment.get("start_time", "00:00"),
+                    "end_time": segment.get("end_time", "23:59"),
+                    "enabled": segment.get("enabled", False),
+                }
+            )
+        return normalized
+
     def _read_segments_from_hardware(self, controller) -> list[dict]:
         """Read current TOU segments from inverter hardware.
 
-        Subclasses can override to use different read mechanisms
-        (e.g. entity state reads for solax_modbus).
+        Raises if the read fails; an empty list means the inverter genuinely
+        holds no segments. Subclasses can override to use different read
+        mechanisms (e.g. entity state reads for solax_modbus).
         """
-        return controller.read_inverter_time_segments()
+        return self._normalize_segments(controller.read_inverter_time_segments())
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Apply MIN inverter TOU schedule to hardware using differential update.
 
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Period (0-95) from which to start applying changes
-            current_tou: TOU intervals currently active on the inverter
 
         Returns:
             Tuple of (segments_updated, segments_disabled)
         """
+        # The differential update must be diffed against what the inverter
+        # actually holds, read fresh every cycle. Diffing against our own
+        # in-memory model instead let the two drift apart (issue #551): the
+        # model was seeded once at startup and never corrected, so writes
+        # started duplicating live segments — which the Growatt cloud rejects
+        # with a 500 — while segments the plan had dropped stayed enabled on
+        # the inverter and kept running.
+        # A failed read raises out of here rather than arriving as an empty
+        # list, so it cannot be mistaken for "the inverter holds nothing" and
+        # trigger a blind rewrite. _hardware_write_pending then retries.
+        current_tou = self._read_segments_from_hardware(controller)
+
         # Only the active (hardware-programmed) intervals are eligible to be
         # written. self.tou_intervals can hold more than the 9 slots the MIN
         # inverter supports; the overflow is pending_write and must not reach
         # set_inverter_time_segment, otherwise the Growatt service rejects the
         # out-of-range segment_id with 500.
         new_tou = self.active_tou_intervals
-
-        # Assign hardware slot ids (segment_id 1..max_intervals) to new_tou.
-        # Preserves the slot of any interval already on hardware (matched by
-        # content) so still-needed segments are not overwritten when a
-        # previously-pending interval is promoted into the active 9.
-        self._assign_hardware_slots(new_tou, current_tou)
-
-        logger.info(
-            "TOU comparison: Current=%d intervals, New=%d intervals",
-            len(current_tou),
-            len(new_tou),
-        )
-
-        # Validate intervals before sending to inverter
-        logger.info("Validating TOU intervals before sending to inverter...")
-        self.validate_tou_intervals_ordering(new_tou, "before_sending_to_inverter")
 
         effective_minute = effective_period * 15
 
@@ -1155,6 +1360,35 @@ class GrowattMinController(InverterController):
             parts = interval["end_time"].split(":")
             return int(parts[0]) * 60 + int(parts[1])
 
+        # Whether a segment should be ON is decided by the whole plan, not by
+        # new_tou — that is only the subset eligible to be *written* now, and
+        # since #554 it omits the plan's far-future segments. Diffing against
+        # it would read a correctly-programmed future segment as unplanned and
+        # clear it, then write it back once it came within range. Deferral
+        # applies to updates only; disables stay prompt, so an unplanned
+        # segment is still cleared immediately (issue #551).
+        planned_tou = [
+            interval
+            for interval in self.tou_intervals
+            if end_minute(interval) >= effective_minute
+        ]
+
+        # Assign hardware slot ids (segment_id 1..max_intervals) to new_tou.
+        # Preserves the slot of any interval already on hardware (matched by
+        # content) so still-needed segments are not overwritten when a
+        # previously-pending interval is promoted into the active 9.
+        self._assign_hardware_slots(new_tou, current_tou, planned_tou)
+
+        logger.info(
+            "TOU comparison: Current=%d intervals, New=%d intervals",
+            len(current_tou),
+            len(new_tou),
+        )
+
+        # Validate intervals before sending to inverter
+        logger.info("Validating TOU intervals before sending to inverter...")
+        self.validate_tou_intervals_ordering(new_tou, "before_sending_to_inverter")
+
         to_disable: list[dict] = []
         to_update: list[dict] = []
 
@@ -1165,42 +1399,49 @@ class GrowattMinController(InverterController):
             (effective_period % 4) * 15,
         )
 
-        # When new schedule is empty, disable ALL current TOU segments
-        if len(new_tou) == 0 and len(current_tou) > 0:
+        # When new schedule is empty, disable ALL currently-enabled segments.
+        # Counting every slot read back would fire this on an idle plan against
+        # any real inverter, which always reports all 9 (issue #551).
+        enabled_now = [seg for seg in current_tou if seg.get("enabled")]
+        if len(planned_tou) == 0 and enabled_now:
             logger.warning("=" * 80)
             logger.warning(
-                "Empty TOU schedule detected - CLEARING ALL %d existing TOU segments from inverter",
-                len(current_tou),
+                "Empty TOU schedule detected - CLEARING ALL %d enabled TOU segments from inverter",
+                len(enabled_now),
             )
             logger.warning(
                 "This happens when optimization determines NO profitable charging/discharging"
             )
             logger.warning("=" * 80)
 
-            for current in current_tou:
-                if current.get("enabled", True):
-                    disabled_segment = current.copy()
-                    disabled_segment["enabled"] = False
-                    to_disable.append(disabled_segment)
-                    logger.info(
-                        "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
-                        current["start_time"],
-                        current["end_time"],
-                        current["batt_mode"],
-                        current.get("segment_id"),
-                    )
+            for current in enabled_now:
+                disabled_segment = current.copy()
+                disabled_segment["enabled"] = False
+                to_disable.append(disabled_segment)
+                logger.info(
+                    "Marking ALL segments for clearing: %s-%s %s (segment_id=%s)",
+                    current["start_time"],
+                    current["end_time"],
+                    current["batt_mode"],
+                    current.get("segment_id"),
+                )
 
             logger.info("Total segments marked for clearing: %d", len(to_disable))
         else:
             # Normal case: differential update (only update future segments)
             for current in current_tou:
+                if not current.get("enabled", True):
+                    # The inverter reports its unused slots as disabled entries.
+                    # There is nothing to turn off, and re-disabling them would
+                    # spend a cloud API call per idle slot, every cycle.
+                    continue
                 if end_minute(current) >= effective_minute:
                     has_match = any(
                         segment["start_time"] == current["start_time"]
                         and segment["end_time"] == current["end_time"]
                         and segment["batt_mode"] == current["batt_mode"]
-                        and segment["enabled"] == current["enabled"]
-                        for segment in new_tou
+                        and segment.get("enabled", True) == current["enabled"]
+                        for segment in planned_tou
                     )
 
                     if not has_match:

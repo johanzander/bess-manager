@@ -17,6 +17,17 @@ from core.bess.models import DecisionData, EnergyData
 # charging (battery_charged > 0) and small residual discharge.
 _POWER_THRESHOLD_KW = POWER_CLASSIFICATION_THRESHOLD_KW
 
+# Energy noise floor (kWh) shared by every flow check in
+# classify_strategic_intent: flows at or below this are treated as noise,
+# not evidence of a real action. Exported because the DP's residual-cover
+# candidate gate (#466 follow-up, action_selector._residual_cover_p)
+# must plan only discharges that this classifier will recognize as
+# LOAD_SUPPORT -- a sub-floor planned discharge classifies IDLE and the
+# command mapper executes nothing (the #282 R != P failure shape). Keeping
+# the gate and the classifier on one constant prevents the silent-collision
+# drift the #275 postmortem describes.
+FLOW_NOISE_FLOOR_KWH = 0.01
+
 
 def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     """Classify the strategic intent of a battery action based on power and energy flows.
@@ -42,18 +53,21 @@ def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
         # deficit and physically cannot export -- see
         # docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md
         # for the R == P failure this threshold mismatch caused.
-        if energy_data.battery_to_grid > 0.01:
+        if energy_data.battery_to_grid > FLOW_NOISE_FLOOR_KWH:
             return "BATTERY_EXPORT"
         return "LOAD_SUPPORT"
     elif power > _POWER_THRESHOLD_KW:  # Charging
-        if energy_data.grid_to_battery > 0.01:
+        if energy_data.grid_to_battery > FLOW_NOISE_FLOOR_KWH:
             return "GRID_CHARGING"
         return "SOLAR_STORAGE"
-    elif energy_data.battery_charged > 0.01:
+    elif energy_data.battery_charged > FLOW_NOISE_FLOOR_KWH:
         return "SOLAR_STORAGE"
-    elif energy_data.battery_discharged > 0.01:
+    elif energy_data.battery_discharged > FLOW_NOISE_FLOOR_KWH:
         return "LOAD_SUPPORT"
-    elif energy_data.grid_exported > 0.01 and energy_data.solar_to_grid > 0.01:
+    elif (
+        energy_data.grid_exported > FLOW_NOISE_FLOOR_KWH
+        and energy_data.solar_to_grid > FLOW_NOISE_FLOOR_KWH
+    ):
         return "SOLAR_EXPORT"
     return "IDLE"
 
@@ -64,6 +78,7 @@ def create_decision_data(
     energy_data: EnergyData,
     cost_basis: float,
     future_value: float,
+    curtailed: bool = False,
 ) -> DecisionData:
     """
     Create DecisionData for a DP-evaluated period.
@@ -78,6 +93,8 @@ def create_decision_data(
         future_value: The DP's value-to-go from the resulting state
             (continuation_value) -- the best achievable outcome from the
             resulting battery level onward.
+        curtailed: Caller-computed planned-curtailment flag (#501) -- mirrors
+            BSM's execution-time should_curtail condition.
 
     Returns:
         DecisionData with strategic intent and economic fields populated.
@@ -89,4 +106,5 @@ def create_decision_data(
         battery_action=battery_action_kwh,
         cost_basis=cost_basis,
         future_value=future_value,
+        curtailed=curtailed,
     )

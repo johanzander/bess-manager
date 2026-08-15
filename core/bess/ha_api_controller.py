@@ -10,11 +10,13 @@ import re
 import ssl
 import time
 import urllib.parse
+from functools import partial
 from typing import ClassVar
 
 import requests
 import websocket
 
+from .energy_balance import derive_load_consumption
 from .exceptions import SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .settings_store import SettingsStore
@@ -79,6 +81,7 @@ class HomeAssistantAPIController:
         huawei_device_id: str | None = None,
         service_domain: str | None = None,
         grid_power_polarity: str | None = None,
+        battery_power_polarity: str | None = None,
     ):
         """Initialize the Controller with Home Assistant API access.
 
@@ -99,6 +102,11 @@ class HomeAssistantAPIController:
                 import_power/export_power share one signed entity
                 (SettingsStore.get_grid_power_polarity() — "import_positive"
                 or "" when the platform has separate entities)
+            battery_power_polarity: Sign convention for a platform whose
+                battery_charge_power/battery_discharge_power share one signed
+                entity (SettingsStore.get_battery_power_polarity() —
+                "charge_positive" or "" when the platform has separate
+                entities)
 
         """
         self.base_url = ha_url
@@ -128,6 +136,11 @@ class HomeAssistantAPIController:
         # Sign convention for a platform whose import_power/export_power
         # share one signed entity (see get_import_power/get_export_power).
         self.grid_power_polarity = grid_power_polarity or ""
+
+        # Sign convention for a platform whose battery charge/discharge power
+        # share one signed entity (see get_battery_charge_power/
+        # get_battery_discharge_power).
+        self.battery_power_polarity = battery_power_polarity or ""
 
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
@@ -379,7 +392,7 @@ class HomeAssistantAPIController:
     # ─────────────────────────────  ─────────────────────────────────  ─────────────────────────────────
     # battery_soc                    state_of_charge_soc                solax_battery_capacity / solax_battery_soc
     # battery_charge_power           battery_1_charging_w               solax_battery_power_charge / solax_battery_charge_power
-    # battery_discharge_power        battery_1_discharging_w            solax_battery_power_discharge / solax_battery_discharge_power
+    # battery_discharge_power        battery_1_discharging_w            solax_battery_discharge_power (Growatt only; native SolaX has no discharge entity — see #542)
     # import_power                   import_power                       solax_measured_power / solax_total_forward_power / solax_ac_power_to_user
     # export_power                   export_power                       solax_grid_export / solax_total_reverse_power / solax_ac_power_to_grid
     # local_load_power               local_load_power                   solax_house_load / solax_total_load_power
@@ -701,8 +714,12 @@ class HomeAssistantAPIController:
     SOLAX_NATIVE_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         # Real-time power
         "battery_capacity": "battery_soc",
+        # One signed register (REGISTER_S16, 0x16), positive = charging. The
+        # integration publishes no discharge counterpart, so
+        # discover_sensors_from_registry points battery_discharge_power at
+        # this same entity and HAApiController splits it by sign — see
+        # PLATFORM_BATTERY_POWER_POLARITY["solax_modbus_native"] (#542).
         "battery_power_charge": "battery_charge_power",
-        "battery_power_discharge": "battery_discharge_power",
         "measured_power": "import_power",
         "grid_import": "import_power",  # alternative suffix
         "grid_export": "export_power",
@@ -861,8 +878,8 @@ class HomeAssistantAPIController:
     # f"{device.serial_number}_{register_key}" — verified against
     # wlcrs/huawei_solar select.py:204, number.py:358, switch.py:200.
     # Lifetime energy register keys verified against
-    # wlcrs/huawei-solar-lib register_names.py/sensor.py: accumulated_yield_energy
-    # (inverter), storage_total_charge/storage_total_discharge (battery),
+    # wlcrs/huawei-solar-lib register_names.py/sensor.py: total_dc_input_power
+    # (inverter PV total, see #569 below), storage_total_charge/storage_total_discharge (battery),
     # grid_exported_energy/grid_accumulated_energy (separate power-meter device,
     # so these two resolve to "not configured" on meterless installs).
     # input_power (inverter, real-time PV) and power_meter_active_power
@@ -884,13 +901,34 @@ class HomeAssistantAPIController:
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
         "active_power": "local_load_power",
-        "accumulated_yield_energy": "lifetime_solar_energy",
+        # PV production, NOT accumulated_yield_energy (#569).  That register
+        # (32106, "Total yield") is the inverter's accumulated AC *output*:
+        # on a LUNA2000 hybrid it rises while the battery discharges and
+        # misses whatever charged it, so feeding it to
+        # derive_load_consumption inflates home consumption by
+        # (battery_discharged - solar_to_battery) with no visible error.
+        # 32108 "Total DC input energy" is the lifetime integral of 32064,
+        # which is already mapped to pv_power below -- DC-side, so it
+        # excludes conversion losses, but Huawei exposes no AC-side PV
+        # total at all (wlcrs/huawei_solar README FAQ).
+        "total_dc_input_power": "lifetime_solar_energy",
         "storage_total_charge": "lifetime_battery_charged",
         "storage_total_discharge": "lifetime_battery_discharged",
         "grid_exported_energy": "lifetime_export_to_grid",
         "grid_accumulated_energy": "lifetime_import_from_grid",
         "input_power": "pv_power",
         "power_meter_active_power": "import_power",
+        # TOU period readback (#431). The integration publishes the configured
+        # periods as extra state attributes of this sensor, in the same text
+        # format set_tou_periods accepts (sensor.py:2487-2513) — so BESS can
+        # start from what the battery actually holds instead of assuming
+        # nothing. EMMA's equivalent register (emma_tou_periods) is
+        # deliberately absent: its entity is disabled by default upstream
+        # (sensor.py:1789), and mapping a disabled entity would hand those
+        # installs a startup read of an entity with no state.
+        "storage_huawei_luna2000_time_of_use_charging_and_discharging_periods": (
+            "huawei_tou_periods"
+        ),
     }
 
     def resolve_sensor_for_influxdb(self, sensor_key: str) -> str | None:
@@ -953,6 +991,46 @@ class HomeAssistantAPIController:
             return False
         return True
 
+    def _signed_split_state(self, method_name: str, state):
+        """Apply the signed split to a raw entity state, for diagnostics.
+
+        get_method_sensor_info reads /api/states/{entity_id} directly rather
+        than going through the getters, so on a platform whose charge and
+        discharge (or import and export) keys resolve to ONE signed entity it
+        would report the same raw signed value for both — e.g. -800 for both
+        "Battery Charging Power" and "Battery Discharging Power" on a native
+        SolaX discharging at 800 W. Reuses the getters' own split predicates
+        instead of re-deriving the polarity here.
+
+        Returns the state unchanged for every other method, for a platform
+        with two real entities, or for a state that isn't numeric.
+        """
+        if method_name in ("get_battery_charge_power", "get_battery_discharge_power"):
+            if not self._is_shared_signed_battery_power():
+                return state
+            split = partial(
+                self._split_signed_battery_power,
+                charging=method_name == "get_battery_charge_power",
+            )
+        elif method_name in ("get_import_power", "get_export_power"):
+            if not self._is_shared_signed_grid_power():
+                return state
+            split = partial(
+                self._split_signed_grid_power,
+                importing=method_name == "get_import_power",
+            )
+        else:
+            return state
+
+        try:
+            raw = float(state)
+        except (TypeError, ValueError):
+            return state
+        # .10g, not .g: the default 6 significant digits would round a raw
+        # state like "12345.678" to "12345.7" and switch to scientific
+        # notation above 1e6, silently degrading a diagnostic reading.
+        return f"{split(raw):.10g}"
+
     def get_method_sensor_info(self, method_name: str) -> dict:
         """Get sensor configuration info for a controller method."""
         method_info = self.METHOD_SENSOR_MAP.get(method_name)
@@ -1013,7 +1091,17 @@ class HomeAssistantAPIController:
                     }
                 )
             else:
-                result.update({"status": "ok", "current_value": response.get("state")})
+                state = response.get("state")
+                # Caught separately from the outer handler: an unknown polarity
+                # is a configuration fault, and reporting it as a connectivity
+                # error ("Failed to check entity") would hide exactly the loud
+                # failure _split_signed_battery_power raises to produce.
+                try:
+                    current_value = self._signed_split_state(method_name, state)
+                except ValueError as e:
+                    result.update({"status": "error", "error": str(e)})
+                else:
+                    result.update({"status": "ok", "current_value": current_value})
         except (requests.RequestException, ValueError, KeyError) as e:
             result.update(
                 {
@@ -1068,10 +1156,11 @@ class HomeAssistantAPIController:
             context: Optional dict of contextual parameters for failure diagnostics
             optional: If True, a 404 is expected (e.g. probing a legacy/disabled
                 entity) and is logged at debug level instead of error
-            suppress_retry_warnings: If True, retry/failure logging is downgraded
-                to debug/info (e.g. Nordpool tomorrow-price calls before the
+            suppress_retry_warnings: If True, the failure is an expected
+                condition (e.g. Nordpool tomorrow-price calls before the
                 provider has published data — an expected daily condition, not
-                an error)
+                an error): retry/failure logging is downgraded to debug/info and
+                no runtime failure is recorded
             **kwargs: Additional arguments for requests
 
         Returns:
@@ -1142,8 +1231,11 @@ class HomeAssistantAPIController:
                         str(e),
                     )
 
-                    # Record runtime failure if failure tracker is available
-                    if self.failure_tracker:
+                    # Record runtime failure if failure tracker is available.
+                    # A suppressed failure is an expected condition (see
+                    # suppress_retry_warnings above) — recording it would surface
+                    # a routine daily event as a user-visible failure (#583).
+                    if self.failure_tracker and not suppress_retry_warnings:
                         # Use provided operation/category or fall back to generic description
                         operation_description = operation or f"{method.upper()} {path}"
                         operation_category = category or "other"
@@ -1430,12 +1522,57 @@ class HomeAssistantAPIController:
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
         self._set_number_like(entity_id, rate, "Set discharging power rate")
 
+    def _is_shared_signed_battery_power(self) -> bool:
+        """True when battery charge/discharge power resolve to one signed entity.
+
+        Native SolaX and Huawei LUNA2000 expose battery power as a single
+        signed register instead of separate charge/discharge entities.
+        get_battery_charge_power/get_battery_discharge_power detect this case
+        and split the one raw reading by sign instead of reading the entity
+        twice unmodified.
+        """
+        charge_entity = self.sensors.get("battery_charge_power")
+        discharge_entity = self.sensors.get("battery_discharge_power")
+        return bool(
+            self.battery_power_polarity
+            and charge_entity
+            and charge_entity == discharge_entity
+        )
+
+    def _split_signed_battery_power(self, raw: float, *, charging: bool) -> float:
+        """Split one signed battery reading into the requested direction.
+
+        Branches on battery_power_polarity rather than assuming it, so that an
+        unimplemented or typo'd entry in PLATFORM_BATTERY_POWER_POLARITY fails
+        loudly instead of reporting every charge as a discharge and vice versa.
+        "charge_positive" is the only value that map holds today.
+
+        Raises:
+            ValueError: If battery_power_polarity is not a recognised value.
+        """
+        if self.battery_power_polarity != "charge_positive":
+            raise ValueError(
+                f"Unknown battery_power_polarity '{self.battery_power_polarity}' — "
+                "cannot split the signed battery power sensor"
+            )
+        return max(0.0, raw if charging else -raw)
+
     def get_battery_charge_power(self):
         """Get current battery charging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return self._split_signed_battery_power(raw, charging=True)
         return self._get_sensor_value("battery_charge_power")
 
     def get_battery_discharge_power(self):
         """Get current battery discharging power in watts."""
+        if self._is_shared_signed_battery_power():
+            raw = self._get_sensor_value("battery_charge_power")
+            if raw is None:
+                return None
+            return self._split_signed_battery_power(raw, charging=False)
         return self._get_sensor_value("battery_discharge_power")
 
     def _set_number_like(
@@ -1589,6 +1726,47 @@ class HomeAssistantAPIController:
             periods=periods_text,
         )
 
+    def read_huawei_tou_periods(self) -> list[str]:
+        """Read the TOU period list currently programmed on the battery.
+
+        The huawei_solar integration has no read_tou_periods service, but
+        HuaweiSolarTOUSensorEntity publishes the periods as "Period N" extra
+        state attributes in the same text format set_tou_periods accepts
+        (wlcrs/huawei_solar sensor.py:2487-2513), so this is a public entity
+        read, not coordinator internals.
+
+        Returns:
+            Period lines "HH:MM-HH:MM/<days>/<+|->", ordered by period number.
+            Empty when the battery holds no periods.
+
+        Raises:
+            ValueError: If the TOU period sensor isn't configured.
+            SystemConfigurationError: If the entity can't be read. An
+                unreadable entity must not be reported as "no periods
+                programmed" — that would let BESS skip a needed write (the
+                distinction #552 drew for Growatt MIN).
+        """
+        entity_id = self._get_entity_for_service("huawei_tou_periods")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read Huawei TOU periods",
+            category="sensor_read",
+        )
+        if not response or response.get("state") in ("unavailable", "unknown", None):
+            raise SystemConfigurationError(
+                f"Huawei TOU period sensor '{entity_id}' is unreadable "
+                f"(state={response.get('state') if response else None})"
+            )
+
+        attributes = response.get("attributes", {})
+        numbered = [
+            (int(key.removeprefix("Period ")), str(value))
+            for key, value in attributes.items()
+            if key.startswith("Period ") and key.removeprefix("Period ").isdigit()
+        ]
+        return [text for _, text in sorted(numbered)]
+
     def set_inverter_time_segment(
         self,
         segment_id: int,
@@ -1633,40 +1811,41 @@ class HomeAssistantAPIController:
         )
 
     def read_inverter_time_segments(self):
-        """Read all time segments from the inverter with retry logic."""
-        try:
-            # Prepare service call parameters
-            service_params: dict[str, str | bool] = {"return_response": True}
+        """Read all time segments from the inverter with retry logic.
 
-            # Require device_id before attempting the API call
-            if not self.growatt_device_id:
-                raise SystemConfigurationError(
-                    "Growatt device_id not configured. Run the setup wizard to configure the inverter."
-                )
+        Raises on a failed or unrecognizable read. An empty list is a valid
+        answer meaning "no segments programmed" and must stay distinguishable
+        from failure: callers diff against this to decide what to write, and
+        a failure silently reported as [] would make them rewrite every
+        segment blind (issue #551).
+        """
+        service_params: dict[str, str | bool] = {"return_response": True}
 
-            service_params["device_id"] = self.growatt_device_id
-
-            # Call the service and get the response
-            result = self._service_call_with_retry(
-                self._vendor_service_domain(),
-                "read_time_segments",
-                operation=None,
-                **service_params,
+        # Require device_id before attempting the API call
+        if not self.growatt_device_id:
+            raise SystemConfigurationError(
+                "Growatt device_id not configured. Run the setup wizard to configure the inverter."
             )
 
-            # Check if the result contains 'service_response' with 'time_segments'
-            if result and "service_response" in result:
-                service_response = result["service_response"]
-                if "time_segments" in service_response:
-                    return service_response["time_segments"]
+        service_params["device_id"] = self.growatt_device_id
 
-            # If the result doesn't match expected format, log and return empty list
-            logger.warning("Unexpected response format from read_time_segments")
-            return []
+        # Transport errors propagate: _service_call_with_retry has already
+        # exhausted its retries by the time it raises.
+        result = self._service_call_with_retry(
+            self._vendor_service_domain(),
+            "read_time_segments",
+            operation=None,
+            **service_params,
+        )
 
-        except (requests.RequestException, ValueError, KeyError) as e:
-            logger.warning("Failed to read time segments: %s", str(e))
-            return []
+        if result and "service_response" in result:
+            service_response = result["service_response"]
+            if "time_segments" in service_response:
+                return service_response["time_segments"]
+
+        raise ValueError(
+            f"Unexpected response format from read_time_segments: {result!r}"
+        )
 
     # ── solax_modbus entity-based TOU segment control (Growatt plugin) ────
 
@@ -2273,6 +2452,17 @@ class HomeAssistantAPIController:
         """Read the current Growatt VPP Remote Control register state."""
         return self._get_raw_state("growatt_vpp_remote_control")
 
+    def get_growatt_vpp_allow_ac_charging(self) -> str | None:
+        """Read the current Growatt VPP allow-AC-charging register state.
+
+        Both flash registers the VPP path writes at startup need a read-back,
+        not just VPP Status: they are written together but can drift apart (a
+        user toggle, a firmware reset, or a write that failed after the first
+        of the two), and an install with Status Enabled but AC charging
+        Disabled cannot execute GRID_CHARGING at all.
+        """
+        return self._get_raw_state("growatt_vpp_allow_ac_charging")
+
     # ─────────────────────────────────────────────────────────────────────────
 
     def set_test_mode(self, enabled):
@@ -2457,15 +2647,22 @@ class HomeAssistantAPIController:
             and import_entity == export_entity
         )
 
+    def _split_signed_grid_power(self, raw: float, *, importing: bool) -> float:
+        """Split one signed grid reading into the requested direction.
+
+        Anything that is not "import_positive" is treated as
+        "export_positive" — the two values PLATFORM_GRID_POWER_POLARITY holds.
+        """
+        positive_is_import = self.grid_power_polarity == "import_positive"
+        return max(0.0, raw if importing == positive_is_import else -raw)
+
     def get_import_power(self):
         """Get current grid import power in watts."""
         if self._is_shared_signed_grid_power():
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, raw)
-            return max(0.0, -raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=True)
         return self._get_sensor_value("import_power")
 
     def get_export_power(self):
@@ -2474,9 +2671,7 @@ class HomeAssistantAPIController:
             raw = self._get_sensor_value("import_power")
             if raw is None:
                 return None
-            if self.grid_power_polarity == "import_positive":
-                return max(0.0, -raw)
-            return max(0.0, raw)  # export_positive
+            return self._split_signed_grid_power(raw, importing=False)
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):
@@ -2515,22 +2710,79 @@ class HomeAssistantAPIController:
     def get_load_consumption_lifetime(self):
         """Get lifetime total load consumption energy in kWh.
 
-        If no direct sensor is configured (e.g. GEN4 Growatt inverters lack a
-        native load consumption register), derives the value from:
-            load = solar + grid_import - grid_export
+        Falls through to the derived path whenever the direct reading is
+        missing — the gate is the runtime value, not the platform, so an
+        unmapped *or* momentarily unavailable entity reaches it. SolaX native,
+        Solis and Huawei are the platforms with no native load register at
+        all, so they take it on every call; any other platform lands here only
+        while its own load sensor is unreadable.
+
+        The derived value comes from the energy balance (see
+        :func:`core.bess.energy_balance.derive_load_consumption`), which needs
+        all five counters. Returns ``None`` when any is unreadable — the
+        battery terms are not optional, and dropping them reports load plus
+        net battery charge (issue #528) — and also when the balance comes out
+        negative, which on monotonic lifetime totals means a counter is
+        stalled or under-reporting rather than rounding noise.
         """
         direct = self._get_sensor_value("lifetime_load_consumption")
         if direct is not None:
             return direct
 
         # Derive from other lifetime sensors when direct sensor unavailable
-        solar = self._get_sensor_value("lifetime_solar_energy")
-        grid_import = self._get_sensor_value("lifetime_import_from_grid")
-        grid_export = self._get_sensor_value("lifetime_export_to_grid")
-        if solar is not None and grid_import is not None and grid_export is not None:
-            derived = solar + grid_import - grid_export
-            return max(derived, 0.0)  # Guard against small negative rounding
-        return None
+        inputs = {
+            "lifetime_solar_energy": self._get_sensor_value("lifetime_solar_energy"),
+            "lifetime_import_from_grid": self._get_sensor_value(
+                "lifetime_import_from_grid"
+            ),
+            "lifetime_export_to_grid": self._get_sensor_value(
+                "lifetime_export_to_grid"
+            ),
+            "lifetime_battery_charged": self._get_sensor_value(
+                "lifetime_battery_charged"
+            ),
+            "lifetime_battery_discharged": self._get_sensor_value(
+                "lifetime_battery_discharged"
+            ),
+        }
+        missing = [key for key, value in inputs.items() if value is None]
+        if missing:
+            # Name the counters, so "N/A" in the health check is traceable to
+            # a specific unmapped or unavailable sensor rather than silent.
+            logger.warning(
+                "Cannot derive lifetime load consumption: %s unreadable "
+                "(unmapped or unavailable). All five counters are required.",
+                ", ".join(missing),
+            )
+            return None
+        solar = inputs["lifetime_solar_energy"]
+        grid_import = inputs["lifetime_import_from_grid"]
+        grid_export = inputs["lifetime_export_to_grid"]
+        battery_charged = inputs["lifetime_battery_charged"]
+        battery_discharged = inputs["lifetime_battery_discharged"]
+        derived = derive_load_consumption(
+            solar_production=solar,
+            import_from_grid=grid_import,
+            export_to_grid=grid_export,
+            battery_charged=battery_charged,
+            battery_discharged=battery_discharged,
+        )
+        if derived < 0:
+            # Report the inputs rather than a laundered number: a health check
+            # showing a plausible value would hide the broken counter.
+            logger.warning(
+                "Derived lifetime load consumption is negative (%.1f kWh) - "
+                "lifetime counters disagree, so no value can be reported. "
+                "solar=%.1f import=%.1f export=%.1f charged=%.1f discharged=%.1f",
+                derived,
+                solar,
+                grid_import,
+                grid_export,
+                battery_charged,
+                battery_discharged,
+            )
+            return None
+        return derived
 
     def get_system_production_lifetime(self):
         """Get lifetime total system production energy in kWh.
@@ -3102,7 +3354,56 @@ class HomeAssistantAPIController:
         """Discover phase current sensor entity IDs.
 
         Scans entity states for sensors with device_class 'current' that
-        match household phase current naming (L1/L2/L3).
+        match household phase current naming, in two conventions:
+
+        - ``current_l1``/``l2``/``l3`` (Tibber Pulse, Shelly 3EM, ...).
+        - ``phase_a``/``b``/``c`` on a *metering* device (#120). huawei_solar
+          names its three-phase meter's currents "Phase A/B/C current"
+          (register keys ``active_grid_{A,B,C}_current``), which yields
+          ``sensor.power_meter_phase_a_current``. The inverter's own AC output
+          currents carry the identical display name and differ only by device
+          prefix, so the phase_a/b/c form is only accepted on an entity whose
+          id also marks it as a meter — binding fuse protection to the
+          inverter's output instead of the house feed would silently protect
+          the wrong circuit.
+
+        Candidates are grouped by the device their entity_id belongs to (the
+        entity id with its phase token blanked, see
+        ``_phase_current_group_id``), and one group supplies every phase. Only
+        groups exposing a set the rest of the system can act on —
+        ``USABLE_PHASE_SETS`` — are eligible; the alternative is handing the
+        wizard a two-phase count it rejects, or a set without L1 that makes
+        PowerMonitor raise on every quarter. ``meter`` is a bare substring, so a
+        sub-circuit meter (heat pump, EV charger) passes the gate too;
+        selecting per phase independently would mix two devices into a reading
+        set describing no real circuit. Preference, in order:
+
+        1. The most phases. A one-phase EV-charger clamp must never beat a
+           complete three-phase meter — the wizard derives the install's
+           phase count from this result, so a short group silently configures
+           single-phase fuse protection on a three-phase house.
+        2. The explicit ``current_lN`` convention over inferred ``phase_a/b/c``
+           naming. This matters on upgrade: an install with a dedicated clamp
+           meter keeps it rather than repointing at a newly-discovered smart
+           meter.
+        3. A grid-side name (``GRID_ID_MARKERS``). Between two equally
+           complete meters, ``power_meter`` is the house feed and
+           ``easee_meter``/``heatpump_meter`` a sub-circuit carrying a
+           fraction of it — binding to the latter under-protects the main
+           fuse, which then trips without BESS ever throttling.
+        4. Lowest group id, purely so the result is reproducible — never
+           ``/api/states`` order, which is arbitrary and varies across
+           restarts.
+
+        A lone sub-circuit meter can still win when it is the only complete
+        set and its name carries no grid marker; the wizard lets the user
+        correct that, and such entities cannot be told apart by name alone on
+        a discovery path with no unique_id suffix map. Phase count is
+        deliberately ranked above the grid-side name, so a grid-named
+        *single-phase* clamp loses to a complete three-phase sub-circuit set:
+        the two orderings cannot both hold, and the alternative reinstates the
+        worse failure — a one-phase group setting the wizard's phase count on
+        a three-phase house.
 
         Args:
             states: List of state dicts from /api/states
@@ -3111,7 +3412,8 @@ class HomeAssistantAPIController:
             dict mapping phase key ('current_l1', 'current_l2', 'current_l3') ->
             entity_id for detected sensors. Empty dict if none found.
         """
-        result: dict[str, str] = {}
+        # group_id -> (convention_rank, {phase_key: entity_id})
+        groups: dict[str, tuple[int, dict[str, str]]] = {}
         for state in states:
             entity_id = str(state.get("entity_id", ""))
             if not entity_id.startswith("sensor."):
@@ -3120,15 +3422,118 @@ class HomeAssistantAPIController:
             if attrs.get("device_class") != "current":
                 continue
             lower_id = entity_id.lower()
-            if "current_l1" in lower_id and "current_l1" not in result:
-                result["current_l1"] = entity_id
-            elif "current_l2" in lower_id and "current_l2" not in result:
-                result["current_l2"] = entity_id
-            elif "current_l3" in lower_id and "current_l3" not in result:
-                result["current_l3"] = entity_id
+            matched = self._match_phase_current_key(lower_id)
+            if not matched:
+                continue
+            key, pattern, rank = matched
+            group_id = self._phase_current_group_id(lower_id, pattern)
+            _, phases = groups.setdefault(group_id, (rank, {}))
+            phases.setdefault(key, entity_id)
 
+        usable = {
+            gid: value
+            for gid, value in groups.items()
+            if set(value[1]) in self.USABLE_PHASE_SETS
+        }
+        if not usable:
+            if groups:
+                logger.info(
+                    "Phase currents: %d candidate device(s), none exposing a "
+                    "usable phase set (L1, or L1+L2+L3): %s",
+                    len(groups),
+                    ", ".join(sorted(groups)),
+                )
+            logger.info("Discovered 0 phase current sensor(s)")
+            return {}
+
+        group_id, (_, result) = min(
+            usable.items(),
+            key=lambda kv: (
+                -len(kv[1][1]),
+                kv[1][0],
+                self._grid_side_rank(kv[0]),
+                kv[0],
+            ),
+        )
+        if len(usable) > 1:
+            logger.info(
+                "Phase currents: %d candidate device(s), selected %s",
+                len(usable),
+                group_id,
+            )
         logger.info("Discovered %d phase current sensor(s)", len(result))
-        return result
+        return dict(result)
+
+    # Household phase-current naming conventions: (pattern, phase key,
+    # meter-gated, convention rank). Lower rank wins when one install exposes
+    # both conventions — the explicit current_lN form is a deliberate
+    # household-phase naming, phase_a/b/c is inferred from a meter's own
+    # per-phase registers. The phase_a/b/c form is meter-gated; see
+    # discover_current_sensors.
+    PHASE_CURRENT_PATTERNS: ClassVar[tuple[tuple[str, str, bool, int], ...]] = (
+        ("current_l1", "current_l1", False, 0),
+        ("current_l2", "current_l2", False, 0),
+        ("current_l3", "current_l3", False, 0),
+        ("phase_a", "current_l1", True, 1),
+        ("phase_b", "current_l2", True, 1),
+        ("phase_c", "current_l3", True, 1),
+    )
+
+    # Entity-id marker identifying a metering device, used to keep the
+    # phase_a/b/c form off the inverter's own output currents.
+    METER_ID_MARKER: ClassVar[str] = "meter"
+
+    # Entity-id markers naming the *house feed* rather than a sub-circuit.
+    # Only used to break a tie between equally complete candidate groups; see
+    # discover_current_sensors.
+    GRID_ID_MARKERS: ClassVar[tuple[str, ...]] = ("power_meter", "grid")
+
+    # The only phase sets the rest of the system can act on: the wizard
+    # accepts a detected phase count of 1 or 3 and nothing else, and
+    # PowerMonitor reads current_l1 unconditionally. A group missing L1, or
+    # holding exactly two phases, would configure fuse protection that raises
+    # on every quarter — reporting nothing found is the honest outcome.
+    USABLE_PHASE_SETS: ClassVar[tuple[frozenset[str], ...]] = (
+        frozenset({"current_l1"}),
+        frozenset({"current_l1", "current_l2", "current_l3"}),
+    )
+
+    def _grid_side_rank(self, group_id: str) -> int:
+        """0 when a candidate group's id names the house feed, else 1."""
+        return 0 if any(m in group_id for m in self.GRID_ID_MARKERS) else 1
+
+    def _phase_current_group_id(self, lower_id: str, pattern: str) -> str:
+        """Identify the device a phase-current entity belongs to.
+
+        The entity id with its phase token blanked out. HA appends ``_2`` to
+        an entity id that collides with an existing one, which happens per
+        entity and so can hit a single phase of an otherwise uniform set
+        (``..._current_l3_2``); that suffix is stripped, or the meter would
+        split into two groups and lose the phases it really has.
+        """
+        return re.sub(r"_\d+$", "", lower_id.replace(pattern, "*"))
+
+    def _match_phase_current_key(self, lower_id: str) -> tuple[str, str, int] | None:
+        """Match a current sensor's entity_id to a phase.
+
+        Returns (phase_key, matched_pattern, convention_rank), or None. The
+        pattern is returned so the caller can derive the owning device's group
+        id by blanking it out of the entity_id.
+
+        Patterns match on token boundaries, not bare substrings: a meter that
+        exposes line-to-line currents names them ``phase_ab``, which must not
+        be read as phase A.
+        """
+        is_meter = self.METER_ID_MARKER in lower_id
+        for pattern, key, meter_only, rank in self.PHASE_CURRENT_PATTERNS:
+            if not re.search(
+                rf"(?<![a-z0-9]){re.escape(pattern)}(?![a-z0-9])", lower_id
+            ):
+                continue
+            if meter_only and not is_meter:
+                continue
+            return key, pattern, rank
+        return None
 
     def _match_optional_sensor(
         self, entity_id: str, lower_id: str
@@ -3270,7 +3675,9 @@ class HomeAssistantAPIController:
         result: dict[str, str] = {}
 
         if entity_registry is not None:
-            solcast = self._map_registry_entities(
+            # Solcast forecast sensors are optional — a disabled one is
+            # simply left unconfigured, nothing to report to the wizard.
+            solcast, _solcast_disabled = self._map_registry_entities(
                 entity_registry, ["solcast_solar"], self.SOLCAST_SUFFIX_MAP
             )
             result.update(solcast)
@@ -3394,7 +3801,7 @@ class HomeAssistantAPIController:
 
     def _match_solis_dict_embedded_entities(
         self, entities: list[dict]
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Map Solis monitoring entities affected by the dict-embedded unique_id bug.
 
         Scoped to the ``solis_modbus`` platform only — never touches
@@ -3409,8 +3816,13 @@ class HomeAssistantAPIController:
         the key appearing as a fragment of some other field's value.
 
         Enabled entities are preferred over disabled ones, mirroring
-        ``_map_registry_entities``'s deferral behavior — a disabled match is
-        only used if no enabled entity matches the same key.
+        ``_map_registry_entities``: a disabled entity is never mapped (it
+        has no state, so reading it 404s), and keys whose only match is
+        disabled are returned separately for the caller to report (#549).
+
+        Returns:
+            Tuple of (mapped, disabled), each mapping
+            bess_sensor_key -> entity_id.  The two never share a key.
         """
         result: dict[str, str] = {}
         disabled_matches: dict[str, str] = {}
@@ -3435,18 +3847,22 @@ class HomeAssistantAPIController:
                 result[bess_key] = entity_id
                 break
 
-        for bess_key, entity_id in disabled_matches.items():
-            if bess_key not in result:
-                result[bess_key] = entity_id
-                logger.warning(
-                    "Solis dict-embedded sensor %s only matched a disabled "
-                    "entity %s",
-                    bess_key,
-                    entity_id,
-                )
+        disabled_only = {
+            bess_key: entity_id
+            for bess_key, entity_id in disabled_matches.items()
+            if bess_key not in result
+        }
+        for bess_key, entity_id in disabled_only.items():
+            logger.warning(
+                "Solis dict-embedded sensor %s not mapped: its only match "
+                "%s is disabled in Home Assistant — enable it, then re-run "
+                "discovery",
+                bess_key,
+                entity_id,
+            )
 
         logger.info("Mapped %d Solis dict-embedded monitoring entities", len(result))
-        return result
+        return result, disabled_only
 
     def _has_solax_entity_suffix(
         self,
@@ -3529,7 +3945,7 @@ class HomeAssistantAPIController:
 
     def discover_sensors_from_registry(
         self, entities: list[dict] | None = None
-    ) -> tuple[dict[str, dict[str, str]], str | None]:
+    ) -> tuple[dict[str, dict[str, str]], str | None, dict[str, dict[str, str]]]:
         """Discover sensor entity IDs for all detected inverter platforms.
 
         Uses the ``platform`` field to identify integration entities, then maps
@@ -3541,34 +3957,42 @@ class HomeAssistantAPIController:
             entities: Pre-fetched entity registry list, or None to fetch.
 
         Returns:
-            Tuple of (platform_sensors, detected_platform) where
-            platform_sensors maps platform name to its sensor dict
-            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``)
-            and detected_platform is ``"growatt"``, ``"solax"``, or None.
-            Growatt takes priority when both are present.
+            Tuple of (platform_sensors, detected_platform, platform_disabled)
+            where platform_sensors maps platform name to its sensor dict
+            (e.g. ``{"growatt": {bess_key: entity_id, ...}, "solax": {...}}``),
+            detected_platform is ``"growatt"``, ``"solax"``, or None (Growatt
+            takes priority when both are present), and platform_disabled maps
+            platform name to the sensor keys left unmapped because their only
+            registry match is disabled in Home Assistant (#549).
         """
         if entities is None:
             entities = self.fetch_entity_registry()
 
         inverter_detected = self.detect_inverter_integrations(entities)
         platform_sensors: dict[str, dict[str, str]] = {}
+        platform_disabled: dict[str, dict[str, str]] = {}
         detected_platform: str | None = None
 
         if inverter_detected.get("growatt"):
-            min_sensors = self._map_registry_entities(
+            min_sensors, min_disabled = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.GROWATT_MIN_SUFFIX_MAP,
             )
-            sph_sensors = self._map_registry_entities(
+            sph_sensors, sph_disabled = self._map_registry_entities(
                 entities,
                 ["growatt_server"],
                 self.GROWATT_SPH_SUFFIX_MAP,
             )
-            if min_sensors:
+            # Include a platform whose every match is disabled: its sensor
+            # dict is empty, but dropping it would hide the "enable these
+            # entities" report that is the only way out of that state.
+            if min_sensors or min_disabled:
                 platform_sensors["growatt_server_min"] = min_sensors
-            if sph_sensors:
+                platform_disabled["growatt_server_min"] = min_disabled
+            if sph_sensors or sph_disabled:
                 platform_sensors["growatt_server_sph"] = sph_sensors
+                platform_disabled["growatt_server_sph"] = sph_disabled
             # Pick the platform that matched more sensors
             if len(min_sensors) >= len(sph_sensors):
                 detected_platform = "growatt_server_min"
@@ -3579,44 +4003,59 @@ class HomeAssistantAPIController:
             solax_platforms = ["solax_modbus", "solax"]
             if self._has_growatt_tou_entities(entities):
                 # GEN4: Growatt MIN/MOD/MID with numbered TOU slots
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_GROWATT_MIN_SUFFIX_MAP
                 )
                 platform_sensors["solax_modbus_growatt_min"] = solax_sensors
+                platform_disabled["solax_modbus_growatt_min"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_min"
             elif self._has_growatt_gen3_entities(entities):
                 # GEN3: Growatt MIX/SPA/SPH with mode-specific time slots
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_GROWATT_SPH_SUFFIX_MAP
                 )
                 platform_sensors["solax_modbus_growatt_sph"] = solax_sensors
+                platform_disabled["solax_modbus_growatt_sph"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_growatt_sph"
             else:
-                solax_sensors = self._map_registry_entities(
+                solax_sensors, solax_disabled = self._map_registry_entities(
                     entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
                 )
+                # battery_power_charge is a single signed register — native
+                # SolaX has no separate discharge entity (#542, same shape as
+                # the grid case below). Point battery_discharge_power at the
+                # same entity so HAApiController's signed split
+                # (battery_power_polarity) can derive both readings from it.
+                if (
+                    "battery_charge_power" in solax_sensors
+                    and "battery_discharge_power" not in solax_sensors
+                ):
+                    solax_sensors["battery_discharge_power"] = solax_sensors[
+                        "battery_charge_power"
+                    ]
                 platform_sensors["solax_modbus_native"] = solax_sensors
+                platform_disabled["solax_modbus_native"] = solax_disabled
                 if not detected_platform:
                     detected_platform = "solax_modbus_native"
 
         if inverter_detected.get("solis"):
             solis_platforms = ["solis_modbus"]
-            solis_sensors = self._map_registry_entities(
+            solis_sensors, solis_disabled = self._map_registry_entities(
                 entities, solis_platforms, self.SOLIS_SUFFIX_MAP
             )
             # Dict-embedded-unique_id monitoring entities need a separate,
             # Solis-scoped matcher (see SOLIS_DICT_EMBEDDED_SUFFIX_MAP) —
             # merge them in without touching _map_registry_entities.
+            embedded, embedded_disabled = self._match_solis_dict_embedded_entities(
+                entities
+            )
             solis_sensors.update(
-                {
-                    k: v
-                    for k, v in self._match_solis_dict_embedded_entities(
-                        entities
-                    ).items()
-                    if k not in solis_sensors
-                }
+                {k: v for k, v in embedded.items() if k not in solis_sensors}
+            )
+            solis_disabled.update(
+                {k: v for k, v in embedded_disabled.items() if k not in solis_disabled}
             )
             # Solis has no separate export_power entity — grid_power_net is
             # a single signed sensor (see SOLIS_SUFFIX_MAP comment). Point
@@ -3631,6 +4070,7 @@ class HomeAssistantAPIController:
             # Solis install must not be silently promoted to "detected"
             # like a fully-controllable one.
             platform_sensors["solis_modbus"] = solis_sensors
+            platform_disabled["solis_modbus"] = solis_disabled
             if self._has_solis_tou_v2_entities(entities):
                 if not detected_platform:
                     detected_platform = "solis_modbus"
@@ -3643,7 +4083,7 @@ class HomeAssistantAPIController:
                 )
 
         if inverter_detected.get("huawei"):
-            huawei_sensors = self._map_registry_entities(
+            huawei_sensors, huawei_disabled = self._map_registry_entities(
                 entities, ["huawei_solar"], self.HUAWEI_SUFFIX_MAP
             )
             # power_meter_active_power is a single signed register — Huawei
@@ -3656,18 +4096,40 @@ class HomeAssistantAPIController:
                 and "export_power" not in huawei_sensors
             ):
                 huawei_sensors["export_power"] = huawei_sensors["import_power"]
+            # storage_charge_discharge_power is likewise a single signed
+            # register (reg 37765, positive = charging) with no discharge
+            # counterpart — same pairing, one layer down (#542). See
+            # PLATFORM_BATTERY_POWER_POLARITY["huawei_solar_luna2000"].
+            if (
+                "battery_charge_power" in huawei_sensors
+                and "battery_discharge_power" not in huawei_sensors
+            ):
+                huawei_sensors["battery_discharge_power"] = huawei_sensors[
+                    "battery_charge_power"
+                ]
             platform_sensors["huawei_solar_luna2000"] = huawei_sensors
+            platform_disabled["huawei_solar_luna2000"] = huawei_disabled
             if not detected_platform:
                 detected_platform = "huawei_solar_luna2000"
 
-        return platform_sensors, detected_platform
+        # A key that some other path did map (a derived alias, the Solis
+        # signed-sensor aliasing above) is configured, not disabled — the
+        # two dicts must never overlap, or the wizard would block on a
+        # sensor it actually has.
+        for platform, disabled in platform_disabled.items():
+            mapped = platform_sensors.get(platform, {})
+            for bess_key in list(disabled):
+                if bess_key in mapped:
+                    del disabled[bess_key]
+
+        return platform_sensors, detected_platform, platform_disabled
 
     def _map_registry_entities(
         self,
         entities: list[dict],
         platforms: list[str],
         suffix_map: dict[str, str],
-    ) -> dict[str, str]:
+    ) -> tuple[dict[str, str], dict[str, str]]:
         """Map entity registry entries to BESS sensor keys using unique_id.
 
         Filters entities belonging to the given platforms, then matches
@@ -3675,9 +4137,11 @@ class HomeAssistantAPIController:
         is assigned by the integration and never changes regardless of
         user entity renaming — this is the only reliable matching strategy.
 
-        Enabled entities are preferred over disabled ones.  If the only
-        match for a sensor key is a disabled entity, it is still returned
-        (the caller can read its state) but a warning is logged.
+        Enabled entities are preferred over disabled ones.  A disabled
+        entity is never mapped: it has no state in Home Assistant, so any
+        read of it 404s.  Keys whose only match is disabled are returned
+        separately so the caller can tell the user which entities to
+        enable, instead of persisting a mapping that cannot work (#549).
 
         Args:
             entities: Full entity registry list.
@@ -3685,7 +4149,8 @@ class HomeAssistantAPIController:
             suffix_map: Maps entity suffix -> BESS sensor key.
 
         Returns:
-            dict mapping bess_sensor_key -> entity_id.
+            Tuple of (mapped, disabled), each mapping
+            bess_sensor_key -> entity_id.  The two never share a key.
         """
         result: dict[str, str] = {}
         disabled_matches: dict[str, str] = {}
@@ -3722,20 +4187,26 @@ class HomeAssistantAPIController:
                             result[bess_key] = entity_id
                     break
 
-        # Fill gaps with disabled entities and warn
-        for bess_key, entity_id in disabled_matches.items():
-            if bess_key not in result:
-                result[bess_key] = entity_id
-                logger.warning(
-                    "Sensor '%s' mapped to disabled entity %s — "
-                    "enable it in Home Assistant for reliable operation",
-                    bess_key,
-                    entity_id,
-                )
+        # Keys whose only match is disabled stay unmapped — reading a
+        # disabled entity 404s, so mapping one just defers the failure to
+        # runtime.  Report them instead (#549).
+        disabled_only = {
+            bess_key: entity_id
+            for bess_key, entity_id in disabled_matches.items()
+            if bess_key not in result
+        }
+        for bess_key, entity_id in disabled_only.items():
+            logger.warning(
+                "Sensor '%s' not mapped: its only match %s is disabled in "
+                "Home Assistant — enable it, then re-run discovery",
+                bess_key,
+                entity_id,
+            )
 
         logger.info(
-            "Mapped %d entities from registry (platforms=%s)",
+            "Mapped %d entities from registry (platforms=%s, %d disabled)",
             len(result),
             platforms,
+            len(disabled_only),
         )
-        return result
+        return result, disabled_only

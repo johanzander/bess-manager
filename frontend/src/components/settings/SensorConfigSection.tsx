@@ -83,6 +83,18 @@ export interface DiscoveryResult {
   sensors: Record<string, string>;
   platformSensors?: Record<string, Record<string, string>>;
   missingSensors: string[];
+  /**
+   * Sensor keys left unmapped because their only matching HA entity is
+   * disabled (#549).  Distinct from missingSensors: the entity exists, it
+   * just has no state until the user switches it on, so the fix is
+   * "enable it in HA", not "install something".
+   */
+  disabledSensors?: Record<string, string>;
+  /**
+   * Same, but keyed by platform — the user can switch the inverter tab away
+   * from the auto-detected platform, and the gate must follow that choice.
+   */
+  platformDisabledSensors?: Record<string, Record<string, string>>;
   detectedInverterPlatforms?: string[];
   detectedPhaseCount: number | null;
   currency: string | null;
@@ -511,8 +523,7 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
               <TabsContent value="solis">
                 <p className="text-xs text-gray-500 dark:text-gray-400">
                   Solis hybrid inverter via the Pho3niX90/solis_modbus integration
-                  (Grid Time of Use v2, local Modbus). Experimental — not yet
-                  validated against a real Solis installation.
+                  (Grid Time of Use v2, local Modbus).
                 </p>
               </TabsContent>
 

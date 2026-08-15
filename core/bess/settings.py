@@ -154,6 +154,19 @@ class BatterySettings:
         self.max_soe_kwh = self.total_capacity * self.max_soc / 100.0
         self.reserved_capacity = self.min_soe_kwh
 
+    def should_curtail_export(self, grid_exported: float, sell_price: float) -> bool:
+        """Core export-limit curtailment condition (#269).
+
+        Single source of truth shared by the DP's planning-time
+        decision.curtailed (#501, dp_battery_algorithm's _create_period_data)
+        and BSM's execution-time gate (_apply_period_schedule) — the two must
+        never diverge, or the UI's Curtailed display desyncs from actual
+        inverter behavior. Callers apply their own outer gates (the DP's
+        capability-aware export_curtailment_active, BSM's
+        export_curtailment_enabled + release latch).
+        """
+        return grid_exported > 0 and sell_price < self.export_curtailment_price_floor
+
     def update(self, **kwargs: Any) -> None:
         """Update settings from a snake_case dict — the store's native format.
 
@@ -200,7 +213,7 @@ class HomeSettings:
     default_hourly: float = HOME_HOURLY_CONSUMPTION_KWH
     min_valid: float = MIN_CONSUMPTION
     currency: str = DEFAULT_CURRENCY
-    consumption_strategy: str = "sensor"
+    consumption_strategy: str = "fixed"
     power_monitoring_enabled: bool = False
 
     def __post_init__(self):
@@ -256,9 +269,7 @@ class HomeSettings:
                 "consumption", HOME_HOURLY_CONSUMPTION_KWH
             )
             self.currency = config["home"].get("currency", DEFAULT_CURRENCY)
-            self.consumption_strategy = home_config.get(
-                "consumption_strategy", "sensor"
-            )
+            self.consumption_strategy = home_config.get("consumption_strategy", "fixed")
             self.power_monitoring_enabled = home_config["power_monitoring_enabled"]
             self.__post_init__()
         return self

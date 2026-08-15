@@ -107,15 +107,48 @@ class SensorCollector:
         self.power_sensors = self._resolve_power_sensor_ids()
         self.energy_flow_calculator.rebuild_sensor_mapping()
 
+    def _shared_signed_power_entities(self) -> set[str]:
+        """Entity IDs that back more than one power flow key.
+
+        Some platforms publish one signed sensor where BESS wants two
+        directional readings — battery power on native SolaX / Huawei (#542),
+        grid power on Solis / Huawei (#475/#438) — so both keys resolve to the
+        same entity and HAApiController splits the live reading by sign.
+
+        That split is impossible here: InfluxDB returns a period *mean* of the
+        entity, in which charge and discharge (or import and export) have
+        already cancelled into one number. Such entities are therefore
+        excluded from the InfluxDB power path entirely rather than being
+        attributed to whichever flow ``power_sensor_flow_map`` happens to
+        iterate last. The live PowerSampleBuffer path (#387) still covers
+        these installs — it samples through the sign-splitting getters.
+        """
+        seen: dict[str, int] = {}
+        for sensor_key in self.power_sensor_flow_map:
+            entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
+            if entity_id:
+                seen[entity_id] = seen.get(entity_id, 0) + 1
+        return {entity_id for entity_id, count in seen.items() if count > 1}
+
     def _resolve_power_sensor_ids(self) -> list[str]:
         """Resolve power sensor keys to entity IDs for InfluxDB.
 
         Returns list of entity IDs (without 'sensor.' prefix).
         """
+        shared = self._shared_signed_power_entities()
         resolved_ids = []
         for sensor_key in self.power_sensor_flow_map:
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
-            if entity_id:
+            if entity_id in shared:
+                logger.info(
+                    "Power sensor key '%s' resolves to shared signed entity "
+                    "'%s' — excluded from InfluxDB gap-fill (direction is not "
+                    "recoverable from a period mean); live sampling still "
+                    "covers it",
+                    sensor_key,
+                    entity_id,
+                )
+            elif entity_id:
                 resolved_ids.append(entity_id)
                 logger.debug(
                     f"Resolved power sensor key '{sensor_key}' to '{entity_id}'"
@@ -560,10 +593,11 @@ class SensorCollector:
         Returns:
             Dict mapping "sensor.entity_id" -> flow_name
         """
+        shared = self._shared_signed_power_entities()
         entity_to_flow = {}
         for sensor_key, flow_name in self.power_sensor_flow_map.items():
             entity_id = self.ha_controller.resolve_sensor_for_influxdb(sensor_key)
-            if entity_id:
+            if entity_id and entity_id not in shared:
                 entity_to_flow[f"sensor.{entity_id}"] = flow_name
         return entity_to_flow
 
@@ -845,17 +879,27 @@ class SensorCollector:
         Only validates the ``get_estimated_consumption`` sensor when the
         ``sensor`` strategy is active — other strategies (fixed,
         influxdb_7d_avg, ha_statistics) do not rely on that HA sensor.
+
+        Under the ``sensor`` strategy that sensor is *required*: every
+        optimization run reads it and aborts without it, so no schedule can
+        ever be built and the dashboard sits on "Initializing" indefinitely
+        (#558). The solar forecast stays optional under every strategy, so
+        only the consumption method is named as required.
         """
         all_methods = ["get_solar_forecast"]
-        if consumption_strategy == "sensor":
+        sensor_strategy_active = consumption_strategy == "sensor"
+        if sensor_strategy_active:
             all_methods = ["get_estimated_consumption", *all_methods]
 
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
-            is_required=False,
+            is_required=sensor_strategy_active,
             controller=self.ha_controller,
             all_methods=all_methods,
+            required_methods=(
+                ["get_estimated_consumption"] if sensor_strategy_active else None
+            ),
         )
 
     def check_health(self, consumption_strategy: str = "sensor") -> list:

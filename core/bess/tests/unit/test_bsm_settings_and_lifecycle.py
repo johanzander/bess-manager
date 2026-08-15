@@ -4,11 +4,13 @@ These tests exercise orchestration methods that do NOT require the DP optimizer,
 using MockHomeAssistantController from conftest.
 """
 
+import logging
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.exceptions import SystemConfigurationError
 from core.bess.models import (
@@ -580,6 +582,44 @@ class TestRefreshHealthCheck:
 
         assert system.has_critical_sensor_failures()
         assert system.get_critical_sensor_failures() == ["Battery SOC"]
+
+    def test_degraded_message_does_not_blame_sensor_configuration(self, system, caplog):
+        """Issue #583: a required component can fail because an upstream source
+        is temporarily unavailable, not because anything is misconfigured. The
+        degraded-mode banner must not tell the user to fix a configuration that
+        is correct — it pointed a user at the Nordpool settings for a 77-second
+        HA outage that healed itself.
+        """
+        failing_result = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Electricity Price Data",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Nordpool Service Call",
+                            "status": "ERROR",
+                            "error": "Nordpool price data is temporarily unavailable, "
+                            "will retry on the next fetch",
+                        }
+                    ],
+                }
+            ],
+        }
+        with patch(
+            "core.bess.battery_system_manager.run_system_health_checks",
+            return_value=failing_result,
+        ):
+            with caplog.at_level(
+                logging.INFO, logger="core.bess.battery_system_manager"
+            ):
+                system.refresh_health_check()
+
+        logged = "\n".join(r.getMessage() for r in caplog.records)
+        assert "fix sensor configuration" not in logged.lower()
+        assert "Electricity Price Data" in logged
 
     def test_retries_schedule_build_when_no_schedule_and_sensors_healthy(self, system):
         """A health check that finds no critical failures but no schedule was
@@ -1260,3 +1300,63 @@ class TestBackfillSkipsDiskSeededPeriods:
         collected_periods = [call.args[0] for call in mock_collect.call_args_list]
         assert 0 not in collected_periods
         assert 1 in collected_periods
+
+
+class TestQuietCycleReconcilesHardware:
+    """A cycle that changes nothing must still re-assert the plan.
+
+    Since #554 the write path is skipped when the plan is unchanged, so this
+    is the only thing that looks at the inverter on a quiet cycle. Issue #551
+    established that the segment table drifts on its own.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _pin_time_of_day(self):
+        """Pin the clock past period 10, keeping today's date.
+
+        Both tests drive `update_battery_schedule(current_period=10)` while the
+        rest of the system reads the real clock. Before 02:30 local, period 9 is
+        still in the future, so data collection raises ("Period 9 is still in
+        progress or in the future") and the cycle aborts before reaching
+        reconcile_hardware — the assertion then fails for a reason that has
+        nothing to do with reconciliation. The window is real: this fails every
+        day between local midnight and 02:30, which is why it passed in CI on
+        the way in (21:49 UTC = 23:49 local) and failed on the next PR
+        (22:30 UTC = 00:30 local).
+        """
+        pinned = time_utils.now().replace(hour=15, minute=0, second=0, microsecond=0)
+        with patch("core.bess.time_utils.now", return_value=pinned):
+            yield
+
+    def test_quiet_cycle_reconciles(self, system):
+        system._current_schedule = MagicMock()
+        with patch.object(
+            system._inverter_controller, "reconcile_hardware", return_value=(0, 0)
+        ) as reconcile:
+            system.update_battery_schedule(current_period=10)
+            system.update_battery_schedule(current_period=10)
+
+        assert (
+            reconcile.called
+        ), "Nothing looked at the inverter on a cycle that changed nothing"
+
+    def test_failed_reconciliation_is_retried_not_fatal(self, system):
+        """The optimization needs no inverter — a failed re-assert must not
+        end the cycle, and must not be forgotten either.
+
+        Checked immediately after the failing cycle: leave it any longer and
+        the next cycle has already retried and cleared the flag, which is the
+        mechanism working rather than the failure being lost.
+        """
+        system.update_battery_schedule(current_period=10)  # first cycle applies
+
+        with patch.object(
+            system._inverter_controller,
+            "reconcile_hardware",
+            side_effect=Exception("Growatt device_id not configured"),
+        ):
+            system.update_battery_schedule(current_period=10)  # quiet cycle
+
+        assert (
+            system._hardware_write_pending is True
+        ), "A failed re-assert was swallowed with nothing scheduled to retry it"

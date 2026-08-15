@@ -12,17 +12,10 @@
       }
     },
     "sensor.solax_battery_power_charge": {
-      "state": "0",
+      "state": "-800",
       "attributes": {
         "unit_of_measurement": "W",
-        "friendly_name": "SolaX Battery Charge Power"
-      }
-    },
-    "sensor.solax_battery_power_discharge": {
-      "state": "800",
-      "attributes": {
-        "unit_of_measurement": "W",
-        "friendly_name": "SolaX Battery Discharge Power"
+        "friendly_name": "SolaX Battery Power Charge"
       }
     },
     "sensor.solax_measured_power": {
@@ -51,6 +44,41 @@
       "attributes": {
         "unit_of_measurement": "W",
         "friendly_name": "SolaX House Load"
+      }
+    },
+    "sensor.solax_battery_input_energy_total": {
+      "state": "1250.5",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "friendly_name": "SolaX Battery Input Energy Total"
+      }
+    },
+    "sensor.solax_battery_output_energy_total": {
+      "state": "1180.2",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "friendly_name": "SolaX Battery Output Energy Total"
+      }
+    },
+    "sensor.solax_total_solar_energy": {
+      "state": "8420.7",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "friendly_name": "SolaX Total Solar Energy"
+      }
+    },
+    "sensor.solax_grid_import_total": {
+      "state": "5310.4",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "friendly_name": "SolaX Grid Import Total"
+      }
+    },
+    "sensor.solax_grid_export_total": {
+      "state": "3105.9",
+      "attributes": {
+        "unit_of_measurement": "kWh",
+        "friendly_name": "SolaX Grid Export Total"
       }
     },
     "select.solax_remotecontrol_power_control": {
@@ -203,12 +231,6 @@
       "unique_id": "solax_battery_power_charge"
     },
     {
-      "entity_id": "sensor.solax_battery_power_discharge",
-      "platform": "solax_modbus",
-      "config_entry_id": "mock_solax_config_entry",
-      "unique_id": "solax_battery_power_discharge"
-    },
-    {
       "entity_id": "sensor.solax_measured_power",
       "platform": "solax_modbus",
       "config_entry_id": "mock_solax_config_entry",
@@ -231,6 +253,36 @@
       "platform": "solax_modbus",
       "config_entry_id": "mock_solax_config_entry",
       "unique_id": "solax_house_load"
+    },
+    {
+      "entity_id": "sensor.solax_battery_input_energy_total",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_input_energy_total"
+    },
+    {
+      "entity_id": "sensor.solax_battery_output_energy_total",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_battery_output_energy_total"
+    },
+    {
+      "entity_id": "sensor.solax_total_solar_energy",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_total_solar_energy"
+    },
+    {
+      "entity_id": "sensor.solax_grid_import_total",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_grid_import_total"
+    },
+    {
+      "entity_id": "sensor.solax_grid_export_total",
+      "platform": "solax_modbus",
+      "config_entry_id": "mock_solax_config_entry",
+      "unique_id": "solax_grid_export_total"
     },
     {
       "entity_id": "select.solax_remotecontrol_power_control",
@@ -343,6 +395,11 @@
       "battery_soc",
       "export_power",
       "import_power",
+      "lifetime_battery_charged",
+      "lifetime_battery_discharged",
+      "lifetime_export_to_grid",
+      "lifetime_import_from_grid",
+      "lifetime_solar_energy",
       "local_load_power",
       "pv_power",
       "solax_active_power",

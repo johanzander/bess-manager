@@ -45,6 +45,10 @@ class GrowattSphController(InverterController):
     # they don't silently reproduce #324's forced-discharge failure mode.
     discharge_rate_is_load_following: ClassVar[bool] = False
 
+    # Same reason as the flag above, one level up: a discharge period is a
+    # time slot with no rate, so a partial load cover cannot be commanded.
+    load_support_delivers_exact_cover: ClassVar[bool] = False
+
     CONTROL_MODEL: ClassVar[str] = "period_list"
 
     MAX_CHARGE_PERIODS = 3
@@ -81,7 +85,7 @@ class GrowattSphController(InverterController):
 
         SPH inverters have no per-period entity controls (grid_charge switch,
         discharge rate number).  The entire schedule is written in
-        ``write_to_hardware`` using ``write_ac_charge_times`` /
+        ``sync_to_hardware`` using ``write_ac_charge_times`` /
         ``write_ac_discharge_times``.
         """
         return True, ""
@@ -154,11 +158,10 @@ class GrowattSphController(InverterController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
-    def write_to_hardware(
+    def sync_to_hardware(
         self,
         controller,
         effective_period: int,
-        current_tou: list,
     ) -> tuple[int, int]:
         """Write SPH charge and discharge periods to hardware.
 
@@ -168,7 +171,6 @@ class GrowattSphController(InverterController):
         Args:
             controller: HomeAssistantAPIController instance
             effective_period: Unused for SPH (full rewrite each time)
-            current_tou: Unused for SPH (full rewrite each time)
 
         Returns:
             Tuple of (writes, disables) — always (2, 0) for SPH

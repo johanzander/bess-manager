@@ -446,3 +446,29 @@ def test_three_phase_returns_three_element_tuple(standard_settings):
 
     loads = monitor.get_current_phase_loads_w()
     assert len(loads) == 3, f"Expected 3-element tuple, got {len(loads)}"
+
+
+def test_get_current_phase_loads_w_raises_value_error_on_none_reading():
+    """A sensor becoming unavailable after being validated (HA restart,
+    integration reload, deleted entity) must not crash with a raw TypeError
+    from `None * voltage` — it should raise a clear ValueError instead, which
+    adjust_charging_power()'s existing except clause already catches
+    (battery_system_manager.py:3348)."""
+
+    class FlakyController:
+        def get_l1_current(self):
+            return None  # sensor temporarily unavailable
+
+        def get_l2_current(self):
+            return 5.0
+
+        def get_l3_current(self):
+            return 5.0
+
+    monitor = HomePowerMonitor(
+        FlakyController(),
+        HomeSettings(power_monitoring_enabled=True, phase_count=3),
+        BatterySettings(),
+    )
+    with pytest.raises(ValueError, match="current_l1"):
+        monitor.get_current_phase_loads_w()

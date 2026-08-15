@@ -613,8 +613,9 @@ class TestSimulatorMapRates:
         assert charge_rate == 100
 
     def test_gate_omitted_leaves_solar_export_at_zero(self):
-        """#388: no shadow_price/buy_price supplied -> gate is a no-op,
-        matching pre-gate SOLAR_EXPORT behavior (discharge always 0)."""
+        """#388: no authorization supplied (None -> caller opted out of the
+        gate) -> gate is a no-op, matching pre-gate SOLAR_EXPORT behavior
+        (discharge always 0)."""
         from core.bess.simulation.inverter_simulator import _map_rates
 
         _grid_charge, rate, _charge_rate = _map_rates(
@@ -622,49 +623,61 @@ class TestSimulatorMapRates:
         )
         assert rate == 0
 
-    def test_gate_opens_solar_export_on_favorable_shadow_price(self):
-        """#388: buy_price * eff_d >= shadow_price -> gate opens, discharge
-        ceiling raised to 100 (mirrors BatterySystemManager's real gate)."""
+    def test_gate_closed_when_dp_withholds_authorization(self):
+        """#526: `False` (the DP deciding against) must be distinct from
+        `None` (caller opting out) only in intent -- both keep the ceiling
+        at the planned baseline, and neither may open it."""
         from core.bess.simulation.inverter_simulator import _map_rates
 
-        s = self._settings()
         _grid_charge, rate, _charge_rate = _map_rates(
-            "SOLAR_EXPORT", 0.0, s, shadow_price=0.5, buy_price=2.0
-        )
-        assert rate == 100
-
-    def test_gate_stays_closed_on_unfavorable_shadow_price(self):
-        """#388: buy_price * eff_d < shadow_price -> gate stays closed."""
-        from core.bess.simulation.inverter_simulator import _map_rates
-
-        s = self._settings()
-        _grid_charge, rate, _charge_rate = _map_rates(
-            "SOLAR_STORAGE", 0.0, s, shadow_price=4.0, buy_price=0.2
+            "SOLAR_EXPORT", 0.0, self._settings(), intra_period_discharge_allowed=False
         )
         assert rate == 0
 
-    def test_load_support_ignores_shadow_price_gate_entirely(self):
-        """#393: LOAD_SUPPORT no longer consults the shadow-price gate at all
-        (reverted #384/#385) -- shadow_price/buy_price are accepted but have
-        no effect, so the plan-scaled baseline (#147) is always what's
-        applied, regardless of whether the (unused) gate condition would
-        have been favorable or not."""
+    def test_gate_opens_solar_export_when_dp_authorizes(self):
+        """#388: the DP authorized sub-period discharge for this period ->
+        gate opens, discharge ceiling raised to 100 (mirrors
+        BatterySystemManager's real gate). The economic comparison behind the
+        authorization lives in the DP (#526), not here."""
         from core.bess.simulation.inverter_simulator import _map_rates
 
         s = self._settings()
         _grid_charge, rate, _charge_rate = _map_rates(
-            "LOAD_SUPPORT", -1.5, s, shadow_price=4.0, buy_price=0.2
+            "SOLAR_EXPORT", 0.0, s, intra_period_discharge_allowed=True
+        )
+        assert rate == 100
+
+    def test_gate_stays_closed_when_dp_does_not_authorize(self):
+        """#388: the DP withheld authorization -> gate stays closed."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "SOLAR_STORAGE", 0.0, s, intra_period_discharge_allowed=False
+        )
+        assert rate == 0
+
+    def test_load_support_ignores_discharge_gate_entirely(self):
+        """#393: LOAD_SUPPORT no longer consults the intra-period discharge
+        gate at all (reverted #384/#385) -- the authorization is accepted but
+        has no effect, so the plan-scaled baseline (#147) is always what's
+        applied, even when the DP did authorize sub-period discharge."""
+        from core.bess.simulation.inverter_simulator import _map_rates
+
+        s = self._settings()
+        _grid_charge, rate, _charge_rate = _map_rates(
+            "LOAD_SUPPORT", -1.5, s, intra_period_discharge_allowed=True
         )
         assert rate == 10  # baseline preserved (1.5 / 15.0 * 100)
 
     def test_battery_export_unaffected_by_gate(self):
         """#388: BATTERY_EXPORT has no deficit backstop (grid_first) -- the
-        gate must never touch it, even with a favorable shadow price."""
+        gate must never touch it, even when the DP authorized discharge."""
         from core.bess.simulation.inverter_simulator import _map_rates
 
         s = self._settings()
         _grid_charge, rate, _charge_rate = _map_rates(
-            "BATTERY_EXPORT", -1.5, s, shadow_price=0.5, buy_price=2.0
+            "BATTERY_EXPORT", -1.5, s, intra_period_discharge_allowed=True
         )
         assert rate == 10  # unchanged: gate never applies to BATTERY_EXPORT
 

@@ -2,12 +2,10 @@ import numpy as np
 import pytest
 
 from core.bess import pwl_window_dp
-from core.bess.dp_battery_algorithm import (
-    BATTERY_EXPORT_THRESHOLD_KWH,
-    _discharge_candidates,
-)
+from core.bess.action_selector import _discharge_candidates
 from core.bess.dp_constants import POWER_STEP_KW
 from core.bess.exceptions import PWLWindowUnderRefinedError
+from core.bess.execution_model import DEFAULT_CAPABILITIES
 from core.bess.pwl_window_dp import (
     _backward_discharge_levels,
     _end_soe_pin_tolerance,
@@ -78,19 +76,21 @@ def test_pwl_best_action_at_continuous_state_prefers_idle_when_flat_continuation
     vs = np.array([0.0, 0.0])
     soe = (battery_settings.min_soe_kwh + battery_settings.max_soe_kwh) / 2
 
-    action, next_soe, _new_cost_basis, _reward = _pwl_best_action_at_continuous_state(
-        soe=soe,
-        t=0,
-        V_next=(xs, vs),
-        power_levels=np.array([]),
-        home_consumption=[0.0],
-        battery_settings=battery_settings,
-        dt=1.0,
-        solar_production=[0.0],
-        buy_price=[0.0],
-        sell_price=[0.0],
-        cost_basis=0.0,
-        max_charge_power_per_period=None,
+    action, next_soe, _new_cost_basis, _reward, _flows = (
+        _pwl_best_action_at_continuous_state(
+            soe=soe,
+            t=0,
+            V_next=(xs, vs),
+            power_levels=np.array([]),
+            home_consumption=[0.0],
+            battery_settings=battery_settings,
+            dt=1.0,
+            solar_production=[0.0],
+            buy_price=[0.0],
+            sell_price=[0.0],
+            cost_basis=0.0,
+            max_charge_power_per_period=None,
+        )
     )
 
     assert action == pytest.approx(0.0)
@@ -190,28 +190,28 @@ def test_pinned_window_forward_replay_lands_on_target():
     soe = start_soe
     cost_basis = 0.0
     for t in range(horizon):
-        _action, next_soe, cost_basis, _reward = _pwl_best_action_at_continuous_state(
-            soe=soe,
-            t=t,
-            V_next=V[t + 1],
-            power_levels=np.array([]),
-            home_consumption=home_consumption,
-            battery_settings=battery,
-            dt=dt,
-            solar_production=solar_production,
-            buy_price=buy_price,
-            sell_price=sell_price,
-            cost_basis=cost_basis,
-            max_charge_power_per_period=None,
+        _action, next_soe, cost_basis, _reward, _flows = (
+            _pwl_best_action_at_continuous_state(
+                soe=soe,
+                t=t,
+                V_next=V[t + 1],
+                power_levels=np.array([]),
+                home_consumption=home_consumption,
+                battery_settings=battery,
+                dt=dt,
+                solar_production=solar_production,
+                buy_price=buy_price,
+                sell_price=sell_price,
+                cost_basis=cost_basis,
+                max_charge_power_per_period=None,
+            )
         )
         soe = next_soe
 
     # The real invariant is the pin's own half-width, not a round number:
     # the discharge lattice guarantees a reachable state inside the band, so
     # anything outside it means the pin failed to steer.
-    pin_half_width = _end_soe_pin_tolerance(
-        1e-3, battery, dt, discharge_resolution_kw=None
-    )
+    pin_half_width = _end_soe_pin_tolerance(1e-3, battery, dt, DEFAULT_CAPABILITIES)
     assert soe == pytest.approx(target, abs=pin_half_width), (
         f"forward replay must land within the pin half-width "
         f"{pin_half_width} of the pinned end SOE {target}, got {soe}"
@@ -226,11 +226,11 @@ def test_end_soe_pin_tolerance_is_floored_at_half_the_action_lattice():
     dt = 0.25
     lattice_step = (battery.max_discharge_power_kw / 100) * dt / 0.95
 
-    floored = _end_soe_pin_tolerance(1e-6, battery, dt, discharge_resolution_kw=None)
+    floored = _end_soe_pin_tolerance(1e-6, battery, dt, DEFAULT_CAPABILITIES)
     assert floored == pytest.approx(lattice_step / 2)
 
     # A caller asking for a *wider* band keeps it.
-    honoured = _end_soe_pin_tolerance(0.5, battery, dt, discharge_resolution_kw=None)
+    honoured = _end_soe_pin_tolerance(0.5, battery, dt, DEFAULT_CAPABILITIES)
     assert honoured == pytest.approx(0.5)
 
 
@@ -325,7 +325,7 @@ def test_resolve_pwl_window_reaches_pinned_end_soe_exactly():
     )
     assert len(actions) == 3
     pin_half_width = _end_soe_pin_tolerance(
-        1e-3, battery, dt=0.25, discharge_resolution_kw=None
+        1e-3, battery, dt=0.25, capabilities=DEFAULT_CAPABILITIES
     )
     final_soe = actions[-1][1]
     assert final_soe == pytest.approx(5.0, abs=pin_half_width)
@@ -375,13 +375,15 @@ def test_exact_discharge_preimages_are_seeded_on_every_row():
     battery = _tiny_battery()
     dt = 0.25
     discharge_energy = (
-        _backward_discharge_levels(battery, None) * dt / battery.efficiency_discharge
+        _backward_discharge_levels(battery, DEFAULT_CAPABILITIES)
+        * dt
+        / battery.efficiency_discharge
     )
     # A row far larger than the old 30000 / 98 ~ 306 cut-off.
     xs_next = np.linspace(battery.min_soe_kwh, battery.max_soe_kwh, 2000)
 
     X = _pwl_window_seed_points(
-        0, xs_next, battery, dt, [0.0], [0.0], discharge_resolution_kw=None
+        0, xs_next, battery, dt, [0.0], [0.0], capabilities=DEFAULT_CAPABILITIES
     )
 
     expected = np.add.outer(xs_next, discharge_energy).ravel()
@@ -461,7 +463,7 @@ def test_pwl_replay_respects_the_grid_import_cap():
     home = 1.0  # kWh per period of household load
     cap = 1.2  # leaves only 0.2 kWh of headroom for grid charging
 
-    _, uncapped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+    _, uncapped_next_soe, _, _, _ = _pwl_best_action_at_continuous_state(
         soe=2.0,
         t=0,
         V_next=v_next,
@@ -475,7 +477,7 @@ def test_pwl_replay_respects_the_grid_import_cap():
         cost_basis=0.0,
         max_charge_power_per_period=None,
     )
-    _, capped_next_soe, _, _ = _pwl_best_action_at_continuous_state(
+    _, capped_next_soe, _, _, _ = _pwl_best_action_at_continuous_state(
         soe=2.0,
         t=0,
         V_next=v_next,
@@ -549,7 +551,7 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
     actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
 
     soe = start_soe
-    for t, (_power, next_soe) in enumerate(actions):
+    for t, (_power, next_soe, _flows) in enumerate(actions):
         planned_import = _planned_import_kwh(soe, next_soe, home, battery)
         assert planned_import <= cap + 1e-9, (
             f"period {t} plans {planned_import} kWh of grid import, above the "
@@ -625,7 +627,9 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
     battery = _tiny_battery()
     dt = 1.0
     level = 2.5  # an exact member of this battery's 0.05 kW percent lattice
-    assert np.isclose(_backward_discharge_levels(battery, None), level).any()
+    assert np.isclose(
+        _backward_discharge_levels(battery, DEFAULT_CAPABILITIES), level
+    ).any()
 
     # One ULP below the SOE at which `level` becomes affordable.
     onset = battery.min_soe_kwh + level * dt / battery.efficiency_discharge
@@ -634,7 +638,7 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
     buy_price, sell_price, home, solar = [1.0], [0.5], [0.5], [0.0]
     continuation = _pinned_terminal_row(
         battery.min_soe_kwh,
-        _end_soe_pin_tolerance(1e-6, battery, dt, None),
+        _end_soe_pin_tolerance(1e-6, battery, dt, DEFAULT_CAPABILITIES),
         battery,
     )
 
@@ -645,7 +649,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         dt,
         home[0],
         solar[0],
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         ac_cap_kwh=None,
     )
     assert np.isclose(replay_levels, level).any(), (
@@ -654,7 +657,7 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
     )
 
     # ...so the replay's one-step Bellman value is the value to match.
-    _action, next_soe, _basis, reward = _pwl_best_action_at_continuous_state(
+    _action, next_soe, _basis, reward, _flows = _pwl_best_action_at_continuous_state(
         soe=soe,
         t=0,
         V_next=continuation,
@@ -667,7 +670,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         sell_price=sell_price,
         cost_basis=0.0,
         max_charge_power_per_period=None,
-        self_throttle_export_threshold_kwh=BATTERY_EXPORT_THRESHOLD_KWH,
         import_cap_kwh=None,
     )
     replay_value = reward + float(_pwl_eval_array(continuation, np.asarray(next_soe)))
@@ -675,7 +677,7 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
     power_row = np.concatenate(
         (
             [0.0],
-            _backward_discharge_levels(battery, None) * -1,
+            _backward_discharge_levels(battery, DEFAULT_CAPABILITIES) * -1,
             [POWER_STEP_KW],
         )
     )
@@ -688,7 +690,6 @@ def test_backward_pass_admits_the_discharge_levels_the_replay_admits():
         battery,
         dt,
         None,
-        BATTERY_EXPORT_THRESHOLD_KWH,
         None,
     )[0]
 

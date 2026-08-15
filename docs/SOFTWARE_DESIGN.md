@@ -78,7 +78,7 @@ def start() -> None
 
 **Algorithm Flow**:
 
-1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.1 kWh / 0.2 kW)
+1. **Discretization**: Battery state of energy (SOE) and power levels are discretized into fine-grained steps (0.025 kWh / 0.1 kW -- halved in #512 after a full-corpus benchmark showed the coarser 0.05 kWh / 0.2 kW grid left 0.01-0.36 SEK/day unrealized on most fixtures)
 2. **Backward Induction**: Starting from the last period, work backwards evaluating all feasible actions (charge/discharge/idle) at each (period, SOE) cell
 3. **Reward + Future Value**: For each action, compute the immediate reward (grid cost savings minus cycle cost) plus the optimal future value from the resulting SOE state
 4. **Policy Extraction**: Forward-simulate from the initial SOE, following the optimal action at each step to produce the final schedule
@@ -364,6 +364,14 @@ for the full VPP-mode design (issue #355).
 2. Only create TOU segments for strategic modes (battery_first, grid_first) — load_first is the inverter default and needs no segment
 3. Enforce hardware constraints: max 9 TOU segments, chronological order, no overlaps
 4. Preserve past intervals to minimize unnecessary inverter writes
+5. Diff against segments read fresh from the inverter on every write cycle, never against an in-memory model — a model seeded once at startup drifts from hardware, producing writes that duplicate live segments (rejected by the vendor API) and leaving dropped segments enabled on the battery ([#551](https://github.com/johanzander/bess-manager/issues/551))
+6. Only write a segment once its start is within `GrowattMinController.WRITE_HORIZON_MINUTES` (45 min). A segment has no effect until it starts, so writing it earlier is pure churn: a marginal period crossing the economic boundary back and forth rewrote the same far-future segment on every cycle. Deferral applies to *updates* only — an unplanned segment is still disabled promptly, and a pending write is retried each cycle, so a segment is eligible on four cycles with three attempts landing strictly before it takes effect ([#554](https://github.com/johanzander/bess-manager/issues/554))
+
+Because at most `floor(45/15) + 1 = 4` segments can be within the horizon at once, no realistic plan now reaches the 9-slot limit. The cap in step 3 remains enforced as the inverter's hard contract (`segment_id` must be 1..9), but the horizon is what binds first.
+
+7. On a cycle where the plan is unchanged, re-run the sync anyway (`reconcile_hardware`, default no-op; only the differential-update platform implements it, as a straight call to its own `sync_to_hardware`). The comparison in step 6 is plan-against-plan, so once a segment is written and the plan stops changing, nothing would look at the inverter again — and issue #551 established that the table drifts on its own, both by dropping a segment and by restoring one the plan does not contain. Re-running the sync covers both directions from the single hardware read it already performs, and re-attempts a write that vanished without raising; one that raises is retried through `_hardware_write_pending`
+
+The other half of the churn came from segments already running. The plan is rebuilt from the current period each cycle, which used to truncate an in-progress segment's `start_time` forward to "now" — renaming it every 15 minutes, so the differential update disabled and re-wrote it each time. `_group_periods_by_mode` now reports the group covering `current_period` from its *true* start, keeping a running segment byte-identical across cycles. A stable two-hour window costs 2 writes (one to program, one to clear on expiry) rather than 16.
 
 ## Configuration and Settings
 
@@ -414,9 +422,18 @@ This is what lets an integration that exposes the same services under its own do
 
 `SolaxModbusGrowattController` subclasses `GrowattMinController` — the scheduling algorithm (9 TOU slots, differential updates, corruption recovery) is identical. Only the hardware I/O differs: `growatt_server` uses a single service call per slot, while `solax_modbus` uses 4 entity writes (`select.select_option`) plus a button press per slot.
 
-#### Signed grid power sensors
+#### Signed power sensors
 
-A platform-fixed sibling of the service-domain pattern above: some platforms (Solis) expose grid power as one signed sensor instead of separate import/export entities. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `""` elsewhere) — not user-overridable, since polarity is a hardware fact, not configuration. Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign whenever both keys resolve to the same entity_id.
+A platform-fixed sibling of the service-domain pattern above: some platforms expose a power flow as one signed sensor instead of two directional entities. Two independent cases, same mechanism:
+
+- **Grid.** Solis (`grid_power_net`) and Huawei (`power_meter_active_power`) publish one signed grid sensor. `SettingsStore.get_grid_power_polarity()` resolves `PLATFORM_GRID_POWER_POLARITY` (`"import_positive"` for `solis_modbus`, `"export_positive"` for `huawei_solar_luna2000`, `""` elsewhere). Held on `HomeAssistantAPIController.grid_power_polarity`; `get_import_power()`/`get_export_power()` split the single reading by sign.
+- **Battery.** Native SolaX (`battery_power_charge`, REGISTER_S16) and Huawei (`storage_charge_discharge_power`, reg 37765) publish one signed battery sensor and no discharge counterpart. `SettingsStore.get_battery_power_polarity()` resolves `PLATFORM_BATTERY_POWER_POLARITY` (`"charge_positive"` for both, `""` elsewhere). Held on `HomeAssistantAPIController.battery_power_polarity`; `get_battery_charge_power()`/`get_battery_discharge_power()` split the single reading by sign (issue #542).
+
+Neither is user-overridable — polarity is a hardware fact, not configuration. Both splits activate only when the two keys resolve to the same entity_id, which `discover_sensors_from_registry` arranges by pointing the second key at the one discovered entity. `BESSController.refresh_power_polarities()` re-syncs both after any settings change that can switch platform.
+
+The split lives in the getters, so any caller that resolves a sensor key to an entity ID and reads that entity *directly* holds the net value instead. The sensor health panel resolves entities that way in `get_method_sensor_info`, but renders `displayValue` from calling the getter, so it reports the split value; `get_method_sensor_info` additionally routes its own `current_value` through `_signed_split_state()`, which reuses the same two predicates so the diagnostic field agrees with the getters rather than showing one net value on both directional rows.
+
+Both split helpers are pure and take the direction as a keyword, so the getters and the diagnostic path share one implementation. The battery helper branches on `battery_power_polarity` explicitly and raises `ValueError` on any unrecognised value — a typo'd or unimplemented entry in `PLATFORM_BATTERY_POWER_POLARITY` must fail loudly rather than silently invert every reading. The grid helper is deliberately laxer, treating anything that is not `"import_positive"` as `"export_positive"`.
 
 ### Platform Capabilities
 
@@ -503,7 +520,7 @@ The HA REST API `/api/states` provides all entity IDs and current values. BESS e
 
 - **Growatt device serial number (SN)**: The `growatt_server` integration creates entity IDs with the inverter serial number as a prefix (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). BESS extracts this SN (`rkm0d7n04x`) via `_extract_growatt_device_sn()`. The SN is used in Stage 3 as a lookup key into the HA device registry to find the actual `device_id` (a hex string like `fbafceb07a1cc74c351ef4310fa430a0`) required by service calls.
 - **Nordpool area**: Parsed from Nordpool entity IDs (e.g. `sensor.nordpool_kwh_se4_sek_...` → `SE4`)
-- **Phase count**: Detected from phase current sensor entities (L1/L2/L3)
+- **Phase count**: Detected from phase current sensor entities — `current_l1/l2/l3` naming, or `phase_a/b/c` on a metering device (#120; huawei_solar gives the meter's `active_grid_{A,B,C}_current` and the inverter's own `phase_{A,B,C}_current` the same "Phase A/B/C current" display name, so the phase_a/b/c form is meter-gated). Candidates are grouped by owning device and one group supplies every phase, preferring the most phases, then the explicit `current_lN` convention, then a grid-side name (`power_meter`/`grid`) over a sub-circuit one, then the lowest group id — never `/api/states` order, which is arbitrary. This keeps a sub-circuit meter from supplying some phases and the grid meter the rest, and keeps an EV-charger or heat-pump submeter from winning outright. Only groups exposing L1 alone or all three phases are eligible, since the wizard accepts a phase count of 1 or 3 and `PowerMonitor` reads L1 unconditionally — a partial set would configure throttling that raises on every quarter
 
 #### Stage 3 — WebSocket Metadata Query
 
@@ -541,6 +558,8 @@ The mapping uses two layers of filtering:
 
 The result maps each BESS sensor key (e.g. `battery_soc`) to the corresponding HA `entity_id` (e.g. `sensor.rkm0d7n04x_state_of_charge_soc`). This entity_id is what the REST API uses to read state values at runtime.
 
+**Disabled entities are never mapped.** An entity with `disabled_by` set exists in the registry but has no state, so any REST read of it returns 404. Enabled matches always win; when a sensor key's *only* match is disabled, the key is left unmapped and returned in a second dict (`platform_disabled`, surfaced by `/api/setup/discover` as `disabledSensors` / `platformDisabledSensors`). The wizard blocks on those and names the entity to enable, rather than persisting a mapping that is guaranteed to fail at runtime. This matters because integrations ship useful entities disabled by default — `solax_modbus` disables all of its `Total *` lifetime energy counters, which is what made issue #549 present as "Sensor not found (404) … SYSTEM DEGRADED" after a wizard run that appeared to succeed.
+
 Renaming entities in the HA UI (friendly name/label) does not affect discovery. However, if a user changes the actual entity_id and removes the original suffix, the `unique_id` still matches — so discovery still works. Only if the integration itself changes its `unique_id` scheme (across versions) would manual remapping via the wizard be needed.
 
 #### Derived Hints
@@ -557,7 +576,7 @@ Beyond core inverter and price sensors, discovery also detects:
 
 - **Solcast solar forecast**: Entity registry entries on the `solcast_solar` platform, matched by `unique_id` suffix (robust against non-English HA locale renaming of the entity ID)
 - **Weather**: Entities in the `weather.*` domain, preferring `weather.home` when multiple exist
-- **Phase currents**: `current_l1`, `current_l2`, `current_l3`
+- **Phase currents**: `current_l1`, `current_l2`, `current_l3` (also discovered from meter-side `phase_a/b/c` naming — see `discover_current_sensors`)
 - **EV charging inhibit**: Binary sensors ending with `_charging` or `_is_charging`
 - **Consumption forecast**: Custom helper sensor for 48-hour average grid import
 
@@ -572,13 +591,13 @@ The setup wizard is a 6-step flow for first-time configuration. It is triggered 
 | `GET /api/setup/status` | Returns `wizard_needed` flag based on whether sensors are configured |
 | `POST /api/setup/discover` | Runs full auto-discovery, returns sensors map, missing sensors, platform hints |
 | `POST /api/setup/confirm` | Persists discovered sensor config to `/data/bess_discovered_config.json` and applies to live controller |
-| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections |
+| `POST /api/setup/complete` | Atomic save of all wizard data across 6 settings sections. Rejects (400) an energy provider whose own required configuration is empty — `nordpool_official` needs `nordpoolConfigEntryId`, `nordpool_hacs`/`entsoe` need their entity, `octopus` needs `octopusImportTodayEntity` — since such a config can never fetch a price |
 
 #### Wizard Steps (Frontend: `SetupWizardPage.tsx`)
 
 1. **Scan** — Calls `/api/setup/discover` to auto-detect integrations and sensors
-2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform
-3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints)
+2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform. Blocked while a required sensor is unmapped, or while a required sensor's only entity is disabled in HA (the entities to enable are listed by name)
+3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints). Blocked until the selected provider's required configuration is filled in, mirroring the server-side check on `/api/setup/complete`
 4. **Battery** — Set capacity, SOC limits, power rating, cycle cost
 5. **Home** — Set consumption, fuse current, voltage, phase count (pre-filled from detected phase count)
 6. **Complete** — Calls `/api/setup/complete` for atomic save
@@ -644,12 +663,22 @@ specific sensors within the component must succeed for it to be ERROR
 rather than WARNING). `determine_health_status()`
 (`core/bess/health_check.py:80-127`) combines them into three outcomes: ERROR
 only when a *required* sensor is missing/failing, WARNING when only an
-*optional* sensor fails, and SKIPPED for sensors intentionally left
-unconfigured (these don't count as a failure at all). A component with
-`is_required=False` should never surface as ERROR — if it does, check
-whether `required_methods` was mistakenly passed as "all methods" instead
-of derived from `is_required` (see `TODO.md`'s "Simplify Health Check
-Severity Model" for the known fragility here).
+*optional* sensor fails, and SKIPPED for optional sensors intentionally left
+unconfigured — those don't count as a failure at all. `perform_health_check()`
+(`core/bess/health_check.py:138-`) never reports SKIPPED for a *required*
+sensor: when a required method's primary sensor mapping is `not_configured`,
+it still attempts to *call* the method, because some methods (e.g.
+`get_load_consumption_lifetime`) derive a value from other sensors when the
+direct one isn't mapped — the pre-check only validates the direct mapping,
+not whether a fallback path exists. That call resolves to OK (fallback
+succeeded), WARNING (returned `None`), or ERROR (raised); a required sensor
+with no working fallback still correctly drives the component to ERROR, it
+just does so via one of those three statuses rather than SKIPPED. A
+component with `is_required=False` should never surface as ERROR — if it
+does, check whether `required_methods` was mistakenly passed as "all
+methods" instead of derived from `is_required`
+(see `TODO.md`'s "Simplify Health Check Severity Model" for the known
+fragility here).
 
 ## API Architecture
 
@@ -767,7 +796,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - **Storage**: Indexes by period_index (0-95)
 - **InfluxDB**: Queries at 15-minute boundaries
 - **API**: Returns quarterly, aggregates only for display
-- **Frontend**: Displays both resolutions as user preference
+- **Frontend**: Displays both resolutions as user preference, except the Dashboard's intent color timeline (`BatteryModeTimeline`), which always renders at quarter-hourly granularity regardless of that preference — hourly aggregation can average away a genuine intent disagreement between quarters (#486)
 
 
 ## Development and Testing

@@ -124,9 +124,13 @@ Serialise, do not stack:
 ## Autonomous spend
 
 Exactly one action costs money without asking: firing Stage 2
-(`@claude-bot analyze`, ~$0.50–2) on an item entering Analysis that is a
-user-facing bug, has its debug log, and ranks in the top priority tier. Every
-other item entering Analysis gets a proposal instead.
+(`@claude-bot analyze`, ~$0.50–2) on an item entering Analysis that meets the
+tier-1 bar from `Verb: next` directly — labelled `bug`, opened by someone
+other than the maintainer, with its debug log attached. This is a check
+against the item itself, not a ranking pass: an item entering Analysis is
+never a member of the Backlog/Ready list that `next` ranks, so it cannot
+"rank" into a tier. Every other item entering Analysis gets a proposal
+instead.
 
 ## Close the loop
 

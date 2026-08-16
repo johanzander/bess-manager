@@ -45,9 +45,10 @@ Its duties, in the order a report travels:
 - Reconcile the kanban board against reality
 - Run `sweep-prs` maintenance on the open PR fleet
 - Notify reporters when a fix reaches a release
-- Fire Stage 2 (`@claude-bot analyze`) on a **top-priority user-facing bug
-  that already has its log** — bounded autonomous spend, ~$0.50–2 a shot.
-  Everything else waits for the maintainer.
+- Fire Stage 2 (`@claude-bot analyze`) on a **user-facing bug — labelled
+  `bug`, opened by someone other than the maintainer — that already has its
+  log** — bounded autonomous spend, ~$0.50–2 a shot. Everything else waits
+  for the maintainer.
 
 **In v1, only on explicit go-ahead:**
 
@@ -189,11 +190,15 @@ comment activity and no development artefact belongs in Analysis regardless of
 labels, and assigning its sub-state is a judgment the PO makes by reading the
 thread. Applying the missing labels is itself PO work.
 
-**Entering Analysis has one autonomous action.** If the item is a user-facing
-bug, has its debug log, and ranks in the top priority tier, the PO fires
-Stage 2 itself rather than waiting to be asked — those are the items the
-maintainer would have approved anyway, and refining them overnight is the
-point of having a PO. Every other item entering Analysis gets a proposal
+**Entering Analysis has one autonomous action.** If the item meets the
+tier-1 bar from the ranking policy directly — labelled `bug`, opened by
+someone other than the maintainer, with its debug log attached — the PO
+fires Stage 2 itself rather than waiting to be asked. This is a check
+against the item, not a ranking pass: an item entering Analysis is not a
+member of the Backlog/Ready list the ranking policy ranks, so it has no tier
+to "rank" into. Those are the items the maintainer would have approved
+anyway, and refining them overnight is the point of having a PO. Every
+other item entering Analysis gets a proposal
 instead ("#502 has its log, shall I analyze?"). This is the only place in v1
 where the PO spends real money unprompted, and the gate is deliberately narrow
 because Stage 2 costs ~$0.50–2 per run.

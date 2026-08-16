@@ -593,6 +593,17 @@ next positive-price block).
 with an explicit tie-break policy stating which physically-preferred
 action wins inside the flat region — float noise is not a policy.
 
+Shaping is not the only source of a flat region (#606). Consecutive periods
+inside one hourly price block can be bit-identical in price, load and solar,
+and where they are all unconstrained the objective is *exactly* invariant to
+how a fixed total is split across them — only the sum reaches the next
+period. Every split is an optimum, so the choice fell to accumulated rounding
+in the value function (measured: 0.93 ULP) and the emitted plan differed by
+interpreter at bit-identical cost. `tie_policy.py`'s row 5 now resolves these
+by a stated order over actions. Signature in a bundle: adjacent periods with
+identical inputs whose actions permute between runs while total cost does
+not move at all.
+
 
 ## Execution Layer: What Can Override the Schedule
 

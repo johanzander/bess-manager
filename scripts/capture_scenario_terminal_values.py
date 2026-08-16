@@ -56,8 +56,9 @@ PRECISION = 9
 def main() -> None:
     check_only = "--check" in sys.argv
     stale: list[str] = []
+    paths = sorted(DATA_DIR.glob("*.json"))
 
-    for path in sorted(DATA_DIR.glob("*.json")):
+    for path in paths:
         scenario = json.loads(path.read_text())
         computed = round(scenario_terminal_value(scenario), PRECISION)
         recorded = scenario.get("terminal_value_per_kwh")
@@ -75,9 +76,15 @@ def main() -> None:
         path.write_text(json.dumps(scenario, indent=2) + "\n")
         print(f"  write {path.name}: {recorded} -> {computed}")
 
-    if check_only and stale:
-        print(f"\n{len(stale)} fixture(s) missing or stale. Re-run without --check.")
-        sys.exit(1)
+    if check_only:
+        if stale:
+            print(
+                f"\n{len(stale)} fixture(s) missing or stale. "
+                "Re-run without --check."
+            )
+            sys.exit(1)
+        print(f"\nall {len(paths)} fixture(s) up to date.")
+        return
     print(f"\n{len(stale)} fixture(s) updated.")
 
 

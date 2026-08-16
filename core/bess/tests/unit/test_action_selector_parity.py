@@ -77,17 +77,27 @@ PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS = {
 
 @pytest.mark.parametrize("name", fixture_names())
 def test_selector_refactor_is_bit_identical(name):
+    # Every assertion in this test is exempt on a #606 fixture (the plan for
+    # the reason above, the cost for the one below), so skip rather than run
+    # the DP solve and assert nothing: a vacuous PASS hides the missing
+    # coverage in the run report, and any assertion added later outside the
+    # guards would silently re-arm the flake.
+    if name in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
+        pytest.skip(
+            "plan selection is interpreter-dependent on this fixture (#606); "
+            "its economics stay pinned by test_scenarios.py::test_all_scenarios"
+        )
+
     golden = json.loads((GOLDEN_DIR / f"{name}.json").read_text())
     actual = capture_fixture(name)
 
-    if name not in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
-        assert actual["actions"] == golden["actions"]
-        assert actual["intents"] == golden["intents"]
-        assert (
-            actual["intra_period_discharge_allowed"]
-            == golden["intra_period_discharge_allowed"]
-        )
-        assert actual["soe_trajectory"] == golden["soe_trajectory"]
+    assert actual["actions"] == golden["actions"]
+    assert actual["intents"] == golden["intents"]
+    assert (
+        actual["intra_period_discharge_allowed"]
+        == golden["intra_period_discharge_allowed"]
+    )
+    assert actual["soe_trajectory"] == golden["soe_trajectory"]
 
     # Cost gets a tolerance where the plan does not, because it is the one
     # field whose exact bits are not reproducible across environments.
@@ -114,7 +124,6 @@ def test_selector_refactor_is_bit_identical(name):
     # `battery_solar_cost` at 0.001 SEK and passes on both interpreters, which
     # is itself the evidence the two plans are a tie rather than one being
     # wrong. What is uncovered until #606 closes is the *plan*, not the money.
-    if name not in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
-        assert actual["battery_solar_cost"] == pytest.approx(
-            golden["battery_solar_cost"], abs=1e-9
-        )
+    assert actual["battery_solar_cost"] == pytest.approx(
+        golden["battery_solar_cost"], abs=1e-9
+    )

@@ -109,17 +109,18 @@ def test_current_plan_is_pinned(name):
     )
     entry = baseline[name]
 
-    if name in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
-        pytest.skip(
-            "plan selection is interpreter-dependent on this fixture (#606) -- "
-            "two near-equal-value plans, chosen by float details. Pinning it "
-            "would assert whichever interpreter last captured the baseline."
+    # Only *which* plan the DP selects is interpreter-dependent on the #606
+    # fixtures -- two near-equal-value plans, chosen by float details, so
+    # pinning the choice would assert whichever interpreter last captured the
+    # baseline. Everything below this guard replays the *recorded* plan
+    # through the VPP simulator and is deterministic, so it stays live:
+    # exempting it too would drop this fixture's execution-model coverage for
+    # a defect that lives entirely on the planner side.
+    if name not in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
+        assert capture_plan(name) == entry["current_plan"], (
+            "the DP now plans this fixture differently. If deliberate, re-pin "
+            "and state the measured VPP delta in the PR."
         )
-
-    assert capture_plan(name) == entry["current_plan"], (
-        "the DP now plans this fixture differently. If deliberate, re-pin "
-        "and state the measured VPP delta in the PR."
-    )
     replayed = simulate_plan(name, entry["current_plan"])
     assert replayed["commands"] == entry["current"]["commands"]
     assert replayed["realized_cost"] == pytest.approx(

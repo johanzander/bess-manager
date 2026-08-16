@@ -50,7 +50,10 @@ since the recorded drift between the two halves is the signal
     PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --repin-current
 
 rewrites that half only, printing each fixture's realized-cost delta so the PR
-can quote the measured VPP movement. Before this existed the only two options
+can quote the measured VPP movement. It re-simulates every fixture and writes
+whenever the plan *or* its execution moved, so it also covers a change to the
+VPP model itself, which leaves the plans equal. Before this existed the only
+two options
 were `--add-new` (a no-op on an unchanged fixture set) and a full re-baseline,
 so a legitimate planner change had no supported path and the full re-baseline
 -- the one the docstring above warns against -- looked like the remedy.
@@ -105,12 +108,36 @@ if args.plans_only:
 if not args.from_plans and not args.add_new and not args.repin_current:
     parser.error("pass --plans-only, --from-plans, --add-new or --repin-current")
 
+from core.bess.tests.unit.test_action_selector_parity import (  # noqa: E402
+    PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS,
+)
 from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     BASELINE_PATH,
     capture_plan,
     fixture_names,
     simulate_plan,
 )
+
+# Mirrors what `test_current_plan_is_pinned` asserts: commands exactly, the
+# float arrays at 1e-9. Comparing those exactly instead would re-pin every
+# fixture whenever the script runs on a different interpreter than last wrote
+# the artefact, since realized cost is reproducible only to ~1e-13 across
+# environments (see test_action_selector_parity's module docstring).
+VPP_TOLERANCE = 1e-9
+
+
+def execution_matches(actual, recorded):
+    return (
+        actual["commands"] == recorded["commands"]
+        and abs(actual["realized_cost"] - recorded["realized_cost"]) <= VPP_TOLERANCE
+        and all(
+            abs(a - b) <= VPP_TOLERANCE
+            for a, b in zip(
+                actual["soe_trajectory"], recorded["soe_trajectory"], strict=True
+            )
+        )
+    )
+
 
 if args.repin_current:
     baseline = json.loads(BASELINE_PATH.read_text())
@@ -121,10 +148,25 @@ if args.repin_current:
             raise SystemExit(
                 f"{name} has no baseline entry -- run --add-new first, not this."
             )
-        current_plan = capture_plan(name)
-        if current_plan == entry["current_plan"]:
-            continue
+        if name in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
+            # #606: which of two near-equal plans the DP picks depends on the
+            # interpreter, so capturing it here would write whichever machine
+            # ran the script into a tracked artefact -- and nothing asserts it
+            # anyway. Keep the recorded plan and re-pin only its execution,
+            # which is deterministic and *is* still asserted.
+            current_plan = entry["current_plan"]
+        else:
+            current_plan = capture_plan(name)
         current = simulate_plan(name, current_plan)
+        # Both halves, not just the plan: a change that moves the *simulator*
+        # leaves every plan equal while the commands/realized-cost/SoE
+        # assertions go red, and re-pinning the plan alone would then report
+        # "nothing written" -- leaving a full re-baseline, the thing this
+        # file's docstring warns against, as the only apparent remedy.
+        if current_plan == entry["current_plan"] and execution_matches(
+            current, entry["current"]
+        ):
+            continue
         before = entry["current"]["realized_cost"]
         after = current["realized_cost"]
         moved.append((name, after - before))

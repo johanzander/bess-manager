@@ -278,10 +278,16 @@ directions. Generate it with:
 
 which applies the production formula (`core/bess/terminal_value.py`) to the
 fixture's own prices, reproducing #422's calendar-day cap scoping as the last
-`24 / period_duration` periods. A fixture that should pin a *specific* terminal
-value — because the defect lives in how that input is computed upstream in
-`BatterySystemManager` — keeps its recorded value; the script leaves any
-already-recorded value alone.
+`24 / period_duration` periods.
+
+**The recorded value is derived, never hand-pinned.** The script overwrites any
+recorded value that disagrees with the formula, and
+`test_scenarios.py::test_recorded_terminal_values_still_match_the_production_formula`
+fails a fixture that carries one — the whole point of the retrofit is that the
+corpus runs at production's terminal value, so a fixture pinned to something
+else is silently exempt from the gate it was added to feed. A defect in how
+`BatterySystemManager` *computes* that input therefore belongs in a test of
+`BatterySystemManager`, not in a scenario fixture.
 
 Adding or changing a fixture therefore means regenerating three artefacts, in
 this order (the second and third fail by design until you do):

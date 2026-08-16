@@ -56,12 +56,10 @@ sessions=$(claude agents --json)
 # default is 30, which would silently truncate against this repo's 37+ open
 # issues.
 #
-# NOTE: the board does not exist yet (created by a deferred task), so the
-# exact JSON key the Priority field lands under is still unverified. The jq
-# below assumes it arrives as a top-level `.priority` on each item (matching
-# the existing `$board.items[]?.priority?` lookup). Confirm this against a
-# real board the first time one exists, and fix the jq path below if the
-# assumption is wrong — do not add a fallback that tries multiple shapes.
+# Confirmed against the real board (2026-08-16): each custom single-select
+# field arrives as a top-level key on the item — `"priority": "P1"` — next to
+# `"status"` (the built-in column) and `"content": {"number": 611, ...}`, which
+# is the join key used below. No `--field` flag is involved or possible.
 board=$(gh project item-list "$PROJECT_NUMBER" --owner "${PROJECT_OWNER:-johanzander}" \
   --limit 200 --format json)
 

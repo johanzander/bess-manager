@@ -26,14 +26,12 @@ Board reads need `PROJECT_NUMBER` set and the board created (deferred —
 first board access in `backlog-digest.sh` — that failure is expected, not a
 bug to route around.
 
-**One thing to verify the first time a board exists.** No board has ever
-existed, so the JSON shape `gh project item-list --format json` uses for a
-custom field is unconfirmed; the digest assumes each item carries a top-level
-`.priority`. On the first real run, check that `priority` is populated rather
-than `null` for an item you have set a priority on. If it is `null`, fix the
-jq path in `scripts/backlog-digest.sh` — do not add a fallback that tries
-several shapes. A silently-null `priority` disables ranking axis 2 without
-any error.
+**Board shape, confirmed.** `gh project item-list --format json` returns each
+custom single-select field as a top-level key on the item — `priority: "P1"` —
+alongside `status` (the built-in column) and `content.number` (the join key).
+Verified against the real board on 2026-08-16 with issue #611 set to P1, read
+back correctly by the digest. The board is project **1** under `johanzander`;
+export `PROJECT_NUMBER=1`.
 
 ## When to Use
 

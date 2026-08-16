@@ -1,6 +1,13 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **`sample_live_power()` gates on the wrong sensor list**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `sensor_collector.py`
+
+**Description**: `sample_live_power()` early-returns on `if not self.power_sensors`, but `power_sensors` comes from `_resolve_power_sensor_ids()`, which deliberately *excludes* shared signed entities (their direction is unrecoverable from an InfluxDB period mean). The sampling loop itself never touches `power_sensors` — it calls the sign-splitting getters, which handle those entities fine. So an install whose only mapped power sensors are the shared signed ones gets no live sampling at all, silently disabling the `PowerSampleBuffer` path that `_shared_signed_power_entities()`'s docstring names as the covering fallback for exactly those installs. The guard should test the flow map / getters instead. Pre-existing; found during the #604 review, which widens the set of installs hitting the exclusion.
+
+
 ## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
 ### 0. **Fix Battery Discharge Power Control Bug**

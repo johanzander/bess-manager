@@ -481,8 +481,29 @@ when it exits. This is a hard session boundary, same as Step 6.
 
 On the verdict:
 
-- **`APPROVED`** — the loop is done. **Mark the PR ready for review, then
-  report the link and stop:**
+- **`APPROVED`** — the review is done, but the PR's *state* is not yet
+  established. **Re-check mergeability before doing anything else:**
+
+  ```bash
+  git fetch origin
+  gh pr view <n> --json mergeable,mergeStateStatus
+  ```
+
+  Step 10's green/`CLEAN` verdict is stale by now — a review round takes
+  minutes (8 in the run that motivated this), and other PRs merge during it.
+  A `CONFLICTING` PR cannot be merged and gets no new workflow run, so
+  reporting Step 10's reading as if it still held hands the maintainer a
+  conflicted PR described as clean. That is what happened on #609, and the
+  reason this check exists here and not only in Step 10.
+
+  If it is `CONFLICTING` / `DIRTY`: `git merge origin/main`, resolve, re-run
+  `./scripts/quality-check.sh` (and the slow suite if the merge pulled in
+  optimizer changes), push, and re-watch CI per Step 10. Then apply the
+  push-after-approval rule below to the merge commit — a clean merge that
+  changed nothing under review does not need another round, one that touched
+  reviewed code does.
+
+  **Then mark the PR ready for review and report the link:**
 
   ```bash
   gh pr ready <n>
@@ -621,6 +642,7 @@ net is upstream, not this section.
 | "the branch was current when I cut it, no need to merge before pushing" | Steps 5–8 take hours and other PRs merge during them. And a CONFLICTING PR gets no workflow run at all, so it reads as "CI never fired" — the conflict stays invisible until someone digs. |
 | "while I'm watching my PR I may as well fix the other red ones" | That's `sweep-prs`, which has the ownership skip gate this skill doesn't. Another agent may be sitting in that worktree; merging under it puts two sessions on one branch. |
 | "the PR is open, my job is done" | Open isn't green. CI runs a matrix `quality-check.sh` doesn't, and the user can't review a red or conflicted PR. Step 10 finishes the job. |
+| "Step 10 said MERGEABLE/CLEAN, so I can report that" | Not after Step 11. The review round takes minutes and other PRs merge in minutes — #609 went `CONFLICTING` during its own approval round and was handed over described as clean. Re-check after the verdict, not before it. |
 | "it's approved, but flipping it out of draft is the maintainer's call" | Merging is their call; marking it ready is just reporting the state the loop already established. Leaving it draft makes them re-derive "is this finished?" by hand. |
 | "Step 6's code review already covered this, skip Step 11" | Step 6 is you reviewing your own diff with the reasoning that produced it. The Stage 4 bot reads the diff cold against the checklist, and in practice takes two to four rounds to run out of real findings. |
 | "the reviewer asked for it, so change it" | The reviewer has the diff, not the diagnosis. A finding that contradicts a deliberate Step 3 scope decision gets a reply explaining why, not a commit. |
@@ -658,6 +680,9 @@ net is upstream, not this section.
   Your own Step 6 review is not the independent one.
 - About to hand over an `APPROVED`, green PR still marked draft — Step 11
   flips it with `gh pr ready`; the maintainer should only have to merge.
+- About to report `mergeable` from Step 10's check after Step 11's review
+  round. That reading is minutes old and other PRs merge in minutes — re-run
+  `gh pr view --json mergeable,mergeStateStatus` before flipping or reporting.
 - About to run `gh pr ready` before an approval, or `gh pr merge` at all.
 - About to implement a review finding because the bot said so, without
   checking it against the Step 2 diagnosis and the Step 3 scope assessment.

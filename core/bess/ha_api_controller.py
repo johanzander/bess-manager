@@ -19,7 +19,7 @@ import websocket
 from .energy_balance import derive_load_consumption
 from .exceptions import SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
-from .settings_store import SettingsStore
+from .settings_store import SettingsStore, apply_signed_pair_aliases
 
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
@@ -4024,17 +4024,11 @@ class HomeAssistantAPIController:
                     entities, solax_platforms, self.SOLAX_NATIVE_SUFFIX_MAP
                 )
                 # battery_power_charge is a single signed register — native
-                # SolaX has no separate discharge entity (#542, same shape as
-                # the grid case below). Point battery_discharge_power at the
-                # same entity so HAApiController's signed split
-                # (battery_power_polarity) can derive both readings from it.
-                if (
-                    "battery_charge_power" in solax_sensors
-                    and "battery_discharge_power" not in solax_sensors
-                ):
-                    solax_sensors["battery_discharge_power"] = solax_sensors[
-                        "battery_charge_power"
-                    ]
+                # SolaX has no separate discharge entity (#542). Pair
+                # battery_discharge_power to it here as well as at read time,
+                # so the key lands in platform_sensors and the reconciliation
+                # below takes it off platform_disabled.
+                apply_signed_pair_aliases("solax_modbus_native", solax_sensors)
                 platform_sensors["solax_modbus_native"] = solax_sensors
                 platform_disabled["solax_modbus_native"] = solax_disabled
                 if not detected_platform:
@@ -4058,11 +4052,10 @@ class HomeAssistantAPIController:
                 {k: v for k, v in embedded_disabled.items() if k not in solis_disabled}
             )
             # Solis has no separate export_power entity — grid_power_net is
-            # a single signed sensor (see SOLIS_SUFFIX_MAP comment). Point
-            # export_power at the same entity so HAApiController's signed
-            # split (grid_power_polarity) can derive both readings from it.
-            if "import_power" in solis_sensors and "export_power" not in solis_sensors:
-                solis_sensors["export_power"] = solis_sensors["import_power"]
+            # a single signed sensor (see SOLIS_SUFFIX_MAP comment); pair
+            # export_power to it (#475, same reason as SolaX's battery pair
+            # above).
+            apply_signed_pair_aliases("solis_modbus", solis_sensors)
             # Monitoring sensors are always mapped, but only auto-select
             # solis_modbus as the detected platform when the Grid TOU v2
             # marker is present — without it, schedule writes fail on every
@@ -4086,27 +4079,11 @@ class HomeAssistantAPIController:
             huawei_sensors, huawei_disabled = self._map_registry_entities(
                 entities, ["huawei_solar"], self.HUAWEI_SUFFIX_MAP
             )
-            # power_meter_active_power is a single signed register — Huawei
-            # has no separate export_power entity (same situation as Solis's
-            # grid_power_net, #475). Point export_power at the same entity
-            # so HAApiController's signed split (grid_power_polarity) can
-            # derive both readings from it.
-            if (
-                "import_power" in huawei_sensors
-                and "export_power" not in huawei_sensors
-            ):
-                huawei_sensors["export_power"] = huawei_sensors["import_power"]
-            # storage_charge_discharge_power is likewise a single signed
-            # register (reg 37765, positive = charging) with no discharge
-            # counterpart — same pairing, one layer down (#542). See
-            # PLATFORM_BATTERY_POWER_POLARITY["huawei_solar_luna2000"].
-            if (
-                "battery_charge_power" in huawei_sensors
-                and "battery_discharge_power" not in huawei_sensors
-            ):
-                huawei_sensors["battery_discharge_power"] = huawei_sensors[
-                    "battery_charge_power"
-                ]
+            # Huawei is single-signed on BOTH pairs: power_meter_active_power
+            # for grid (#438/#475) and storage_charge_discharge_power (reg
+            # 37765, positive = charging) for battery (#542). Neither has a
+            # counterpart entity, so both derived keys are paired to them.
+            apply_signed_pair_aliases("huawei_solar_luna2000", huawei_sensors)
             platform_sensors["huawei_solar_luna2000"] = huawei_sensors
             platform_disabled["huawei_solar_luna2000"] = huawei_disabled
             if not detected_platform:

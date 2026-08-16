@@ -1,9 +1,17 @@
 # Stage 4 — PR Review (manual)
 #
 # Triggered with `@claude-bot` on a pull request comment, by the repo owner or
-# by the `bess-agent` automation identity (the `implement-issue` review loop
-# posts as bess-agent via scripts/request-pr-review.sh). Reviews the diff
-# against docs/agents/rules.md and the checklist in .github/claude-bot.md.
+# by the developer automation identity (the `implement-issue` review loop
+# posts via scripts/request-pr-review.sh, using scripts/gh-agent.sh's default
+# `dev` role). Reviews the diff against docs/agents/rules.md and the checklist
+# in .github/claude-bot.md.
+#
+# Migration window: the automation account is being renamed bess-agent ->
+# bess-developer (see scripts/gh-agent.sh's --as dev role and CLAUDE.md's
+# "General bot rules"). Add 'bess-developer' to the gate below in the SAME
+# commit that renames the account, never before — pre-authorising an
+# unregistered username on a public repo is exploitable by anyone who
+# registers it first.
 
 name: PR Review
 

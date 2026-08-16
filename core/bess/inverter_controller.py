@@ -570,6 +570,7 @@ class InverterController(ABC):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        at_reserve_floor: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -591,6 +592,12 @@ class InverterController(ABC):
                 BATTERY_EXPORT to the same values, so platforms that need to
                 treat them differently (VPP-style -- see #413) require the
                 intent itself. Register-based platforms ignore this.
+            at_reserve_floor: Whether the battery is at (or below) its
+                configured minimum SoE right now. Register-based platforms
+                ignore this -- their min_soc register already stops discharge
+                at the floor. Forced-power platforms use it to stop holding a
+                battery that has nothing left to hold, releasing the inverter
+                so its BMS can sleep -- see #592.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.

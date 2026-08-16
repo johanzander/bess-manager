@@ -302,6 +302,15 @@ grid/solar. See `docs/INVERTER_PLATFORMS.md`'s "IDLE semantics" section for
 the full mapping and why `grid_first` (the SOLAR_EXPORT pattern) doesn't
 also fix this.
 
+**Exception — at the reserve floor** (issue #592): the hold protects stored
+energy, so at `min_soc` there is nothing to protect and it only keeps the
+inverter under continuous remote control, preventing the BMS from sleeping.
+VPP-mode IDLE with the battery at the floor releases instead
+(`remote_control=Disabled`, `vpp_power=0`). Flow-neutral — released
+`load_first` absorbs passive solar exactly as the hold does, and there is no
+headroom to discharge — so the VPP regression baseline is unchanged. Above
+the floor, nothing changes.
+
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
 
 Both export to grid, but they are different situations and need different

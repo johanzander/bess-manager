@@ -1,6 +1,7 @@
 ---
 name: bess-analyst
 description: Analyze BESS issues, debug problems, and explain system behavior. Use when investigating savings calculations, optimization decisions, or schedule issues.
+color: cyan
 tools: Read, Grep, Glob, Bash, WebFetch
 ---
 

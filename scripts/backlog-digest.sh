@@ -12,6 +12,13 @@ set -euo pipefail
 
 repo="${REPO:-johanzander/bess-manager}"
 
+if [ -z "${PROJECT_NUMBER:-}" ]; then
+  echo "backlog-digest.sh: PROJECT_NUMBER is not set — the backlog board has" >&2
+  echo "not been created yet. Run scripts/backlog-board-init.sh (deferred) to" >&2
+  echo "create it, then set PROJECT_NUMBER." >&2
+  exit 1
+fi
+
 issues=$(gh issue list --repo "$repo" --state open --limit 200 \
   --json number,title,labels,author,createdAt,updatedAt,comments,body)
 
@@ -22,7 +29,7 @@ prs=$(gh pr list --repo "$repo" --state open --limit 100 \
 # always emits the main checkout as its first record, and it is excluded
 # here — it is never a task worktree, so it must not appear in the orphan
 # scan below.
-worktrees=$(git worktree list --porcelain 2>/dev/null | awk '
+worktrees=$(git worktree list --porcelain | awk '
   BEGIN { RS=""; FS="\n" }
   NR==1 { next }
   {
@@ -36,13 +43,6 @@ worktrees=$(git worktree list --porcelain 2>/dev/null | awk '
 ' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // "")}' | jq -s .)
 
 sessions=$(claude agents --json)
-
-if [ -z "${PROJECT_NUMBER:-}" ]; then
-  echo "backlog-digest.sh: PROJECT_NUMBER is not set — the backlog board has" >&2
-  echo "not been created yet. Run scripts/backlog-board-init.sh (deferred) to" >&2
-  echo "create it, then set PROJECT_NUMBER." >&2
-  exit 1
-fi
 
 board=$(gh project item-list "$PROJECT_NUMBER" --owner "${PROJECT_OWNER:-johanzander}" \
   --format json)
@@ -58,11 +58,12 @@ jq -n \
 
   def label_names: [.labels[].name];
 
+  def pr_matches_issue($p; $n):
+    ($p.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
+    or ($p.headRefName | test("issue-\($n)(\\D|$)"));
+
   def pr_for($n):
-    ([ $prs[] | select(
-          (.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
-       or (.headRefName | test("issue-\($n)(\\D|$)"))
-    ) ]) as $matches
+    ([ $prs[] | select(pr_matches_issue(.; $n)) ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0] end;
 
   # Matches a worktree whose path OR branch contains the issue number in a
@@ -137,7 +138,7 @@ jq -n \
       [ $worktrees[] | select(. as $w | ($issues | map(.number) | any(. as $n | matches_issue($w; $n))) | not)
         | {kind: "worktree_no_issue", ref: .path, detail: "no open issue matches this worktree"} ]
       +
-      [ $prs[] | select((.body // "") | test("(?i)(fixes|closes|resolves) #\\d+") | not)
+      [ $prs[] | select(. as $p | ($issues | map(.number) | any(. as $n | pr_matches_issue($p; $n))) | not)
         | {kind: "pr_no_issue", ref: (.number | tostring), detail: .title} ]
     )
   }

@@ -355,6 +355,108 @@ def test_worktree_matched_only_by_similar_number_is_not_joined(bin_dir: Path) ->
     assert digest["items"][0]["worktree"] is None
 
 
+def test_pr_joined_only_by_headref_is_not_an_orphan(bin_dir: Path) -> None:
+    """The `pr_no_issue` orphan check must be the exact negation of the
+    issue<->PR join (`pr_for`), which matches on EITHER a body reference OR
+    `headRefName`. A PR joined purely by branch name (no fixes/closes/resolves
+    phrase in the body) must NOT be reported as an orphan.
+
+    Every other PR fixture in this suite includes a fixes/closes/resolves
+    phrase in its body, which is why this false positive wasn't caught
+    earlier: the orphan check used to test only the body."""
+    issue = {
+        "number": 607,
+        "title": "Joined by branch name only",
+        "labels": [{"name": "bug"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    pr = {
+        "number": 630,
+        "title": "fix: joined by branch only",
+        "headRefName": "fix/issue-607-branch-only",
+        "mergeable": "MERGEABLE",
+        "body": "No magic phrase here, just a description.",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+
+    item = digest["items"][0]
+    assert item["pr"] == 630, "PR must still join the issue via headRefName"
+    pr_orphans = [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"]
+    assert pr_orphans == [], (
+        "a PR joined to an open issue by headRefName must not be reported as "
+        f"pr_no_issue, got {pr_orphans!r}"
+    )
+
+
+def test_board_priority_is_joined_onto_matching_issue(bin_dir: Path) -> None:
+    issue = {
+        "number": 608,
+        "title": "Has a board entry",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    project_item = {"content": {"number": 608}, "priority": "P1"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [project_item]))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["priority"] == "P1"
+
+
+def test_issue_with_no_board_entry_has_null_priority(bin_dir: Path) -> None:
+    issue = {
+        "number": 609,
+        "title": "No board entry",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["priority"] is None
+
+
+def test_board_entry_for_unknown_issue_does_not_spurious_or_crash(
+    bin_dir: Path,
+) -> None:
+    """A board entry referencing an issue number that isn't in the open-issue
+    list (e.g. a closed issue still on the board) must be ignored, not
+    produce a spurious item or crash the join."""
+    issue = {
+        "number": 611,
+        "title": "The only real open issue",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    project_item = {"content": {"number": 9999}, "priority": "P2"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [project_item]))
+
+    digest = _run(bin_dir)
+
+    assert len(digest["items"]) == 1
+    assert digest["items"][0]["number"] == 611
+    assert digest["items"][0]["priority"] is None
+
+
 def test_missing_project_number_fails_loudly(bin_dir: Path) -> None:
     """No fallback: PROJECT_NUMBER must be required, not defaulted to 1 and
     silently masked by a swallowed `gh` error."""

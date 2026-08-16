@@ -102,7 +102,20 @@ It reads an issue body only when actually deciding on that issue. This follows
 the pattern that has worked in this repo before: pre-compute the evidence and
 feed the digest, rather than instructing a model to go gather it.
 
-### 2. `.claude/skills/backlog/SKILL.md` — the judgment layer
+### 2. `.claude/agents/backlogger.md` + `.claude/skills/backlog/SKILL.md` — the judgment layer
+
+The agent file makes the backlogger a first-class thing to talk to rather than
+a skill someone must remember to invoke: `claude --agent backlogger` boots
+straight into a backlog pass. Verified frontmatter fields used:
+
+| Field | Value | Why |
+|---|---|---|
+| `color` | `purple` | Distinguishes it in the task list and transcript |
+| `initialPrompt` | a backlog pass | Auto-submitted first turn when run as a main session |
+| `memory` | `project` | Accumulates standing judgment ("dashboard work keeps getting deferred") |
+| `skills` | `backlog`, `sweep-prs` | Preloaded, so a pass needs no skill lookup |
+
+The skill holds the procedure. It
 
 Reads the digest, applies the ranking policy, drives three verbs:
 
@@ -131,6 +144,27 @@ creates its own from a fresh `origin/main`; launching from the main checkout
 preserves that invariant exactly and sidesteps the `EnterWorktree` /
 `git worktree add` friction entirely. One session per issue, named
 `issue-<n>`, so the join key back to the digest is obvious.
+
+## Agent identity
+
+Avatars exist only on GitHub, and each distinct avatar-bearing actor costs a
+GitHub App — an install, a secret, and a rotation. Locally, Claude Code
+supports `color` (one of `red, blue, green, yellow, purple, orange, pink,
+cyan`) and session names; there is no `icon` or `avatar` field.
+
+So: **colors and names locally, one identity on GitHub.**
+
+| Role | Local | GitHub |
+|---|---|---|
+| `backlogger` | `color: purple`, `memory: project`, `initialPrompt` | `bess-agent`, comment prefixed `🗂️ **backlogger**` |
+| `bess-analyst` (exists) | `color: cyan` | `bess-agent`, prefixed `🔍 **analyst**` |
+| implementer sessions | `claude --bg -n "issue-<n>"` | `bess-agent` (unchanged) |
+
+A second App (`bess-backlogger`) is deliberately **not** created. It would cut
+against the established rule that the identity axis is *review*, not topic —
+everything unreviewed posts as `bess-agent` — and the role tag in the comment
+body buys the same timeline legibility for nothing. Revisit only if the
+timeline actually becomes ambiguous.
 
 ## Kanban state machine
 
@@ -168,14 +202,35 @@ Applied in order, to items in *Backlog* / *Ready* only:
 1. **User-facing breakage** — `bug` opened by someone other than the
    maintainer, the beta user especially. A wrong number on a real dashboard
    outranks everything.
-2. **Roadmap direction** — advances `docs/agents/roadmap.md`, or moves an
-   experimental inverter platform toward stable.
+2. **Roadmap direction** — advances a theme in `docs/agents/product-roadmap.md`
+   (see below), or moves an experimental inverter platform toward stable.
 3. **Cheap wins and batching** — within a tier, prefer small and low-risk, and
    group items touching the same subsystem.
 
 Tiebreaker: release-blocking.
 Suppressed entirely: `blocked`, `needs-debug-log` (waiting on the reporter),
 duplicates.
+
+### The roadmap the ranking reads
+
+`docs/agents/roadmap.md` is **not** a product roadmap — it is a note
+evaluating Sweep AI and CodeRabbit as pipeline tooling. Axis 2 therefore needs
+a file that does not exist yet: `docs/agents/product-roadmap.md`.
+
+Two layers, so direction is authored once instead of re-decided per issue:
+
+- **Direction** — 5–8 themes with a rough order, human-approved. Themes, not
+  items ("get SolaX modbus to stable", "consumption forecasting works on all
+  platforms"). The backlogger reads this file and never edits it.
+- **Per-item priority** — the board's `Priority` field, backlogger-maintained,
+  derived from how well an item serves the themes.
+
+**Bootstrap:** the backlogger's first pass reads all 37 issues plus `TODO.md`
+and proposes a *draft* set of themes with every item mapped underneath. The
+maintainer edits and approves that draft; the approved result becomes
+`product-roadmap.md`. This grounds the roadmap in the real backlog rather than
+a blank page, and it is a one-time step — thereafter the file is read-only
+input, changed by the maintainer alone.
 
 ## Dependency orchestration
 

@@ -1,7 +1,10 @@
-ARG BUILD_FROM=python:3.13-alpine
+ARG BUILD_FROM=ghcr.io/home-assistant/amd64-base-python:3.13-alpine3.22
 
-# Build frontend on native amd64 to avoid QEMU npm timeouts on ARM
-FROM --platform=linux/amd64 node:20-alpine AS frontend-builder
+# Build the frontend natively to avoid QEMU npm timeouts: $BUILDPLATFORM is
+# the host doing the build (amd64 on CI runners, arm64 on an Apple Silicon
+# dev machine), never the emulated target. The stage emits plain JS, so its
+# arch does not matter to the image.
+FROM --platform=$BUILDPLATFORM node:20-alpine AS frontend-builder
 ARG BUILD_VERSION
 WORKDIR /tmp/frontend
 RUN echo "Building frontend for version ${BUILD_VERSION}"
@@ -21,7 +24,7 @@ LABEL \
     io.hass.description="Battery Energy Storage System optimization and management" \
     io.hass.version=${BUILD_VERSION} \
     io.hass.type="addon" \
-    io.hass.arch="aarch64,amd64,armv7" \
+    io.hass.arch="aarch64,amd64" \
     maintainer="Johan Zander <johanzander@gmail.com>" \
     org.label-schema.build-date=${BUILD_DATE} \
     org.label-schema.description="Battery Energy Storage System optimization and management" \
@@ -30,10 +33,11 @@ LABEL \
     org.label-schema.vcs-ref=${BUILD_REF} \
     org.label-schema.vcs-url="https://github.com/johanzander/bess-manager"
 
+# Python and pip come from the base image (/usr/local/bin). Do NOT apk add
+# python3/py3-pip here: on the HA base-python images that installs Alpine's
+# own interpreter at /usr/bin alongside it, and which one `python3 -m venv`
+# picks then depends on PATH order. gcc/musl-dev stay for source builds.
 RUN apk add --no-cache \
-    python3 \
-    py3-pip \
-    python3-dev \
     gcc \
     musl-dev \
     bash

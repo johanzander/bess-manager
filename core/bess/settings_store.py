@@ -123,6 +123,52 @@ PLATFORM_BATTERY_POWER_POLARITY = {
     "huawei_solar_luna2000": "charge_positive",
 }
 
+# The two sensor keys backed by each single signed entity, in
+# (mapped_key, derived_key) order: the integration publishes only the first,
+# and the second is pointed at the same entity so HAApiController's split can
+# derive it. See apply_signed_pair_aliases.
+_SIGNED_PAIRS = (
+    (PLATFORM_GRID_POWER_POLARITY, "import_power", "export_power"),
+    (
+        PLATFORM_BATTERY_POWER_POLARITY,
+        "battery_charge_power",
+        "battery_discharge_power",
+    ),
+)
+
+
+def apply_signed_pair_aliases(platform: str, sensors: dict) -> dict:
+    """Point a single signed entity's missing counterpart key at that entity.
+
+    Solis and Huawei publish grid power as one signed register, and native
+    SolaX and Huawei publish battery power the same way (#475, #542). The
+    split lives in HAApiController and is gated on BOTH keys resolving to the
+    same entity, so the counterpart has to be mapped for it to fire at all.
+
+    Which platforms are single-signed is a fixed integration fact — the
+    polarity maps above — so the pairing is derived here, on every read of a
+    per-platform sensor map, rather than only when discovery writes it. A
+    settings file persisted before the pairing existed otherwise leaves the
+    split silently off forever: charge power reads back negative while
+    discharging and discharge power reads back None, with no error anywhere
+    (#604). The legacy flat shape carries no platform, so it is not aliased —
+    ``_migrate_schema`` converts it to the per-platform shape for every
+    platform in ``VALID_PLATFORMS``, which is a superset of both polarity
+    maps.
+
+    An explicitly mapped counterpart is never overwritten — a user who mapped
+    a real second entity keeps two independent readings, which is exactly what
+    the split predicate's ``charge_entity == discharge_entity`` check honours.
+
+    Mutates and returns ``sensors``.
+    """
+    for polarity_map, mapped_key, derived_key in _SIGNED_PAIRS:
+        if not polarity_map.get(platform, ""):
+            continue
+        if sensors.get(mapped_key) and not sensors.get(derived_key):
+            sensors[derived_key] = sensors[mapped_key]
+    return sensors
+
 
 def flatten_sensors(sensors: dict) -> dict:
     """Flatten a per-platform sensors dict into a flat sensor_key -> entity_id dict.
@@ -154,7 +200,7 @@ def flatten_sensors(sensors: dict) -> dict:
         result.update(shared_sensors)
     if isinstance(platform_sensors, dict):
         result.update(platform_sensors)
-    return result
+    return apply_signed_pair_aliases(platform, result)
 
 
 class SettingsStore:

@@ -6,7 +6,6 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 import json
 import logging
 import os
-import statistics
 import traceback
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
@@ -62,6 +61,7 @@ from .settings import (
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
 from .solis_modbus_controller import SolisModbusController
+from .terminal_value import terminal_value_breakdown
 from .time_utils import (
     format_period,
     get_period_count,
@@ -1945,47 +1945,12 @@ class BatterySystemManager:
     ) -> float:
         """Calculate terminal value per kWh for the DP optimization.
 
-        Estimate value from the median buy price (over whatever horizon window
-        the caller passed in) adjusted for efficiency and cycle cost ("avoid a
-        future purchase"), capped at the best achievable in-horizon export
-        value ("arbitrage-consistency cap"). This applies at either horizon
-        boundary, midnight-today or midnight-tomorrow:
-        the caller already truncates buy_prices/sell_prices to the current
-        optimization window, so the median/cap formula reflects genuine
-        future price uncertainty beyond that window regardless of where it
-        ends (#345).
-
-        `sell_prices` is expected to be scoped by the caller to the terminal
-        boundary's own calendar day, not the full remaining horizon (#422):
-        on a 48h-extended horizon, using the full window lets an
-        already-committed near-term peak (e.g. today's still-upcoming best
-        sell slot) inflate the cap for a later, economically unrelated day's
-        terminal energy, making the DP hold charge through that day's own
-        (lower) export opportunities instead of exporting into them.
-        `buy_prices` is unaffected -- it feeds a median, which is already
-        resistant to a single-period outlier.
-
-        The cap is required because cycle cost is only ever charged on
-        charging, never on discharge (see `_compute_reward`): an uncapped
-        buy-median terminal value can exceed the best real, known export price
-        already visible inside today's horizon, which makes the DP hold charge
-        to chase a fictitious future bonus instead of exporting now (#126,
-        #244). The cap is self-calibrating from data the DP already has, so it
-        collapses on wide-spread contracts (e.g. Belgian ENTSO-e/Belpex)
-        without needing a market-specific threshold, and stays inert on
-        ordinary/Nordic-shaped markets where the best in-horizon peak is
-        already above the buy-median estimate (#246, supersedes #245).
-
-        The cap is skipped when the export tariff is fixed. It bounds terminal
-        value by an export opportunity the DP would forgo by holding charge,
-        but on a flat sell curve `max(sell_prices)` is not an opportunity to
-        forgo — it is the price available in every period, including the
-        current one, which each period's reward already prices in. Applying it
-        there double-counts the immediate export alternative and makes storing
-        surplus solar for post-horizon use arithmetically impossible for *any*
-        future price, since the cap forces
-        `terminal <= sell * efficiency_discharge < sell < sell / efficiency_charge`
-        — the round-trip breakeven that storing has to clear (#359).
+        The formula itself lives in `core/bess/terminal_value.py` so that
+        production, the forecast-robustness harness and the pinned scenario
+        corpus all price the boundary identically -- see that module's
+        docstring for the full rationale (#126, #244, #246, #345, #359, #422).
+        This method owns fetching the inputs from settings and reporting the
+        result; it does not own the economics.
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
@@ -1995,39 +1960,32 @@ class BatterySystemManager:
         Returns:
             Terminal value per kWh (floored at 0.0)
         """
-        # Estimate terminal value using median (resistant to peak price outliers)
+        # A horizon with no remaining periods is an expected state here (the
+        # last optimization of the day), and there is nothing left to value.
+        # The shared formula deliberately raises on empty input instead of
+        # defaulting, so this case is owned here rather than there -- see
+        # `terminal_value_breakdown`.
         if not buy_prices:
             return 0.0
 
-        median_price = statistics.median(buy_prices)
-        max_sell_price = max(sell_prices)
-        buy_based = max(
-            0.0,
-            median_price * self.battery_settings.efficiency_discharge
-            - self.battery_settings.cycle_cost_per_kwh,
+        breakdown = terminal_value_breakdown(
+            buy_prices, sell_prices, self.battery_settings
         )
-        sell_cap = max(
-            0.0,
-            max_sell_price * self.battery_settings.efficiency_discharge
-            - self.battery_settings.cycle_cost_per_kwh,
-        )
-        export_prices_vary = max_sell_price > min(sell_prices)
-        terminal_value = min(buy_based, sell_cap) if export_prices_vary else buy_based
 
         logger.info(
             "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
             "cap_applied=%s, median_buy=%.3f, max_sell=%.3f, "
             "efficiency=%.2f, cycle_cost=%.3f)",
-            terminal_value,
-            buy_based,
-            sell_cap,
-            export_prices_vary,
-            median_price,
-            max_sell_price,
+            breakdown["terminal_value"],
+            breakdown["buy_based"],
+            breakdown["sell_cap"],
+            breakdown["cap_applied"],
+            breakdown["median_buy"],
+            breakdown["max_sell"],
             self.battery_settings.efficiency_discharge,
             self.battery_settings.cycle_cost_per_kwh,
         )
-        return terminal_value
+        return float(breakdown["terminal_value"])
 
     def _get_temperature_derated_charge_limits(
         self, num_periods: int

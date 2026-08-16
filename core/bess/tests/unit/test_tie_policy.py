@@ -278,3 +278,67 @@ def test_a_decisive_winner_is_alone_in_the_eligible_set(epsilon):
     decisive_idle = _candidate(10.0, 0.0, 6.0, 0.0, 0.0, 0.25)
     behind = _candidate(10.0 - epsilon - 1e-6, -1.0, 5.74, 0.0, 0.25, 0.0)
     assert _pick([decisive_idle, behind], 0, epsilon=epsilon) == 0
+
+
+# ---------------------------------------------------------------- row 5 (#606)
+
+# Row 5 resolves what the objective cannot: candidates whose values are within
+# VALUE_INDISTINGUISHABLE_SEK. Its discharge direction is covered end-to-end by
+# test_tie_determinism.py against a real DP solve; the charge and idle
+# directions and the class guard are NOT reachable from any corpus fixture (all
+# 38 are byte-identical under the opposite charge ordering), so they are pinned
+# here directly. Without these, an edit to the sort key or the class filter
+# would change charge/idle tie-breaking with nothing to catch it.
+
+
+def test_row5_prefers_the_largest_discharge_among_indistinguishable():
+    big = _candidate(10.0, -3.0, 5.21, 0.0, 0.30, 0.0)
+    small = _candidate(10.0 - 1e-13, -2.0, 5.50, 0.0, 0.30, 0.0)
+    # No net load, so row 3 stands down and row 5 is what decides.
+    assert _pick([small, big], 0, home=0.0, solar=0.0) == 1
+
+
+def test_row5_prefers_the_largest_charge_among_indistinguishable():
+    # The charge direction follows row 4's argument (absorb earliest at equal
+    # model reward), not the discharge sign. Unreachable from the corpus.
+    small = _candidate(10.0, 1.0, 6.25, 0.0, -0.25, 0.375)
+    big = _candidate(10.0 - 1e-13, 3.0, 6.75, 0.0, -0.75, 0.375)
+    assert _pick([small, big], 0, home=0.0, solar=0.0) == 1
+
+
+def test_row5_never_changes_the_action_class():
+    # The guard that makes this a tie-break rather than a re-decision. An
+    # unrestricted "largest magnitude" would turn an IDLE winner into a full
+    # discharge on a flat value function, and flip charge winners to
+    # discharges -- both observed failing before the class filter existed.
+    idle = _candidate(10.0, 0.0, 6.0, 0.0, 0.0, 0.25)
+    tied_discharge = _candidate(10.0, -3.0, 5.21, 0.0, 0.30, 0.0)
+    tied_charge = _candidate(10.0, 3.0, 6.75, 0.0, -0.75, 0.375)
+    # Bit-exact ties in all three classes, no net load so row 3 stands down.
+    assert _pick([idle, tied_discharge, tied_charge], 0, home=0.0, solar=0.0) == 0
+    assert _pick([idle, tied_discharge, tied_charge], 1, home=0.0, solar=0.0) == 1
+    assert _pick([idle, tied_discharge, tied_charge], 2, home=0.0, solar=0.0) == 2
+
+
+def test_row5_breaks_an_equal_power_tie_by_index():
+    # Totality: two candidates at the same power must not reopen the float gap.
+    first = _candidate(10.0, -2.0, 5.50, 0.0, 0.30, 0.0)
+    second = _candidate(10.0 - 1e-14, -2.0, 5.50, 0.0, 0.30, 0.0)
+    assert _pick([first, second], 0, home=0.0, solar=0.0) == 0
+    assert _pick([first, second], 1, home=0.0, solar=0.0) == 0
+
+
+def test_row5_stands_down_outside_the_indistinguishable_band():
+    # A gap the objective CAN see is a real ranking, not a tie. 1e-9 is far
+    # inside epsilon, so the candidate stays eligible -- only row 5's own
+    # 1e-12 band excludes it, which is the distinction being pinned.
+    winner = _candidate(10.0, -2.0, 5.50, 0.0, 0.30, 0.0)
+    bigger_but_worse = _candidate(10.0 - 1e-9, -3.0, 5.21, 0.0, 0.30, 0.0)
+    assert _pick([winner, bigger_but_worse], 0, home=0.0, solar=0.0) == 0
+
+
+def test_row5_does_not_overrule_an_earlier_rows_pick():
+    # Row 3 swaps IDLE -> COVER; row 5 must not then pull it to the larger
+    # OVER discharge, which row 3 deliberately refused as a genuine export.
+    tied_over = _candidate(10.00, -3.0, 5.21, 0.0, 0.30, 0.0)
+    assert _pick([IDLE, COVER, tied_over], 0) == 1

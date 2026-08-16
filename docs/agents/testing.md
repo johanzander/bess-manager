@@ -253,13 +253,56 @@ Name them descriptively: `high_solar_export.json`, `ev_charging_overnight.json`.
 
 Scenarios may carry `expected_results` (plan economics) and `expected_behavior`
 (intent presence/absence, `savings_positive`). When the optimizer legitimately
-changes behavior, regenerate these **from the optimizer** (store `expected_results`
-at ≥4 decimals to avoid 1-dp rounding-boundary flips) rather than hand-editing.
-Optional per-scenario overrides beyond the standard price/consumption/battery
-fields are supported ad hoc as they come up — e.g. `terminal_value_per_kwh`
-(added for #422) lets a fixture pin the DP's terminal-value input directly,
-for bugs whose defect lives in how that input is *computed* upstream (in
-`BatterySystemManager`) rather than in the DP itself.
+changes behavior, regenerate these **from the optimizer** rather than
+hand-editing:
+
+```bash
+.venv/bin/python scripts/capture_scenario_expected_results.py   # prints every delta
+```
+
+It rewrites only the keys a fixture already carries and prints what moved, so
+the PR can quote the measured movement. `--check` reports staleness without
+writing. It is a *deliberate re-pin*, never a way to green a red suite — if you
+cannot explain a printed delta, that delta is the finding.
+
+**`terminal_value_per_kwh` is required on every fixture**, enforced by
+`test_scenarios.py::test_every_fixture_declares_a_terminal_value`. It used to
+be an optional override (added for #422); every other fixture fell through to
+`optimize_battery_schedule`'s `0.0` default, and at 0.0 the DP's terminal-row
+branch never executes, so the whole corpus was blind to terminal value in both
+directions. Generate it with:
+
+```bash
+.venv/bin/python scripts/capture_scenario_terminal_values.py
+```
+
+which applies the production formula (`core/bess/terminal_value.py`) to the
+fixture's own prices, reproducing #422's calendar-day cap scoping as the last
+`24 / period_duration` periods.
+
+**The recorded value is derived, never hand-pinned.** The script overwrites any
+recorded value that disagrees with the formula, and
+`test_scenarios.py::test_recorded_terminal_values_still_match_the_production_formula`
+fails a fixture that carries one — the whole point of the retrofit is that the
+corpus runs at production's terminal value, so a fixture pinned to something
+else is silently exempt from the gate it was added to feed. A defect in how
+`BatterySystemManager` *computes* that input therefore belongs in a test of
+`BatterySystemManager`, not in a scenario fixture.
+
+Adding or changing a fixture therefore means regenerating three artefacts, in
+this order (the second and third fail by design until you do):
+
+```bash
+.venv/bin/python scripts/capture_scenario_terminal_values.py
+.venv/bin/python scripts/capture_selector_goldens.py
+PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --add-new
+```
+
+For a change that moves what the DP *plans* on existing fixtures, the VPP step
+is `--repin-current` instead of `--add-new`: it rewrites only the
+`current_plan`/`current` half and prints each fixture's realized-cost delta.
+Never run a full VPP re-baseline to go green — that regenerates both halves and
+destroys the recorded v10.0.2 drift signal.
 
 **For a bug fix that changes optimizer economics or behavior: pin the
 regression into this fixture system before reaching for a standalone test

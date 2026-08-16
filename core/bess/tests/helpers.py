@@ -22,6 +22,7 @@ from core.bess.settings import (
     HomeSettings,
 )
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
+from core.bess.terminal_value import calculate_terminal_value_per_kwh
 
 
 def _scenario_inputs(scenario: dict):
@@ -114,6 +115,38 @@ def _scenario_inputs(scenario: dict):
     if "home" in scenario:
         inputs["home_settings"] = HomeSettings(**scenario["home"])
     return inputs
+
+
+def scenario_terminal_value(scenario: dict) -> float:
+    """Production terminal value for one scenario, with #422 cap scoping.
+
+    Shared by `scripts/capture_scenario_terminal_values.py` (which records the
+    result into the fixture) and
+    `test_scenarios.py::test_recorded_terminal_values_still_match_the_production_formula`
+    (which fails when a recorded value drifts from it). One definition, so the
+    guard cannot pass against a stale copy of the rule it enforces.
+
+    Production scopes the arbitrage-consistency cap to sell prices on the
+    terminal boundary's own calendar day. Fixtures carry no timestamps, so the
+    equivalent window here is the last `24 / period_duration` periods -- which
+    reproduces `regression_frank_debug_before`'s independently-pinned
+    0.143013413 exactly, where the unscoped array gives the pre-#422
+    0.195488259. `buy_prices` stays the full remaining horizon, as in
+    production.
+
+    Precondition, unenforceable from fixture data: the horizon ends on a day
+    boundary. True for the whole corpus (every fixture is shorter than a day,
+    or "partial first day + whole terminal day"), and not checkable by
+    arithmetic on the length -- `n % periods_per_day == 0` is false for every
+    correct multi-day fixture here, 118 % 96 = 22 among them.
+    """
+    inputs = _scenario_inputs(scenario)
+    periods_per_day = round(24 / inputs["period_duration_hours"])
+    return calculate_terminal_value_per_kwh(
+        inputs["buy_price"],
+        inputs["sell_price"][-periods_per_day:],
+        inputs["battery_settings"],
+    )
 
 
 def run_scenario(scenario: dict):

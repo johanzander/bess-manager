@@ -733,3 +733,120 @@ def test_migrate_schema_handles_missing_ai_analyst_section(tmp_path, monkeypatch
     store.data = {"battery": {"total_capacity": 10.0}}
     store._migrate_schema()  # must not raise
     assert "ai_analyst" not in store.data
+
+
+# ---------------------------------------------------------------------------
+# Signed-pair aliasing (issue #604)
+# ---------------------------------------------------------------------------
+
+
+class TestSignedPairAliasing:
+    """Platforms with one signed entity get the counterpart key derived on read.
+
+    Native SolaX and Huawei publish battery power as a single signed register;
+    Solis and Huawei publish grid power the same way. The counterpart key
+    (battery_discharge_power / export_power) points at that same entity so
+    HAApiController's signed split fires. That pairing is a fixed integration
+    fact, so it is derived on every read rather than only when discovery runs —
+    a settings file written before the pairing existed would otherwise leave
+    the split silently disabled forever (#604).
+    """
+
+    def test_huawei_battery_discharge_derived_from_signed_charge_entity(self):
+        """The issue #604 config: only battery_charge_power was persisted."""
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "huawei_solar_luna2000",
+                "huawei_solar_luna2000": {
+                    "battery_charge_power": "sensor.batteries_charge_discharge_power",
+                },
+            }
+        )
+        assert (
+            flat["battery_discharge_power"] == "sensor.batteries_charge_discharge_power"
+        )
+
+    def test_solax_native_battery_discharge_derived_from_signed_charge_entity(self):
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "solax_modbus_native",
+                "solax_modbus_native": {
+                    "battery_charge_power": "sensor.solax_battery_power_charge",
+                },
+            }
+        )
+        assert flat["battery_discharge_power"] == "sensor.solax_battery_power_charge"
+
+    def test_solis_export_derived_from_signed_import_entity(self):
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "solis_modbus",
+                "solis_modbus": {"import_power": "sensor.solis_grid_power_net"},
+            }
+        )
+        assert flat["export_power"] == "sensor.solis_grid_power_net"
+
+    def test_huawei_export_derived_from_signed_import_entity(self):
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "huawei_solar_luna2000",
+                "huawei_solar_luna2000": {
+                    "import_power": "sensor.power_meter_active_power",
+                },
+            }
+        )
+        assert flat["export_power"] == "sensor.power_meter_active_power"
+
+    def test_two_entity_platform_gets_no_derived_counterpart(self):
+        """Growatt publishes separate charge/discharge entities — nothing to derive."""
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "growatt_server_min",
+                "growatt_server_min": {
+                    "battery_charge_power": "sensor.growatt_battery_charging_w",
+                    "import_power": "sensor.growatt_import",
+                },
+            }
+        )
+        assert "battery_discharge_power" not in flat
+        assert "export_power" not in flat
+
+    def test_explicitly_mapped_counterpart_is_never_overwritten(self):
+        """A user who mapped a real discharge entity keeps it — no split applies."""
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "huawei_solar_luna2000",
+                "huawei_solar_luna2000": {
+                    "battery_charge_power": "sensor.signed_battery_power",
+                    "battery_discharge_power": "sensor.separate_discharge",
+                },
+            }
+        )
+        assert flat["battery_discharge_power"] == "sensor.separate_discharge"
+
+    def test_unmapped_primary_derives_nothing(self):
+        """No charge entity means there is nothing to alias to."""
+        flat = _sm.flatten_sensors(
+            {
+                "platform": "huawei_solar_luna2000",
+                "huawei_solar_luna2000": {"battery_soc": "sensor.soc"},
+            }
+        )
+        assert "battery_discharge_power" not in flat
+        assert "export_power" not in flat
+
+    def test_get_active_sensors_exposes_the_derived_pair(self, tmp_path, monkeypatch):
+        """The controller reads sensors through get_active_sensors, so the
+        derivation has to be visible there, not only in flatten_sensors."""
+        _patch_path(tmp_path, monkeypatch)
+        store = SettingsStore()
+        store.data["sensors"] = {
+            "platform": "huawei_solar_luna2000",
+            "huawei_solar_luna2000": {
+                "battery_charge_power": "sensor.batteries_charge_discharge_power",
+            },
+        }
+        assert (
+            store.get_active_sensors()["battery_discharge_power"]
+            == "sensor.batteries_charge_discharge_power"
+        )

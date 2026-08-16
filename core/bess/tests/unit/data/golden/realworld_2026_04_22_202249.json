@@ -109,7 +109,7 @@
   -0.15,
   -0.15,
   -0.15,
-  -0.3,
+  -0.15,
   -0.15
  ],
  "intents": [
@@ -222,7 +222,7 @@
   "LOAD_SUPPORT",
   "LOAD_SUPPORT",
   "LOAD_SUPPORT",
-  "BATTERY_EXPORT",
+  "LOAD_SUPPORT",
   "LOAD_SUPPORT"
  ],
  "intra_period_discharge_allowed": [
@@ -336,7 +336,7 @@
   true,
   true,
   true,
-  false
+  true
  ],
  "soe_trajectory": [
   6.6,
@@ -449,8 +449,8 @@
   3.800052631584955,
   3.6421578947428497,
   3.4842631579007444,
-  3.1684736842165337,
-  3.0105789473744284
+  3.326368421058639,
+  3.1684736842165337
  ],
- "battery_solar_cost": -15.523233624598037
+ "battery_solar_cost": -15.214279390723037
 }

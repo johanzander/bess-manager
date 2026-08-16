@@ -169,6 +169,25 @@ developer's. It is also where the existing Stage 2 pipeline lives — an item
 enters Analysis when refinement starts and leaves it when the Definition of
 Ready is met.
 
+### Analysis sub-states
+
+Refinement stalls for more reasons than a missing log, and the PO's follow-up
+differs by reason. Four sub-states, held in an `Awaiting` field on the board:
+
+| Sub-state | Meaning | PO follow-up |
+|---|---|---|
+| `reporter` | Debug log or reproduction requested, not yet supplied | Nudge at 14 days; park at 28 |
+| `discussion` | Behaviour, scope, or expected outcome still being agreed with the reporter or maintainer — e.g. #592 "VPP idle mode", #593 "Growatt VPP order of register values" | Summarise the thread and put the open question to the maintainer; never auto-park an active conversation |
+| `upstream` | Blocked on a vendor or third party (inverter register semantics, an HA release) | Track, restate the dependency, do not chase the reporter |
+| `analysis` | Log present, approach not yet agreed; Stage 2 not run or running | Fire or propose Stage 2 (below) |
+
+**Label-based derivation is not sufficient here.** #592 and #593 are open,
+actively discussed, and carry *no labels at all* — a label-only rule files
+both under Backlog while a live conversation runs. So an open issue with
+comment activity and no development artefact belongs in Analysis regardless of
+labels, and assigning its sub-state is a judgment the PO makes by reading the
+thread. Applying the missing labels is itself PO work.
+
 **Entering Analysis has one autonomous action.** If the item is a user-facing
 bug, has its debug log, and ranks in the top priority tier, the PO fires
 Stage 2 itself rather than waiting to be asked — those are the items the
@@ -177,7 +196,9 @@ point of having a PO. Every other item entering Analysis gets a proposal
 instead ("#502 has its log, shall I analyze?"). This is the only place in v1
 where the PO spends real money unprompted, and the gate is deliberately narrow
 because Stage 2 costs ~$0.50–2 per run.
-Fields: `Priority` (single-select), `Source` (`issue` / `TODO`).
+Fields: `Priority` (single-select), `Source` (`issue` / `TODO`), `Awaiting`
+(`reporter` / `discussion` / `upstream` / `analysis`, meaningful only in the
+Analysis column).
 
 The only new persistent object, and it is GitHub-native — a real board in the
 browser, queryable by any agent, with no duplicate store.
@@ -196,24 +217,49 @@ preserves that invariant exactly and sidesteps the `EnterWorktree` /
 
 ## Agent identity
 
-Avatars exist only on GitHub, and each distinct avatar-bearing actor costs a
-GitHub App — an install, a secret, and a rotation. Locally, Claude Code
-supports `color` (one of `red, blue, green, yellow, purple, orange, pink,
-cyan`) and session names; there is no `icon` or `avatar` field.
+Roles must be visibly distinct actors in an issue timeline — the Product Owner
+asking for a log, the Developer posting a diagnosis, and the Reviewer
+commenting on a PR should not look like the same account. A comment prefix
+cannot do that; only a separate account has a name and an avatar.
 
-So: **colors and names locally, one identity on GitHub.**
+**Three GitHub Apps, one per role.** Apps rather than machine-user PATs: the
+project's own evaluation criteria call for App token auth over personal
+tokens, and installation tokens expire in an hour instead of living
+indefinitely in `.env`. Each renders as `<name>[bot]` with its uploaded
+avatar.
 
-| Role | Local | GitHub |
+| Identity | Avatar | Speaks in |
 |---|---|---|
-| `backlogger` | `color: purple`, `memory: project`, `initialPrompt` | `bess-agent`, comment prefixed `🗂️ **backlogger**` |
-| `bess-analyst` (exists) | `color: cyan` | `bess-agent`, prefixed `🔍 **analyst**` |
-| implementer sessions | `claude --bg -n "issue-<n>"` | `bess-agent` (unchanged) |
+| `bess-product-owner[bot]` | clipboard / kanban | Stage 1 intake, board writes, backlog and reporter comments, log chases |
+| `bess-developer[bot]` | wrench / hard hat | Stage 2 analyze, Stage 3 fix, PR creation |
+| `bess-reviewer[bot]` | magnifying glass | Stage 4 PR review — the existing `CLAUDE_REVIEWER` App, rebranded so all three roles are deliberate rather than one being a leftover |
+| `bess-agent` (existing PAT) | unchanged | Release plumbing and ungoverned local writes; not a role |
 
-A second App (`bess-backlogger`) is deliberately **not** created. It would cut
-against the established rule that the identity axis is *review*, not topic —
-everything unreviewed posts as `bess-agent` — and the role tag in the comment
-body buys the same timeline legibility for nothing. Revisit only if the
-timeline actually becomes ambiguous.
+This supersedes the earlier rule that the identity axis is *review, not
+topic*. That rule existed to stop unreviewed output masquerading as the
+maintainer's voice, and it still holds — none of these three is the
+maintainer. Within automation, role is now the axis.
+
+**Local writes use the same identity as CI**, via a new
+`scripts/gh-as.sh <role> ...`: sign a JWT with the role's App key, exchange it
+for an installation token, run `gh` with it. Roughly twenty lines, modelled on
+the existing `gh-agent.sh`. Without it the PO would show one avatar when
+Reflex runs in CI and another when Rhythm runs locally — the exact confusion
+these identities exist to remove.
+
+Per role, one-time setup: create the App, upload an avatar, install it on the
+repo, add `<ROLE>_APP_ID` and `<ROLE>_PRIVATE_KEY` to Actions secrets and to
+`.env`.
+
+**Locally, Claude Code has names and colors but no avatars** — verified: agent
+frontmatter supports `color` (`red, blue, green, yellow, purple, orange, pink,
+cyan`) and sessions take `-n`, but there is no `icon` or `avatar` field.
+
+| Agent | Local |
+|---|---|
+| `product-owner` | `color: purple`, `memory: project`, `initialPrompt` |
+| `bess-analyst` (exists) | `color: cyan` |
+| implementer sessions | `claude --bg -n "issue-<n>"` |
 
 ### 5. `issue-triage.yml` — Reflex, rewritten as PO intake
 
@@ -241,7 +287,7 @@ CI merge.
 | Column | Derivation |
 |---|---|
 | Backlog | open issue, no `blocked`, no worktree, no PR, and no refinement started |
-| Analysis | being refined toward Ready — either *awaiting reporter* (`needs-debug-log`, PO has asked) or *awaiting analysis* (`ready-for-analysis`, log present, Stage 2 not yet run or running) |
+| Analysis | being refined toward Ready — see the four sub-states below |
 | Ready | satisfies the Definition of Ready below, and Priority is set |
 | In progress | live worktree on a branch naming the issue, or draft PR with no review |
 | In review | PR open and review requested / `has-fix-pr` |
@@ -259,7 +305,9 @@ The valuable output is the **mismatches**, each mapping to one action:
 | PR `CONFLICTING` | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
 | issue closed, card not *Done* | move card |
-| in *Analysis*, `needs-debug-log`, quiet 14 days | nudge once; on a second timeout park back to *Backlog* with a comment |
+| in *Analysis*/`reporter`, quiet 14 days | nudge once; park back to *Backlog* with a comment at 28 |
+| in *Analysis*/`discussion`, quiet 14 days | summarise the thread, put the open question to the maintainer |
+| open issue, comment activity, no labels | file into *Analysis*, assign a sub-state, apply the missing labels |
 | in *Analysis*, `analyzed`, DoR met | promote to *Ready* |
 
 ## Definition of Ready

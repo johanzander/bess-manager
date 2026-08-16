@@ -422,11 +422,16 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
         r for r in caplog.records if "Near-tied DP decisions detected" in r.getMessage()
     ], "fixture now trips the tie detector -- it no longer exercises the fast path"
 
+    # Re-pinned by Phase 4b (#352): +0.09732 SEK, the exact-cover candidate
+    # changing what this fixture plans. The fast-path assertion above is what
+    # this test is for and is unaffected -- the detector still flags nothing.
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        158.2466715789474, abs=1e-4
+        158.34398757894738, abs=1e-4
     )
+    # Savings = grid_only_cost - battery_solar_cost, so this moves by the same
+    # -0.09729 SEK and has to be re-pinned with it.
     assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
-        62.8678, abs=1e-3
+        62.7705, abs=1e-3
     )
 
 
@@ -541,6 +546,247 @@ def test_466_sunrise_crossover_covers_residual_load_instead_of_idle():
 
     # Whole-horizon R == P: the cover candidate plans delivery, not a
     # rate-step command, so execution reproduces the planned economics.
+    assert sim.realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=1e-6
+    )
+
+
+def test_352_low_rate_export_is_not_planned_when_exact_cover_exists():
+    """#352 Shape B, on the reporter's own hardware data: a period whose
+    house load falls between two lattice steps must not be planned as a
+    partial-rate export.
+
+    Replays `regression_2026_08_12_202906` (Growatt MIN, 15 kW battery, from
+    the 2026-08-12 bundle). Period 99 needs 0.700 kWh over 15 minutes --
+    2.80 kW -- and the percent lattice offers 18% (2.70 kW) or 19% (2.85
+    kW). Pre-fix the DP chose 3.30 kW: it under-covers at 2.70 (importing
+    0.025 kWh at buy 3.92) and over-covers above it, so over-covering was
+    the cheaper error. That is what classified the period BATTERY_EXPORT,
+    which is what wrote `grid_first` at a sub-load rate -- and `grid_first`
+    does not load-follow, so the reporter's evening oven load was imported
+    while the battery sat at 10.2 kWh.
+
+    The export was never the goal (design doc section 2, "the root cause is a
+    missing candidate"): 0.125 kWh at sell 2.63 against 2.925 kWh of
+    forfeited load-following headroom. On ceiling hardware exact cover *is*
+    commandable -- 19% is a ceiling, so it delivers min(2.85, 2.80) = 2.80
+    exactly -- so the fix is that the candidate exists, not that the export
+    is vetoed.
+
+    Asserts the outcome (flows and realized cost), not the written command:
+    a rate assertion would stay green if the plan still exported and only
+    the mapping changed.
+    """
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
+    )
+
+    scenario = load_test_scenario("regression_2026_08_12_202906")
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+    dt = inp["period_duration_hours"]
+
+    pd = result.period_data[99]
+    assert pd.energy.battery_to_grid == pytest.approx(0.0, abs=1e-6), (
+        f"period 99: planned a {pd.energy.battery_to_grid:.4f} kWh export "
+        f"against {pd.energy.home_consumption:.4f} kWh of home consumption -- "
+        f"the commitment shape #352 reports. Intent "
+        f"{pd.decision.strategic_intent}, action "
+        f"{pd.decision.battery_action:.4f} kWh"
+    )
+    assert pd.energy.grid_imported == pytest.approx(0.0, abs=1e-6), (
+        f"period 99: the battery holds enough to cover the house exactly; "
+        f"got {pd.energy.grid_imported:.4f} kWh imported"
+    )
+    assert pd.energy.battery_to_home == pytest.approx(
+        pd.energy.home_consumption, abs=1e-6
+    )
+
+    # R == P over the whole horizon: the cover plan is a ceiling command,
+    # and a ceiling that rounds DOWN would under-deliver it (539 of 1377
+    # corpus deficits round down under nearest-rounding -- design doc
+    # section 2). This is the assertion that catches that.
+    commands = [
+        derive_control_command(
+            p.decision.strategic_intent,
+            p.decision.battery_action / dt,
+            inp["battery_settings"],
+            intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+        )
+        for p in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        inp["solar_production"],
+        inp["home_consumption"],
+        inp["buy_price"],
+        inp["sell_price"],
+        scenario["battery"]["initial_soe"],
+        inp["battery_settings"],
+        dt,
+    )
+    assert sim.realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=1e-6
+    )
+
+
+def test_352_fix_must_not_refuse_the_arbitrage_remainder():
+    """The adversarial pin the design requires alongside the #352 fix, and
+    the case that refuted an earlier answer to it (design doc section 6).
+
+    25 kWh available above reserve, a 10 kW export cap, three hourly periods
+    priced 2.00 / 4.00 / 5.00 SEK/kWh and no house load. The optimum is
+    **5, 10, 10**: every exporting period at the cap except one, which takes
+    the remainder in the *cheapest* hour. That 50%-rate period is a
+    partial-rate committing export and it is legitimate arbitrage -- a rule
+    that fixes #352 by refusing partial-rate exports moves 4.5 kWh into the
+    0.50 SEK/kWh hour and loses 7% of the revenue.
+
+    This is why #352 is fixed by *adding* the missing cover candidate rather
+    than by a materiality veto: adding a candidate cannot refuse this plan.
+    Stated as revenue rather than "unchanged" so a regression reports a
+    number.
+    """
+    settings_kwargs = {
+        "max_soe_kwh": 28.0,
+        "min_soe_kwh": 3.0,
+        "max_charge_power_kw": 10.0,
+        "max_discharge_power_kw": 10.0,
+        "efficiency_charge": 1.0,
+        "efficiency_discharge": 1.0,
+        "cycle_cost_per_kwh": 0.0,
+        "initial_soe": 28.0,
+    }
+    scenario = {
+        "period_duration_hours": 1.0,
+        "buy_price": [2.0, 4.0, 5.0],
+        "sell_price": [2.0, 4.0, 5.0],
+        "home_consumption": [0.0, 0.0, 0.0],
+        "solar_production": [0.0, 0.0, 0.0],
+        "battery": settings_kwargs,
+    }
+    result = optimize_battery_schedule(**_scenario_inputs(scenario))
+
+    discharged = [p.energy.battery_discharged for p in result.period_data]
+    assert discharged[1:] == pytest.approx(
+        [10.0, 10.0], abs=1e-6
+    ), f"the two expensive hours must export at the cap; got {discharged}"
+    assert 0.0 < discharged[0] < 10.0, (
+        f"the energy-limited remainder must stay in the cheapest hour at a "
+        f"partial rate -- a rule that refuses partial-rate exports pushes it "
+        f"into a dearer hour or forfeits it; got {discharged}"
+    )
+    # Measured on this branch, not asserted as "unchanged": 4.9 rather than
+    # the analytic 5.0 because the state grid leaves 0.1 kWh above reserve,
+    # which is pre-existing and independent of this fix.
+    revenue = sum(p.economic.export_revenue for p in result.period_data)
+    assert revenue == pytest.approx(99.80, abs=1e-6), (
+        f"planned export revenue {revenue:.2f} SEK; 4.9*2 + 10*4 + 10*5 = "
+        f"99.80 is what this energy budget buys at the optimum"
+    )
+
+
+def test_exact_cover_is_delivered_in_the_round_down_band():
+    """A cover plan whose ceiling rounds DOWN under nearest-rounding must
+    still be delivered exactly (Phase 4b).
+
+    This is the half of the fix the #352 reproduction does not exercise. At
+    that fixture's period 99 the deficit (2.80 kW on a 0.15 kW step) happens
+    to round *up*, so a cover plan survives nearest-rounding there by luck.
+    Across the corpus 539 of 1377 house deficits round down, and for those a
+    nearest-rounded ceiling sits below the plan and the inverter delivers
+    less than planned -- silently, since `min(ceiling, load)` never reports
+    a shortfall.
+
+    Built to land squarely in that band: a 10 kW battery has a 0.1 kW step,
+    and a 1.22 kW deficit is 12.2 steps -- nearest gives 12 (1.20 kW), a
+    0.02 kW under-delivery, while ceil gives 13 (1.30 kW), which the ceiling
+    throttles back to exactly 1.22. Asserted as realized-vs-planned cost
+    through the inverter simulator, not as the percent written, so it holds
+    the outcome rather than the mapping.
+    """
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+        simulate,
+    )
+
+    scenario = {
+        "period_duration_hours": 1.0,
+        # Expensive to import, worthless to export, and only enough stored
+        # energy for the three periods: covering the house exactly is the
+        # only sensible action, so the DP has no reason to choose anything
+        # else and the test pins the delivery rather than the choice.
+        "buy_price": [3.0, 3.0, 3.0],
+        "sell_price": [0.0, 0.0, 0.0],
+        "home_consumption": [1.22, 1.22, 1.22],
+        "solar_production": [0.0, 0.0, 0.0],
+        "battery": {
+            "max_soe_kwh": 20.0,
+            "min_soe_kwh": 2.0,
+            "max_charge_power_kw": 10.0,
+            "max_discharge_power_kw": 10.0,
+            "efficiency_charge": 1.0,
+            "efficiency_discharge": 1.0,
+            "cycle_cost_per_kwh": 0.0,
+            "initial_soe": 6.0,
+        },
+    }
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+
+    # The period must be planning *exactly* the deficit from the battery --
+    # not merely ending up with the house covered, which a large export
+    # would also produce as a by-product and which would make the
+    # realized-cost assertion below pass without exercising the ceiling at
+    # all.
+    covered = [
+        t
+        for t, p in enumerate(result.period_data)
+        if p.energy.battery_discharged == pytest.approx(1.22, abs=1e-6)
+        and p.energy.battery_to_home == pytest.approx(1.22, abs=1e-6)
+        and p.energy.grid_exported == pytest.approx(0.0, abs=1e-6)
+    ]
+    assert len(covered) == 3, (
+        "expected all three periods to plan exact cover at 1.22 kW; without "
+        "that this test pins nothing. Got "
+        + str(
+            [
+                (p.decision.strategic_intent, p.energy.battery_discharged)
+                for p in result.period_data
+            ]
+        )
+    )
+
+    commands = [
+        derive_control_command(
+            p.decision.strategic_intent,
+            p.decision.battery_action / inp["period_duration_hours"],
+            inp["battery_settings"],
+            intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+        )
+        for p in result.period_data
+    ]
+    sim = simulate(
+        commands,
+        inp["solar_production"],
+        inp["home_consumption"],
+        inp["buy_price"],
+        inp["sell_price"],
+        scenario["battery"]["initial_soe"],
+        inp["battery_settings"],
+        inp["period_duration_hours"],
+    )
+    for t in covered:
+        assert sim.period_data[t].energy.battery_discharged == pytest.approx(
+            result.period_data[t].energy.battery_discharged, abs=1e-6
+        ), (
+            f"period {t}: planned "
+            f"{result.period_data[t].energy.battery_discharged:.4f} kWh but "
+            f"the written ceiling delivers "
+            f"{sim.period_data[t].energy.battery_discharged:.4f} -- the "
+            f"ceiling rounded below the plan"
+        )
     assert sim.realized_cost == pytest.approx(
         result.economic_summary.battery_solar_cost, abs=1e-6
     )

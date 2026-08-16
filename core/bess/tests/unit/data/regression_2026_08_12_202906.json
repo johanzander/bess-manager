@@ -3,10 +3,10 @@
   "description": "Issue #352 Shape B: low-rate BATTERY_EXPORT written as grid_first. Period 99 plans a 0.125 kWh export while giving up 2.925 kWh of load-following headroom -- the commitment shape reproduced on the reporter's hardware on 2026-08-12.",
   "expected_results": {
     "base_cost": 187.45848,
-    "battery_solar_cost": 17.82485,
-    "base_to_battery_solar_savings": 169.63363,
-    "base_to_battery_solar_savings_pct": 90.49131,
-    "_note": "PRE-FIX pin, captured on main (post-#545) 2026-08-13. #352 Shape B is not fixed yet -- this records what today's candidate space plans so Phase 4b's change to it is measurable. 4b is expected to move these values and must state the measured delta."
+    "battery_solar_cost": 17.49181,
+    "base_to_battery_solar_savings": 169.96667,
+    "base_to_battery_solar_savings_pct": 90.66897,
+    "_note": "POST-FIX pin, Phase 4b. The pre-fix values were base 187.45848 / battery_solar 17.82485 / savings 169.63363 (90.49131%), captured 2026-08-13 to make this measurable; the exact-cover candidate moves battery_solar_cost -0.33304 SEK on this fixture. Period 99 now plans LOAD_SUPPORT covering the house exactly (0.700 kWh, no export) instead of a 0.825 kWh BATTERY_EXPORT written as grid_first -- see test_352_low_rate_export_is_not_planned_when_exact_cover_exists."
   },
   "issue": 352,
   "pr": null,

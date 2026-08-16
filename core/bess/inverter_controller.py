@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
-from .execution_model import INTENT_TO_MODE
+from .execution_model import INTENT_TO_MODE, discharge_command_index
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -483,7 +483,16 @@ class InverterController(ABC):
 
     @staticmethod
     def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
-        """Scale a power value to a 0-100 percent rate, clamped to range."""
+        """Scale a *charge* power to a 0-100 percent rate, clamped to range.
+
+        Charge only, since 4b: the discharge path goes through
+        `execution_model.discharge_command_index`, which knows whether the
+        number it produces is a ceiling or a target. A charge rate is always
+        a target, so nearest-rounding is right here and this stays a plain
+        scale -- but it is the same conversion, and Phase 4c collapses it
+        into the shared function along with the six `rate_throughput` sites
+        that assume nominal charge power.
+        """
         return min(100, max(0, round(power_kw / max_power_kw * 100)))
 
     def _compute_charge_rate(
@@ -521,8 +530,28 @@ class InverterController(ABC):
             return False, 0
         elif intent in ("LOAD_SUPPORT", "BATTERY_EXPORT"):
             if battery_action_kw < -0.01:
-                discharge_rate = self._scale_to_percent(
-                    abs(battery_action_kw), self.max_discharge_power_kw
+                discharge_rate = discharge_command_index(
+                    abs(battery_action_kw),
+                    # The platform's own lattice, not a hardcoded 1%: the
+                    # planner enumerates candidates on
+                    # `discharge_resolution_kw` (via
+                    # `PlatformCapabilities.discharge_rate_step_kw`), so a
+                    # platform that overrides it and a write path that did
+                    # not would plan on one grid and command on another --
+                    # R != P by construction. No shipped controller
+                    # overrides it today, which is exactly why this was
+                    # invisible.
+                    self.discharge_resolution_kw(self.max_discharge_power_kw),
+                    # LOAD_SUPPORT writes load_first, where the number is a
+                    # ceiling on hardware that load-follows -- so it must be
+                    # rounded UP or it under-delivers the plan (Phase 4b;
+                    # see discharge_command_index). BATTERY_EXPORT writes
+                    # grid_first, where the number is the delivered power on
+                    # every platform, so nearest stays correct.
+                    rate_is_ceiling=(
+                        intent == "LOAD_SUPPORT"
+                        and self.discharge_rate_is_load_following
+                    ),
                 )
             else:
                 discharge_rate = 0

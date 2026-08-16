@@ -47,17 +47,28 @@ horizon.
 **Actions**: Charge, discharge, or idle at various power levels — filtered
 by physical constraints (available energy, remaining capacity, power limits).
 Discharge candidates enumerate the inverter's integer-percent rate grid,
-plus one deliberate off-lattice candidate (#466 follow-up): discharging
-exactly the forecast net-load residual when that residual is smaller than
-the smallest percent candidate (typical at solar/load crossovers around
-sunrise/sunset). Load-first hardware delivers `min(actual load, ceiling)`,
-so this action executes exactly as planned; it is gated so it always
-classifies as LOAD_SUPPORT and rounds to a nonzero rate register
-(`_residual_cover_p` in `dp_battery_algorithm.py`). Without it, those
-crossover periods had no executable discharge at all — sub-residual
-lattice candidates don't exist and overshooting ones are excluded as
-unexecutable (#497 below) — so IDLE won by default and the home imported
-the residual: the "morning IDLE" pattern users saw pre-fix.
+plus one deliberate off-lattice candidate (#466 follow-up, generalized by
+Phase 4b for #352): discharging exactly the forecast net-load residual,
+wherever the lattice cannot represent covering it. Load-first hardware
+delivers `min(actual load, ceiling)`, so commanding the smallest lattice
+step at or above the residual delivers the residual exactly — the plan is
+the *delivery*, the command is on the lattice. It is gated so it always
+classifies as LOAD_SUPPORT and so a covering ceiling actually exists on
+the platform (`_residual_cover_p` in `action_selector.py`, and
+`load_support_delivers_exact_cover` in `execution_model.py` — the
+candidate is withdrawn on hardware where a discharge number is a forced
+power rather than a ceiling, #580).
+
+Without it a period whose net load falls between two lattice steps has no
+action that covers the house: the step below under-covers and imports the
+difference at buy price, and every step above either is excluded as
+unexecutable (#497 below) or exports for real at sell price. With buy >
+sell that is a forced loss either way. Two user-visible symptoms came from
+exactly this gap — the "morning IDLE" pattern at sunrise/sunset crossovers
+(#466), and low-rate evening `BATTERY_EXPORT` periods written as
+`grid_first`, which does not load-follow, so a load spike was imported
+while the battery sat full (#352 Shape B). The export in the second case
+was never the goal; it was the cheaper of two bad roundings.
 
 **Transition**: Each action updates SOE accounting for charge/discharge
 efficiency losses and updates the **cost basis** of stored energy.

@@ -28,6 +28,7 @@ from core.bess.action_selector import (
     Candidate,
     _charge_candidate,
     _discharge_candidates,
+    _residual_cover_p,
     _tie_margin,
 )
 from core.bess.dp_battery_algorithm import (
@@ -38,7 +39,7 @@ from core.bess.dp_battery_algorithm import (
     _run_dynamic_programming,
 )
 from core.bess.dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
-from core.bess.execution_model import PlatformCapabilities
+from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import build_scenario_inputs
@@ -285,8 +286,17 @@ def test_discharge_candidates_are_hardware_representable():
     a 10 kW max), which _map_rates rounds to 75% -> 7.5 kW -- a planned
     action the hardware silently can't reproduce, breaking R == P on
     several real-world scenarios. Every candidate this function returns
-    must therefore already be an exact multiple of max_discharge_power_kw
-    / 100, so planning and execution can never diverge on this account."""
+    must therefore be executable exactly as planned.
+
+    Since Phase 4b that is "on the lattice **or** an exact-cover delivery",
+    not "on the lattice" alone: the cover candidate is deliberately
+    off-lattice because it plans the *delivery* of a ceiling command
+    (`min(ceiling, actual load)`), and it is executable precisely when a
+    covering ceiling exists on the platform -- which is what
+    `covering_ceiling_kw` decides and what is asserted here. The 1.234 kW
+    deficit below now produces one; before 4b the cover candidate was
+    offered only below the smallest lattice step, so this scenario never
+    reached it and the blanket lattice assertion happened to hold."""
     settings = make_battery_settings(max_discharge_power_kw=10.0)
     # soe/home_consumption/solar chosen so an unconstrained analytic
     # breakpoint (V-grid crossing) would fall strictly between two
@@ -300,7 +310,18 @@ def test_discharge_candidates_are_hardware_representable():
     )
     assert candidates, "expected at least one discharge candidate"
     step = settings.max_discharge_power_kw / 100
+    cover_p = _residual_cover_p(1.234, 0.0, 1.0, DEFAULT_CAPABILITIES, settings)
+    assert cover_p is not None, (
+        "this scenario is supposed to exercise the exact-cover candidate; "
+        "if it no longer does, the exemption below is untested"
+    )
     for p in candidates:
+        if p == pytest.approx(cover_p, abs=1e-9):
+            assert DEFAULT_CAPABILITIES.covering_ceiling_kw(p, settings) is not None, (
+                f"exact-cover candidate {p} kW has no commandable covering "
+                f"ceiling -- it cannot be delivered as planned"
+            )
+            continue
         pct = p / step
         assert pct == pytest.approx(round(pct), abs=1e-6), (
             f"candidate {p} kW is not an exact multiple of the hardware's "
@@ -514,9 +535,17 @@ def test_discharge_candidates_use_injected_resolution():
     )
     assert len(finer_candidates) > len(default_candidates)
     # every finer-grid candidate must still be an exact multiple of the
-    # *injected* step, not the hardcoded 1% step
+    # *injected* step, not the hardcoded 1% step -- except the exact-cover
+    # candidate, which is off-lattice by construction on every step size
+    # (it plans the delivery of a ceiling; see _residual_cover_p).
+    finer_caps = PlatformCapabilities(
+        discharge_resolution_kw=settings.max_discharge_power_kw / 200
+    )
     step = settings.max_discharge_power_kw / 200
+    cover_p = _residual_cover_p(1.234, 0.0, 1.0, finer_caps, settings)
     for p in finer_candidates:
+        if cover_p is not None and p == pytest.approx(cover_p, abs=1e-9):
+            continue
         pct = p / step
         assert pct == pytest.approx(round(pct), abs=1e-6)
 

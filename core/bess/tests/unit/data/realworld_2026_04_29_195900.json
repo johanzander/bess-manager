@@ -367,11 +367,11 @@
   },
   "expected_results": {
     "base_cost": 156.05171,
-    "battery_solar_cost": 43.57349,
-    "base_to_battery_solar_savings": 112.47822,
-    "base_to_battery_solar_savings_pct": 72.07753,
-    "total_charged": 9.67444,
-    "total_discharged": 12.05,
+    "battery_solar_cost": 43.5325,
+    "base_to_battery_solar_savings": 112.51921,
+    "base_to_battery_solar_savings_pct": 72.1038,
+    "total_charged": 9.66088,
+    "total_discharged": 12.0253,
     "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 near-tied periods flip (3 IDLE->LOAD_SUPPORT, 3 downstream LOAD_SUPPORT->IDLE), improving battery_solar_cost from 43.8938 to 43.54321. total_charged/total_discharged were re-derived from the current run as part of this refresh too."
   },
   "expected_behavior": {

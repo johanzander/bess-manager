@@ -41,7 +41,11 @@ from core.bess.dp_constants import (
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
-from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
+from core.bess.execution_model import (
+    DEFAULT_CAPABILITIES,
+    LATTICE_EPS,
+    PlatformCapabilities,
+)
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
 from core.bess.settings import BatterySettings
 from core.bess.strategic_intent import FLOW_NOISE_FLOOR_KWH
@@ -119,50 +123,64 @@ def _residual_cover_p(
     capabilities: PlatformCapabilities,
     battery_settings: BatterySettings,
 ) -> float | None:
-    """Exact net-load residual as a discharge power (kW, positive), when the
-    percent lattice cannot represent covering it -- else None (#466
-    follow-up, sunrise crossover).
+    """Exact net-load residual as a discharge power (kW, positive) wherever
+    the lattice cannot represent covering it exactly -- else None (#466
+    sunrise crossover; generalized above the lattice by Phase 4b to close
+    #352 Shape B).
 
-    When forecast home load exceeds solar by less than the smallest lattice
-    candidate (`min_pct * rate_step`, see `_discharge_candidates`), the DP
-    has no executable action that covers the residual: sub-residual lattice
-    candidates don't exist, and every overshooting one is either excluded
-    by `_discharge_is_unexecutable` (#497) or exports for real -- so IDLE
-    wins by default and the home imports the residual at buy price even
-    when the battery's marginal value says covering it is cheaper. On
-    load-first hardware the exact-cover action is natively executable: the
-    inverter delivers `min(actual load, rate ceiling)`, so a planned
-    residual-cover discharge is delivered exactly at forecast
-    (`inverter_simulator.py::mode_to_power`; VPP LOAD_SUPPORT is rate-less
-    load-following, #413). Planning the *delivery* rather than a rate-step
-    *command* is what keeps exact plan-faithfulness -- the property that
-    ruled out keeping the smallest lattice step for this case in #497's
-    design (see the carve-out note in `_discharge_candidates`).
+    The percent lattice is coarse, and the net load almost never lands on
+    it. Whenever it does not, no lattice action covers the house exactly:
+    the step below under-covers and imports the difference at buy price,
+    and every step above either is excluded by `_discharge_is_unexecutable`
+    (#497) or exports for real at sell price. With buy > sell that is a
+    forced loss in both directions, and which one the DP takes is decided
+    by the tariff rather than by intent.
 
-    Two executability floors gate the candidate (both verified against the
-    execution path, not assumed):
+    On ceiling hardware the missing action is not merely desirable, it is
+    directly commandable. `load_first` delivers `min(ceiling, actual load)`,
+    so writing the smallest lattice step at or above the residual
+    (`PlatformCapabilities.covering_ceiling_kw`) delivers the residual
+    *exactly* (`inverter_simulator.py::mode_to_power`; VPP LOAD_SUPPORT is
+    rate-less load-following, #413). The plan is the delivery; the command
+    is on the lattice. That is what keeps exact plan-faithfulness, and it is
+    why this is a candidate rather than a post-hoc demotion of the export.
 
-    - `residual * dt > 0.01 kWh`: `classify_strategic_intent`'s
-      sub-threshold fallthrough labels a discharge LOAD_SUPPORT only above
-      its `battery_discharged > 0.01` noise floor
-      (`strategic_intent.py`) -- at or below it the period classifies IDLE
-      and the command mapper would discharge nothing (R != P, the #282
-      failure shape).
-    - `residual <= round(residual / rate_step) * rate_step`: register/TOU
-      platforms write an integer percent (`_scale_to_percent` rounds to
-      nearest), and load-first delivery is `min(actual load, ceiling)` --
-      so the plan is only exact when the rounded rate ceiling covers the
-      residual. This subsumes the round-to-0% case (below half a step the
-      ceiling is 0 and nothing executes) and rejects the round-DOWN bands
-      `(k*rate_step, (k+0.5)*rate_step)` for k >= 1, where the commanded
-      ceiling would under-deliver the plan by up to half a step (caught in
-      review by executed repro: residual 0.12 kW -> 1% of 10 kW = 0.10 kW
-      ceiling -> realized 0.10 for a planned 0.12).
+    **This was previously offered only below the smallest lattice step**,
+    which made it look like a narrow #466 special case. It was not: at
+    `regression_2026_08_12_202906` period 99 the house needs 2.80 kW, the
+    lattice offers 2.70 and 2.85, #497 removes 2.85/3.00/3.15, and the DP
+    took 3.30 kW -- exporting 0.125 kWh, which classified the period
+    BATTERY_EXPORT and wrote `grid_first` at a sub-load rate, forfeiting
+    2.925 kWh of load-following headroom for 0.33 SEK. That is #352 Shape B,
+    and it is what an absent candidate looks like from the outside. Removing
+    the below-lattice restriction is the fix (design doc section 2, "the root
+    cause is a missing candidate"); the DP is left to choose, and it chooses
+    cover because cover is cheaper.
 
-    Residuals at or above the smallest lattice candidate return None: the
-    percent grid already contains candidates at or below the residual
-    there, and this helper must not widen #466's scope beyond the
-    unrepresentable gap.
+    Three executability gates, each verified against the execution path
+    rather than assumed:
+
+    - `residual * dt > FLOW_NOISE_FLOOR_KWH`:
+      `classify_strategic_intent` labels a discharge LOAD_SUPPORT only above
+      its `battery_discharged > 0.01` kWh noise floor -- at or below it the
+      period classifies IDLE and the command mapper discharges nothing
+      (R != P, the #282 failure shape).
+    - `residual > POWER_CLASSIFICATION_THRESHOLD_KW`: the same classifier
+      treats any *magnitude* at or below the threshold as noise, whatever
+      its energy. This is stated directly now; before 4b it was enforced as
+      a side effect of the nearest-rounding gate below, which rejected
+      sub-half-step residuals because they wrote 0%.
+    - a covering ceiling exists on this platform (`covering_ceiling_kw`).
+      This replaces the old `residual <= round(residual / rate_step) *
+      rate_step` gate, which existed because the write path rounded to
+      nearest and a ceiling rounded *down* under-delivers the plan (repro:
+      residual 0.12 kW -> 1% of 10 kW = 0.10 kW ceiling -> realized 0.10 for
+      a planned 0.12). The write path now rounds ceilings up
+      (`execution_model.discharge_command_index`), so the whole round-DOWN
+      band is executable and the gate reduces to "is the ceiling
+      commandable at all", i.e. at or below 100%. Rejecting 39% of the
+      corpus's deficits was never the intent; it was the conversion's
+      rounding direction showing through into the action space.
 
     **Only where a LOAD_SUPPORT discharge is actually delivered as
     `min(plan, actual load)`** (#580, Phase 4a). The paragraph above is the
@@ -185,14 +203,12 @@ def _residual_cover_p(
     """
     if not capabilities.load_support_delivers_exact_cover:
         return None
-    rate_step = capabilities.discharge_rate_step_kw(battery_settings)
     residual_p = (home_consumption - solar_production) / dt
-    min_lattice_p = capabilities.min_discharge_gear_kw(battery_settings)
-    if residual_p >= min_lattice_p:
-        return None
     if residual_p * dt <= FLOW_NOISE_FLOOR_KWH:
         return None
-    if residual_p > round(residual_p / rate_step) * rate_step:
+    if residual_p <= POWER_CLASSIFICATION_THRESHOLD_KW:
+        return None
+    if capabilities.covering_ceiling_kw(residual_p, battery_settings) is None:
         return None
     return residual_p
 
@@ -249,14 +265,19 @@ def _discharge_candidates(
         return []
 
     rate_step = capabilities.discharge_rate_step_kw(battery_settings)
-    max_pct = int(np.floor(p_max / rate_step + 1e-9))
+    max_pct = int(np.floor(p_max / rate_step + LATTICE_EPS))
     min_pct = capabilities.min_discharge_gear_index(battery_settings)
     if min_pct > max_pct:
         # No lattice candidate fits, but the off-lattice residual-cover
-        # candidate (#466 follow-up, below) may still: it sits under the
-        # smallest lattice power by construction, so a nearly-empty battery
-        # can be able to cover a small net load while unable to sustain any
-        # percent-grid discharge.
+        # candidate (below) may still: a nearly-empty battery can be able to
+        # cover a small net load while unable to sustain any percent-grid
+        # discharge.
+        #
+        # The `cover_p <= p_max` check below is load-bearing here, not
+        # belt-and-braces. Before 4b the cover candidate sat under the
+        # smallest lattice power *by construction*, so feasibility followed
+        # from the branch itself; now the residual can be any size and only
+        # the explicit check keeps an infeasible one out.
         cover_p = _residual_cover_p(
             home_consumption, solar_production, dt, capabilities, battery_settings
         )
@@ -285,20 +306,29 @@ def _discharge_candidates(
         if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
     ]
 
-    # #466 follow-up: one deliberate off-lattice candidate -- discharge
-    # exactly the forecast net-load residual when it is smaller than the
-    # smallest lattice candidate. This is not the carve-out the paragraph
-    # above rejects: that draft planned the smallest *step* and let the plan
+    # One deliberate off-lattice candidate: discharge exactly the forecast
+    # net-load residual (#466 sunrise crossover; extended above the lattice
+    # by 4b for #352). This is not the carve-out the paragraph above
+    # rejects: that draft planned the smallest *step* and let the plan
     # overstate delivery by the overshoot, breaking exact plan-faithfulness.
     # This candidate plans the *delivery* itself -- load-first executes
-    # `min(actual load, ceiling)`, so commanding one rate step at a sub-step
-    # deficit delivers exactly the deficit -- which is why R == P holds
-    # exactly. See _residual_cover_p for the classify/round-to-percent gates.
+    # `min(actual load, ceiling)`, so commanding the smallest step at or
+    # above the deficit delivers exactly the deficit -- which is why R == P
+    # holds exactly. See _residual_cover_p for the gates.
     cover_p = _residual_cover_p(
         home_consumption, solar_production, dt, capabilities, battery_settings
     )
     if cover_p is not None and cover_p <= p_max:
-        executable.append(cover_p)
+        # Only when it is not already one of the lattice steps. Since 4b the
+        # residual can be any size, so a deficit landing exactly on the grid
+        # makes cover_p a duplicate -- differing by float dust rather than
+        # exactly (measured: 2.6999999999999997 against 2.7, 4.4e-16 apart),
+        # which no set/`in` test would catch. A duplicate decides nothing
+        # differently (the tie policy's dedup distance and its strict `>`
+        # both absorb it) but costs a Candidate, a _compute_reward and an
+        # eval_V per period, plus a state column in each backward pass.
+        if not any(abs(p - cover_p) <= LATTICE_EPS for p in executable):
+            executable.append(cover_p)
 
     return sorted(executable)
 

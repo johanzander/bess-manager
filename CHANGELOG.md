@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The battery now covers house load exactly instead of exporting a few Wh and committing the inverter** — a period whose load fell between two discharge steps was planned as a small export, which forces `grid_first` at a fixed rate and imports any load spike. ([#352](https://github.com/johanzander/bess-manager/issues/352))
 - **Growatt MIN TOU segments are now written to the inverter only once they are about to take effect**, roughly halving inverter writes: a segment hours away no longer gets rewritten every time the plan shifts around a marginal period. ([#554](https://github.com/johanzander/bess-manager/issues/554))
 - **A running Growatt MIN TOU segment's end is no longer rewritten hours before the change matters** — nudging a live window's end waited on nothing, so it was written immediately even when the difference was hours away. ([#589](https://github.com/johanzander/bess-manager/issues/589))
 - **A running Growatt MIN TOU segment is no longer rewritten every 15 minutes** — its start time was being truncated forward each cycle, so an unchanged two-hour window cost 16 inverter writes instead of 2. ([#554](https://github.com/johanzander/bess-manager/issues/554))

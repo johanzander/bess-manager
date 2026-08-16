@@ -40,6 +40,17 @@ has no v10.0.2 plan and never will, so:
 
 appends an entry per missing fixture with `plan: null` and today's plan pinned
 as `current_plan`. It never touches existing entries.
+
+**Nor does a PR that moves plans on purpose.** A candidate-space change (Phase
+4b onward) moves `current_plan` on most fixtures at once, and the answer is
+still not a re-baseline:
+
+    PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --repin-current
+
+rewrites only the `current_plan`/`current` half of entries that actually
+moved, leaving every v10.0.2 reference byte-identical -- so the drift the
+baseline measures survives the re-pin. State the measured delta in the PR, as
+`test_current_plan_is_pinned` asks.
 """
 
 import argparse
@@ -58,6 +69,14 @@ parser.add_argument(
     help="add an entry for each fixture missing from the baseline, pinning "
     "today's plan only (plan: null). The incremental path -- a new fixture "
     "has no v10.0.2 reference and must not trigger a full re-baseline.",
+)
+parser.add_argument(
+    "--repin-current",
+    action="store_true",
+    help="refresh only the `current_plan`/`current` half of every existing "
+    "entry, leaving the v10.0.2 reference half byte-identical. The path for "
+    "a PR that moves plans deliberately -- state the measured delta in the "
+    "PR body. Does NOT re-baseline against a newer release.",
 )
 args = parser.parse_args()
 
@@ -81,8 +100,8 @@ if args.plans_only:
     print(f"captured {len(plans)} plans")
     raise SystemExit(0)
 
-if not args.from_plans and not args.add_new:
-    parser.error("pass --plans-only, --from-plans or --add-new")
+if not args.from_plans and not args.add_new and not args.repin_current:
+    parser.error("pass --plans-only, --from-plans, --add-new or --repin-current")
 
 from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     BASELINE_PATH,
@@ -90,6 +109,30 @@ from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     fixture_names,
     simulate_plan,
 )
+
+if args.repin_current:
+    # A deliberate planner change moves `current_plan` on many fixtures at
+    # once. The only *sanctioned* way to record that is to rewrite the
+    # current half and leave the released half alone: `--from-plans` would
+    # rebuild both from a plans file and silently drop every entry whose
+    # `plan` is null (a fixture added after the tag), and re-capturing the
+    # released half from HEAD would collapse the recorded drift to zero,
+    # which is the failure this file's docstring exists to prevent.
+    baseline = json.loads(BASELINE_PATH.read_text())
+    moved = []
+    for name, entry in baseline["fixtures"].items():
+        current_plan = capture_plan(name)
+        if current_plan == entry["current_plan"]:
+            continue
+        entry["current_plan"] = current_plan
+        entry["current"] = simulate_plan(name, current_plan)
+        moved.append(name)
+    if not moved:
+        print("every current_plan already matches; nothing written")
+        raise SystemExit(0)
+    BASELINE_PATH.write_text(json.dumps(baseline, indent=1))
+    print(f"re-pinned {len(moved)} fixture(s): {moved}")
+    raise SystemExit(0)
 
 if args.add_new:
     # A fixture added today has no v10.0.2 plan and never will -- the tag

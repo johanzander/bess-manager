@@ -33,7 +33,11 @@ from core.bess.dp_constants import (
     SOE_STEP_KWH,
 )
 from core.bess.exceptions import PWLEndSoeOutOfRangeError, PWLWindowUnderRefinedError
-from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
+from core.bess.execution_model import (
+    DEFAULT_CAPABILITIES,
+    LATTICE_EPS,
+    PlatformCapabilities,
+)
 
 PWL_EPS_REFINE = 1e-6
 PWL_EPS_PRUNE = 1e-6
@@ -52,7 +56,7 @@ PWL_EPS_PRUNE = 1e-6
 # very small `max_discharge_power_kw` combined with sub-hourly `dt`), the
 # merge could again keep the "wrong" side of a feasibility onset and
 # reintroduce this bug class -- see the fixed #450 bug this constant closed.
-DISCHARGE_LATTICE_PCT_EPS = 1e-9
+DISCHARGE_LATTICE_PCT_EPS = LATTICE_EPS
 
 
 def _pwl_prune(xs: np.ndarray, vs: np.ndarray, eps: float = PWL_EPS_PRUNE):
@@ -89,7 +93,9 @@ def _backward_discharge_levels(
     the value the backward pass promised (no snap/interpolation residual for
     replay to fall short of)."""
     rate_step = capabilities.discharge_rate_step_kw(battery_settings)
-    max_pct = int(np.floor(battery_settings.max_discharge_power_kw / rate_step + 1e-9))
+    max_pct = int(
+        np.floor(battery_settings.max_discharge_power_kw / rate_step + LATTICE_EPS)
+    )
     min_pct = capabilities.min_discharge_gear_index(battery_settings)
     return np.array([pct * rate_step for pct in range(min_pct, max_pct + 1)])
 

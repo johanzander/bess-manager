@@ -105,6 +105,91 @@ def intra_period_discharge_gate(allowed: bool) -> int:
     return 100 if allowed else 0
 
 
+# Lattice-snapping tolerance, in lattice-index units. A planned power that
+# *is* a lattice point must not be pushed a step up (or dropped a step down)
+# by float dust: 2.70 kW on a 0.15 kW step is index 18, not 19.
+#
+# One owner, per P5. Every site that floors or ceilings a power onto the
+# percent lattice uses this: `discharge_command_index` below,
+# `action_selector._discharge_candidates`' `max_pct`, and both of
+# `pwl_window_dp`'s mirrors of that arithmetic -- where it is re-exported as
+# `DISCHARGE_LATTICE_PCT_EPS`, whose comment records the #450 constraint that
+# pins its magnitude from below. The two passes must admit the identical
+# level set at every state, which four independently-written `1e-9`s do not
+# guarantee and one constant does.
+#
+# Not to be confused with the tie epsilon (`tie_detection.epsilon_for_period`)
+# or the import-cap comparison slack: those are tolerances on money and
+# energy, this one is on a lattice index.
+LATTICE_EPS = 1e-9
+
+
+def discharge_command_index(
+    power_kw: float,
+    step_kw: float,
+    *,
+    rate_is_ceiling: bool,
+    max_index: int = 100,
+) -> int:
+    """The lattice index (percent, on the default 1%-of-max lattice) to write
+    for a planned discharge of `power_kw` -- **rounded in the direction the
+    written number's own semantics require** (Phase 4b).
+
+    This is the one place the planned-power -> written-command conversion
+    happens. Both ends of it used to round to nearest and neither knew what
+    the number meant once written:
+
+    - Where the rate is a **ceiling** (`load_first` on TOU-register
+      hardware), firmware delivers `min(number, actual load)`. Rounding to
+      nearest rounds *down* half the time, and a ceiling below the plan
+      under-delivers it -- measured over the corpus, 539 of 1377 house
+      deficits round down. So a ceiling must be at least the plan, and
+      `ceil` is the **smallest** lattice value that is: not a free choice,
+      the tightest admissible one. This is what makes exact cover exact, and
+      the property the whole exact-cover candidate rests on
+      (`action_selector._residual_cover_p`).
+
+      **It is not free, and the cost is real if small.** A ceiling above the
+      plan is headroom the battery will use if actual load exceeds the
+      forecast -- including in periods where the #520 intra-period gate is
+      deliberately CLOSED, i.e. where the DP decided the stored energy is
+      worth more than buying now and specifically does not want that
+      coverage. Measured on this branch's goldens: 436 of 756 LOAD_SUPPORT
+      periods get a ceiling strictly above plan, 31 of them with the gate
+      closed, each by at most one lattice step.
+
+      There is no rounding that both delivers the plan and never exceeds it
+      -- the lattice is coarser than the deficit, which is the whole reason
+      this phase exists -- so the choice is between a *certain*
+      under-delivery and a *possible* over-delivery bounded by one step.
+      Nearest-rounding did not avoid this; it leaked up to half a step in
+      the same periods while also under-delivering in the other half. Do not
+      "fix" it by making the direction depend on the gate: that is a second
+      construction site for the same conversion, and the drift between two
+      such sites is #282's failure shape.
+    - Where the rate is a **target** (`grid_first` anywhere, `load_first` on
+      native SolaX), the number *is* the delivered power. Nearest is correct
+      there and rounding up would discharge and export more than planned --
+      so the direction is a function of the command, not a global setting.
+      The `LATTICE_EPS` nudge applies to the ceiling branch only: `round`
+      is half-to-even in Python, so a plan landing exactly halfway between
+      two steps resolves to the even one. That is arbitrary but symmetric,
+      and biasing it would be a silent half-step change on every target
+      platform.
+
+    Keeping both directions in one function is the point: this conversion
+    drifting from what the planner assumed is #282's and #497's shared shape,
+    and before this it was written out five times (the controller's discharge
+    and charge paths, the simulator's mirror of both, and the planner's own
+    executability gate).
+    """
+    if step_kw <= 0:
+        raise ValueError(f"discharge lattice step must be positive, got {step_kw}")
+    raw = power_kw / step_kw
+    index = math.ceil(raw - LATTICE_EPS) if rate_is_ceiling else round(raw)
+    return min(max_index, max(0, int(index)))
+
+
 @dataclass(frozen=True)
 class PlatformCapabilities:
     """What the executing platform can express, as the optimizer needs to see
@@ -230,13 +315,37 @@ class PlatformCapabilities:
         rate_step = self.discharge_rate_step_kw(battery_settings)
         return math.floor(POWER_CLASSIFICATION_THRESHOLD_KW / rate_step) + 1
 
-    def min_discharge_gear_kw(self, battery_settings: BatterySettings) -> float:
-        """`min_discharge_gear_index` as a power (kW) -- the smallest lattice
-        candidate. A net load below this cannot be covered by any lattice
-        action; see `action_selector._residual_cover_p`."""
-        return self.min_discharge_gear_index(
-            battery_settings
-        ) * self.discharge_rate_step_kw(battery_settings)
+    # `min_discharge_gear_kw` lived here until Phase 4b and is deliberately
+    # gone: its only caller was `_residual_cover_p`'s below-the-lattice gate,
+    # which 4b removed (the cover candidate is no longer restricted to
+    # residuals under the smallest gear). `covering_ceiling_kw` below answers
+    # the question that replaced it. The index form is still live -- it is
+    # what `_discharge_candidates` starts its enumeration from.
+
+    def covering_ceiling_kw(
+        self, power_kw: float, battery_settings: BatterySettings
+    ) -> float | None:
+        """The smallest lattice ceiling that fully covers `power_kw`, or None
+        if this platform cannot be commanded that high (Phase 4b).
+
+        Only meaningful where the written rate is a ceiling: it is the command
+        an exact-cover plan writes, and `min(ceiling, actual load)` is what
+        makes the plan's delivery exact. Above 100% of `max_discharge_power_kw`
+        there is no such command -- the clamped write would be a ceiling
+        *below* the plan, which is the under-delivery this rounding direction
+        exists to prevent -- so the answer is None rather than a best effort.
+        """
+        step = self.discharge_rate_step_kw(battery_settings)
+        max_index = math.floor(
+            battery_settings.max_discharge_power_kw / step + LATTICE_EPS
+        )
+        index = discharge_command_index(
+            power_kw, step, rate_is_ceiling=True, max_index=max_index
+        )
+        ceiling = index * step
+        if ceiling + LATTICE_EPS < power_kw:
+            return None
+        return ceiling
 
     @classmethod
     def from_controller(

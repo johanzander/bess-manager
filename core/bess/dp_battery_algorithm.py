@@ -1179,12 +1179,14 @@ def _run_dynamic_programming(
     """
     Run backward induction DP to compute optimal battery control policy.
 
-    Also considers, per period, a residual load-cover column (#466
-    follow-up): discharge exactly the forecast net load when that residual
-    sits below the smallest lattice candidate (see _residual_cover_p) -- so
-    the value function knows holding is not the only option at a
-    sunrise/sunset crossover, keeping V consistent with the replay pass
-    whose candidate set (_discharge_candidates) contains the same action.
+    Also considers, per period, a residual load-cover column: discharge
+    exactly the forecast net load wherever the lattice cannot represent
+    covering it (see _residual_cover_p) -- so the value function knows
+    holding, under-covering and over-covering are not the only options,
+    keeping V consistent with the replay pass whose candidate set
+    (_discharge_candidates) contains the same action. Added for the
+    sunrise/sunset crossover (#466) and extended to every such period by
+    Phase 4b (#352).
 
     Also considers, at every state, a distinct SOLAR_EXPORT-below-max
     candidate (#313) -- battery SOE held exactly unchanged (no passive

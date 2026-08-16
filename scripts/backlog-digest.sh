@@ -123,6 +123,11 @@ jq -n \
       elif (human_comments($comments) | length) > 0 then "discussion"
       else null end;
 
+  # Ready keys off the `analyzed` label alone, deliberately. The design also
+  # requires "Priority is set", but no board exists yet so priority is null for
+  # everything — gating on it here would make Ready permanently unreachable and
+  # strand every analysed item. Add the priority condition in the same change
+  # that creates the board.
   def column($labels; $pr; $wt; $awaiting):
       if $pr != null then "In review"
       elif $wt != null then "In progress"

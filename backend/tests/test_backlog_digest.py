@@ -36,7 +36,9 @@ def _run(bin_dir: Path, **extra_env: str) -> dict:
     proc = subprocess.run(
         ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, check=True
     )
-    return json.loads(proc.stdout)
+    # Typed intermediate: json.loads returns Any, and warn_return_any is on.
+    digest: dict = json.loads(proc.stdout)
+    return digest
 
 
 def _run_expect_failure(bin_dir: Path, **extra_env: str) -> subprocess.CompletedProcess:

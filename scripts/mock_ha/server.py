@@ -13,7 +13,7 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -141,7 +141,7 @@ def _real_recorder_statistics(
     # caller, _fetch_ha_statistics_raw, builds them with an explicit tzinfo),
     # but fall back to UTC rather than the host's local zone if that ever
     # isn't true.
-    fallback_tz = start_dt.tzinfo or timezone.utc
+    fallback_tz = start_dt.tzinfo or UTC
     filtered = []
     for entry in stats:
         start_val = entry.get("start")

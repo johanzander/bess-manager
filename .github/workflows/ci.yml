@@ -40,6 +40,9 @@ jobs:
               - 'docker-compose.ci.yml'
               - 'docker-compose.prod-test.yml'
               - 'Dockerfile'
+              - 'backend/Dockerfile'
+              - 'build.json'
+              - 'package-addon.sh'
 
       # Algorithm filter uses a script instead of dorny because dorny's
       # negation patterns don't work correctly with the default 'some'
@@ -491,6 +494,26 @@ jobs:
       - name: Stop environment
         if: always()
         run: docker compose -f docker-compose.prod-test.yml down
+
+      # The step above builds ./Dockerfile — what release-addon.yml publishes
+      # to GHCR. A local install goes down a different path entirely:
+      # deploy.sh → package-addon.sh, which ships backend/Dockerfile and lets
+      # the supervisor build it against build.json. That path had no CI
+      # coverage, which is how a base image with Python 3.11 and a numpy pin
+      # needing >=3.12 reached users. Build it here the way the supervisor
+      # does, using the real base from build.json.
+      - name: Build the add-on image the supervisor builds
+        run: |
+          ./package-addon.sh
+          BASE=$(jq -r '.build_from.amd64' build.json)
+          echo "Building build/bess_manager/Dockerfile on $BASE"
+          docker build \
+            --build-arg BUILD_FROM="$BASE" \
+            --build-arg BUILD_VERSION=ci \
+            -t bess-addon-supervisor-test \
+            build/bess_manager
+          docker run --rm --entrypoint /app/venv/bin/python bess-addon-supervisor-test \
+            -c "import sys, numpy, pandas, fastapi; print('py', sys.version.split()[0], 'numpy', numpy.__version__)"
 
   # ── Merge gate: single required check for branch protection ──────
   # Branch protection cannot require the conditional jobs (test-algorithm,

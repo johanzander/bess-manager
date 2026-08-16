@@ -134,8 +134,10 @@ def command_index(
     max_index: int = 100,
 ) -> int:
     """The lattice index (percent, on the default 1%-of-max lattice) to write
-    for a planned discharge of `power_kw` -- **rounded in the direction the
-    written number's own semantics require** (Phase 4b).
+    for a planned power of `power_kw` -- **rounded in the direction the
+    written number's own semantics require** (Phase 4b for discharge, 4c for
+    charge; `step_kw` is the caller's lattice, so the same function serves
+    both).
 
     This is the one place the planned-power -> written-command conversion
     happens. Both ends of it used to round to nearest and neither knew what
@@ -147,7 +149,16 @@ def command_index(
       under-delivers it -- measured over the corpus, 539 of 1377 house
       deficits round down. So a ceiling must be at least the plan, and
       `ceil` is the **smallest** lattice value that is: not a free choice,
-      the tightest admissible one. This is what makes exact cover exact, and
+      the tightest admissible one.
+
+      A **charge** rate takes this branch too (4c), but for a different
+      reason: what binds above the command there is the battery's own
+      remaining room -- the inverter stops when full -- not house load. The
+      distinction matters because it fails where an import cap is what
+      limited the plan, and `lattice_grid_charge` handles that case by
+      bringing the plan down instead.
+
+      This is what makes exact cover exact, and
       the property the whole exact-cover candidate rests on
       (`action_selector._residual_cover_p`).
 

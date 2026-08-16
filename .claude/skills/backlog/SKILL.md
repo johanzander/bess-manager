@@ -18,6 +18,14 @@ picture:
 
 Open an individual issue only when you are deciding about that issue.
 
+## Prerequisites
+
+Board reads need `PROJECT_NUMBER` set and the board created (deferred —
+`scripts/backlog-board-init.sh`). Board writes need `BESS_PO_TOKEN` with
+`project` scope (also deferred). Until both exist, a pass fails loudly at the
+first board access in `backlog-digest.sh` — that failure is expected, not a
+bug to route around.
+
 ## When to Use
 
 - Reviewing or refining the backlog, triaging a report, chasing a reporter
@@ -85,6 +93,10 @@ always wins** — never trust a card's current position. Act on each mismatch:
 Never auto-park an active conversation, and never chase a reporter for
 something an upstream vendor owns.
 
+Also review the digest's `orphans` list (worktrees with no matching open
+issue, PRs with no `fixes/closes/resolves` reference) and hand any worktree
+or PR rot found there to `sweep-prs`.
+
 ## Verb: next
 
 Rank Backlog and Ready items in this order:
@@ -126,10 +138,17 @@ Serialise, do not stack:
 Exactly one action costs money without asking: firing Stage 2
 (`@claude-bot analyze`, ~$0.50–2) on an item entering Analysis that meets the
 tier-1 bar from `Verb: next` directly — labelled `bug`, opened by someone
-other than the maintainer, with its debug log attached. This is a check
-against the item itself, not a ranking pass: an item entering Analysis is
-never a member of the Backlog/Ready list that `next` ranks, so it cannot
-"rank" into a tier. Every other item entering Analysis gets a proposal
+other than the maintainer, with its debug log attached — **and that has no
+prior `@claude-bot analyze` comment already on the issue**. Check this by
+reading the issue's comments from the digest (or `gh issue view` if the
+digest's comment count needs confirming) — never a local file. This is a
+check against the item itself, not a ranking pass: an item entering Analysis
+is never a member of the Backlog/Ready list that `next` ranks, so it cannot
+"rank" into a tier. The no-prior-analyze condition exists because the digest
+is a stateless snapshot with no notion of "entering" — without it, an item
+that Stage 2 already failed to reach a conclusion on (`needs-human-review`)
+would keep matching every pass under `/loop`, firing Stage 2 again each time
+at $0.50–2 a shot. Every other item entering Analysis gets a proposal
 instead.
 
 ## Close the loop

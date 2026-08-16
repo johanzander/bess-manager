@@ -1,6 +1,10 @@
 # Backlogger Agent — Design
 
-**Status:** approved design, not yet implemented
+**Status:** Tasks 1–4 implemented (`scripts/backlog-digest.sh`,
+`scripts/gh-agent.sh`, `.claude/skills/backlog/SKILL.md`,
+`.claude/agents/product-owner.md`). Tasks 5–8 (identity creation, board
+setup, Reflex rewrite, dispatch verification) deferred — they need GitHub
+accounts and secrets only the maintainer can create.
 **Date:** 2026-08-15
 
 ## Problem
@@ -130,18 +134,19 @@ One invocation, one compact table on stdout, no model involvement. It joins:
 - `gh project item-list` → current column and Priority field per item
 
 Output is one row per backlog item with a derived `state`, plus an **orphans**
-section: worktrees with no PR, PRs with no issue, issues labelled `has-fix-pr`
-whose PR has merged, cards whose session died.
+section. v1 emits two kinds: `worktree_no_issue` (a worktree whose path and
+branch match no open issue) and `pr_no_issue` (a PR with no
+`fixes/closes/resolves #N` reference in its body).
 
 This exists so the model never reads 37 issue bodies to answer "what's next".
 It reads an issue body only when actually deciding on that issue. This follows
 the pattern that has worked in this repo before: pre-compute the evidence and
 feed the digest, rather than instructing a model to go gather it.
 
-### 2. `.claude/agents/backlogger.md` + `.claude/skills/backlog/SKILL.md` — the judgment layer
+### 2. `.claude/agents/product-owner.md` + `.claude/skills/backlog/SKILL.md` — the judgment layer
 
 The agent file makes the backlogger a first-class thing to talk to rather than
-a skill someone must remember to invoke: `claude --agent backlogger` boots
+a skill someone must remember to invoke: `claude --agent product-owner` boots
 straight into a backlog pass. Verified frontmatter fields used:
 
 | Field | Value | Why |
@@ -151,9 +156,8 @@ straight into a backlog pass. Verified frontmatter fields used:
 | `memory` | `project` | Accumulates standing judgment ("dashboard work keeps getting deferred") |
 | `skills` | `backlog`, `sweep-prs` | Preloaded, so a pass needs no skill lookup |
 
-The skill holds the procedure. It
-
-Reads the digest, applies the ranking policy, drives three verbs:
+The skill holds the procedure. It reads the digest, applies the ranking
+policy, and drives three verbs:
 
 - **triage** — label, dedupe, promote TODO items, set the Priority field
 - **board** — move cards to the column the digest says they are actually in

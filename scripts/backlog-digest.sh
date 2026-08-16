@@ -7,7 +7,7 @@
 # The PO reads this table and opens an individual issue only when it is
 # actually deciding on that issue.
 #
-# Usage: scripts/backlog-digest.sh [--repo owner/name]
+# Usage: scripts/backlog-digest.sh
 set -euo pipefail
 
 repo="${REPO:-johanzander/bess-manager}"
@@ -18,13 +18,34 @@ issues=$(gh issue list --repo "$repo" --state open --limit 200 \
 prs=$(gh pr list --repo "$repo" --state open --limit 100 \
   --json number,title,headRefName,mergeable,body)
 
-worktrees=$(git worktree list --porcelain 2>/dev/null \
-  | awk '/^worktree /{print $2}' | jq -R . | jq -s .)
+# Emits, per worktree, a JSON object of {path, branch}. `git worktree list`
+# always emits the main checkout as its first record, and it is excluded
+# here — it is never a task worktree, so it must not appear in the orphan
+# scan below.
+worktrees=$(git worktree list --porcelain 2>/dev/null | awk '
+  BEGIN { RS=""; FS="\n" }
+  NR==1 { next }
+  {
+    path=""; branch=""
+    for (i = 1; i <= NF; i++) {
+      if ($i ~ /^worktree /)      { path = substr($i, 10) }
+      else if ($i ~ /^branch /)   { branch = substr($i, 8); sub(/^refs\/heads\//, "", branch) }
+    }
+    if (path != "") print path "\t" branch
+  }
+' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // "")}' | jq -s .)
 
-sessions=$(claude agents --json 2>/dev/null || echo '[]')
+sessions=$(claude agents --json)
 
-board=$(gh project item-list "${PROJECT_NUMBER:-1}" --owner "${PROJECT_OWNER:-johanzander}" \
-  --format json 2>/dev/null || echo '{"items":[]}')
+if [ -z "${PROJECT_NUMBER:-}" ]; then
+  echo "backlog-digest.sh: PROJECT_NUMBER is not set — the backlog board has" >&2
+  echo "not been created yet. Run scripts/backlog-board-init.sh (deferred) to" >&2
+  echo "create it, then set PROJECT_NUMBER." >&2
+  exit 1
+fi
+
+board=$(gh project item-list "$PROJECT_NUMBER" --owner "${PROJECT_OWNER:-johanzander}" \
+  --format json)
 
 jq -n \
   --argjson issues "$issues" \
@@ -44,8 +65,18 @@ jq -n \
     ) ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0] end;
 
+  # Matches a worktree whose path OR branch contains the issue number in a
+  # delimited position: preceded by start-of-string, "-" or "/"; followed by
+  # end-of-string, "-" or "_". Covers "issue-542", "fix-542-...",
+  # "fix/issue-542-...", "design-466-..." without matching an unrelated
+  # number that merely contains "542" as a substring (e.g. "15420").
+  def issue_boundary($n): "(^|[-/])\($n)([-_]|$)";
+
+  def matches_issue($w; $n):
+    ($w.path | test(issue_boundary($n))) or ($w.branch | test(issue_boundary($n)));
+
   def worktree_for($n):
-    ([ $worktrees[] | select(test("issue-\($n)(\\D|$)")) ]) as $matches
+    ([ $worktrees[] | select(matches_issue(.; $n)) | .path ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0] end;
 
   def session_for($n):
@@ -103,8 +134,8 @@ jq -n \
         }
     ],
     orphans: (
-      [ $worktrees[] | select(. as $w | ($issues | map("issue-\(.number)") | any(. as $s | $w | test($s))) | not)
-        | {kind: "worktree_no_pr", ref: ., detail: "no open issue matches this worktree"} ]
+      [ $worktrees[] | select(. as $w | ($issues | map(.number) | any(. as $n | matches_issue($w; $n))) | not)
+        | {kind: "worktree_no_issue", ref: .path, detail: "no open issue matches this worktree"} ]
       +
       [ $prs[] | select((.body // "") | test("(?i)(fixes|closes|resolves) #\\d+") | not)
         | {kind: "pr_no_issue", ref: (.number | tostring), detail: .title} ]

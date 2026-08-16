@@ -26,12 +26,48 @@ def _write_shim(bin_dir: Path, name: str, body: str) -> None:
     p.chmod(p.stat().st_mode | stat.S_IEXEC)
 
 
-def _run(bin_dir: Path) -> dict:
-    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+def _run(bin_dir: Path, **extra_env: str) -> dict:
+    env = dict(
+        os.environ,
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        PROJECT_NUMBER=extra_env.pop("PROJECT_NUMBER", "1"),
+        **extra_env,
+    )
     proc = subprocess.run(
         ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, check=True
     )
     return json.loads(proc.stdout)
+
+
+def _run_expect_failure(bin_dir: Path, **extra_env: str) -> subprocess.CompletedProcess:
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", **extra_env)
+    env.pop("PROJECT_NUMBER", None)
+    return subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env
+    )
+
+
+def _porcelain(*worktrees: tuple[str, str | None]) -> str:
+    """Build `git worktree list --porcelain` output for a main checkout
+    followed by the given (path, branch) pairs. branch=None means detached."""
+    records = [
+        "worktree /repo\nHEAD 0000000000000000000000000000000000000\nbranch refs/heads/main"
+    ]
+    for path, branch in worktrees:
+        lines = [f"worktree {path}", "HEAD 1111111111111111111111111111111111111"]
+        lines.append(f"branch refs/heads/{branch}" if branch else "detached")
+        records.append("\n".join(lines))
+    return "\n\n".join(records) + "\n"
+
+
+def _git_shim(porcelain: str) -> str:
+    escaped = porcelain.replace("'", "'\\''")
+    return f"""
+case "$1 $2 $3" in
+  "worktree list --porcelain") printf '%s' '{escaped}' ;;
+  *) echo "unexpected git call: $*" >&2; exit 1 ;;
+esac
+"""
 
 
 @pytest.fixture
@@ -39,7 +75,7 @@ def bin_dir(tmp_path: Path) -> Path:
     d = tmp_path / "bin"
     d.mkdir()
     _write_shim(d, "claude", 'echo "[]"')
-    _write_shim(d, "git", 'echo ""')
+    _write_shim(d, "git", _git_shim(_porcelain()))
     return d
 
 
@@ -222,3 +258,119 @@ def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
         "pr must be a single scalar issue number, not a list — " f"got {item['pr']!r}"
     )
     assert item["pr"] == 620
+
+
+def test_worktree_branch_without_issue_prefix_joins_by_delimited_number(
+    bin_dir: Path,
+) -> None:
+    """Real fleet shape: `fix-542-signed-power-display` has no `issue-`
+    substring at all, and the issue number lives only in the branch, not the
+    path. The join must match on branch as well as path, at a delimited
+    position (not merely 'contains the digits')."""
+    issue = {
+        "number": 542,
+        "title": "Signed power display",
+        "labels": [{"name": "bug"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/worktrees/wt1", "fix-542-signed-power-display"))),
+    )
+
+    digest = _run(bin_dir)
+
+    item = digest["items"][0]
+    assert item["column"] == "In progress"
+    assert item["worktree"] == "/repo/worktrees/wt1"
+
+
+def test_worktree_with_no_matching_issue_is_an_orphan(bin_dir: Path) -> None:
+    issue = {
+        "number": 999,
+        "title": "Unrelated issue",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/worktrees/bench", "bench-pwl-everywhere"))),
+    )
+
+    digest = _run(bin_dir)
+
+    orphans = [o for o in digest["orphans"] if o["kind"] == "worktree_no_issue"]
+    assert len(orphans) == 1
+    assert orphans[0]["ref"] == "/repo/worktrees/bench"
+    assert orphans[0]["detail"] == "no open issue matches this worktree"
+
+
+def test_main_checkout_is_never_reported_as_an_orphan(bin_dir: Path) -> None:
+    """The main checkout is always `git worktree list`'s first record and is
+    an orphan by construction (its branch is 'main', matching no issue) — it
+    must be excluded from the orphan scan entirely."""
+    _write_shim(bin_dir, "gh", _gh_shim([], [], []))
+    # Default bin_dir git shim already emits only the main checkout.
+
+    digest = _run(bin_dir)
+
+    assert digest["orphans"] == []
+
+
+def test_worktree_matched_only_by_similar_number_is_not_joined(bin_dir: Path) -> None:
+    """15420 must not join to issue 542 — the boundary check must reject a
+    non-delimited digit run."""
+    issue = {
+        "number": 542,
+        "title": "Signed power display",
+        "labels": [{"name": "bug"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/worktrees/wt2", "fix-15420-something"))),
+    )
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["column"] != "In progress"
+    assert digest["items"][0]["worktree"] is None
+
+
+def test_missing_project_number_fails_loudly(bin_dir: Path) -> None:
+    """No fallback: PROJECT_NUMBER must be required, not defaulted to 1 and
+    silently masked by a swallowed `gh` error."""
+    issue = {
+        "number": 601,
+        "title": "Wizard shows stale inverter",
+        "labels": [{"name": "bug"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    result = _run_expect_failure(bin_dir)
+
+    assert result.returncode != 0
+    assert "PROJECT_NUMBER" in result.stderr

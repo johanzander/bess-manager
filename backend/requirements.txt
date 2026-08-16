@@ -15,9 +15,14 @@ watchdog
 # Pinned (audit Pass 3, F1). The optimizer's cost is a numpy reduction and its
 # last bits depend on the build, so a silent numpy bump could move reported
 # costs; the goldens carry a 1e-9 tolerance and this pin is the other half.
-# 2.4.6, not 2.5.x: the HA add-on base (ghcr.io/home-assistant/*-base:3.19)
-# ships Python 3.11, and numpy >=2.5 requires >=3.12 — pinning 2.5.2 broke the
-# supervisor build outright. 2.4.6 has cp311/312/313 wheels on manylinux,
+# 2.4.6 is now a plain version pin, not a compatibility floor. It was chosen
+# because the add-on base was ghcr.io/home-assistant/*-base:3.19, which ships
+# Python 3.11, and numpy >=2.5 requires >=3.12 — pinning 2.5.2 broke the
+# supervisor build outright (#546). That constraint is gone: the base is now
+# *-base-python:3.13-alpine3.22 (Python 3.13.14), so 2.5.x would install. Any
+# bump is a deliberate decision about moving reported costs, per the paragraph
+# above, and must be measured — it is no longer blocked by the interpreter.
+# 2.4.6 has cp311/312/313 wheels on manylinux,
 # musllinux (the Alpine add-on image) and macOS, so add-on, CI and dev all
 # resolve to the same numpy. Measured spread between 2.4.6/py3.11.15 and
 # 2.5.2/py3.12.13 was <=5.7e-14 SEK on 27 of 36 action-selector fixtures with

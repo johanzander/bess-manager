@@ -466,5 +466,6 @@
     "inverter_ac_power_margin": 0.05,
     "initial_soe": 16.0,
     "initial_cost_basis": 0.4
-  }
+  },
+  "terminal_value_per_kwh": 0.10806
 }

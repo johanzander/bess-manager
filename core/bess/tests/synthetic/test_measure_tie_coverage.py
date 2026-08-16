@@ -134,8 +134,37 @@ def test_near_miss_segment_rejects_mismatched_input_lengths():
 # --------------------------------------------------------------------------
 
 
+def _at_zero_terminal_value(name):
+    """Load a fixture with its terminal value pinned to 0.0.
+
+    Every SEK constant in this suite was measured at `terminal_value_per_kwh
+    = 0.0`, which was the corpus-wide default until the fixtures were
+    retrofitted onto production-computed terminal values. That retrofit
+    dissolves most of the near-ties this suite measures: a nonzero terminal
+    row adds a value gradient at the horizon, and across the whole retrofitted
+    corpus only four fixtures still flag a tie window at all.
+
+    This suite's subject is the *detector and the near-miss measurement rig* --
+    "given a near-tie, is the coverage silence earned, and what is the miss
+    worth" -- so it has to run under a condition where near-ties exist. 0.0 is
+    that condition, and pinning it explicitly is why these constants remain
+    comparable to the ones recorded when they were first measured.
+
+    Pinned rather than re-measured deliberately: re-pinning the deltas against
+    the retrofitted values would replace a set of numbers that mean "this is
+    what the near miss costs" with a set that mostly mean "there is no longer
+    a near miss here", which is not the same test. Whether #450's hybrid path
+    still earns its keep at realistic terminal values is a real question -- the
+    largest surviving advantage in the corpus is 0.0043 SEK -- but it belongs
+    to #450, not to this rig's unit coverage.
+    """
+    scenario = dict(load_test_scenario(name))
+    scenario["terminal_value_per_kwh"] = 0.0
+    return scenario
+
+
 def _run_fixture(name):
-    scenario = load_test_scenario(name)
+    scenario = _at_zero_terminal_value(name)
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
@@ -434,7 +463,7 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     itself. Both directions are stated in `segment_reference_cost`'s docstring
     and must survive into Task 6's reporting.
     """
-    scenario = load_test_scenario("synthetic_2024_08_16_high_spread_with_solar")
+    scenario = _at_zero_terminal_value("synthetic_2024_08_16_high_spread_with_solar")
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
     result = optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
@@ -472,7 +501,7 @@ def test_scenario_with_no_measurable_period_reports_nothing_rather_than_guessing
     report "nothing measurable" instead of silently measuring an arbitrary
     segment and presenting its economics as a coverage result.
     """
-    scenario = load_test_scenario("historical_2025_01_05_no_spread_no_solar")
+    scenario = _at_zero_terminal_value("historical_2025_01_05_no_spread_no_solar")
     inputs = _scenario_inputs(scenario)
     diagnostics: dict = {}
     optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
@@ -531,7 +560,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
     wrong SOE trajectory) would show up here even though the lower-level
     pieces are already covered individually.
     """
-    scenario = load_test_scenario("synthetic_2024_08_16_high_spread_with_solar")
+    scenario = _at_zero_terminal_value("synthetic_2024_08_16_high_spread_with_solar")
 
     measurement = measure_scenario(scenario)
 
@@ -551,7 +580,7 @@ def test_measure_scenario_reports_none_when_nothing_is_measurable():
     directly on this fixture. `measure_scenario` must propagate that as
     `financial_impact_sek=None` rather than measuring an arbitrary segment.
     """
-    scenario = load_test_scenario("historical_2025_01_05_no_spread_no_solar")
+    scenario = _at_zero_terminal_value("historical_2025_01_05_no_spread_no_solar")
 
     measurement = measure_scenario(scenario)
 

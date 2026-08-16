@@ -201,7 +201,7 @@
     "base_cost": 2.43248,
     "battery_solar_cost": -7.9169,
     "base_to_battery_solar_savings": 10.34938,
-    "base_to_battery_solar_savings_pct": 425.46563,
+    "base_to_battery_solar_savings_pct": 425.43973,
     "total_charged": 4.11829,
     "total_discharged": 9.875,
     "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 near-tied periods flip IDLE->LOAD_SUPPORT, moving battery_solar_cost from -7.91789 to -7.91425 (a ~0.0036 SEK crossing of the rounding boundary at .1 precision, well within the harness's standard tolerance; total_charged/total_discharged were already stale pre-#466 and are out of scope here since no test asserts them). total_charged/total_discharged were re-derived from the current run as part of this refresh too."
@@ -220,5 +220,6 @@
     },
     "intents_absent": []
   },
-  "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread eliminates both meaningful pinned intents (BATTERY_EXPORT, GRID_CHARGING) for this fixture, leaving only baseline IDLE -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up."
+  "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread eliminates both meaningful pinned intents (BATTERY_EXPORT, GRID_CHARGING) for this fixture, leaving only baseline IDLE -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up.",
+  "terminal_value_per_kwh": 0.102892
 }

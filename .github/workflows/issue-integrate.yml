@@ -41,7 +41,8 @@ jobs:
       # never created — which would mark every gated-stop run as failed.
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          # Must match ci.yml and the add-on base image (see issue-fix.yml).
+          python-version: "3.13"
 
       - uses: actions/setup-node@v4
         with:

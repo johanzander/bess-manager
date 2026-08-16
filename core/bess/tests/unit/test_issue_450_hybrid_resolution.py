@@ -30,8 +30,10 @@ from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.tests.unit.test_scenarios import build_scenario_optimizer_inputs
 
 
-def _optimize(scenario_name):
+def _optimize(scenario_name, terminal_value_per_kwh=None):
     _, kwargs = build_scenario_optimizer_inputs(scenario_name)
+    if terminal_value_per_kwh is not None:
+        kwargs["terminal_value_per_kwh"] = terminal_value_per_kwh
     result = optimize_battery_schedule(**kwargs)
 
     # Grid DP alone, tie detection suppressed: the behaviour #450 fixed.
@@ -45,7 +47,31 @@ def test_hybrid_resolution_improves_on_grid_dp():
     # longer near-ties at #512's finer grid -- see the companion test below --
     # so the mechanism is asserted on a fixture that still does. Measured at
     # the 0.1 kW / 0.025 kWh grid: window (14, 19), advantage +0.0600 SEK.
-    result, grid_only = _optimize("synthetic_consumption_high_no_solar")
+    #
+    # Pinned at terminal_value_per_kwh = 0.0 explicitly, which is what this
+    # fixture ran at when the advantage above was measured -- it is no longer
+    # the fixture's own value, since the corpus was retrofitted onto
+    # production-computed terminal values. That retrofit dissolves this
+    # window: a nonzero terminal row adds a value gradient at the horizon that
+    # breaks the near-tie, and at the fixture's own 1.78386 SEK/kWh the
+    # advantage falls to exactly 0.
+    #
+    # This is scoped deliberately rather than re-tuned. The test's subject is
+    # the splice mechanism -- "when a window ties, does resolving it beat the
+    # grid DP" -- so it has to run under a condition where a window ties, and
+    # 0.0 is that condition for this fixture. Lowering the 0.01 threshold to
+    # chase the one fixture that still ties at a realistic terminal value
+    # (realworld_2026_04_27_184643, advantage +0.0043 SEK) would have kept the
+    # test green while quietly weakening it by an order of magnitude.
+    #
+    # The finding that motivated the scoping is worth more than the pin: across
+    # the whole retrofitted corpus only four fixtures still flag a tie window
+    # at all, and the largest hybrid advantage among them is 0.0043 SEK. The
+    # measured value of #450's hybrid path under realistic terminal values is
+    # therefore close to nil, which is a question for #450, not for this test.
+    result, grid_only = _optimize(
+        "synthetic_consumption_high_no_solar", terminal_value_per_kwh=0.0
+    )
 
     advantage = grid_only.reward_objective_cost - result.reward_objective_cost
     assert advantage > 0.01, (

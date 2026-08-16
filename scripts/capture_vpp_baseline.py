@@ -41,16 +41,22 @@ has no v10.0.2 plan and never will, so:
 appends an entry per missing fixture with `plan: null` and today's plan pinned
 as `current_plan`. It never touches existing entries.
 
-**Nor does a PR that moves plans on purpose.** A candidate-space change (Phase
-4b onward) moves `current_plan` on most fixtures at once, and the answer is
-still not a re-baseline:
+**A deliberate planner change does not need it either.** When a change moves
+what the DP plans, only the `current_plan`/`current` half of each entry is
+stale -- the v10.0.2 half is a historical record and must survive untouched,
+since the recorded drift between the two halves is the signal
+`test_drift_from_the_released_version_is_recorded` exists to hold:
 
     PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py --repin-current
 
-rewrites only the `current_plan`/`current` half of entries that actually
-moved, leaving every v10.0.2 reference byte-identical -- so the drift the
-baseline measures survives the re-pin. State the measured delta in the PR, as
-`test_current_plan_is_pinned` asks.
+rewrites that half only, printing each fixture's realized-cost delta so the PR
+can quote the measured VPP movement. It re-simulates every fixture and writes
+whenever the plan *or* its execution moved, so it also covers a change to the
+VPP model itself, which leaves the plans equal. Before this existed the only
+two options
+were `--add-new` (a no-op on an unchanged fixture set) and a full re-baseline,
+so a legitimate planner change had no supported path and the full re-baseline
+-- the one the docstring above warns against -- looked like the remedy.
 """
 
 import argparse
@@ -73,10 +79,9 @@ parser.add_argument(
 parser.add_argument(
     "--repin-current",
     action="store_true",
-    help="refresh only the `current_plan`/`current` half of every existing "
-    "entry, leaving the v10.0.2 reference half byte-identical. The path for "
-    "a PR that moves plans deliberately -- state the measured delta in the "
-    "PR body. Does NOT re-baseline against a newer release.",
+    help="rewrite only the current_plan/current half of every existing entry, "
+    "leaving the v10.0.2 half untouched. For a PR that deliberately changes "
+    "what the DP plans; prints the realized-cost delta per fixture.",
 )
 args = parser.parse_args()
 
@@ -110,28 +115,61 @@ from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     simulate_plan,
 )
 
+# Mirrors what `test_current_plan_is_pinned` asserts: commands exactly, the
+# float arrays at 1e-9. Comparing those exactly instead would re-pin every
+# fixture whenever the script runs on a different interpreter than last wrote
+# the artefact, since realized cost is reproducible only to ~1e-13 across
+# environments (see test_action_selector_parity's module docstring).
+VPP_TOLERANCE = 1e-9
+
+
+def execution_matches(actual, recorded):
+    return (
+        actual["commands"] == recorded["commands"]
+        and abs(actual["realized_cost"] - recorded["realized_cost"]) <= VPP_TOLERANCE
+        and all(
+            abs(a - b) <= VPP_TOLERANCE
+            for a, b in zip(
+                actual["soe_trajectory"], recorded["soe_trajectory"], strict=True
+            )
+        )
+    )
+
+
 if args.repin_current:
-    # A deliberate planner change moves `current_plan` on many fixtures at
-    # once. The only *sanctioned* way to record that is to rewrite the
-    # current half and leave the released half alone: `--from-plans` would
-    # rebuild both from a plans file and silently drop every entry whose
-    # `plan` is null (a fixture added after the tag), and re-capturing the
-    # released half from HEAD would collapse the recorded drift to zero,
-    # which is the failure this file's docstring exists to prevent.
     baseline = json.loads(BASELINE_PATH.read_text())
     moved = []
-    for name, entry in baseline["fixtures"].items():
+    for name in fixture_names():
+        entry = baseline["fixtures"].get(name)
+        if entry is None:
+            raise SystemExit(
+                f"{name} has no baseline entry -- run --add-new first, not this."
+            )
         current_plan = capture_plan(name)
-        if current_plan == entry["current_plan"]:
+        current = simulate_plan(name, current_plan)
+        # Both halves, not just the plan: a change that moves the *simulator*
+        # leaves every plan equal while the commands/realized-cost/SoE
+        # assertions go red, and re-pinning the plan alone would then report
+        # "nothing written" -- leaving a full re-baseline, the thing this
+        # file's docstring warns against, as the only apparent remedy.
+        if current_plan == entry["current_plan"] and execution_matches(
+            current, entry["current"]
+        ):
             continue
+        before = entry["current"]["realized_cost"]
+        after = current["realized_cost"]
+        moved.append((name, after - before))
+        # The v10.0.2 half (`plan`, `commands`, `realized_cost`,
+        # `soe_trajectory`) is deliberately not touched.
         entry["current_plan"] = current_plan
-        entry["current"] = simulate_plan(name, current_plan)
-        moved.append(name)
+        entry["current"] = current
     if not moved:
-        print("every current_plan already matches; nothing written")
+        print("no fixture's plan changed; nothing written")
         raise SystemExit(0)
     BASELINE_PATH.write_text(json.dumps(baseline, indent=1))
-    print(f"re-pinned {len(moved)} fixture(s): {moved}")
+    print(f"re-pinned the current half of {len(moved)} fixture(s):")
+    for name, delta in sorted(moved, key=lambda x: -abs(x[1])):
+        print(f"  {name:56s} realized_cost {delta:+.4f} SEK")
     raise SystemExit(0)
 
 if args.add_new:

@@ -92,8 +92,12 @@ where `buy_prices` is the median over the full remaining horizon, capped at
 `max(sell_prices) * efficiency_discharge - cycle_cost` — an
 **arbitrage-consistency cap** that prevents the estimate from exceeding what
 could actually be realized by selling at the best available price
-(`core/bess/battery_system_manager.py:1841-1921`, `_calculate_terminal_value`;
-see issues #126/#244/#246/#345). This is the mechanism to check first for
+(the formula lives in `core/bess/terminal_value.py`, called by
+`BatterySystemManager._calculate_terminal_value`, which owns fetching its
+inputs and logging the result; see issues #126/#244/#246/#345/#422). The same
+function is what the forecast-robustness harness and the pinned scenario
+corpus price the boundary with, so all three optimize against one objective.
+This is the mechanism to check first for
 "why didn't the battery discharge everything right before midnight" or "why
 does it hold charge near the end of the horizon" — it applies at both the
 today-only and today+tomorrow boundary, so this remains the first thing to
@@ -599,6 +603,17 @@ next positive-price block).
 (floors, caps, zeroing) manufactures indifference regions and MUST ship
 with an explicit tie-break policy stating which physically-preferred
 action wins inside the flat region — float noise is not a policy.
+
+Shaping is not the only source of a flat region (#606). Consecutive periods
+inside one hourly price block can be bit-identical in price, load and solar,
+and where they are all unconstrained the objective is *exactly* invariant to
+how a fixed total is split across them — only the sum reaches the next
+period. Every split is an optimum, so the choice fell to accumulated rounding
+in the value function (measured: 0.93 ULP) and the emitted plan differed by
+interpreter at bit-identical cost. `tie_policy.py`'s row 5 now resolves these
+by a stated order over actions. Signature in a bundle: adjacent periods with
+identical inputs whose actions permute between runs while total cost does
+not move at all.
 
 
 ## Execution Layer: What Can Override the Schedule

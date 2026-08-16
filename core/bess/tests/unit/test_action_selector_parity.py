@@ -87,6 +87,7 @@ def test_selector_refactor_is_bit_identical(name):
     # (0.0181 SEK), so nothing real can hide under it. The plan itself stays
     # bit-exact: a reordered float sum that actually changes a decision moves
     # `actions` or `intents`, which are compared with `==`.
+    #
     assert actual["battery_solar_cost"] == pytest.approx(
         golden["battery_solar_cost"], abs=1e-9
     )

@@ -494,6 +494,68 @@ class TestSignedBatteryPowerSplit:
         assert ctrl.get_battery_discharge_power() == 42.0
 
 
+class TestSignedPowerOnSettingsPersistedWithoutThePair:
+    """Issue #604: a Huawei install whose settings predate the pairing.
+
+    The reporter's persisted config mapped ONLY battery_charge_power to
+    sensor.batteries_charge_discharge_power — the counterpart key was written
+    by discovery, which had not run since the pairing was added. The signed
+    split is gated on the pair, so it stayed off: a 375 W discharge was
+    reported as -375 W of *charging* and discharge power came back None, with
+    no error anywhere. Built on a real SettingsStore in the persisted
+    per-platform shape, because that is where the pairing has to survive.
+    """
+
+    def _ctrl(self, sensors: dict) -> HomeAssistantAPIController:
+        store = SettingsStore()
+        store.data["inverter"] = {"platform": "huawei_solar_luna2000"}
+        store.data["sensors"] = {
+            "platform": "huawei_solar_luna2000",
+            "huawei_solar_luna2000": sensors,
+        }
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=store,
+            battery_power_polarity=store.get_battery_power_polarity(),
+            grid_power_polarity=store.get_grid_power_polarity(),
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        return c
+
+    def test_discharging_reads_as_discharge_not_negative_charge(self):
+        ctrl = self._ctrl(
+            {"battery_charge_power": "sensor.batteries_charge_discharge_power"}
+        )
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "-375"})
+        )
+        assert ctrl.get_battery_charge_power() == 0.0
+        assert ctrl.get_battery_discharge_power() == 375.0
+        assert ctrl.get_net_battery_power() == -375.0
+
+    def test_charging_still_reads_as_charge(self):
+        ctrl = self._ctrl(
+            {"battery_charge_power": "sensor.batteries_charge_discharge_power"}
+        )
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "1693"})
+        )
+        assert ctrl.get_battery_charge_power() == 1693.0
+        assert ctrl.get_battery_discharge_power() == 0.0
+
+    def test_exporting_reads_as_export_not_negative_import(self):
+        """Same staleness one layer up: the grid pair on the power meter."""
+        ctrl = self._ctrl({"import_power": "sensor.power_meter_active_power"})
+        ctrl.session.get = _session_method_mock(
+            "get", return_value=_mock_response({"state": "2000"})
+        )
+        # huawei_solar_luna2000 is export_positive (#438)
+        assert ctrl.get_export_power() == 2000.0
+        assert ctrl.get_import_power() == 0.0
+
+
 class TestUnknownBatteryPolarityRaises:
     """An unrecognised polarity must fail loudly, not silently invert.
 

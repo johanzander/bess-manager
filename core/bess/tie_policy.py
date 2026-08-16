@@ -350,6 +350,13 @@ def _row_canonical_among_indistinguishable(
     the smallest genuine cost movement this corpus has recorded (0.0181 SEK),
     so nothing economically real can hide under it.
 
+    That reconciliation is **not** settled here: `optimizer-architecture.md`
+    names this band as P5's sole permitted exception, fixes its boundary (it
+    decides no eligibility, only ordering within an eligible set epsilon has
+    already fixed), and its compliance check fails a PR that widens it, reuses
+    it for eligibility, or adds a third band. This docstring states the
+    reasoning; that document is what a reviewer is entitled to read literally.
+
     Economic bound: zero in *model* value by construction -- the row only ever
     reorders candidates the objective cannot separate -- but not zero in
     realized cost, because an exact tie in *interpolated* value is not an

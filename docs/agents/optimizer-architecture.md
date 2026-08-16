@@ -81,8 +81,10 @@ the physics core — protected below, not a P1 target.)
 
 ### P2. Ties resolve through one lexicographic preference table
 
-All near-tie resolution (within the single epsilon definition, P5) happens
-in **one ordered preference table**, applied once, inside the P1 selector.
+All near-tie resolution happens in **one ordered preference table**, applied
+once, inside the P1 selector. Eligibility for it is set by the single
+epsilon definition (P5) and nothing else; the one narrower, non-economic
+band used *within* an eligible set is bounded in P5.
 The baseline order, subsuming the #466 and #510 tie-breaks:
 
 1. Never prefer a candidate that imports more grid energy than the argmax
@@ -209,10 +211,32 @@ flows are exact by definition and must never pass through a noise model.
 
 ### P5. One epsilon, one owner
 
-The tie/noise threshold is defined in exactly one place
+The **economic** tie/noise threshold is defined in exactly one place
 (`tie_detection.epsilon_for_period`) and consumed everywhere ties are
 compared — the preference table, tie-window detection, hysteresis (#485).
 No caller re-derives or hand-picks a SEK margin.
+
+**The one narrow exception, and its boundary (#606).** Exactly one other
+band exists: `tie_policy.VALUE_INDISTINGUISHABLE_SEK`. It is not a second
+epsilon and must never be used as one — it decides nothing about
+*eligibility*, which remains epsilon's sole property. It applies strictly
+*inside* an already-decided eligible set, to pick a canonical action among
+candidates whose values are indistinguishable as IEEE doubles. The
+distinction is what it is a statement about: epsilon says "the DP's SOE
+grid injects this much value noise, so these options are economically
+unrankable" and is derived per period from the value slope;
+`VALUE_INDISTINGUISHABLE_SEK` says "these two floats are the same number",
+on a quantity whose own accumulated rounding is ~1 ULP (~1e-15 at corpus
+magnitudes). Widening it toward epsilon would silently turn it into an
+economic preference — measured at 0.006–0.010 SEK per fixture across the
+corpus — so it is fixed at 1e-12 and any change to it needs the same
+measured-delta treatment a new table row does.
+
+This exception exists because a plateau can be *exact* rather than merely
+narrow: bit-identical consecutive periods make the objective exactly
+invariant to how a fixed total splits across them, so no economic margin,
+however small, can rank them and the choice would otherwise fall to float
+ordering. No further exception may be added without amending this section.
 
 ### P6. Exactness claims are certified or bounded
 
@@ -264,7 +288,11 @@ A PR touching the files in the header fails review if it:
    action (P4).
 4. Applies a sensor-noise heuristic to planned or simulated flows (P4).
 5. Hand-picks a SEK tie margin instead of consuming `epsilon_for_period`
-   (P5).
+   (P5). The sole permitted exception is
+   `tie_policy.VALUE_INDISTINGUISHABLE_SEK`, which decides no eligibility
+   and applies only within an eligible set already fixed by epsilon — see
+   P5 for its boundary. A PR widening it, reusing it for eligibility, or
+   adding a third band fails this check.
 6. Adds reward shaping that flattens the objective without the matching
    preference-table row (P2).
 7. Adds per-period uncertainty modeling without field evidence (P7).

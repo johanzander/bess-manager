@@ -100,7 +100,7 @@ about as a whole.
 |---|---|
 | Priority | `Priority` single-select field on the Project board |
 | Ordering / status | Board column |
-| Rationale for a decision | Issue comment from `bess-agent` |
+| Rationale for a decision | Issue comment from `bess-product-owner` |
 | Duplicate | Close-as-duplicate |
 | Blocked-by | `Blocked by #N` line in the issue body + `blocked` label |
 | Source (`issue` / `TODO`) | `Source` field on the board |
@@ -111,7 +111,8 @@ time there is one backlog rather than two.
 
 **Prerequisite:** the maintainer's `gh` token lacks project scope. A one-time
 `gh auth refresh -s project` is required before any board write, and the
-`bess-agent` PAT likely needs the same.
+`bess-product-owner` PAT must carry `project` scope when it is created — the
+PO is the only role that writes to the board.
 
 ## Architecture
 
@@ -222,34 +223,54 @@ asking for a log, the Developer posting a diagnosis, and the Reviewer
 commenting on a PR should not look like the same account. A comment prefix
 cannot do that; only a separate account has a name and an avatar.
 
-**Three GitHub Apps, one per role.** Apps rather than machine-user PATs: the
-project's own evaluation criteria call for App token auth over personal
-tokens, and installation tokens expire in an hour instead of living
-indefinitely in `.env`. Each renders as `<name>[bot]` with its uploaded
-avatar.
+### What exists today
 
-| Identity | Avatar | Speaks in |
-|---|---|---|
-| `bess-product-owner[bot]` | clipboard / kanban | Stage 1 intake, board writes, backlog and reporter comments, log chases |
-| `bess-developer[bot]` | wrench / hard hat | Stage 2 analyze, Stage 3 fix, PR creation |
-| `bess-reviewer[bot]` | magnifying glass | Stage 4 PR review — the existing `CLAUDE_REVIEWER` App, rebranded so all three roles are deliberate rather than one being a leftover |
-| `bess-agent` (existing PAT) | unchanged | Release plumbing and ungoverned local writes; not a role |
+An audit of the current identities, because two of the three roles already
+exist under names that hide what they do:
+
+- **`bess-agent`** is *not* a release agent, despite the description in
+  `CLAUDE.md`. It has exactly one caller, `scripts/request-pr-review.sh`, and
+  one job: `pr-review.yml` gates on
+  `comment.user.login == owner || == 'bess-agent'`, so an `implement-issue`
+  session can post `@claude-bot review` on its own PR without wearing the
+  maintainer's face. Requesting review of your own PR is a **developer**
+  action — `bess-agent` already is the Developer, badly named.
+- **`CLAUDE_REVIEWER`** (the App behind `CLAUDE_REVIEWER_APP_ID`) is the
+  Reviewer, likewise already correct and likewise unlabelled as such.
+- **Release needs no identity.** Nothing automated posts releases; the
+  `release` skill runs as the maintainer, deliberately. Inventing a release
+  bot would be inventing a role that does not exist.
+
+### The three roles
+
+| Role | Does | Identity | Work needed |
+|---|---|---|---|
+| **Product Owner** | Intake, log chases, backlog, board, reporter comments | `bess-product-owner` (machine user) | Create — the only genuinely new one |
+| **Developer** | Stage 2 analyze, Stage 3 fix, PR authorship, requesting review | `bess-agent` → renamed `bess-developer` | Rename, upload avatar, update the `pr-review.yml` gate |
+| **Reviewer** | Stage 4 PR review only | existing `CLAUDE_REVIEWER` App | Rebrand, upload avatar |
+
+**Developer and Reviewer must stay distinct, and this is the strongest
+identity argument in the design.** Stage 4 reviews Stage 3's own output. Under
+one face the timeline reads as an account approving its own PR, and no later
+reader can tell independent review from self-approval at a glance. Elsewhere
+separate identities are a nicety; here the separation *is* the meaning.
 
 This supersedes the earlier rule that the identity axis is *review, not
 topic*. That rule existed to stop unreviewed output masquerading as the
 maintainer's voice, and it still holds — none of these three is the
 maintainer. Within automation, role is now the axis.
 
-**Local writes use the same identity as CI**, via a new
-`scripts/gh-as.sh <role> ...`: sign a JWT with the role's App key, exchange it
-for an installation token, run `gh` with it. Roughly twenty lines, modelled on
-the existing `gh-agent.sh`. Without it the PO would show one avatar when
-Reflex runs in CI and another when Rhythm runs locally — the exact confusion
-these identities exist to remove.
+### Auth
 
-Per role, one-time setup: create the App, upload an avatar, install it on the
-repo, add `<ROLE>_APP_ID` and `<ROLE>_PRIVATE_KEY` to Actions secrets and to
-`.env`.
+**Machine users for Product Owner and Developer; the Reviewer stays an App.**
+A machine-user PAT works identically in CI (as a secret) and locally (from
+`.env`), so a role wears one avatar in both places with no new machinery:
+`gh-agent.sh` is generalised to `gh-agent.sh --as po|dev` and that is the
+whole change. Minting installation tokens locally from an App key would have
+required a JWT-signing script; that component is deliberately not built.
+
+Per new role, one-time setup: create the account, upload an avatar, add the
+PAT to `.env` and to Actions secrets.
 
 **Locally, Claude Code has names and colors but no avatars** — verified: agent
 frontmatter supports `color` (`red, blue, green, yellow, purple, orange, pink,

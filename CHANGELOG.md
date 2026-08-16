@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The battery schedule no longer varies between otherwise identical runs** — when two plans were worth exactly the same, the optimizer picked between them on floating-point noise, so the same day could plan differently on different machines. ([#606](https://github.com/johanzander/bess-manager/issues/606))
 - **Growatt MIN TOU segments are now written to the inverter only once they are about to take effect**, roughly halving inverter writes: a segment hours away no longer gets rewritten every time the plan shifts around a marginal period. ([#554](https://github.com/johanzander/bess-manager/issues/554))
 - **A running Growatt MIN TOU segment's end is no longer rewritten hours before the change matters** — nudging a live window's end waited on nothing, so it was written immediately even when the difference was hours away. ([#589](https://github.com/johanzander/bess-manager/issues/589))
 - **A running Growatt MIN TOU segment is no longer rewritten every 15 minutes** — its start time was being truncated forward each cycle, so an unchanged two-hour window cost 16 inverter writes instead of 2. ([#554](https://github.com/johanzander/bess-manager/issues/554))

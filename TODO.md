@@ -408,17 +408,29 @@ This would make the profitability gate compare apples-to-apples with the dashboa
 
 ---
 
-### Pinned scenario fixtures never exercise a realistic (nonzero) terminal value
+### Does #450's hybrid PWL path still earn its keep at realistic terminal values?
 
-**Impact**: Medium | **Effort**: Medium-High | **Dependencies**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py`, `core/bess/battery_system_manager.py`
+**Impact**: Medium | **Effort**: Medium | **Dependencies**: `core/bess/tie_detection.py`, `core/bess/pwl_window_dp.py`, `core/bess/tests/synthetic/measure_tie_coverage.py`
 
-**Description**: `optimize_battery_schedule()` defaults `terminal_value_per_kwh=0.0`, and every one of the ~26 pinned scenarios in `test_scenarios.py` calls it without overriding that default — so the entire pinned-fixture regression suite always tests the DP with terminal value hardcoded to zero, regardless of what each scenario's horizon is meant to represent. In production, every real optimization run computes a nonzero terminal value via `_calculate_terminal_value()` (`battery_system_manager.py`). Found while investigating #345 (terminal-value zeroing at the extended horizon boundary): CI stayed green through that fix specifically because nothing in the pinned suite touches this code path at all, in either direction.
+**Description**: Surfaced by the fixture terminal-value retrofit. A nonzero terminal row adds a value gradient at the horizon that breaks the near-ties the hybrid detect/resolve/splice path exists to fix. Measured across the retrofitted corpus: only **four** of 38 fixtures still flag a tie window at all, and the largest hybrid advantage among them is **0.0043 SEK** (`realworld_2026_04_27_184643`) — against the +0.0600 SEK that `test_hybrid_resolution_improves_on_grid_dp` was written on, at `terminal_value_per_kwh = 0.0`.
 
-**What to improve**: Retrofit the pinned scenarios to compute their terminal value the same way production does (`_calculate_terminal_value`'s median-buy/sell-cap formula, applied to each scenario's own price data) instead of silently defaulting to zero, then re-pin each scenario's expected cost against the new baseline.
+Three test files now pin `terminal_value_per_kwh = 0.0` explicitly to keep exercising the mechanism (`test_issue_450_hybrid_resolution.py`, `test_measure_tie_coverage.py`, and the fixture choice in `test_tie_diagnostics_hook.py`). That is honest — the rig's subject is near-ties, so it must run where near-ties exist — but it means the hybrid path's *production* value is now measured by nothing.
 
-**Why not done as part of #345**: per the CHANGELOG history, changes to this exact mechanism have previously shifted "nearly every scenario's expected schedule" — retrofitting all 26 fixtures is a broad, independently risky change that conflates two different concerns ("is `_calculate_terminal_value`'s formula correct" vs. "does the DP correctly handle *some* nonzero terminal value") and shouldn't ride along with a narrow bug fix. #345/#347 instead added one new targeted pinned fixture for the extended-horizon mechanism specifically, without touching the other 26.
+**What to improve**: Decide whether the hybrid path is still worth its latency and complexity under production-realistic terminal values, or whether #512's finer grid plus a nonzero terminal row has already absorbed what it was built for. Note the question changes again once #602 lands, since that further raises terminal values.
 
-**Files**: `core/bess/tests/unit/test_scenarios.py`, `core/bess/dp_battery_algorithm.py:1313-1327` (`optimize_battery_schedule` signature/default), `core/bess/battery_system_manager.py` (`_calculate_terminal_value`)
+**Files**: `core/bess/tests/unit/test_issue_450_hybrid_resolution.py`, `core/bess/tests/synthetic/test_measure_tie_coverage.py`, `core/bess/pwl_window_dp.py`
+
+---
+
+### Fixture re-pin scripts each reimplement the same glob/read/check/write loop
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `scripts/`
+
+**Description**: There are now four entry points that walk `core/bess/tests/unit/data/*.json`, re-derive a field and write it back — `capture_selector_goldens.py`, `capture_vpp_baseline.py`, `capture_scenario_terminal_values.py` and `capture_scenario_expected_results.py` — and the last two duplicate the loop skeleton (`--check` handling, `json.dumps(indent=2)` plus trailing newline, stale counting) verbatim. The repo already factors the *capture* half into `vpp_capture.py` and `golden_capture.py`; the driver half was not.
+
+**What to improve**: Extract the shared walk/report/write into one helper the four scripts call. Raised in review of the terminal-value retrofit, with the observation that a PR whose thesis is "two copies of a formula is two objectives" should not leave four copies of its driver.
+
+**Files**: `scripts/capture_scenario_terminal_values.py`, `scripts/capture_scenario_expected_results.py`, `scripts/capture_selector_goldens.py`, `scripts/capture_vpp_baseline.py`
 
 ---
 

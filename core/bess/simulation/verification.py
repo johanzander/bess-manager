@@ -1,7 +1,5 @@
 """Verification harnesses: plan-faithfulness (R == P) and A/B economic gate."""
 
-import statistics
-
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
 from core.bess.simulation.inverter_simulator import (
@@ -9,6 +7,7 @@ from core.bess.simulation.inverter_simulator import (
     derive_control_command,
     simulate,
 )
+from core.bess.terminal_value import calculate_terminal_value_per_kwh
 
 
 def verify_plan_faithfulness(
@@ -99,26 +98,16 @@ def realized_under_solar_error(
     answer to "is the schedule robust to solar forecast error?".
 
     Both figures are credited for usable energy left in the battery at horizon end
-    (mirroring BatterySystemManager._calculate_terminal_value's median-buy-price
-    valuation, capped unless the export tariff is fixed — see #359), otherwise a
-    run that legitimately stores more bonus solar than the forecast run — real
-    value carried past the horizon, not waste — looks like a loss purely from the
-    horizon cutoff.
+    using the same terminal valuation production optimizes against
+    (`core/bess/terminal_value.py`), otherwise a run that legitimately stores more
+    bonus solar than the forecast run — real value carried past the horizon, not
+    waste — looks like a loss purely from the horizon cutoff. Sharing the formula
+    rather than mirroring it is load-bearing: a hand-cloned copy here would let
+    this harness judge plans by a different objective than the one that produced
+    them.
     """
-    buy_based = max(
-        0.0,
-        statistics.median(buy_price) * settings.efficiency_discharge
-        - settings.cycle_cost_per_kwh,
-    )
-    sell_cap = max(
-        0.0,
-        max(sell_price) * settings.efficiency_discharge - settings.cycle_cost_per_kwh,
-    )
-    # Cap skipped on a fixed export tariff — see
-    # BatterySystemManager._calculate_terminal_value for why (#359).
-    export_prices_vary = max(sell_price) > min(sell_price)
-    terminal_value_per_kwh = (
-        min(buy_based, sell_cap) if export_prices_vary else buy_based
+    terminal_value_per_kwh = calculate_terminal_value_per_kwh(
+        buy_price, sell_price, settings
     )
     result = optimize_battery_schedule(
         buy_price=buy_price,

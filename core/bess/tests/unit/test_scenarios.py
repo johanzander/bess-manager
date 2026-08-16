@@ -25,6 +25,7 @@ from core.bess.tests.helpers import (
     assert_physical_constraints,
     assert_savings_positive,
     get_intent_distribution,
+    scenario_terminal_value,
 )
 
 pytestmark = pytest.mark.slow
@@ -33,6 +34,75 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+
+def test_every_fixture_declares_a_terminal_value():
+    """A fixture without an explicit terminal value silently runs the DP at 0.0.
+
+    `optimize_battery_schedule` defaults `terminal_value_per_kwh` to 0.0, and at
+    0.0 the terminal-row branch in `dp_battery_algorithm` never executes at all
+    -- `V[horizon]` stays all zeros. Every fixture here used to fall through to
+    that default, so the whole pinned corpus was blind to the terminal value in
+    both directions: it could neither regress it nor validate it, which is how
+    #345's terminal-value fix went green without a single fixture reaching the
+    code path (TODO.md).
+
+    Measured when the corpus was retrofitted: applying #602's candidate change
+    (dropping the double `cycle_cost` deduction) moves 28 of 38 fixtures, one by
+    11.45 kWh of boundary SOE and 33 SEK. At the old 0.0 default it moved none.
+    That gap is what this guard protects -- a fixture added without a declared
+    terminal value quietly re-opens it for itself.
+    """
+    missing = [
+        name
+        for name in get_all_scenario_files()
+        if "terminal_value_per_kwh" not in load_test_scenario(name)
+    ]
+    assert missing == [], (
+        f"fixtures without a declared terminal value: {missing}. Run "
+        "`.venv/bin/python scripts/capture_scenario_terminal_values.py`."
+    )
+
+
+def test_recorded_terminal_values_still_match_the_production_formula():
+    """A change to the terminal-value formula must reach the pinned corpus.
+
+    Fixtures record `terminal_value_per_kwh` as an explicit number so a reader
+    can see what a scenario runs at. That transparency costs something this
+    test buys back: a recorded constant does not move when
+    `core/bess/terminal_value.py` changes, so without this guard a formula
+    change would leave all 38 fixtures replaying their old values and the
+    economics pins would stay green -- the same blindness the retrofit set out
+    to remove, in a new form.
+
+    Caught by mutation, not by inspection: dropping the double `cycle_cost`
+    deduction (#602's candidate change) left `test_all_scenarios` at 43 passed
+    until this existed. With it, the same mutation reddens this test first,
+    which forces the re-capture that then moves 28 of 38 fixtures' economics.
+
+    A fixture that must pin a *specific* terminal value regardless of the
+    formula -- because its defect lives in how that input is computed upstream
+    -- does not belong in this corpus; give it a standalone test where the
+    intent is visible.
+    """
+    stale = []
+    for name in get_all_scenario_files():
+        scenario = load_test_scenario(name)
+        recorded = scenario["terminal_value_per_kwh"]
+        computed = scenario_terminal_value(scenario)
+        if abs(recorded - computed) > 1e-9:
+            stale.append(f"{name}: recorded={recorded} computed={computed}")
+
+    assert stale == [], (
+        "recorded terminal values no longer match the production formula:\n  "
+        + "\n  ".join(stale)
+        + "\nIf the formula change is deliberate, re-capture and re-pin:\n"
+        "  .venv/bin/python scripts/capture_scenario_terminal_values.py\n"
+        "  .venv/bin/python scripts/capture_scenario_expected_results.py\n"
+        "  .venv/bin/python scripts/capture_selector_goldens.py\n"
+        "  PYTHONPATH=. .venv/bin/python scripts/capture_vpp_baseline.py "
+        "--repin-current"
+    )
 
 
 def load_test_scenario(scenario_name):
@@ -422,11 +492,16 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
         r for r in caplog.records if "Near-tied DP decisions detected" in r.getMessage()
     ], "fixture now trips the tie detector -- it no longer exercises the fast path"
 
+    # Re-pinned when the fixture corpus was retrofitted off
+    # `terminal_value_per_kwh = 0.0` onto its production-computed value: this
+    # fixture runs at 2.4481 SEK/kWh, which moves the grid DP's own output by
+    # -0.030 SEK. The fast-path guarantee this test exists to protect is
+    # unchanged -- the assertion above still shows no tie window is detected.
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        158.2466715789474, abs=1e-4
+        158.2166715789474, abs=1e-4
     )
     assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
-        62.8678, abs=1e-3
+        62.89783, abs=1e-3
     )
 
 

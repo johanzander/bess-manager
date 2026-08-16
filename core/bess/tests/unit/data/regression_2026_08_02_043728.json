@@ -345,5 +345,6 @@
     "base_to_battery_solar_savings": 14.9279,
     "base_to_battery_solar_savings_pct": 165.59819,
     "_note": "Re-pinned to the hybrid grid-DP + windowed-PWL result (#450). The grid DP alone reports -5.989678408 on battery_solar_cost; the hybrid's tie-detect/resolve/splice path (window 31-40) genuinely improves this to -6.002124244. This is a real improvement, not exact: full-horizon PWL reaches -5.984652292 on the actual reward objective (the quantity the optimizer maximizes) vs the windowed hybrid's -5.976470872 on that same objective -- the gap is expected windowing coverage (only part of the horizon is re-solved), not a defect. Do not compare against the previous pin (-6.012541994, from PR #461's full-horizon MILP): that figure is inflated by an unrelated MILP self-throttle export-credit bug (see TODO.md, 'From #450 hybrid grid-DP + windowed exact-PWL investigation') and is not a fair target."
-  }
+  },
+  "terminal_value_per_kwh": 0.169031
 }

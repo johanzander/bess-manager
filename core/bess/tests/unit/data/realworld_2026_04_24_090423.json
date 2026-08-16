@@ -227,5 +227,6 @@
       "soe_within_bounds": true,
       "power_within_limits": true
     }
-  }
+  },
+  "terminal_value_per_kwh": 2.077335156
 }

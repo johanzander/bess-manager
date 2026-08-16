@@ -10,7 +10,8 @@
 # The trigger comment is posted as the developer automation identity (the
 # default role in scripts/gh-agent.sh, currently the `bess-agent` GitHub
 # account, being renamed to `bess-developer`). pr-review.yml's gate accepts
-# both logins alongside the repo owner during the migration window.
+# `bess-agent` alongside the repo owner today; `bess-developer` is added to
+# that gate only in the same commit that renames the account.
 #
 # Usage:
 #   scripts/request-pr-review.sh <pr-number> [timeout-seconds]

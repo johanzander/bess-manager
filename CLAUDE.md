@@ -126,9 +126,11 @@ of `analyzed`.
 - Only the repo owner can trigger bot commands. The one exception is Stage 4:
   `pr-review.yml` also accepts `@claude-bot` from the developer automation
   identity (currently the `bess-agent` GitHub account; being renamed to
-  `bess-developer`, both accepted during the migration window — see
-  `scripts/gh-agent.sh`), so `implement-issue`'s Step 11 loop can request its
-  own review. Stages 1–3 and 5 stay owner-only — those spend money on work
+  `bess-developer` — see `scripts/gh-agent.sh`), so `implement-issue`'s
+  Step 11 loop can request its own review. `bess-developer` is added to that
+  gate only in the same commit that renames the account — never before,
+  since pre-authorising an unregistered username on a public repo is
+  exploitable. Stages 1–3 and 5 stay owner-only — those spend money on work
   nobody has asked for yet.
 - Automation writes carry a **role** identity, and role is the axis:
   `bess-product-owner` (intake, backlog, board, reporter comments),

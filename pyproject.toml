@@ -42,7 +42,7 @@ exclude = [
     "frontend",
     "node_modules",
 ]
-target-version = "py310"
+target-version = "py313"
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "app"]

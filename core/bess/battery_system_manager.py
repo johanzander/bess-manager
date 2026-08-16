@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import traceback
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
 from . import time_utils
@@ -1412,7 +1412,6 @@ class BatterySystemManager:
         the flat "sensor" strategy, this captures intra-day variation
         (morning/evening peaks, overnight baseline).
         """
-        from datetime import timezone
 
         target_sensor, stats = self._fetch_ha_statistics_raw()
         tz = time_utils.TIMEZONE
@@ -1430,7 +1429,7 @@ class BatterySystemManager:
                 if isinstance(start_val, (int, float)):
                     # HA returns millisecond epoch timestamps
                     ts = start_val / 1000 if start_val > 1e12 else start_val
-                    dt = datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(tz)
+                    dt = datetime.fromtimestamp(ts, tz=UTC).astimezone(tz)
                 else:
                     dt = datetime.fromisoformat(str(start_val)).astimezone(tz)
                 hourly_buckets[dt.hour].append(float(change))

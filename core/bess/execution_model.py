@@ -210,8 +210,8 @@ def lattice_grid_charge(solar_to_battery, grid_to_battery, charge_step_kwh):
     Only a grid-charging period needs this. `INTENT_TO_CONTROL` writes a flat
     `charge_rate: 100` for SOLAR_STORAGE and IDLE, so their plan is never
     scaled and never rounds; GRID_CHARGING is the one intent whose rate is
-    derived from the plan itself (`_compute_charge_rate` ->
-    `_scale_to_percent`, nearest). A planned power between two steps is
+    derived from the plan itself (`_compute_charge_rate`, which rounded to
+    nearest until 4c). A planned power between two steps was
     therefore written as the step *below* and the inverter charges less than
     the plan assumed -- measured pre-fix as 4 of 493 charging periods, worst
     -0.0288 kWh.
@@ -234,8 +234,8 @@ def lattice_grid_charge(solar_to_battery, grid_to_battery, charge_step_kwh):
     Accepts scalars or arrays; returns the matching shape. Where no grid
     top-up is planned the value passes through untouched.
 
-    The step is `max_charge_power_kw / 100` to mirror `_scale_to_percent`
-    exactly. A declared per-platform charge resolution (the charge-side twin
+    The step is `max_charge_power_kw / 100`, matching what the controller
+    scales against. A declared per-platform charge resolution (the charge-side twin
     of `discharge_resolution_kw`) does not exist yet -- that belongs with the
     full P3 charge work, which also has to stop `_period_flows` deriving
     throughput from nominal power.

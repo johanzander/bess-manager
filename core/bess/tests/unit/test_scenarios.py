@@ -879,10 +879,10 @@ def test_grid_charge_plan_is_deliverable_by_the_written_command():
     can actually deliver.
 
     The charge rate is written as an integer percent of `max_charge_power_kw`
-    scaled from the plan's own action (`_compute_charge_rate` ->
-    `_scale_to_percent`, nearest). A planned power landing between two steps
-    therefore rounds **down** and the inverter charges less than the plan
-    assumed -- the charge-side twin of the discharge defect #352 fixed.
+    scaled from the plan's own action (`_compute_charge_rate`), and until 4c
+    that scaling rounded to *nearest*. A planned power landing between two
+    steps therefore rounded **down** and the inverter charged less than the
+    plan assumed -- the charge-side twin of the discharge defect #352 fixed.
 
     Measured across the corpus before the fix: 4 of 493 charging periods
     under-deliver, worst `synthetic_extreme_volatility` period 13 at

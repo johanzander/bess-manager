@@ -481,19 +481,11 @@ class InverterController(ABC):
         block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
         return grid_charge, discharge_rate, block_passive_charging
 
-    @staticmethod
-    def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
-        """Scale a *charge* power to a 0-100 percent rate, clamped to range.
-
-        Charge only, since 4b: the discharge path goes through
-        `execution_model.command_index`, which knows whether the
-        number it produces is a ceiling or a target. A charge rate is always
-        a target, so nearest-rounding is right here and this stays a plain
-        scale -- but it is the same conversion, and Phase 4c collapses it
-        into the shared function along with the six `rate_throughput` sites
-        that assume nominal charge power.
-        """
-        return min(100, max(0, round(power_kw / max_power_kw * 100)))
+    # `_scale_to_percent` lived here and did this conversion by nearest
+    # rounding for both rate paths. Both now go through
+    # `execution_model.command_index`, which rounds by what the written
+    # number means -- discharge in 4b, charge in 4c -- so it has no callers
+    # left and is gone rather than kept as a second way to do the same thing.
 
     def _compute_charge_rate(
         self, intent: str, control: dict[str, bool | int], battery_action_kw: float

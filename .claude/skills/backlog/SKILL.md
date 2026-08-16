@@ -19,6 +19,13 @@ never implement, and you never assign. Implementers pull the top of
 Note *Ready for Dev* is the column; the *Definition of Ready* below is the
 criteria an item must meet to enter it. Two different things.
 
+**You manage the first five. `Done` is not yours.** The digest reads only
+*open* issues, so a closed one vanishes from your evidence entirely — you
+cannot derive `Done` and must never try to. It is filled by the board's own
+built-in "item closed" workflow and ages out via auto-archive. A card in
+`Done` is invisible to you by construction, which is the intended behaviour,
+not a gap.
+
 Every pass starts from one command. Do not read issues one by one to build a
 picture:
 
@@ -113,7 +120,6 @@ always wins** — never trust a card's current position. Act on each mismatch:
 | worktree present, no session, no PR | the session died mid-issue. Report it and offer to relaunch; the branch's commits survive. **Never silently relaunch** — a session that died twice is telling you something |
 | PR `CONFLICTING` | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
-| issue closed, card not *Done* | move the card |
 | *Analysis*/`reporter` quiet 14 days | nudge once; park to *Backlog* at 28 |
 | *Analysis*/`discussion` quiet 14 days | summarise the thread, put the open question to the maintainer |
 | open issue, comment activity, no labels | file into *Analysis*, assign a sub-state, apply labels |

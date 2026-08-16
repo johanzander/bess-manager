@@ -121,7 +121,12 @@ jq -n \
       elif (human_comments($comments) | length) > 0 then "discussion"
       else null end;
 
-  # These six strings must match the Status options on the board EXACTLY — the
+  # Five derived columns. `Done` is deliberately absent and unreachable here:
+  # only OPEN issues are fetched, so a closed one leaves the digest entirely
+  # and cannot be derived into anything. The board fills `Done` itself via its
+  # built-in item-closed workflow.
+  #
+  # These strings must match the Status options on the board EXACTLY — the
   # reconcile step compares them as strings, so a casing difference silently
   # strands every card. Confirmed against project 1 on 2026-08-16:
   #   Backlog, Analysis, Ready for Dev, In Progress, In Review, Done

@@ -48,7 +48,7 @@ target-version = "py310"
 known-first-party = ["core", "app"]
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.13"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = true

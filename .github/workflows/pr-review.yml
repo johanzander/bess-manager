@@ -74,6 +74,16 @@ jobs:
                    - REQUEST_CHANGES — at least one rule violation or correctness bug
                    - COMMENT  — questions/observations only
 
+                 **Submitting this review is mandatory in every case,
+                 including when you find nothing wrong.** Finishing the run
+                 without calling `gh pr review` is a failed run, not a clean
+                 one. Silence is indistinguishable from a crash to everything
+                 downstream, and it has a concrete cost: GitHub keeps showing
+                 the LAST explicit verdict, so a prior REQUEST_CHANGES goes on
+                 blocking the merge no matter how many clean runs follow, and
+                 the review can never be cleared by re-running. If the diff is
+                 clean, say so in one line and APPROVE.
+
               5. The summary must include:
                  - Whether the fix matches the linked issue's root-cause
                  - Whether the test added would catch a regression

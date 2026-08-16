@@ -469,6 +469,17 @@ redundant:
   token from the macOS keychain, which is XPC, not network. The same block is
   why `git push` emitted `failed to store: 100001` — the credential helper
   could not cache the credential, though the push itself still landed.
+
+  **When a keychain read does fail, `gh` does not error — it silently falls
+  back to a token with fewer scopes**, so the symptom is a plain `Forbidden`
+  on an API call that should have been permitted, and the obvious conclusion
+  ("I lack permission for this operation") is wrong. Run `gh auth status`
+  first: `✓ Logged in ... (keyring)` plus the expected scope line means the
+  token is fine and the failure is something else. A `Failed to log in ...
+  (keyring)` line means you are on the fallback token, and the fix is to
+  restore keychain access or re-run `gh auth refresh`, NOT to widen anything.
+  Diagnosed the expensive way: a `PUT .../dismissals` returned `Forbidden`
+  in-sandbox and `DISMISSED` outside it, same account, same command.
 - **`network.allowLocalBinding`** — `podman info` returned *"dial tcp
   127.0.0.1:64752: connect: operation not permitted"*. The podman VM is reached
   over a local TCP port, so `filesystem.allowRead` and

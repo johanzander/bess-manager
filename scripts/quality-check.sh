@@ -96,6 +96,51 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
         echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
         ERRORS=$((ERRORS + 1))
     fi
+    # mypy, scoped to files this branch actually changed.
+    #
+    # `docs/agents/rules.md` requires mypy to pass, but nothing ran it: not
+    # this gate, not CI, and it was not even in requirements-dev.txt. Turning
+    # it on repo-wide is not an option — a measured 2914 errors across 191
+    # files, 417 of them outside tests. So the rule is enforced going forward
+    # instead of retroactively: code you touch must type-check, and the legacy
+    # backlog burns down as files get edited.
+    #
+    # Three sources, because each misses something the others catch:
+    # committed-on-this-branch, uncommitted-but-tracked, and untracked. The
+    # last one matters most — a brand-new file is untracked until its first
+    # commit, and this gate is meant to run BEFORE that commit. Leaving it out
+    # let a probe file with a known error pass the gate silently.
+    #
+    # A file deleted on this branch still appears in the diff, hence the -e
+    # test. No changed Python files is a pass, not a skip-with-warning.
+    if MYPY=$(py_tool mypy); then
+        echo "🔸 Checking mypy on changed files..."
+        base=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+        if [ -z "$base" ]; then
+            echo "⚠️  Cannot resolve origin/main — skipping mypy (run: git fetch origin main)"
+            WARNINGS=$((WARNINGS + 1))
+        else
+            changed=""
+            while IFS= read -r f; do
+                case "$f" in *.py) [ -e "$f" ] && changed="$changed $f" ;; esac
+            done <<EOF
+$(git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard)
+EOF
+            if [ -z "$changed" ]; then
+                echo "✅ mypy OK (no changed Python files)"
+            elif ! "$MYPY" --explicit-package-bases --ignore-missing-imports $changed >/dev/null 2>&1; then
+                echo "❌ mypy errors in changed files. Run:"
+                echo "   $MYPY --explicit-package-bases --ignore-missing-imports$changed"
+                ERRORS=$((ERRORS + 1))
+            else
+                echo "✅ mypy OK (changed files)"
+            fi
+        fi
+    else
+        echo "❌ mypy not found in .venv/bin or on PATH — cannot verify types."
+        echo "   Install with: .venv/bin/pip install -r requirements-dev.txt"
+        ERRORS=$((ERRORS + 1))
+    fi
 else
     echo "ℹ️  No Python files found to check"
 fi

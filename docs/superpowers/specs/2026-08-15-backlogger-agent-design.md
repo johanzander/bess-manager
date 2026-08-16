@@ -158,7 +158,13 @@ Holds no state.
 
 ### 3. The board — a GitHub Project v2
 
-Columns: `Backlog / Ready / In progress / In review / Done`.
+Columns: `Backlog / Analysis / Ready / In progress / In review / Done`.
+
+`Analysis` is the refinement column, and it exists so refinement stalls are
+visible as such: an item stuck there for weeks is the PO's problem, not a
+developer's. It is also where the existing Stage 2 pipeline lives — an item
+enters Analysis when refinement starts and leaves it when the Definition of
+Ready is met.
 Fields: `Priority` (single-select), `Source` (`issue` / `TODO`).
 
 The only new persistent object, and it is GitHub-native — a real board in the
@@ -222,7 +228,8 @@ CI merge.
 
 | Column | Derivation |
 |---|---|
-| Backlog | open issue, no `blocked`, no worktree, no PR |
+| Backlog | open issue, no `blocked`, no worktree, no PR, and no refinement started |
+| Analysis | being refined toward Ready — either *awaiting reporter* (`needs-debug-log`, PO has asked) or *awaiting analysis* (`ready-for-analysis`, log present, Stage 2 not yet run or running) |
 | Ready | satisfies the Definition of Ready below, and Priority is set |
 | In progress | live worktree on a branch naming the issue, or draft PR with no review |
 | In review | PR open and review requested / `has-fix-pr` |
@@ -240,7 +247,8 @@ The valuable output is the **mismatches**, each mapping to one action:
 | PR `CONFLICTING` | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
 | issue closed, card not *Done* | move card |
-| `needs-debug-log` older than 14 days | nudge the reporter or park |
+| in *Analysis*, `needs-debug-log`, quiet 14 days | nudge once; on a second timeout park back to *Backlog* with a comment |
+| in *Analysis*, `analyzed`, DoR met | promote to *Ready* |
 
 ## Definition of Ready
 

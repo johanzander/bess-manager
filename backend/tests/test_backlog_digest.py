@@ -168,3 +168,57 @@ def test_conflicting_pr_is_reported_on_its_issue(bin_dir: Path) -> None:
     assert item["pr"] == 610
     assert item["pr_state"] == "CONFLICTING"
     assert item["column"] == "In review"
+
+
+def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
+    bin_dir: Path,
+) -> None:
+    """Regression test for a real bug found while implementing this script:
+    the first-draft jq used `select(...) // null` to pick "the" PR for an
+    issue. In jq, `EXPR // null` only substitutes `null` when EXPR produces
+    *no* output — with one match it returns that match, but with two or more
+    matches `select(...)` is a stream and the whole expression becomes a
+    stream of PR objects rather than a single scalar. Downstream that stream
+    gets cross-multiplied into the `items[]` comprehension, silently emitting
+    one duplicate item row per extra match instead of picking a single PR
+    deterministically. This issue has two open PRs that both match it (one by
+    `Fixes #N` in the body, one by headRefName pattern), which triggers the
+    bug if `pr_for` regresses back to the `// null` idiom."""
+    issue = {
+        "number": 606,
+        "title": "Two competing fix attempts",
+        "labels": [{"name": "bug"}, {"name": "has-fix-pr"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-10T00:00:00Z",
+        "comments": [],
+        "body": "",
+    }
+    pr_a = {
+        "number": 620,
+        "title": "fix: attempt A",
+        "headRefName": "fix/issue-606-a",
+        "mergeable": "MERGEABLE",
+        "body": "Fixes #606",
+    }
+    pr_b = {
+        "number": 621,
+        "title": "fix: attempt B",
+        "headRefName": "fix/issue-606-b",
+        "mergeable": "MERGEABLE",
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr_a, pr_b], []))
+
+    digest = _run(bin_dir)
+
+    assert len(digest["items"]) == 1, (
+        "an issue matched by two PRs must still emit exactly one item row, "
+        f"got {len(digest['items'])}"
+    )
+    item = digest["items"][0]
+    assert item["number"] == 606
+    assert isinstance(item["pr"], int), (
+        "pr must be a single scalar issue number, not a list — " f"got {item['pr']!r}"
+    )
+    assert item["pr"] == 620

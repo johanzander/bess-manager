@@ -130,7 +130,86 @@ def test_unlabeled_issue_with_discussion_lands_in_analysis(bin_dir: Path) -> Non
         "author": {"login": "reporter"},
         "createdAt": "2026-08-01T00:00:00Z",
         "updatedAt": "2026-08-14T00:00:00Z",
-        "comments": [{"body": "what do you mean by idle?"}],
+        "comments": [
+            {"body": "what do you mean by idle?", "author": {"login": "areader"}}
+        ],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["column"] == "Analysis"
+    assert digest["items"][0]["awaiting"] == "discussion"
+
+
+def test_bot_only_comment_does_not_trigger_discussion(bin_dir: Path) -> None:
+    """Stage 1 triage (issue-triage.yml) posts a comment on every issue it
+    processes. A bot comment alone must not read as human discussion, or the
+    heuristic degenerates to 'everything is a discussion' once triage runs
+    on every issue."""
+    issue = {
+        "number": 612,
+        "title": "Only ever touched by triage",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-14T00:00:00Z",
+        "comments": [
+            {
+                "body": "Triaged as bug, needs-debug-log.",
+                "author": {"login": "bess-manager-claude-bot"},
+            }
+        ],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["column"] == "Backlog"
+    assert digest["items"][0]["awaiting"] is None
+
+
+def test_human_comment_still_triggers_discussion(bin_dir: Path) -> None:
+    issue = {
+        "number": 613,
+        "title": "A real human weighed in",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-14T00:00:00Z",
+        "comments": [
+            {
+                "body": "I think this is actually two bugs.",
+                "author": {"login": "areader"},
+            }
+        ],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["column"] == "Analysis"
+    assert digest["items"][0]["awaiting"] == "discussion"
+
+
+def test_bot_and_human_comment_still_triggers_discussion(bin_dir: Path) -> None:
+    issue = {
+        "number": 614,
+        "title": "Triaged, then a human replied",
+        "labels": [],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-14T00:00:00Z",
+        "comments": [
+            {"body": "Triaged as bug.", "author": {"login": "bess-manager-claude-bot"}},
+            {
+                "body": "Actually I can't reproduce this.",
+                "author": {"login": "areader"},
+            },
+        ],
         "body": "",
     }
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))

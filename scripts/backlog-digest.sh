@@ -44,8 +44,26 @@ worktrees=$(git worktree list --porcelain | awk '
 
 sessions=$(claude agents --json)
 
+# No `--field "Priority"` here: verified against the real CLI just now,
+# `gh project item-list --field "Priority" --format json` is rejected
+# outright with "cannot use --format with --field or --field-id" —
+# `--field` only adds extra columns to the human-readable table, it is not
+# a JSON-output selector. `--format json` alone was confirmed to reach the
+# API (tested against a nonexistent project number: it returns a GraphQL
+# "could not resolve" error, not a flag error), so JSON output is assumed to
+# already include custom field values without needing `--field` at all.
+# --limit matches the 200 used for `gh issue list` above; the item-list
+# default is 30, which would silently truncate against this repo's 37+ open
+# issues.
+#
+# NOTE: the board does not exist yet (created by a deferred task), so the
+# exact JSON key the Priority field lands under is still unverified. The jq
+# below assumes it arrives as a top-level `.priority` on each item (matching
+# the existing `$board.items[]?.priority?` lookup). Confirm this against a
+# real board the first time one exists, and fix the jq path below if the
+# assumption is wrong — do not add a fallback that tries multiple shapes.
 board=$(gh project item-list "$PROJECT_NUMBER" --owner "${PROJECT_OWNER:-johanzander}" \
-  --format json)
+  --limit 200 --format json)
 
 jq -n \
   --argjson issues "$issues" \
@@ -57,6 +75,17 @@ jq -n \
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
   def label_names: [.labels[].name];
+
+  # Automation identities whose comments do not count as human discussion.
+  # Stage 1 triage (issue-triage.yml) posts a comment on every issue it
+  # processes, in every one of its four buckets, and a deferred task turns
+  # that workflow into this very agent, as its own intake arm — at which point every
+  # issue would carry a bot comment and a raw comment-count heuristic would
+  # degenerate to "everything is a discussion". bess-product-owner and
+  # bess-developer are the renamed/future identities (see scripts/gh-agent.sh).
+  def bot_authors: ["bess-manager-claude-bot", "bess-agent", "bess-product-owner", "bess-developer"];
+
+  def human_comments($comments): [ $comments[] | select((.author.login // "") as $a | (bot_authors | index($a)) | not) ];
 
   def pr_matches_issue($p; $n):
     ($p.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
@@ -91,7 +120,7 @@ jq -n \
       if ($labels | index("needs-debug-log")) then "reporter"
       elif ($labels | index("ready-for-analysis")) then "analysis"
       elif ($labels | index("upstream")) then "upstream"
-      elif ($comments | length) > 0 then "discussion"
+      elif (human_comments($comments) | length) > 0 then "discussion"
       else null end;
 
   def column($labels; $pr; $wt; $awaiting):
@@ -121,6 +150,10 @@ jq -n \
           author: .author.login,
           age_days: days_since(.createdAt),
           last_activity_days: days_since(.updatedAt),
+          # Total comment count (bots included) — an activity signal, not
+          # the discussion trigger. `awaiting: discussion` above is driven
+          # by human_comments only; this field stays a raw total so the
+          # digest still shows how much traffic (bot or human) an issue has.
           comments: (.comments | length),
           column: $col,
           awaiting: (if $col == "Analysis" then $aw else null end),

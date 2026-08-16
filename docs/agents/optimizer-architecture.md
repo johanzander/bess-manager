@@ -172,11 +172,38 @@ out of `battery_system_manager` so the selector and
 optimizer importing the orchestrator. `BatterySystemManager` builds the
 object from the live controller and passes it to
 `optimize_battery_schedule`, which threads it to the candidate space in
-place of the old `discharge_resolution_kw` kwarg. Candidates are **not yet**
-commands — that is 4b (discharge) and 4c (charge). The first thing the
+place of the old `discharge_resolution_kw` kwarg. The first thing the
 capability buys: the off-lattice residual-cover candidate is now offered
 only where a planned LOAD_SUPPORT discharge is actually delivered as
 `min(plan, actual load)` (#580).
+
+**As built, Phase 4b (discharge half).** A discharge candidate is now scored
+against what its command actually delivers, not against its nominal power.
+`_residual_cover_p` offers exact load cover **wherever the lattice cannot
+represent covering the deficit** — not only below the smallest gear, which
+was the #466 sunrise case — because the same gap exists at any size: the
+step below under-covers and imports at the buy price, every step above is
+either unexecutable (#497) or exports at the sell price, and with buy > sell
+that is a forced loss either way. The plan is the *delivery* under a ceiling
+command; the command stays on the hardware lattice.
+
+That only holds if the written ceiling covers the plan, so the
+planned-power → written-percent conversion is now one function,
+`execution_model.discharge_command_index`, rounding by what the number
+**means**: up for a ceiling (`load_first` where the rate load-follows),
+nearest for a target (`grid_first` anywhere, native SolaX). The controller,
+the simulator's mirror and the planner's own executability gate all call it,
+so they cannot round apart — the #282/#497 shape. Rounding up is the
+*tightest admissible* ceiling, not a free one: it leaves up to one lattice
+step of headroom the battery will use if actual load exceeds forecast,
+including where the intra-period gate is deliberately closed. No rounding
+both delivers the plan and never exceeds it, because the lattice is coarser
+than the deficit.
+
+**Still open: 4c (charge).** The six `rate_throughput` sites still charge at
+nominal power and never read `charging_power_rate`, so the charge path keeps
+its structural R≠P divergence. Candidates are commands on the discharge side
+only.
 
 **Two questions, not one — do not collapse them.** "Is the rate register a
 ceiling" (`discharge_rate_is_load_following`, what the intra-period gate

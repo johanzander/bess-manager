@@ -13,7 +13,10 @@ from core.bess.dp_battery_algorithm import (
     _period_flows,
     _state_transition,
 )
-from core.bess.execution_model import intra_period_discharge_gate
+from core.bess.execution_model import (
+    discharge_command_index,
+    intra_period_discharge_gate,
+)
 from core.bess.inverter_controller import InverterController
 from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings
@@ -125,11 +128,16 @@ def _map_rates(
         # total, purely from the unmodellable half of the trade-off. Modelling
         # it would pin a number the simulator cannot interpret.
         #
-        # Plan-scaled cap only, same as BATTERY_EXPORT.
+        # Plan-scaled cap only, same as BATTERY_EXPORT -- but rounded UP, not
+        # to nearest: this simulator models the Growatt MIN, where load_first
+        # is a ceiling, and a ceiling below the plan under-delivers it (Phase
+        # 4b, `execution_model.discharge_command_index`). Same call the
+        # controller makes, so plan and execution cannot round apart.
         if action_kw < -0.01:
-            rate = min(
-                100,
-                max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100)),
+            rate = discharge_command_index(
+                abs(action_kw),
+                settings.max_discharge_power_kw / 100,
+                rate_is_ceiling=True,
             )
         else:
             rate = 0
@@ -137,10 +145,16 @@ def _map_rates(
     if intent == "BATTERY_EXPORT":
         # No shadow-price gate: grid_first has no physical deficit backstop,
         # so an open ceiling would oversell beyond the arbitrage plan.
+        #
+        # Nearest, not up: under grid_first the number is the delivered
+        # power, so the plan is what to hit, not what to stay above. Same
+        # shared conversion as LOAD_SUPPORT above, opposite direction --
+        # which is the distinction 4b exists to make explicit.
         if action_kw < -0.01:
-            rate = min(
-                100,
-                max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100)),
+            rate = discharge_command_index(
+                abs(action_kw),
+                settings.max_discharge_power_kw / 100,
+                rate_is_ceiling=False,
             )
         else:
             rate = 0

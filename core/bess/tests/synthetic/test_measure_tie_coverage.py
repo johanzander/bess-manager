@@ -331,6 +331,14 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     strictly-positive to non-negative -- the regression this test guards
     is a NEGATIVE delta (the reference coming out worse than the hybrid,
     the #450 feasibility defect), which stays forbidden.
+
+    Re-pinned again for Phase 4b (#352, the exact-cover candidate):
+    42.861695 / 42.861695, delta still exactly zero. This segment costs
+    +0.069435 SEK more than before while the fixture's full-horizon
+    objective *improves* 230.701009 -> 230.592975 (-0.108034) -- the plan
+    moved energy between segments, which is what a candidate-space change
+    does. The invariant under test is untouched: reference and hybrid
+    agree to the femto-öre, so the reference still does not undershoot.
     """
     scenario = load_test_scenario("historical_2024_08_16_high_spread_no_solar")
     inputs = _scenario_inputs(scenario)
@@ -341,8 +349,8 @@ def test_reference_does_not_undershoot_the_hybrid_on_the_regression_segment():
     reference_cost = _reference(inputs, result, Window(start=7, end=12), cost_bases)
 
     hybrid_cost = sum(period_costs[7:12])
-    assert hybrid_cost == pytest.approx(42.792260, abs=1e-5)
-    assert reference_cost == pytest.approx(42.792260, abs=1e-5)
+    assert hybrid_cost == pytest.approx(42.861695, abs=1e-5)
+    assert reference_cost == pytest.approx(42.861695, abs=1e-5)
     assert hybrid_cost - reference_cost >= -1e-9
 
 
@@ -476,7 +484,11 @@ def test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all():
     # independently of whether the PWL solver itself found the true optimum
     # (it does not always; see the undershoot test above).
     delta = sum(period_costs[segment.start : segment.end]) - reference_cost
-    assert delta == pytest.approx(0.053490, abs=1e-5)
+    # Re-pinned for Phase 4b (#352): 0.053490 -> 0.051273 SEK. The witness
+    # shrank, i.e. the grid DP leaves slightly *less* on the table here now
+    # that the exact-cover candidate is in the action space -- still
+    # positive, which is what this test asserts the existence of.
+    assert delta == pytest.approx(0.051273, abs=1e-5)
 
 
 @pytest.mark.slow
@@ -541,7 +553,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
 
     Same fixture and segment as
     `test_measures_a_real_near_miss_on_a_scenario_with_no_flags_at_all` above,
-    which independently pins the delta at 0.053490 SEK by calling
+    which independently pins the delta at 0.051273 SEK by calling
     `replay_schedule`/`segment_reference_cost` directly. This test exercises
     the same numbers through the public `measure_scenario` entry point, so a
     wiring mistake in `measure_scenario` itself (wrong segment, wrong slice,
@@ -556,7 +568,7 @@ def test_measure_scenario_reports_a_real_non_zero_near_miss():
     assert sum(measurement.margin_ratio_counts.values()) == len(
         scenario["home_consumption"]
     )
-    assert measurement.financial_impact_sek == pytest.approx(0.053490, abs=1e-5)
+    assert measurement.financial_impact_sek == pytest.approx(0.051273, abs=1e-5)
 
 
 @pytest.mark.slow

@@ -45,7 +45,10 @@ from types import SimpleNamespace
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
-from core.bess.execution_model import intra_period_discharge_gate
+from core.bess.execution_model import (
+    discharge_command_index,
+    intra_period_discharge_gate,
+)
 from core.bess.models import (
     DecisionData,
     EconomicData,
@@ -194,8 +197,16 @@ def test_load_support_ceiling_follows_the_gate_on_real_data():
     held = 0
     for i, buy, allowed, action_kwh in periods:
         action_kw = action_kwh / dt
-        baseline = min(
-            100, max(0, round(abs(action_kw) / settings.max_discharge_power_kw * 100))
+        # The plan-scaled baseline comes from the shared conversion rather
+        # than a restatement of it here: this test is about the *gate*, and a
+        # mirrored rounding rule only pins the mirror. Phase 4b made the
+        # direction command-dependent (a load_first ceiling rounds up, or it
+        # under-delivers the plan), which a hand-written `round()` here got
+        # wrong the moment production changed.
+        baseline = discharge_command_index(
+            abs(action_kw),
+            settings.max_discharge_power_kw / 100,
+            rate_is_ceiling=True,
         )
         gate = intra_period_discharge_gate(allowed)
 

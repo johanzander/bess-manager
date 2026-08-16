@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The battery now covers house load exactly instead of exporting a few Wh and committing the inverter** — a period whose load fell between two discharge steps was planned as a small export, which forces `grid_first` at a fixed rate and imports any load spike. ([#352](https://github.com/johanzander/bess-manager/issues/352))
 - **Huawei, native SolaX and Solis installs no longer report a discharge as negative charging, or an export as negative import** — the signed battery/grid sensor split now works on settings saved before the sensor pairing existed, with no wizard re-run. ([#604](https://github.com/johanzander/bess-manager/issues/604))
 - **The battery schedule no longer varies between otherwise identical runs** — when two plans were worth exactly the same, the optimizer picked between them on floating-point noise, so the same day could plan differently on different machines. ([#606](https://github.com/johanzander/bess-manager/issues/606))
 - **Growatt MIN TOU segments are now written to the inverter only once they are about to take effect**, roughly halving inverter writes: a segment hours away no longer gets rewritten every time the plan shifts around a marginal period. ([#554](https://github.com/johanzander/bess-manager/issues/554))

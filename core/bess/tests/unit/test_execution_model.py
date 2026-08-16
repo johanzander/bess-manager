@@ -142,12 +142,16 @@ class TestLattice:
         # 1% of 5 kW is 0.05 kW -- exactly the threshold, so the first gear
         # clear of it is 2%.
         assert caps.min_discharge_gear_index(five_kw) == 2
-        assert caps.min_discharge_gear_kw(five_kw) == pytest.approx(0.1)
+        assert caps.min_discharge_gear_index(five_kw) * caps.discharge_rate_step_kw(
+            five_kw
+        ) == pytest.approx(0.1)
 
         # 1% of 20 kW is 0.2 kW, already clear of the threshold.
         twenty_kw = make_battery_settings(max_discharge_power_kw=20.0)
         assert caps.min_discharge_gear_index(twenty_kw) == 1
-        assert caps.min_discharge_gear_kw(twenty_kw) == pytest.approx(0.2)
+        assert caps.min_discharge_gear_index(twenty_kw) * caps.discharge_rate_step_kw(
+            twenty_kw
+        ) == pytest.approx(0.2)
 
 
 class TestGateRelocation:

@@ -137,7 +137,12 @@ class TestDischargeRateFromSchedule:
 class TestChargeRateFromSchedule:
     def test_grid_charging_uses_action_derived_rate(self, controller):
         """GRID_CHARGING charge_rate reflects actual battery action, not static 100%."""
-        # 0.05 kWh / 0.25 h = 0.2 kW; round(0.2 / 6.0 * 100) = 3
+        # 0.05 kWh / 0.25 h = 0.2 kW, which is 3.33% of 6.0 kW -- off the
+        # integer-percent lattice. Rounded UP to 4 since Phase 4c: 3% would
+        # command 0.18 kW and charge less than the plan, while 4% commands
+        # 0.24 kW and the battery's own remaining room stops it at the
+        # planned 0.2. Was `round(...) = 3` before, which is the
+        # under-delivery that phase fixes.
         intents = ["IDLE"] * 96
         intents[20] = "GRID_CHARGING"
         intents[21] = "GRID_CHARGING"
@@ -156,7 +161,7 @@ class TestChargeRateFromSchedule:
         groups = controller.get_detailed_period_groups()
 
         charge_group = next(g for g in groups if g["intent"] == "GRID_CHARGING")
-        assert charge_group["charge_rate"] == 3  # round(0.2/6.0*100)
+        assert charge_group["charge_rate"] == 4  # ceil(0.2/6.0*100), see above
 
     def test_grid_charging_no_schedule_falls_back_to_static_rate(self, controller):
         """With no current_schedule, charge_rate falls back to static 100."""

@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
-from .execution_model import INTENT_TO_MODE, discharge_command_index
+from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -486,7 +486,7 @@ class InverterController(ABC):
         """Scale a *charge* power to a 0-100 percent rate, clamped to range.
 
         Charge only, since 4b: the discharge path goes through
-        `execution_model.discharge_command_index`, which knows whether the
+        `execution_model.command_index`, which knows whether the
         number it produces is a ceiling or a target. A charge rate is always
         a target, so nearest-rounding is right here and this stays a plain
         scale -- but it is the same conversion, and Phase 4c collapses it
@@ -509,7 +509,23 @@ class InverterController(ABC):
             Charge rate percent (0-100)
         """
         if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
-            return self._scale_to_percent(battery_action_kw, self.max_charge_power_kw)
+            # Rounded UP, like a discharge ceiling and for the same reason
+            # (Phase 4c): the battery's own remaining room binds above the
+            # command -- the inverter stops when full -- so a rate above the
+            # plan delivers the plan exactly, while nearest-rounding lands
+            # below it and silently charges less. Measured pre-fix: 4 of 493
+            # charging periods short, worst -0.0288 kWh.
+            #
+            # Safe because the DP floors a plan the *import cap* limited
+            # (`lattice_grid_charge`), which is the one case where nothing
+            # physical binds above the command and rounding up would draw
+            # more from the grid than the house fuse allows. With that plan
+            # already on the lattice, rounding up is a no-op there.
+            return command_index(
+                battery_action_kw,
+                self.max_charge_power_kw / 100,
+                rate_is_ceiling=True,
+            )
         return control["charge_rate"]
 
     def _map_intent_to_rates(
@@ -530,7 +546,7 @@ class InverterController(ABC):
             return False, 0
         elif intent in ("LOAD_SUPPORT", "BATTERY_EXPORT"):
             if battery_action_kw < -0.01:
-                discharge_rate = discharge_command_index(
+                discharge_rate = command_index(
                     abs(battery_action_kw),
                     # The platform's own lattice, not a hardcoded 1%: the
                     # planner enumerates candidates on
@@ -545,7 +561,7 @@ class InverterController(ABC):
                     # LOAD_SUPPORT writes load_first, where the number is a
                     # ceiling on hardware that load-follows -- so it must be
                     # rounded UP or it under-delivers the plan (Phase 4b;
-                    # see discharge_command_index). BATTERY_EXPORT writes
+                    # see command_index). BATTERY_EXPORT writes
                     # grid_first, where the number is the delivered power on
                     # every platform, so nearest stays correct.
                     rate_is_ceiling=(

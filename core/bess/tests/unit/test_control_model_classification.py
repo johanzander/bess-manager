@@ -79,7 +79,7 @@ def test_exact_cover_is_only_declared_where_the_written_rate_can_deliver_it():
     partial load cover (`action_selector._residual_cover_p`).
     `discharge_rate_is_load_following` decides whether the written rate is
     rounded UP as a ceiling or to nearest as a target
-    (`execution_model.discharge_command_index`). If a platform ever declares
+    (`execution_model.command_index`). If a platform ever declares
     cover=True with a *target* rate, the DP plans a delivery the write path
     rounds to something else -- R != P, the #282 shape this phase exists to
     end.

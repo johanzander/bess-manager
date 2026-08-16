@@ -450,6 +450,22 @@ class TestSeedReplayDoesNotTouchRealDiskState:
 
         mock_store.assert_not_called()
 
+    def test_persist_today_view_is_skipped_during_seed_replay(
+        self, system, monkeypatch
+    ):
+        """The other caller of the shared guard — both must stay wired to it."""
+        monkeypatch.setenv("BESS_HISTORICAL_SEED_FILE", "/tmp/seed.json")
+
+        with (
+            patch.object(
+                system.schedule_store, "get_latest_schedule", return_value=MagicMock()
+            ),
+            patch.object(system.daily_view_store, "save_day") as mock_save,
+        ):
+            system._persist_today_view()
+
+        mock_save.assert_not_called()
+
     def test_capture_prediction_snapshot_runs_when_not_replaying(
         self, system, monkeypatch
     ):

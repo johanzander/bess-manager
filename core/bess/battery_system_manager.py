@@ -805,11 +805,7 @@ class BatterySystemManager:
             optimization_period: Period when optimization ran (0-95)
             optimization_result: Result from DP optimization
         """
-        # Skip during BESS_HISTORICAL_SEED_FILE replay, for the same reason
-        # _persist_today_view() does: since #409 snapshots live in the shared
-        # /data/daily_views/{date}.json, so writing replayed fixture data here
-        # would inject it into the real persisted day.
-        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+        if self._is_seed_replay():
             return
         try:
             # Build daily view (merges actuals + predictions)
@@ -860,6 +856,17 @@ class BatterySystemManager:
 
         except Exception as e:
             logger.error(f"Failed to read current inverter schedule: {e}")
+
+    @staticmethod
+    def _is_seed_replay() -> bool:
+        """True while replaying a debug bundle via BESS_HISTORICAL_SEED_FILE.
+
+        Nothing may persist to /data during a replay: the data is fixture data,
+        and both the daily view and the prediction snapshots now share the real
+        /data/daily_views/{date}.json, so writing there would corrupt a real
+        user's history from a test/E2E run.
+        """
+        return bool(os.environ.get("BESS_HISTORICAL_SEED_FILE", ""))
 
     def _load_historical_seed(self, current_period: int) -> bool:
         """Seed the historical store from BESS_HISTORICAL_SEED_FILE if set.
@@ -3429,10 +3436,7 @@ class BatterySystemManager:
         _update_energy_data on every tick, and an uncaught exception here
         would abort that tick's optimization and hardware write.
         """
-        # Skip during BESS_HISTORICAL_SEED_FILE replay (see _load_historical_seed):
-        # persisting replayed fixture data to /data/daily_views would corrupt
-        # real disk state for a test/E2E run.
-        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+        if self._is_seed_replay():
             return
         if self.schedule_store.get_latest_schedule() is None:
             return

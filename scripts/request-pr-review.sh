@@ -7,9 +7,10 @@
 # run_in_background and you are notified once when it exits, instead of an
 # agent re-reading the session context every poll.
 #
-# The trigger comment is posted as `bess-agent` (automation identity, per
-# scripts/gh-agent.sh). pr-review.yml's gate accepts that login alongside the
-# repo owner.
+# The trigger comment is posted as the developer automation identity (the
+# default role in scripts/gh-agent.sh, currently the `bess-agent` GitHub
+# account, being renamed to `bess-developer`). pr-review.yml's gate accepts
+# both logins alongside the repo owner during the migration window.
 #
 # Usage:
 #   scripts/request-pr-review.sh <pr-number> [timeout-seconds]

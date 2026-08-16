@@ -124,10 +124,20 @@ of `analyzed`.
 ### General bot rules
 
 - Only the repo owner can trigger bot commands. The one exception is Stage 4:
-  `pr-review.yml` also accepts `@claude-bot` from the `bess-agent` automation
-  identity, so `implement-issue`'s Step 11 loop can request its own review.
-  Stages 1–3 and 5 stay owner-only — those spend money on work nobody has
-  asked for yet.
+  `pr-review.yml` also accepts `@claude-bot` from the developer automation
+  identity (currently the `bess-agent` GitHub account; being renamed to
+  `bess-developer`, both accepted during the migration window — see
+  `scripts/gh-agent.sh`), so `implement-issue`'s Step 11 loop can request its
+  own review. Stages 1–3 and 5 stay owner-only — those spend money on work
+  nobody has asked for yet.
+- Automation writes carry a **role** identity, and role is the axis:
+  `bess-product-owner` (intake, backlog, board, reporter comments),
+  `bess-developer` (analyze, fix, PR authorship, requesting review),
+  `bess-reviewer` (Stage 4 review only). Developer and Reviewer are
+  deliberately distinct — Stage 4 reviews Stage 3's own output, and one shared
+  face would read as an account approving its own PR. Post via
+  `scripts/gh-agent.sh --as po|dev`. Genuine maintainer voice still uses plain
+  `gh`.
 - Always use `gh` CLI for all GitHub operations (issues, PRs, labels).
 - Never push directly to `main`. PRs are always *opened* as drafts, and no
   agent ever merges one — the merge is the maintainer's, always.

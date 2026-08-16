@@ -272,6 +272,11 @@ required a JWT-signing script; that component is deliberately not built.
 Per new role, one-time setup: create the account, upload an avatar, add the
 PAT to `.env` and to Actions secrets.
 
+**Avatars are supplied by the maintainer**, who already has a set in a
+consistent style and will produce the new ones. Implementation neither
+generates nor specifies images; it only assumes each account has one uploaded
+before the role goes live.
+
 **Locally, Claude Code has names and colors but no avatars** — verified: agent
 frontmatter supports `color` (`red, blue, green, yellow, purple, orange, pink,
 cyan`) and sessions take `-n`, but there is no `icon` or `avatar` field.

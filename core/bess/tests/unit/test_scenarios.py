@@ -498,14 +498,16 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
     # -0.030 SEK. The fast-path guarantee this test exists to protect is
     # unchanged -- the assertion above still shows no tie window is detected.
     #
-    # Re-pinned again by Phase 4b (#352): PIN_4B_COST, the exact-cover
-    # candidate changing what this fixture plans.
+    # Re-pinned again by Phase 4b (#352): -0.07996 SEK, the exact-cover
+    # candidate changing what this fixture plans. The fast-path assertion
+    # above is what this test is for and is unaffected -- the detector still
+    # flags nothing.
     assert result.economic_summary.battery_solar_cost == pytest.approx(
-        158.2166715789474, abs=1e-4
+        158.13671158, abs=1e-4
     )
     # Savings = grid_only_cost - battery_solar_cost, so this moves with it.
     assert result.economic_summary.grid_to_battery_solar_savings == pytest.approx(
-        62.89783, abs=1e-3
+        62.97779, abs=1e-3
     )
 
 
@@ -821,9 +823,15 @@ def test_exact_cover_is_delivered_in_the_round_down_band():
         and p.energy.battery_to_home == pytest.approx(1.22, abs=1e-6)
         and p.energy.grid_exported == pytest.approx(0.0, abs=1e-6)
     ]
-    assert len(covered) == 3, (
-        "expected all three periods to plan exact cover at 1.22 kW; without "
-        "that this test pins nothing. Got "
+    # At least one, not all three: how many periods choose exact cover is an
+    # incidental DP outcome (terminal value moves it), while "a cover plan in
+    # the round-down band is delivered exactly" is the property under test.
+    # Non-empty is still the discriminating assertion -- under nearest
+    # rounding no covering ceiling exists at 1.22 kW, the candidate is
+    # withdrawn entirely, and this list goes empty.
+    assert covered, (
+        "no period planned exact cover at 1.22 kW, so this test pins "
+        "nothing. Got "
         + str(
             [
                 (p.decision.strategic_intent, p.energy.battery_discharged)

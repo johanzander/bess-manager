@@ -420,8 +420,8 @@
     "battery_solar_cost": -2.10015,
     "base_to_battery_solar_savings": 12.9082,
     "base_to_battery_solar_savings_pct": 119.43129,
-    "total_charged": 8.18079,
-    "total_discharged": 15.076
+    "total_charged": 8.17103,
+    "total_discharged": 15.067
   },
   "expected_behavior": {
     "description": "Issue #313: mistimed 14-Jul morning discharge (07:00-11:30) must be eliminated -- solar bypasses the battery instead of a low-price discharge.",

@@ -90,6 +90,9 @@ The baseline order, subsuming the #466 and #510 tie-breaks:
 2. Never override a decisive winner (margin > epsilon).
 3. Within epsilon: **load-tracking discharge (up to net load) >
    store-surplus > idle/hold.**
+4. Within *float noise* (values indistinguishable to 1e-12), and only where
+   no row above fired: **the most decisive action of the winner's own class**
+   (largest magnitude), then lowest candidate index (#606).
 
 Consequences, by construction:
 
@@ -101,6 +104,19 @@ Consequences, by construction:
   a new `_prefer_*` function or a new call site.
 - Epsilon-compounding is impossible: the table is applied once against the
   argmax value, not chained.
+- **The emitted plan never depends on the last bit of a float.** Before #606
+  the table's final row was "the argmax winner stands", which is not a
+  preference at all but a deferral to a `>` comparison, and a structural
+  plateau (bit-identical consecutive periods inside one price block, all
+  unconstrained) made two candidates tie to 0.93 ULP. The plan then differed
+  by *interpreter*: measured on `regression_2026_08_13_145213`, period 18 was
+  -1.1625 kW on py3.12.13 and -0.6875 kW on py3.13, at bit-identical cost.
+  Item 4 above closes that (it is row 5 in `tie_policy.py`'s own numbering,
+  which counts the two eligibility rows separately): an exactly-tied choice
+  is resolved by a stated order over actions, never by the value's noise. A
+  reward-shaping change
+  that creates a *plateau* now needs this row the way one that creates an
+  *indifference region* needs a within-epsilon row.
 
 Reward shaping that flattens the objective (price floors, export-credit
 zeroing) MUST land together with the table row that resolves the

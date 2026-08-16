@@ -20,7 +20,11 @@ all rows measured against the argmax winner:
    load (#466).
 4. **Prefer the highest-SOE candidate** when this period's sell price was
    floored by the #269 curtailment rule (#510).
-5. Otherwise the argmax winner stands.
+5. **Break a value-indistinguishable tie canonically** -- when no row above
+   fired and the objective cannot separate the candidates even to float
+   precision, order them by action rather than by the float comparison
+   (#606).
+6. Otherwise the argmax winner stands.
 
 Rows 3 and 4 keep their own, deliberately *different* winner guards -- see
 their docstrings. A single shared "bail on any non-idle winner" guard cannot
@@ -39,6 +43,12 @@ from core.bess.dp_battery_algorithm import POWER_TOLERANCE_KW
 
 if TYPE_CHECKING:  # circular at runtime: action_selector imports this module
     from core.bess.action_selector import Candidate
+
+# Row 5's float-noise threshold (#606): two candidate values closer than this
+# are the same number as far as the objective is concerned. Deliberately NOT
+# an epsilon -- see `_row_canonical_among_indistinguishable` for why this does
+# not breach P5, and why the epsilon-eligible set is the wrong band here.
+VALUE_INDISTINGUISHABLE_SEK = 1e-12
 
 
 @dataclass(frozen=True)
@@ -259,6 +269,141 @@ def _row_stored_energy(
     return chosen_index
 
 
+def _action_class(power: float) -> int:
+    """-1 discharge, 0 idle, +1 charge -- the same three-way split, drawn at
+    the same `POWER_TOLERANCE_KW` deadband, that rows 3 and 4 use in their own
+    winner guards. Row 5 reorders only within one class."""
+    if power > POWER_TOLERANCE_KW:
+        return 1
+    if power < -POWER_TOLERANCE_KW:
+        return -1
+    return 0
+
+
+def _row_canonical_among_indistinguishable(
+    candidates: "list[Candidate]",
+    eligible: list[int],
+    incoming_index: int,
+    argmax_index: int,
+) -> int:
+    """Row 5 (#606): when the objective cannot separate the candidates even to
+    float precision, order them by action instead of by the float comparison.
+
+    Rationale. Rows 3 and 4 answer "which of several near-tied actions is
+    safer?". This row answers a different question: "when the DP is *exactly*
+    indifferent, which action do we emit?" -- and before it existed the answer
+    was whichever candidate happened to win a `>` comparison in
+    `action_selector.select_action`'s argmax loop. That is the one row of the
+    old table that was not a preference at all, but a deferral to the last bit
+    of a float, and it is the P2 violation #606 reported.
+
+    The degeneracy is structural, not incidental. Four consecutive 15-minute
+    slots inside one hourly price block can be bit-identical in buy price, sell
+    price, home consumption and solar; if all four are unconstrained battery
+    export, the objective is *exactly* invariant to how a fixed total discharge
+    is split across them, because only the sum reaches the next period. Every
+    split is an optimum and the DP has no basis to prefer one -- so the choice
+    fell to accumulated rounding in `V`, measured at 0.93 ULP on
+    `regression_2026_08_13_145213` period 18. The two plans there cost
+    bit-identically (`battery_solar_cost = -4.954319746390006` for both), and a
+    one-ULP change to a single input swaps them. That is why this could differ
+    between environments while every economic pin stayed green.
+
+    **Canonical order: the most decisive action of the winner's own class
+    (largest magnitude), then lowest candidate index.** Keyed on
+    `candidate.power`, never on `candidate.value` -- the whole point is to
+    stop reading a quantity whose last bits are noise. The index tiebreak
+    makes the result total rather than merely deterministic, so two candidates
+    at equal power cannot reopen the gap.
+
+    "Largest magnitude" points the same way as the rest of the table in both
+    directions, which is why it is stated as one rule rather than two. On a
+    discharge winner it prefers the larger discharge: energy already delivered
+    cannot be lost to a later forecast miss, and the alternative defers it to
+    a slot the plan may not reach as modelled -- row 3's argument. On a charge
+    winner it prefers the larger absorb, which is row 4's argument
+    (charging earliest is stochastically dominant at equal model reward). On
+    an idle winner every candidate has |power| <= POWER_TOLERANCE_KW and the
+    index decides.
+
+    Note the charge and idle directions are **not** exercised by the fixture
+    corpus: measured 2026-08-16, this row and its `(power, index)` predecessor
+    -- which ordered charge ties the opposite way, preferring the *smallest*
+    absorb -- produce byte-identical output on all 38 fixtures, because no
+    charge-class or idle-class multi-candidate tie occurs in any of them. The
+    direction is therefore chosen for consistency with rows 3 and 4 rather
+    than measured, and `test_tie_policy.py` pins it directly so a future edit
+    to this key cannot change it unnoticed.
+
+    **Why this needs its own threshold, and why that is not a P5 breach.**
+    Eligibility (row 2) is an *economic* band: epsilon is the value noise the
+    SOE grid injects, ~7.4e-4 SEK here, and it is `epsilon_for_period`'s to
+    own. This row deliberately does not use it. Reordering the whole
+    epsilon-eligible set is a real economic preference change -- measured
+    across the corpus at 0.006-0.010 SEK per fixture on several fixtures --
+    and #606 asked for no such thing. What this row reorders is only what the
+    objective declares *indistinguishable*, which needs a float-noise
+    threshold, not a SEK one. P5's "one epsilon, one owner" governs the
+    economic margin; `VALUE_INDISTINGUISHABLE_SEK` is a statement about IEEE
+    doubles, on a quantity whose own accumulated rounding is ~1 ULP (~1e-15
+    at these magnitudes). It is ~1000x that noise floor and ~1e7 finer than
+    the smallest genuine cost movement this corpus has recorded (0.0181 SEK),
+    so nothing economically real can hide under it.
+
+    Economic bound: zero in *model* value by construction -- the row only ever
+    reorders candidates the objective cannot separate -- but not zero in
+    realized cost, because an exact tie in *interpolated* value is not an
+    exact tie in realized cost. The residual is grid-snapping interpolation
+    error, the same noise epsilon exists for, and it goes both ways. Measured
+    across the 38-fixture corpus 2026-08-16, 4 fixtures move:
+
+        synthetic_clear_sky_ac_clipping     -0.03900 SEK  (12 periods)
+        regression_2026_08_13_145213        +0.00000 SEK  ( 2 periods)
+        realworld_2026_04_19_084608         +0.00000 SEK  ( 2 periods)
+        regression_2026_08_08_143843        +0.00154 SEK  (11 periods)
+
+    Net -0.03746 SEK. **The worst case is the +0.00154 SEK regression on
+    `regression_2026_08_08_143843`** -- stated here and not only in that
+    fixture's re-pinned `_note`, since a maintainer reading this row needs the
+    bound, not the favourable half of it. Both extremes are inside the #450
+    budget of 0.05 SEK per fixture. A fifth fixture,
+    `realworld_2026_04_29_220919`, shifts 2.1e-12 SEK with its plan unchanged:
+    the row picked an equal-power duplicate candidate, which is what the index
+    tiebreak is for.
+
+    **Winner guard, part 1 -- an earlier row's pick stands.** Rows 3 and 4
+    stated a deliberate preference; this one must not overrule it. Hence
+    `incoming_index`, and hence this row's position last in the table.
+
+    **Winner guard, part 2 -- never change the action's class.** The row
+    reorders only within the winner's own class (charge / idle / discharge),
+    which is what keeps it a tie-*break* rather than a re-decision. Without
+    this it is not a canonical ordering but a new preference, and a wrong one:
+    on a flat continuation value function every candidate is a bit-exact tie,
+    so an unrestricted "largest discharge" would turn IDLE into a full-rate
+    discharge for no modelled gain (`test_pwl_window_dp.py::
+    test_pwl_best_action_at_continuous_state_prefers_idle_when_flat_continuation`),
+    and it would flip charge winners to discharges -- the semantic change row
+    3's docstring records that no phase has declared
+    (`test_tie_policy.py::test_charge_winner_is_untouched`). Both were
+    observed failing before this guard existed. The class is exactly the one
+    the rest of the table reasons in, so `POWER_TOLERANCE_KW` draws the
+    boundary here too.
+    """
+    if incoming_index != argmax_index:
+        return incoming_index
+
+    winner = candidates[argmax_index]
+    winner_class = _action_class(winner.power)
+    tied = [
+        index
+        for index in eligible
+        if winner.value - candidates[index].value <= VALUE_INDISTINGUISHABLE_SEK
+        and _action_class(candidates[index].power) == winner_class
+    ]
+    return min(tied, key=lambda index: (-abs(candidates[index].power), index))
+
+
 def apply_tie_policy(
     candidates: "list[Candidate]", argmax_index: int, ctx: TieContext
 ) -> int:
@@ -266,8 +411,14 @@ def apply_tie_policy(
     emit, given the raw value argmax.
 
     The whole table, applied once. Rows 1-2 build the eligible set against
-    the argmax winner; rows 3-4 pick within it in order; if neither fires,
-    the argmax winner stands (row 5).
+    the argmax winner; rows 3-4 pick within it in order; row 5 breaks a
+    value-indistinguishable tie canonically when neither fired; if nothing
+    fires, the argmax winner stands (row 6).
+
+    Row 5 is last on purpose. It is the weakest claim in the table -- it
+    applies only where the objective is exactly indifferent -- so any row
+    with an actual economic or risk argument must get to speak first, and
+    its winner guard makes that ordering explicit rather than incidental.
     """
     eligible = _eligible_indices(candidates, argmax_index, ctx)
     chosen_index = _row_load_covering_discharge(candidates, eligible, argmax_index, ctx)
@@ -275,4 +426,6 @@ def apply_tie_policy(
         chosen_index = _row_stored_energy(
             candidates, eligible, chosen_index, argmax_index
         )
-    return chosen_index
+    return _row_canonical_among_indistinguishable(
+        candidates, eligible, chosen_index, argmax_index
+    )

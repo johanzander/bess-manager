@@ -18,19 +18,33 @@ earn — with 31 live worktrees, this is not hypothetical.
 
 ## What this is
 
-One agent the maintainer talks to. It holds the whole-backlog picture,
-prioritises, keeps a kanban board honest, and — on the maintainer's
-go-ahead — launches the implementation sessions that do the work.
+**A Product Owner, in the SCRUM sense.** It owns the product backlog: it
+faces the customer, gets reports into a state a developer can act on, orders
+the backlog, and decides what is ready. It does not implement anything, and —
+per the same discipline — it does not assign work either. The implementing
+agents pull the top of the Ready column; the PO's leverage is entirely in what
+reaches that column and in what order.
 
-It does not implement anything itself.
+Its duties, in the order a report travels:
+
+1. **Intake** — answer the reporter, ask for the debug log, classify.
+2. **Readiness** — chase what's missing until the item satisfies the
+   Definition of Ready. Nothing is handed to a developer before that line.
+3. **Ordering** — dedupe, prioritise, hold a coherent roadmap.
+4. **Flow** — keep the board honest, keep the PR fleet unblocked.
+5. **Close the loop** — tell the reporter when their fix ships.
 
 ## Scope
 
 **In v1, without asking:**
 
+- Respond to new and edited issues: classify, request debug logs, flag likely
+  duplicates
+- Chase stale reports (`needs-debug-log` quiet for 14 days)
 - Label, prioritise, dedupe, and promote `TODO.md` items into issues
 - Reconcile the kanban board against reality
 - Run `sweep-prs` maintenance on the open PR fleet
+- Notify reporters when a fix reaches a release
 
 **In v1, only on explicit go-ahead:**
 
@@ -41,18 +55,35 @@ It does not implement anything itself.
 - Autonomous implement-and-release of easy fixes (explicitly a later version)
 - Stacked PRs (see Dependency orchestration)
 
-## Runtime shape
+## Runtime shape — three surfaces, one agent
 
-A long-lived Claude session the maintainer chats with. On-demand by default:
-it acts when spoken to and is otherwise silent. An opt-in `/loop /backlog`
-heartbeat (~20–30 min, self-paced) reconciles the board and catches PR rot
-without being asked.
+A PO is not a chat session. A customer-facing response cannot depend on the
+maintainer's laptop being open, and cross-issue judgment cannot run on Haiku
+in a 12-turn CI job. So one definition and one identity execute on three
+surfaces:
 
-The session holds no durable state. Every pass reads fresh from the digest,
-so a `/clear`, a crash, or a machine restart costs nothing. This is what makes
-a long-lived session affordable despite the cost-discipline rules in
-`CLAUDE.md`: the expensive pattern is a session that *holds* a large context
-across long waits, not one that is merely long-lived.
+| Surface | Trigger | Where | Model | Owns |
+|---|---|---|---|---|
+| **Reflex** | `issues: opened/edited/reopened` | GitHub Actions | Haiku | First response, log request, classification, duplicate flag |
+| **Rhythm** | `/loop`, self-paced | Local session | cheap | Follow-up chases, dedupe, board reconciliation, `sweep-prs` |
+| **Conversation** | the maintainer speaks | Local session | strong | Ranking judgment, roadmap themes, approving dispatch |
+
+**Reflex already exists** as Stage 1 (`issue-triage.yml`) and is well-built:
+event-driven, `allowed_non_write_users: "*"` so external reporters are
+answered at all, Haiku at ~$0.05. It is rewritten as the PO's intake arm
+rather than replaced — same trigger and cost, but the PO persona and a backlog
+digest, so it can spot duplicates and reference related issues on first
+contact. Today it reads one issue and knows nothing of the other 36.
+
+**Rhythm runs locally, on a loop, by deliberate choice.** The consequence is
+explicit: first response to a reporter is always immediate because that is
+Reflex in CI, but *follow-up* — the 14-day log chase, the shipped-notification
+— happens only while the maintainer is at the machine. If reports start going
+stale, that is the signal to move Rhythm to an Actions cron; nothing else in
+this design changes if it does.
+
+No surface holds durable state. Every pass reads fresh from the digest, so a
+`/clear`, a crash, or a machine restart costs nothing.
 
 ## State model — GitHub only
 
@@ -166,6 +197,22 @@ everything unreviewed posts as `bess-agent` — and the role tag in the comment
 body buys the same timeline legibility for nothing. Revisit only if the
 timeline actually becomes ambiguous.
 
+### 5. `issue-triage.yml` — Reflex, rewritten as PO intake
+
+Kept in place, same trigger and same Haiku budget. Three changes:
+
+- The prompt becomes the PO persona, so the reporter hears one voice from
+  first contact through to the shipped-notification.
+- It is fed a compact digest of open issue titles and labels, so it can flag a
+  likely duplicate on first response instead of reading one issue in
+  isolation.
+- Its labels are stated in terms of the Definition of Ready, so intake and the
+  board agree on what "Ready" means.
+
+`allowed_non_write_users: "*"` and the Haiku model are load-bearing and stay
+— external reporters must be answered, and this runs on every issue edit.
+The pipeline table in `CLAUDE.md` needs updating to match.
+
 ## Kanban state machine
 
 Columns are **derived, then reconciled**. The backlogger never trusts a card's
@@ -176,7 +223,7 @@ CI merge.
 | Column | Derivation |
 |---|---|
 | Backlog | open issue, no `blocked`, no worktree, no PR |
-| Ready | approach agreed (`analyzed` label, or maintainer okay) and Priority set |
+| Ready | satisfies the Definition of Ready below, and Priority is set |
 | In progress | live worktree on a branch naming the issue, or draft PR with no review |
 | In review | PR open and review requested / `has-fix-pr` |
 | Done | PR merged and issue closed |
@@ -194,6 +241,28 @@ The valuable output is the **mismatches**, each mapping to one action:
 | worktree whose PR merged | prune via `sweep-prs` |
 | issue closed, card not *Done* | move card |
 | `needs-debug-log` older than 14 days | nudge the reporter or park |
+
+## Definition of Ready
+
+The line between the PO's work and the developers'. Moving items across it is
+the PO's main job on the left of the board, and **nothing is dispatched that
+has not crossed it** — that is what stops a developer agent burning a session
+on a report it cannot reproduce.
+
+A bug is Ready when:
+
+1. A debug log or bundle is attached (the existing `needs-debug-log` gate)
+2. There is a reproduction, or enough real data to replay one
+3. Expected versus actual behaviour is stated explicitly, in system terms
+4. An approach is agreed — the Stage 2 analysis, or the maintainer's say-so
+5. No unresolved blocker (`blocked` label clear)
+
+An enhancement is Ready when 3–5 hold and the user-visible outcome is stated.
+
+An item failing any criterion stays in *Backlog* and becomes a PO follow-up
+action, not a developer's problem. Criterion 1 is what Reflex chases on
+intake; criteria 2–3 are what Rhythm chases when a reporter replies with
+something vague.
 
 ## Ranking policy
 

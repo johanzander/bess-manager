@@ -40,7 +40,7 @@ def _run(bin_dir: Path, env_file: Path, args: list[str]) -> subprocess.Completed
 @pytest.fixture
 def env_file(tmp_path: Path) -> Path:
     f = tmp_path / ".env"
-    f.write_text("BESS_PO_TOKEN=po-secret\nBESS_DEVELOPER_TOKEN=dev-secret\n")
+    f.write_text("BESS_PO_TOKEN=po-secret\nBESS_AGENT_TOKEN=dev-secret\n")
     return f
 
 

@@ -7,8 +7,14 @@
 # authors, approving graduation to prod — use plain `gh` (posts as the human).
 #
 # Two roles, two identities:
-#   --as po   BESS_PO_TOKEN         intake, backlog, board, reporter comments
-#   --as dev  BESS_DEVELOPER_TOKEN  analyze, fix, PR authorship, review requests
+#   --as po   BESS_PO_TOKEN     intake, backlog, board, reporter comments
+#   --as dev  BESS_AGENT_TOKEN  analyze, fix, PR authorship, review requests
+#
+# `dev` still reads BESS_AGENT_TOKEN because the account is still named
+# `bess-agent` — the rename to `bess-developer` has not happened. Switch this
+# to BESS_DEVELOPER_TOKEN in the SAME commit that renames the account and adds
+# that login to pr-review.yml's gate, never before: renaming the variable ahead
+# of the account breaks scripts/request-pr-review.sh on every PR.
 #
 # Default role is `dev` (no `--as` given) so existing callers — currently only
 # scripts/request-pr-review.sh — keep posting as the developer identity, which
@@ -42,7 +48,7 @@ fi
 
 case "$role" in
   po)  token_var="BESS_PO_TOKEN" ;;
-  dev) token_var="BESS_DEVELOPER_TOKEN" ;;
+  dev) token_var="BESS_AGENT_TOKEN" ;;
   *)   echo "gh-agent.sh: unknown role '$role' (expected po or dev)" >&2; exit 2 ;;
 esac
 

@@ -121,15 +121,26 @@ jq -n \
       elif (human_comments($comments) | length) > 0 then "discussion"
       else null end;
 
-  # Ready keys off the `analyzed` label alone, deliberately. The design also
-  # requires "Priority is set", but no board exists yet so priority is null for
-  # everything — gating on it here would make Ready permanently unreachable and
-  # strand every analysed item. Add the priority condition in the same change
-  # that creates the board.
+  # These six strings must match the Status options on the board EXACTLY — the
+  # reconcile step compares them as strings, so a casing difference silently
+  # strands every card. Confirmed against project 1 on 2026-08-16:
+  #   Backlog, Analysis, Ready for Dev, In Progress, In review, Done
+  # `Ready for Dev` and `In Progress` follow the wording the board itself uses,
+  # not the spec wording (`Ready`, `In progress`). The board is authoritative
+  # for its own column names.
+  #
+  # NOTE: no apostrophes in this jq program. It is a single-quoted shell
+  # string, so one apostrophe silently truncates the whole program and jq
+  # reports only "Top-level program not given".
+  #
+  # Ready for Dev keys off the `analyzed` label alone, deliberately. The design
+  # also requires Priority to be set, but gating on it here would strand every
+  # analysed item whose priority the PO has not set yet. Add the priority
+  # condition only alongside a rule that guarantees one gets set.
   def column($labels; $pr; $wt; $awaiting):
       if $pr != null then "In review"
-      elif $wt != null then "In progress"
-      elif ($labels | index("analyzed")) then "Ready"
+      elif $wt != null then "In Progress"
+      elif ($labels | index("analyzed")) then "Ready for Dev"
       elif $awaiting != null then "Analysis"
       else "Backlog" end;
 

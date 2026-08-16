@@ -368,7 +368,7 @@ def test_worktree_branch_without_issue_prefix_joins_by_delimited_number(
     digest = _run(bin_dir)
 
     item = digest["items"][0]
-    assert item["column"] == "In progress"
+    assert item["column"] == "In Progress"
     assert item["worktree"] == "/repo/worktrees/wt1"
 
 
@@ -432,7 +432,7 @@ def test_worktree_matched_only_by_similar_number_is_not_joined(bin_dir: Path) ->
 
     digest = _run(bin_dir)
 
-    assert digest["items"][0]["column"] != "In progress"
+    assert digest["items"][0]["column"] != "In Progress"
     assert digest["items"][0]["worktree"] is None
 
 

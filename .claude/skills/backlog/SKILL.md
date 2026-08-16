@@ -9,7 +9,15 @@ description: Use when acting as the bess-manager Product Owner — reviewing the
 
 You own the product backlog. You face the reporter, drive issues to a
 Definition of Ready, order the work, and dispatch implementation — but you
-never implement, and you never assign. Implementers pull the top of Ready.
+never implement, and you never assign. Implementers pull the top of
+*Ready for Dev*.
+
+**The board's columns, exactly** — compared as strings, so casing matters:
+
+    Backlog | Analysis | Ready for Dev | In Progress | In review | Done
+
+Note *Ready for Dev* is the column; the *Definition of Ready* below is the
+criteria an item must meet to enter it. Two different things.
 
 Every pass starts from one command. Do not read issues one by one to build a
 picture:
@@ -25,6 +33,19 @@ Board reads need `PROJECT_NUMBER` set and the board created (deferred —
 `project` scope (also deferred). Until both exist, a pass fails loudly at the
 first board access in `backlog-digest.sh` — that failure is expected, not a
 bug to route around.
+
+**Board writes go through GraphQL, not `gh project`.** The CLI's
+`--owner johanzander` resolution needs `read:org`, which the PO token
+deliberately does not have, so `gh project ... --owner johanzander` fails with
+`unknown owner type` no matter what project access is granted. Address the
+board by node ID instead — verified working for both read and write as the PO:
+
+    scripts/gh-agent.sh --as po api graphql -f query='...'
+    project id  PVT_kwHOACEigM4Bgiwa
+    Priority    PVTSSF_lAHOACEigM4Bgiwazhfh7NQ  (P0 da61340b, P1 131c5c2f, P2 107b9947)
+
+Read-only queries the maintainer runs — `backlog-digest.sh` — use the plain
+`gh project` CLI, which works because that token does have the scope.
 
 **Board shape, confirmed.** `gh project item-list --format json` returns each
 custom single-select field as a top-level key on the item — `priority: "P1"` —
@@ -88,7 +109,7 @@ always wins** — never trust a card's current position. Act on each mismatch:
 
 | Mismatch | Action |
 |---|---|
-| card *In progress*, no worktree, no PR | abandoned — move to *Ready*, report it |
+| card *In Progress*, no worktree, no PR | abandoned — move to *Ready for Dev*, report it |
 | worktree present, no session, no PR | the session died mid-issue. Report it and offer to relaunch; the branch's commits survive. **Never silently relaunch** — a session that died twice is telling you something |
 | PR `CONFLICTING` | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
@@ -106,7 +127,7 @@ or PR rot found there to `sweep-prs`.
 
 ## Verb: next
 
-Rank Backlog and Ready items in this order:
+Rank *Backlog* and *Ready for Dev* items in this order:
 
 1. **User-facing breakage** — `bug` opened by someone other than the
    maintainer. A wrong number on a real dashboard outranks everything.
@@ -134,7 +155,7 @@ fresh `origin/main`.
 Serialise, do not stack:
 
 - An item with an unmet `blocked_by` stays put. When the blocker's PR merges,
-  drop `blocked`, move it to *Ready*, and dispatch fresh.
+  drop `blocked`, move it to *Ready for Dev*, and dispatch fresh.
 - Two items likely to touch the same file are queued, not run concurrently —
   the second would eat a merge conflict it did nothing to earn. Predict the
   touch-set from the Stage 2 analysis or the issue text. Warn and queue; this
@@ -150,7 +171,7 @@ prior `@claude-bot analyze` comment already on the issue**. Check this by
 reading the issue's comments from the digest (or `gh issue view` if the
 digest's comment count needs confirming) — never a local file. This is a
 check against the item itself, not a ranking pass: an item entering Analysis
-is never a member of the Backlog/Ready list that `next` ranks, so it cannot
+is never a member of the Backlog/Ready-for-Dev list that `next` ranks, so it cannot
 "rank" into a tier. The no-prior-analyze condition exists because the digest
 is a stateless snapshot with no notion of "entering" — without it, an item
 that Stage 2 already failed to reach a conclusion on (`needs-human-review`)

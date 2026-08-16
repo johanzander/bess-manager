@@ -327,7 +327,14 @@ def _discharge_candidates(
         # differently (the tie policy's dedup distance and its strict `>`
         # both absorb it) but costs a Candidate, a _compute_reward and an
         # eval_V per period, plus a state column in each backward pass.
-        if not any(abs(p - cover_p) <= LATTICE_EPS for p in executable):
+        #
+        # Compared in lattice-index units, which is what `LATTICE_EPS` is
+        # defined in -- every other site divides by the step before applying
+        # it. Comparing kW against it directly happens to work at today's
+        # step sizes (the dust is ~4e-16, the tolerance 1e-9) but silently
+        # scales with `rate_step`, which is the drift P5's one-owner rule
+        # exists to stop.
+        if not any(abs(p - cover_p) / rate_step <= LATTICE_EPS for p in executable):
             executable.append(cover_p)
 
     return sorted(executable)

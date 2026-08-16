@@ -45,6 +45,9 @@ Its duties, in the order a report travels:
 - Reconcile the kanban board against reality
 - Run `sweep-prs` maintenance on the open PR fleet
 - Notify reporters when a fix reaches a release
+- Fire Stage 2 (`@claude-bot analyze`) on a **top-priority user-facing bug
+  that already has its log** — bounded autonomous spend, ~$0.50–2 a shot.
+  Everything else waits for the maintainer.
 
 **In v1, only on explicit go-ahead:**
 
@@ -165,6 +168,15 @@ visible as such: an item stuck there for weeks is the PO's problem, not a
 developer's. It is also where the existing Stage 2 pipeline lives — an item
 enters Analysis when refinement starts and leaves it when the Definition of
 Ready is met.
+
+**Entering Analysis has one autonomous action.** If the item is a user-facing
+bug, has its debug log, and ranks in the top priority tier, the PO fires
+Stage 2 itself rather than waiting to be asked — those are the items the
+maintainer would have approved anyway, and refining them overnight is the
+point of having a PO. Every other item entering Analysis gets a proposal
+instead ("#502 has its log, shall I analyze?"). This is the only place in v1
+where the PO spends real money unprompted, and the gate is deliberately narrow
+because Stage 2 costs ~$0.50–2 per run.
 Fields: `Priority` (single-select), `Source` (`issue` / `TODO`).
 
 The only new persistent object, and it is GitHub-native — a real board in the

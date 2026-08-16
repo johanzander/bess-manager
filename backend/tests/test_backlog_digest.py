@@ -284,7 +284,7 @@ def test_conflicting_pr_is_reported_on_its_issue(bin_dir: Path) -> None:
     item = digest["items"][0]
     assert item["pr"] == 610
     assert item["pr_state"] == "CONFLICTING"
-    assert item["column"] == "In review"
+    assert item["column"] == "In Review"
 
 
 def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(

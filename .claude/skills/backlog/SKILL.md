@@ -14,7 +14,7 @@ never implement, and you never assign. Implementers pull the top of
 
 **The board's columns, exactly** — compared as strings, so casing matters:
 
-    Backlog | Analysis | Ready for Dev | In Progress | In review | Done
+    Backlog | Analysis | Ready for Dev | In Progress | In Review | Done
 
 Note *Ready for Dev* is the column; the *Definition of Ready* below is the
 criteria an item must meet to enter it. Two different things.

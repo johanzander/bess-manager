@@ -120,11 +120,14 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
             echo "⚠️  Cannot resolve origin/main — skipping mypy (run: git fetch origin main)"
             WARNINGS=$((WARNINGS + 1))
         else
+            # sort -u is load-bearing: a file changed on the branch AND dirty
+            # in the working tree appears in both diffs, and mypy fails with
+            # "Duplicate module named ..." when handed the same path twice.
             changed=""
             while IFS= read -r f; do
                 case "$f" in *.py) [ -e "$f" ] && changed="$changed $f" ;; esac
             done <<EOF
-$(git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard)
+$( { git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
 EOF
             if [ -z "$changed" ]; then
                 echo "✅ mypy OK (no changed Python files)"

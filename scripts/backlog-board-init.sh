@@ -71,7 +71,7 @@ mutation for either:
 
   1. Columns. Open the board, edit the built-in Status field, and set its
      options to exactly:
-       Backlog, Analysis, Ready, In progress, In review, Done
+       Backlog, Analysis, Ready for Dev, In Progress, In Review, Done
      The digest derives these names; a mismatch silently strands cards.
 
   2. PO access. Project -> ... -> Settings -> Manage access -> invite

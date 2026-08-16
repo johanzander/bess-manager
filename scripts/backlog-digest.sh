@@ -124,7 +124,7 @@ jq -n \
   # These six strings must match the Status options on the board EXACTLY — the
   # reconcile step compares them as strings, so a casing difference silently
   # strands every card. Confirmed against project 1 on 2026-08-16:
-  #   Backlog, Analysis, Ready for Dev, In Progress, In review, Done
+  #   Backlog, Analysis, Ready for Dev, In Progress, In Review, Done
   # `Ready for Dev` and `In Progress` follow the wording the board itself uses,
   # not the spec wording (`Ready`, `In progress`). The board is authoritative
   # for its own column names.
@@ -138,7 +138,7 @@ jq -n \
   # analysed item whose priority the PO has not set yet. Add the priority
   # condition only alongside a rule that guarantees one gets set.
   def column($labels; $pr; $wt; $awaiting):
-      if $pr != null then "In review"
+      if $pr != null then "In Review"
       elif $wt != null then "In Progress"
       elif ($labels | index("analyzed")) then "Ready for Dev"
       elif $awaiting != null then "Analysis"

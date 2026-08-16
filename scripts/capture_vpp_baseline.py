@@ -108,9 +108,6 @@ if args.plans_only:
 if not args.from_plans and not args.add_new and not args.repin_current:
     parser.error("pass --plans-only, --from-plans, --add-new or --repin-current")
 
-from core.bess.tests.unit.test_action_selector_parity import (  # noqa: E402
-    PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS,
-)
 from core.bess.tests.unit.vpp_capture import (  # noqa: E402
     BASELINE_PATH,
     capture_plan,
@@ -148,15 +145,7 @@ if args.repin_current:
             raise SystemExit(
                 f"{name} has no baseline entry -- run --add-new first, not this."
             )
-        if name in PLAN_NONDETERMINISTIC_ACROSS_INTERPRETERS:
-            # #606: which of two near-equal plans the DP picks depends on the
-            # interpreter, so capturing it here would write whichever machine
-            # ran the script into a tracked artefact -- and nothing asserts it
-            # anyway. Keep the recorded plan and re-pin only its execution,
-            # which is deterministic and *is* still asserted.
-            current_plan = entry["current_plan"]
-        else:
-            current_plan = capture_plan(name)
+        current_plan = capture_plan(name)
         current = simulate_plan(name, current_plan)
         # Both halves, not just the plan: a change that moves the *simulator*
         # leaves every plan equal while the commands/realized-cost/SoE

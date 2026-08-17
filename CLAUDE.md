@@ -493,8 +493,20 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   upstream writes `.git/config` — and it fails *after* creating the branch, so
   the branch exists while the command reports an error and leaves you on the
   old one. Use `git checkout -b <branch> --no-track origin/<branch>`, or just
-  re-run `git checkout <branch>`. Set upstream at push time with
-  `git push -u`. *(measured)*
+  re-run `git checkout <branch>`. *(measured)*
+- **`git push -u` does not set the upstream either**, and for the same reason —
+  `.git/config` is denied. This bullet used to recommend `-u` as the way around
+  the previous one; it is not. What it does is **push the ref successfully and
+  then report an error**:
+
+  ```
+  error: unable to write upstream branch configuration
+  ```
+
+  The branch IS on origin at that point. Verify with `git ls-remote origin
+  <branch>` rather than re-pushing, and don't read the message as a failed
+  push. Use a plain `git push origin <branch>`; nothing in this repo's flow
+  needs the upstream recorded. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,

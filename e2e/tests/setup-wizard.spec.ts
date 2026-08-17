@@ -486,3 +486,104 @@ test.describe('Setup Wizard', () => {
     await expect(page.getByRole('button', { name: /Next: Battery/i })).toBeEnabled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Undetected inverter platform (#621)
+// ---------------------------------------------------------------------------
+
+/**
+ * A user whose inverter integration is not one BESS recognises — the
+ * reporter runs Huawei LUNA2000/EMMA through `huawei_emma_management`, so
+ * `_INVERTER_PLATFORMS` (which matches only `huawei_solar`) detects nothing.
+ *
+ * Discovery failing must narrow the wizard's *defaults*, not its *choices*:
+ * a user who knows their platform has to be able to pick it and configure
+ * the sensors by hand. These tests stub a discovery in which nothing at all
+ * was recognised, which is exactly that user's state.
+ */
+test.describe('Setup Wizard — undetected inverter platform', () => {
+  const NOTHING_DETECTED = {
+    growattFound: false,
+    growattDeviceId: null,
+    huaweiFound: false,
+    huaweiDeviceId: null,
+    solaxFound: false,
+    solaxHasGrowattTou: false,
+    solaxHasGrowattGen3: false,
+    solisFound: false,
+    nordpoolFound: true,
+    nordpoolArea: 'SE3',
+    nordpoolCustomArea: null,
+    nordpoolCustomEntity: null,
+    nordpoolConfigEntryId: 'entry1',
+    octopusFound: false,
+    entsoeFound: false,
+    entsoeEntity: null,
+    sensors: {},
+    platformSensors: {},
+    missingSensors: [],
+    detectedInverterPlatforms: [],
+    detectedPhaseCount: null,
+    currency: 'SEK',
+    vatMultiplier: 1.25,
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await page.route('**/api/setup/discover', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(NOTHING_DETECTED),
+      });
+    });
+  });
+
+  /** Fill every sensor input the wizard reports as undetected. */
+  async function fillAllUndetectedSensors(page: Page) {
+    const missing = page.locator('input[placeholder="Not detected — enter entity ID"]');
+    // The placeholder clears as each field is filled, so the set shrinks and
+    // the loop terminates. The cap only guards against a non-shrinking set.
+    for (let i = 0; i < 200 && (await missing.count()) > 0; i++) {
+      await missing.first().fill(`sensor.manual_entity_${i}`);
+    }
+    await expect(missing).toHaveCount(0);
+  }
+
+  test('every platform tab stays selectable when nothing is detected', async ({ page }) => {
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    // Detection failed for all four, so under the old gate every tab was
+    // disabled and the wizard had no reachable platform at all.
+    for (const name of [/Growatt Cloud/i, /SolaX Modbus/i, /Solis Modbus/i, /Huawei/i]) {
+      await expect(page.getByRole('tab', { name })).toBeEnabled();
+    }
+
+    // And the choice actually takes: selecting Huawei reveals its panel.
+    await page.getByRole('tab', { name: /Huawei/i }).click();
+    await expect(page.getByText('LUNA2000')).toBeVisible();
+    await expect(page.getByPlaceholder('Huawei battery device ID')).toBeVisible();
+  });
+
+  test('a manually selected platform survives a re-scan', async ({ page }) => {
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    await page.getByRole('tab', { name: /Huawei/i }).click();
+    await expect(page.getByPlaceholder('Huawei battery device ID')).toBeVisible();
+
+    // Re-scan is the button this user reaches for after a failed detection.
+    // It must not silently revert the platform they just chose: the required
+    // -sensor list follows the selected tab while the filled-in check reads
+    // the sensor dict named by `sensors.platform`, so if those two diverge
+    // the step can never be completed no matter what is typed.
+    await page.getByRole('button', { name: /Re-scan/i }).click();
+    await expect(page.getByPlaceholder('Huawei battery device ID')).toBeVisible();
+
+    await fillAllUndetectedSensors(page);
+
+    await expect(
+      page.getByRole('button', { name: /Next: Electricity Pricing/i }),
+    ).toBeEnabled();
+  });
+});

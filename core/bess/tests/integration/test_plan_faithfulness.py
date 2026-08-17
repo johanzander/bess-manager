@@ -191,6 +191,15 @@ KNOWN_PLAN_EXECUTION_GAP_SEK = {
     # curtailment-affected export volume shifts slightly with the plan);
     # was +0.0203 under the 0.2 kW / 0.05 kWh grid.
     "regression_2026_08_08_143843": +0.0214,
+    # `regression_2026_08_17_624`'s +0.0016 entry lived here between #629 and
+    # #630 and is now gone: that fixture's gap is +0.000000. The cause was not
+    # the SOE-grid snapping this entry described -- the forward replay carries
+    # continuous SoE, and period 32's SoE was held bit-exactly, which snapping
+    # would not produce. The DP was choosing the SOLAR_EXPORT-below-max bypass
+    # (#313) for a surplus too small to classify SOLAR_EXPORT, so the derived
+    # IDLE command absorbed what the plan exported. See
+    # `_solar_export_bypass_is_unexecutable` and
+    # `test_subfloor_solar_export_is_never_planned` below (#630).
 }
 
 
@@ -226,6 +235,77 @@ def test_realized_matches_planned_across_all_fixtures():
         f"{len(gaps)} fixture(s) plan a cost their own execution does not "
         f"reproduce. The optimizer is predicting savings the hardware cannot "
         f"deliver:\n" + "\n".join(gaps)
+    )
+
+
+def test_subfloor_solar_export_is_never_planned():
+    """Regression for issue #630.
+
+    The DP offers a "hold SoE, export this period's own solar surplus"
+    candidate (the SOLAR_EXPORT-below-max bypass, #313). It is only executable
+    where `classify_strategic_intent` will actually label the period
+    SOLAR_EXPORT, because that intent is what writes charge rate 0 and stops
+    the inverter absorbing the surplus. Below the classifier's
+    `FLOW_NOISE_FLOOR_KWH`, the period falls through to IDLE instead, whose
+    command is `load_first` at charge rate 100 -- so the plan books export
+    revenue on energy the hardware puts in the battery. Same shape as #282 on
+    the discharge side, which `_residual_cover_p` already gates against.
+
+    The scenario is built to make the bypass the DP's honest choice, so the
+    plan is wrong for a real economic reason rather than by accident:
+
+    - period 0's surplus is 0.0099 kWh, just under the 0.01 kWh floor
+    - periods 1-2 carry enough surplus to fill the battery to `max_soe`
+      regardless, so the marginal value of storing period 0's surplus is only
+      the export it displaces later (sell 0.2), not its evening value
+    - selling it now at 0.5 therefore beats storing it, by more than the
+      cycle cost
+    - a larger discharge-and-refill at period 0 is unprofitable
+      (0.5 sell - 0.4 cycle - 0.2 displaced export < 0), so the DP has no
+      reason to reach for a discharge candidate instead
+
+    `terminal_value_per_kwh` is pinned to 0.0 so the leftover-SoE term cannot
+    quietly change which candidate wins as prices are tuned.
+
+    Measured on the pre-fix code: R=2.404206 P=2.401236, gap +0.002970 SEK --
+    three times `PLAN_EXECUTION_TOLERANCE_SEK`.
+    """
+    from core.bess.tests.helpers import run_scenario_realized
+
+    scenario = {
+        "buy_price": [1.2, 1.2, 1.2, 3.0, 3.0, 3.0],
+        "sell_price": [0.5, 0.2, 0.2, 0.2, 0.2, 0.2],
+        "solar_production": [0.5099, 2.0, 2.0, 0.0, 0.0, 0.0],
+        "home_consumption": [0.5, 0.5, 0.5, 6.0, 6.0, 6.0],
+        "terminal_value_per_kwh": 0.0,
+        "battery": {
+            "max_soe_kwh": 20.0,
+            "min_soe_kwh": 2.2,
+            "max_charge_power_kw": 10.0,
+            "max_discharge_power_kw": 10.0,
+            "efficiency_charge": 0.97,
+            "efficiency_discharge": 0.97,
+            "cycle_cost_per_kwh": 0.40,
+            "initial_soe": 19.0,
+        },
+    }
+
+    result, realized = run_scenario_realized(scenario)
+    planned = result.economic_summary.battery_solar_cost
+
+    # The outcome that matters: executing this plan costs what it said it would.
+    assert abs(realized - planned) <= PLAN_EXECUTION_TOLERANCE_SEK, (
+        f"plan books a cost its own execution does not reproduce: "
+        f"R={realized:.6f} P={planned:.6f} gap={realized - planned:+.6f}"
+    )
+
+    # The mechanism, so a future regression is diagnosable and not just red:
+    # period 0 must absorb its sub-floor surplus, because that is what the
+    # command derived for it does.
+    p0 = result.period_data[0].energy
+    assert p0.grid_exported == pytest.approx(0.0, abs=1e-9), (
+        f"period 0 plans a {p0.grid_exported:.5f} kWh export below the "
+        f"classifier's noise floor -- the derived command absorbs it instead"
     )
 
 

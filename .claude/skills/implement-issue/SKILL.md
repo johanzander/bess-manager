@@ -24,10 +24,29 @@ the `bess-analyst` sub-agent.
 
 - User gives you a bess-manager issue number/URL and asks you to implement,
   fix, or resolve it locally.
+- **Or a PR number, or a `TODO.md` item, or a refactor with no issue at all.**
+  Issue-driven is the common case, not the only one. Step 0 resolves a bare
+  number to whichever it is, since GitHub numbers issues and PRs from one
+  sequence. Where there is no issue, the Step 2 diagnosis comes from the
+  maintainer's own framing rather than a Stage 2 comment, and Step 9 records it
+  in the PR body as usual.
 - Not for the `feature-lifecycle` multi-release integration flow (new
   inverter/price-provider platforms) — that skill owns experimental→stable
   graduation across multiple beta cycles. Use `implement-issue` for
   single-PR bug fixes and small enhancements.
+- **Also for picking an issue back up after a session died mid-flight.** Same
+  invocation, `/implement-issue <n>`; Step 0 detects the prior work and
+  re-enters at the right step. This is not a separate skill because the loop
+  that acts on review feedback is Step 11 and lives here — a second skill
+  would duplicate it, and duplicating a review loop is how one of them goes
+  stale.
+
+**Sessions die mid-issue routinely, and nothing used to pick them up.** A
+fleet audit found 34 worktrees whose sessions had exited: 8 with real
+unpushed commits and no PR, and three PRs sitting green-or-reviewed with
+nobody left to finish them. #615 was `APPROVED` and still a draft the next
+morning; #614 had `CHANGES_REQUESTED` with no owner to act on it. That is the
+gap Step 0 closes.
 
 ## CI mode (GitHub Actions)
 
@@ -39,6 +58,7 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 
 | Step | CI mode |
 |---|---|
+| 0. Resume check | Applies, and matters more here: Stage 3 is re-triggered by hand, so a second `@claude-bot fix` on an issue that already has a `has-fix-pr` PR is a resume, not a restart. Detect the existing PR and continue it — never open a second PR for one issue. The CI checkout has no worktrees, so branch existence on `origin` is the only signal available. Reading the PR's **conversation comments** matters more here too, not less: the re-trigger is itself a comment, so the maintainer has very often said *why* in the same thread. |
 | 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
 | 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
 | 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
@@ -52,6 +72,118 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 12. Hard constraints | Apply verbatim. |
 
 ## Process
+
+### 0. Resume check — is there prior work for this number?
+
+Run this before Step 1, every time. A fresh issue costs one cheap check; a
+resumed one would otherwise lose work.
+
+**`<n>` may be an issue OR a pull request, and you resolve which.** GitHub
+numbers issues and PRs from one sequence per repository, so a bare number is
+unambiguous and no flag is needed. This is not an edge case: this skill is used
+for `TODO.md` items and for refactors that never had an issue, so a PR with no
+linked issue is the normal shape for that work, not a defect.
+
+```bash
+gh pr view <n> --json number,headRefName,isDraft,mergeable,reviews,comments 2>/dev/null \
+  || gh issue view <n> --json number,title,labels,body,comments
+```
+
+**`comments` is in that list deliberately — do not drop it.** It is a separate
+feed from `reviews`, it is where the maintainer sets direction, and omitting it
+has already cost one full rework (see Rehydrate, below).
+
+If `<n>` is a **PR**, resume from it directly — it is the stronger handle,
+carrying the branch, the diff, the `## Scope assessment` and the review verdict,
+which is everything the table below reads. Read its linked issue too if it
+references one, for the diagnosis.
+
+If `<n>` is an **issue**, find its work the usual way:
+
+```bash
+gh pr list --state open --search "<n>" --json number,headRefName,isDraft,mergeable,reviews
+git worktree list                       # a worktree already on this issue's branch?
+git branch --list '*issue-<n>*'         # a branch even without a worktree?
+```
+
+**Completion is observable from outside the dead session — read state, never
+assume it:**
+
+| Evidence | The dead session got at least to |
+|---|---|
+| branch or worktree exists | Step 4 |
+| commits ahead of `origin/main`, RED test in the diff | Step 5–7 |
+| an open PR exists for the branch | Step 9 |
+| `gh pr checks` green | Step 10 |
+| a terminal review verdict on the PR | Step 11, mid-loop |
+
+Re-enter at the **earliest incomplete** step and run forward normally. A PR
+carrying `CHANGES_REQUESTED` re-enters at Step 11's `CHANGES_REQUESTED` branch;
+one carrying `APPROVED` needs only `gh pr ready`.
+
+**Rehydrate the diagnosis before touching code.** Step 2's analysis died with
+the session, and Step 11 depends on holding it. It is recoverable only because
+this skill already forces it to be written down:
+
+- the Stage 2 `@claude-bot analyze` comment on the issue — the root cause
+- the PR body's `## Test plan`, and its `## Scope assessment` **if the PR came
+  from CI mode** — the agreed approach, and what the test was meant to
+  discriminate. Interactive mode keeps its scope assessment conversational, so
+  that heading is absent on most PRs this skill opens; the PR's existence is
+  what proves Step 9 was reached, not any particular heading
+- **the PR CONVERSATION comments, not only its reviews** — see below
+- the diff itself, and any inline review comments
+
+**Reviews and conversation comments are two different feeds, and `gh pr view
+--json reviews` returns only the first.** Read both, every time:
+
+```bash
+gh pr view <n> --json reviews  --jq '.reviews[]  | "\(.author.login) \(.state) \(.submittedAt)\n\(.body)"'
+gh pr view <n> --json comments --jq '.comments[] | "\(.author.login) \(.createdAt)\n\(.body)"'
+```
+
+**A maintainer conversation comment OUTRANKS every bot review on the PR**,
+including ones submitted after it. The bot reviews the diff; the maintainer
+decides the direction, and they change direction in comments — that is the
+only place they can, since a review has to attach to a diff.
+
+This is not hypothetical. On #620 the maintainer posted "**this PR should
+shrink**" with a four-step plan: branch protection now rejects pushes to `main`
+server-side, so the protected-ref *enumeration* should be **deleted** rather
+than extended. A later session read the reviews, did not read the comments,
+and spent a full rework **adding** protected-ref patterns — the exact opposite
+of the standing instruction, on a PR whose own thread already said so. Two
+further holes the maintainer had found by hand (`git push origin
+refs/tags/v1.2.3`, `git push origin HEAD`) were in that comment too, and stayed
+open because nobody read it.
+
+So: **before touching code on a resumed PR, read the human comments first, and
+newest-first.** If one sets a direction the diff contradicts, that is a
+STOP-and-confirm, not something to reconcile silently — the maintainer may have
+changed their mind since, and asking costs one message where guessing costs a
+rework.
+
+**If those sources do not reconstruct a coherent diagnosis, STOP and report
+it.** Do not re-diagnose from scratch on top of someone else's half-finished
+branch: you would be building on a design you cannot see, and the commits
+already there encode decisions you would silently contradict.
+
+Hard rules, each from an observed failure:
+
+- **Never create a fresh worktree when a branch for this issue already has
+  commits.** Step 4 branches from `origin/main`, which discards them. One
+  abandoned branch held 32 commits that existed nowhere else.
+- **Never `git reset` or force-push a resumed branch.** Its commits are the
+  only copy; the session that made them is gone.
+- **Check for a live session on that worktree first** (`claude agents --json`,
+  run unscoped **and unsandboxed** — the sandbox denies `~/.claude/jobs`, so a
+  sandboxed listing silently truncates and a session reads as dead). Two
+  sessions on one branch is worse than a stalled one.
+- **A worktree with uncommitted tracked changes is unfinished work, not
+  debris.** Commit it as a WIP commit before doing anything else, so it is
+  recoverable by SHA.
+- **If the same issue has died twice, say so and stop.** A second silent
+  relaunch is how a real blocker gets mistaken for bad luck.
 
 ### 1. Fetch & scope
 
@@ -472,9 +604,28 @@ Each round:
 scripts/request-pr-review.sh <n>     # run_in_background: true
 ```
 
-The script posts `@claude-bot review` as `bess-agent` and blocks until a new
-review lands, printing `VERDICT <STATE> <submittedAt> <author>` (exit 2 on a
-15-minute timeout, after dumping recent `PR Review` runs). Like Step 10's
+The script posts `@claude-bot review` as `bess-agent` and blocks until a
+verdict lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED>
+<submittedAt> <author>` (exit 2 on a 15-minute timeout, after dumping recent
+`PR Review` runs).
+
+**`COMMENTED` is ambiguous, and the script resolves it for you — don't
+second-guess it.** `pr-review.yml` allows three final verdicts (`APPROVE`,
+`REQUEST_CHANGES`, `COMMENT`), so a real `COMMENT` verdict is possible and
+carries findings. But the bot has also submitted extra `COMMENTED` reviews
+ahead of its summary — inline notes, and a stray "test permission check" while
+probing what it could call — and those are identical to a verdict by state.
+Acting on one is how PR #615 sat `APPROVED` but still a draft overnight.
+
+The script disambiguates by asking whether the **workflow run is still
+going**, not by waiting a fixed time. A timer was tried first and was wrong:
+the gap that matters is placeholder-to-end-of-run, not placeholder-to-summary,
+and no constant covers both. So a `COMMENTED` that reaches you arrived after
+the run finished and **is** the verdict: treat it like `CHANGES_REQUESTED` —
+collect the findings, do not flip the PR ready. If the run state cannot be read
+at all, the script keeps waiting rather than guessing.
+
+Like Step 10's
 `--watch`, it blocks rather than polls — so **do not poll it and do not
 re-touch the diagnosis/TDD context while it runs.** You are notified once,
 when it exits. This is a hard session boundary, same as Step 6.
@@ -540,7 +691,8 @@ On the verdict:
   The round cap counts this round like any other. If it lands you on the cap,
   say so and hand over a draft PR with the outstanding state — an honest
   draft beats a ready flag that means less than it claims.
-- **`CHANGES_REQUESTED` / `COMMENTED`** — collect the findings:
+- **`CHANGES_REQUESTED` / `COMMENTED`** — both carry findings and neither earns
+  the ready flag. Collect them:
 
   ```bash
   gh api repos/johanzander/bess-manager/pulls/<n>/comments \
@@ -556,6 +708,20 @@ On the verdict:
   silently ignore it either.
 - **A review from the maintainer rather than the bot** (the `<author>` field):
   treat it as authoritative and stop the loop — a human has taken over.
+- **A maintainer CONVERSATION comment, which is not a review at all**, is
+  equally authoritative and arrives on a feed the verdict never touches. Check
+  it each round, not only at Step 0 — a direction posted mid-loop is invisible
+  to `gh pr view --json reviews`, and to the bot, which will keep reviewing the
+  diff as if nothing had been said:
+
+  ```bash
+  gh pr view <n> --json comments \
+    --jq '.comments[] | select(.createdAt > "<submittedAt from the round before>") | "\(.author.login)\n\(.body)"'
+  ```
+
+  If one lands, stop the loop and act on it before the next round. A bot
+  APPROVED on a diff the maintainer has already asked you to redo is worth
+  nothing.
 
 Fix the blockers, park genuine nits in `TODO.md`, run
 `./scripts/quality-check.sh`, commit, and push. Step 9's frontend rule carries
@@ -633,6 +799,13 @@ net is upstream, not this section.
 |---|---|
 | "the test asserts the exact command we write to hardware, that's precise" | Precise about the mapping, silent about the outcome. It stays green when the mapping is right and the physics is wrong. Assert realized cost / SoE / flows wherever an execution model exists. |
 | "it's green, so the fix works" | Green means the suite is satisfied. Revert the fix and watch the test fail — if it doesn't, it was never evidence. |
+| "this issue has no PR yet, so I'm starting fresh" | Step 0 checks branches and worktrees too, not just PRs. 8 abandoned branches in one audit had real commits and no PR — one with 32. Starting fresh from `origin/main` deletes them. |
+| "there's no issue for this PR, so it isn't mine to resume" | This skill covers `TODO.md` items and refactors, which never had an issue. A bare number resolves to either — that dead end left #620, #622 and #623 with no owner in the loop. |
+| "the old branch is a mess, cleaner to redo it" | Its commits are the only copy of a diagnosis you no longer have. If you genuinely cannot reconstruct the approach, that is a STOP-and-report, not a licence to reset. |
+| "that worktree's session shows dead, so it's mine to take" | Check unsandboxed. A sandboxed `claude agents --json` returned 1 session where the real answer was 17, because `~/.claude/jobs` is sandbox-denied — every other session read as dead. |
+| "the review said CHANGES_REQUESTED but nobody assigned it to me" | Nothing else will pick it up. Once the opening session exits, an orphaned PR has no owner at all — `sweep-prs` refuses the job by design. Resuming is how it gets one. |
+| "I read the reviews, so I know what this PR needs" | Reviews and conversation comments are separate feeds and `--json reviews` returns only one. The maintainer sets *direction* in comments, because a review can only attach to a diff. On #620 that cost a full rework in the opposite direction. |
+| "the bot approved it, so the direction must be fine" | The bot reviews the diff against a checklist; it has no idea what the maintainer asked for in the thread. An approval on a diff you were told to redo is worth nothing. |
 | "I can see the assertion is right, no need to run it red" | Assertions that look right have repeatedly bounded only one side, or compared a quantity a second varying term swamped. Seeing it fail is the cheap part. |
 | "quality-check.sh passed, that's enough" | Green tests prove the suite is satisfied, not that the fix behaves correctly against the real scenario. Step 8 requires observed output, every time. |
 | "the diagnosis is obviously right, skip the confirm gate" | Wrong diagnoses are exactly when confidence is highest. One message, cheap insurance. |
@@ -658,6 +831,20 @@ net is upstream, not this section.
 
 ## Red Flags — Stop and Go Back
 
+- About to run Step 4 (fresh worktree from `origin/main`) when a branch for
+  this issue already carries commits. That deletes them.
+- About to `git reset` or force-push a branch a dead session left behind.
+- About to re-diagnose from scratch on top of someone else's half-finished
+  branch because the Stage 2 comment and PR body didn't reconstruct the
+  approach. That is a STOP-and-report.
+- **About to change code on a resumed PR without having read its conversation
+  comments** — not just its reviews. They are separate feeds, and the
+  maintainer's direction lives in the one `--json reviews` does not return.
+- About to implement a diff that contradicts a maintainer comment already on
+  the thread. Stop and confirm; they may have moved on, but guessing costs a
+  rework and asking costs one message.
+- About to open a second PR for an issue that already has one.
+- About to relaunch an issue that has already died twice without saying so.
 - About to commit or open the PR without having actually run/observed the
   fix — only ran automated tests.
 - About to skip the Step 3 confirm gate, or the Step 7 gate for a frontend
@@ -697,6 +884,7 @@ net is upstream, not this section.
 
 | Step | Skill/Tool | Skippable? |
 |---|---|---|
+| 0. Resume check | `gh pr list` + `git worktree list` + unscoped/unsandboxed `claude agents --json` | No |
 | 1. Fetch & scope | `gh issue view` | No |
 | 2. Diagnose | `bess-analyst` (if no bot comment) | Conditional |
 | 3. Confirm gate | — | No |

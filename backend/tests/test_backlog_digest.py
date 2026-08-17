@@ -72,11 +72,22 @@ def _porcelain(*worktrees: tuple[str, str | None]) -> str:
     return "\n\n".join(records) + "\n"
 
 
-def _git_shim(porcelain: str) -> str:
+def _git_shim(porcelain: str, common_dir: str = "/nonexistent/repo/.git") -> str:
+    """A `git` answering the two calls the digest makes.
+
+    `rev-parse --git-common-dir` is how the digest locates the repo's `.env`,
+    and answering it from the shim is what keeps that lookup deterministic: a
+    test that let the real git through would resolve to the maintainer's
+    actual checkout and read their real `.env`, so the outcome would depend on
+    a gitignored file that CI does not have. The default points at a directory
+    holding no `.env`, which is the "nothing to source" case every pre-existing
+    test wants.
+    """
     escaped = porcelain.replace("'", "'\\''")
     return f"""
 case "$1 $2 $3" in
   "worktree list --porcelain") printf '%s' '{escaped}' ;;
+  "rev-parse --path-format=absolute --git-common-dir") printf '%s\\n' '{common_dir}' ;;
   *) echo "unexpected git call: $*" >&2; exit 1 ;;
 esac
 """
@@ -784,3 +795,108 @@ def test_missing_project_number_fails_loudly(bin_dir: Path) -> None:
 
     assert result.returncode != 0
     assert "PROJECT_NUMBER" in result.stderr
+
+
+def _dotenv(bin_dir: Path, tmp_path: Path, contents: str) -> None:
+    """Point the git shim at a repo root holding the given `.env`."""
+    repo_root = tmp_path / "checkout"
+    repo_root.mkdir(exist_ok=True)
+    (repo_root / ".env").write_text(contents)
+    _write_shim(
+        bin_dir, "git", _git_shim(_porcelain(), common_dir=str(repo_root / ".git"))
+    )
+
+
+def test_project_number_is_read_from_dotenv(bin_dir: Path, tmp_path: Path) -> None:
+    """The whole point: an unattended pass exports nothing, so the digest has
+    to find PROJECT_NUMBER itself or it never runs at all. `.env` is
+    gitignored, so no caller inherits it."""
+    _write_shim(bin_dir, "gh", _gh_shim([], [], []))
+    _dotenv(bin_dir, tmp_path, "PROJECT_NUMBER=1\nBESS_PO_TOKEN=tok\n")
+
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+    env.pop("PROJECT_NUMBER", None)
+    proc = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["counts"]["issues"] == 0
+
+
+def test_environment_wins_over_dotenv(bin_dir: Path, tmp_path: Path) -> None:
+    """An explicit PROJECT_NUMBER must not be overwritten by the file, or the
+    variable becomes un-overridable and a pinned value silently reads the
+    maintainer's real board."""
+    _dotenv(bin_dir, tmp_path, "PROJECT_NUMBER=1\n")
+    # A `gh` that refuses any project but 7. The assertion is that the digest
+    # asked for 7, which is observable nowhere except in the call itself.
+    _write_shim(
+        bin_dir,
+        "gh",
+        'case "$*" in\n'
+        '  *"project item-list 7"*) echo \'{"items": []}\' ;;\n'
+        '  *"project item-list"*) echo "wrong project: $*" >&2; exit 1 ;;\n'
+        '  *"issue list"*|*"pr list"*) echo \'[]\' ;;\n'
+        '  *) echo "unexpected gh call: $*" >&2; exit 1 ;;\n'
+        "esac\n",
+    )
+
+    digest = _run(bin_dir, PROJECT_NUMBER="7")
+
+    assert digest["counts"]["issues"] == 0
+
+
+def test_a_dotenv_without_the_variable_still_fails_loudly(
+    bin_dir: Path, tmp_path: Path
+) -> None:
+    """A `.env` that exists but carries no PROJECT_NUMBER must not be mistaken
+    for a configured one."""
+    _write_shim(bin_dir, "gh", _gh_shim([], [], []))
+    _dotenv(bin_dir, tmp_path, "BESS_PO_TOKEN=tok\n")
+
+    result = _run_expect_failure(bin_dir)
+
+    assert result.returncode != 0
+    assert "PROJECT_NUMBER" in result.stderr
+
+
+def test_board_status_reports_the_cards_current_column(bin_dir: Path) -> None:
+    """`column` is where the evidence says the card belongs; `board_status` is
+    where it actually sits. The board verb reconciles the two, so the digest
+    has to carry both — otherwise reconciling means a second API call by
+    hand, which is the one thing this script exists to prevent."""
+    issue = _issue(602, labels=[{"name": "bug"}])
+    card = {"content": {"number": 602}, "status": "Ready for Dev", "priority": "P1"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["board_status"] == "Ready for Dev"
+    assert item["column"] == "Backlog"
+
+
+def test_issue_with_no_card_reports_null_status_and_is_an_orphan(
+    bin_dir: Path,
+) -> None:
+    """An off-board issue carries no Priority, and `Ready for Dev` requires
+    one — so it can never become dispatchable however well it is analysed. It
+    has to be surfaced, not read as a quiet Backlog item."""
+    issue = _issue(624, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["board_status"] is None
+    orphans = [o for o in digest["orphans"] if o["kind"] == "issue_no_card"]
+    assert [o["ref"] for o in orphans] == ["624"]
+
+
+def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:
+    issue = _issue(602)
+    card = {"content": {"number": 602}, "status": "Backlog", "priority": "P1"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    digest = _run(bin_dir)
+
+    assert [o for o in digest["orphans"] if o["kind"] == "issue_no_card"] == []

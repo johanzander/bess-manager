@@ -28,6 +28,10 @@ def _item(number: int, **over: object) -> dict:
         "last_activity_days": 1,
         "comments": 0,
         "column": "Backlog",
+        # Defaults to matching `column`, so the default item is a reconciled
+        # card and no board action fires. A test that overrides one and not the
+        # other is asserting a mismatch on purpose.
+        "board_status": "Backlog",
         "awaiting": None,
         "awaiting_source": None,
         "awaiting_suggested": None,
@@ -176,6 +180,34 @@ def test_missing_priority_and_missing_labels_are_grooming_debt(tmp_path: Path) -
     item = _item(8, labels=[], priority=None, last_comment=_comment(1))
     actions = _actions_for(_run(tmp_path, [item]), 8)
     assert {"set_priority", "triage_labels"} <= actions
+
+
+def test_an_issue_with_no_card_asks_for_a_card_not_a_priority(
+    tmp_path: Path,
+) -> None:
+    """Both causes leave Priority null, and conflating them sent the PO to set
+    a field on a card that does not exist."""
+    item = _item(621, board_status=None, priority=None)
+    actions = _actions_for(_run(tmp_path, [item]), 621)
+    assert "add_card" in actions
+    assert "set_priority" not in actions
+
+
+def test_a_card_in_the_wrong_column_is_a_move(tmp_path: Path) -> None:
+    item = _item(602, board_status="Ready for Dev", column="In Progress")
+    result = _run(tmp_path, [item])
+    assert "move_card" in _actions_for(result, 602)
+    move = next(
+        a
+        for a in result["actions"]
+        if a.get("issue") == 602 and a["action"] == "move_card"
+    )
+    assert "In Progress" in move["detail"]
+
+
+def test_a_reconciled_card_is_not_moved(tmp_path: Path) -> None:
+    item = _item(603, board_status="Analysis", column="Analysis")
+    assert "move_card" not in _actions_for(_run(tmp_path, [item]), 603)
 
 
 def test_stale_worktree_is_handed_to_sweep_prs(tmp_path: Path) -> None:

@@ -120,10 +120,28 @@ actions=$(printf '%s' "$digest" | jq \
      else empty end),
 
     # No priority means the item cannot be ranked, so it can never be "next".
-    (if .priority == null
+    #
+    # The two causes need different actions, and conflating them sent the PO
+    # to set a field on a card that does not exist. `board_status: null` is
+    # the stronger one: no card at all, so there is nothing to set a Priority
+    # on until one is added. #621 and #624 were both in that state while
+    # reporting the milder "no Priority on the board".
+    (if .board_status == null
+     then {issue: .number, action: "add_card",
+           why: "open issue with no card on the board",
+           detail: "add it to Project #1, then set Priority — until then it is unrankable and invisible to every board pass"}
+     elif .priority == null
      then {issue: .number, action: "set_priority",
            why: "no Priority on the board",
            detail: "set P1-P4; without it the item is unrankable and never Ready"}
+     else empty end),
+
+    # The card sits somewhere the evidence does not support. The digest wins;
+    # this is always a card move, never a re-derivation.
+    (if .board_status != null and .board_status != .column
+     then {issue: .number, action: "move_card",
+           why: "card is \(.board_status) but the evidence says \(.column)",
+           detail: "move the card to \(.column)"}
      else empty end),
 
     # Un-pruned worktrees are what made four issues read as In Progress.

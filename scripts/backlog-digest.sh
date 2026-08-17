@@ -422,6 +422,38 @@ jq -n \
           blocked: $blocked
         }
     ],
+    # BOARD STATE FOR PULL REQUESTS, keyed by number.
+    #
+    # The board holds issues, and every judgement about a PR therefore had
+    # nowhere to live. "#437 is lower priority, I will get to it later" and
+    # "#167 and #354 are blocked" are real decisions, and the rhythm pass
+    # re-reported all three as due on every tick because nothing recorded them
+    # — so the same conversation happened every 30 minutes.
+    #
+    # Projects v2 takes PRs as items with the identical field set, so the fix
+    # is membership rather than a parallel mechanism: a PR card carries the
+    # same `Priority` and `Awaiting` an issue card does, and `backlog-rhythm.sh`
+    # suppresses on them.
+    #
+    # `content.type` is what separates the two, confirmed against a real card
+    # rather than assumed: an added PR reports `"type": "PullRequest"` with
+    # `number`, `title`, `url` and `repository` alongside it. Numbers are unique
+    # across issues and PRs in one repository, so this cannot collide with the
+    # issue lookup above.
+    #
+    # Emitted as a lookup rather than merged into a PR list, because the digest
+    # does not own the open-PR list — `backlog-rhythm.sh` fetches that with the
+    # review fields it needs, and joins this in by number.
+    pr_board: [
+      $board.items[]?
+      | select(.content.type? == "PullRequest")
+      | {
+          number: .content.number,
+          board_status: (.status? // null),
+          priority: (.priority? // null),
+          awaiting: (.awaiting? // null)
+        }
+    ],
     orphans: (
       [ $worktrees[] | select(. as $w | ($issues | map(.number) | any(. as $n | matches_issue($w; $n))) | not)
         | {kind: "worktree_no_issue", ref: .path, detail: "no open issue matches this worktree"} ]

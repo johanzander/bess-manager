@@ -2180,12 +2180,13 @@ def optimize_battery_schedule(
     # exceptional. Imported here rather than at module scope because
     # pwl_window_dp imports this module (it reuses this file's reward and
     # transition primitives), so a top-level import would be circular.
+    from core.bess.exceptions import PWLWindowUnderRefinedError
     from core.bess.pwl_window_dp import (
         resolve_pwl_window,
         run_pwl_window_backward_induction,
     )
     from core.bess.schedule_splicer import splice_schedule
-    from core.bess.tie_detection import detect_tie_windows
+    from core.bess.tie_detection import Window, detect_tie_windows
 
     windows = detect_tie_windows(
         tie_margins,
@@ -2208,7 +2209,14 @@ def optimize_battery_schedule(
             [(w.start, w.end) for w in windows],
         )
         window_resolutions: dict[int, list[tuple[float, float, PeriodFlows]]] = {}
-        for window in windows:
+        # The windows actually solved, which is what the splice and the
+        # boundary re-derivation below must iterate -- not `windows`, because
+        # a detected window too large for the solver is bisected here and
+        # replaced by the sub-windows that were certified in its place.
+        resolved_windows: list[Window] = []
+        pending = list(windows)
+        while pending:
+            window = pending.pop(0)
             window_horizon = window.end - window.start
             sl = slice(window.start, window.end)
             window_max_charge = (
@@ -2218,13 +2226,41 @@ def optimize_battery_schedule(
             )
             # End SOE is pinned to the grid DP's own SOE at the window's exit,
             # so the untouched schedule after the window stays valid. An
-            # infeasible pin raises out of resolve_pwl_window, and a solve
-            # that blew one of its accuracy budgets raises
-            # PWLWindowUnderRefinedError out of the backward induction --
-            # both deliberately not caught. Silently keeping the grid DP's
+            # infeasible pin raises out of resolve_pwl_window and is
+            # deliberately not caught: silently keeping the grid DP's
             # possibly-wrong choice, or splicing in a table whose accuracy the
             # solver itself could not certify, are both exactly the fallback
             # this project forbids.
+            #
+            # `PWLWindowUnderRefinedError` is caught, and only it, because it
+            # says something different from the other raises: not "this answer
+            # is wrong" but "this window is too big to answer exactly" (#624).
+            # `detect_tie_windows` merges adjacent flagged periods with no cap,
+            # while the solver's breakpoint set compounds per backward step, so
+            # a long enough run of near-ties exceeds
+            # `PWL_MAX_PREIMAGE_SEED_POINTS` no matter what the budget is set
+            # to -- measured at ~8 periods, and reported from the field on a
+            # nine-period window over volatile SE3 prices. Left uncaught it
+            # discarded the entire schedule, including every period that had
+            # solved fine, and the hourly retry then reran the same inputs into
+            # the same wall forever.
+            #
+            # Bisecting is not a fallback and does not weaken P6: each half is
+            # solved by the same solver under the same certification, and a
+            # half that still cannot certify is split again. What changes is
+            # only how much the exact solver is asked to do at once. The two
+            # halves reconnect through `soe_trajectory[mid]` -- the grid DP's
+            # own SOE, which is exactly the pin two separately-detected
+            # adjacent windows would already have used, so the splice sees
+            # nothing it does not handle today.
+            #
+            # Termination is by construction rather than by an iteration cap: a
+            # one-period window seeds from the four-breakpoint pinned terminal
+            # row (`_pinned_terminal_row`), so its preimage cross product is
+            # ~4 x |discharge levels| -- three orders of magnitude below the
+            # budget, and independent of prices, battery size and grid
+            # resolution. A horizon-1 window that still cannot certify is
+            # therefore not a sizing problem, and is re-raised.
             #
             # `import_cap_kwh` is the same fuse-derived grid-import cap (#429)
             # the grid DP optimized the rest of the schedule against. It has to
@@ -2233,23 +2269,39 @@ def optimize_battery_schedule(
             # without the cap could splice back a grid-charge action that
             # plans more import than the house's fuse can carry -- weakening
             # the constraint precisely where it is most likely to bind.
-            V_window = run_pwl_window_backward_induction(
-                window_horizon=window_horizon,
-                buy_price=buy_price[sl],
-                sell_price=reward_sell_price[sl],
-                home_consumption=home_consumption[sl],
-                solar_production=solar_production[sl],
-                battery_settings=battery_settings,
-                dt=dt,
-                end_soe_target=soe_trajectory[window.end],
-                max_charge_power_per_period=window_max_charge,
-                capabilities=capabilities,
-                import_cap_kwh=import_cap_kwh,
-            )
+            try:
+                V_window = run_pwl_window_backward_induction(
+                    window_horizon=window_horizon,
+                    buy_price=buy_price[sl],
+                    sell_price=reward_sell_price[sl],
+                    home_consumption=home_consumption[sl],
+                    solar_production=solar_production[sl],
+                    battery_settings=battery_settings,
+                    dt=dt,
+                    end_soe_target=soe_trajectory[window.end],
+                    max_charge_power_per_period=window_max_charge,
+                    capabilities=capabilities,
+                    import_cap_kwh=import_cap_kwh,
+                )
+            except PWLWindowUnderRefinedError:
+                if window_horizon <= 1:
+                    raise
+                mid = window.start + window_horizon // 2
+                logger.warning(
+                    "PWL window (%d, %d) exceeds what the exact solver can "
+                    "certify in one solve (#624) -- splitting at %d and "
+                    "re-solving each half against the grid DP's own SOE there",
+                    window.start,
+                    window.end,
+                    mid,
+                )
+                pending.insert(0, Window(start=mid, end=window.end))
+                pending.insert(0, Window(start=window.start, end=mid))
+                continue
             window_floored = (
                 sell_price_floored[sl] if sell_price_floored is not None else None
             )
-            window_resolutions[window.start] = resolve_pwl_window(
+            resolution = resolve_pwl_window(
                 V_window,
                 start_soe=soe_trajectory[window.start],
                 window_horizon=window_horizon,
@@ -2265,10 +2317,49 @@ def optimize_battery_schedule(
                 import_cap_kwh=import_cap_kwh,
                 sell_price_floored=window_floored,
             )
+            window_resolutions[window.start] = resolution
+            resolved_windows.append(window)
 
-        actions, soe_trajectory, flows_trajectory = splice_schedule(
-            actions, soe_trajectory, flows_trajectory, windows, window_resolutions
-        )
+            # Splice each window as it is resolved, rather than all of them
+            # once the loop ends (#624).
+            #
+            # A bisected window's second half starts exactly where the first
+            # half ends, so it must be solved against the SOE the first half
+            # actually reached -- not the grid DP's nominal value there. Those
+            # differ: the end-SOE pin is only guaranteed to within
+            # `_end_soe_pin_tolerance`, and `splice_schedule` writes the
+            # solver's own achieved `next_soe`, not the target. Planning the
+            # second half from a state the schedule never visits would make it
+            # optimize against a start state the plan does not reach.
+            #
+            # Measured contribution on the #624 fixture: 0.000000 SEK. This
+            # closes a latent inconsistency, not an observed cost error -- the
+            # seam periods there are discharge-dominated, where throughput
+            # follows the action rather than the start SOE, so the residual
+            # cannot express itself as cost. It is kept because the next
+            # bisected window need not be discharge-dominated, and because a
+            # seam is the one boundary the pre-existing "period AT `end`"
+            # re-derivation below deliberately does not cover.
+            #
+            # For separately-detected windows this is a no-op, so no existing
+            # schedule moves: `detect_tie_windows` merges any windows that
+            # touch, so a later window's `start` is strictly greater than an
+            # earlier window's `end`, and a window only writes SOE up to its
+            # own `end`.
+            #
+            # `cost_basis_trajectory` is deliberately NOT advanced the same
+            # way. It feeds the solver's reward, not the physics, and the
+            # final accounting comes from `_replay_accounting_pass` over the
+            # spliced trajectory below -- so a stale basis at a seam can make
+            # the second half's ranking marginally worse, but cannot make its
+            # plan unexecutable, which is what R == P is about.
+            actions, soe_trajectory, flows_trajectory = splice_schedule(
+                actions,
+                soe_trajectory,
+                flows_trajectory,
+                [window],
+                {window.start: resolution},
+            )
 
         # A window owns periods [start, end), but writes the SOE at `end` --
         # that is the pinned exit state. The period AT `end` is not re-solved,
@@ -2307,8 +2398,17 @@ def optimize_battery_schedule(
         # is bounded by `_end_soe_pin_tolerance`, and closing it means
         # re-deriving the post-window trajectory, which the pin exists
         # precisely to avoid.
-        for window in windows:
-            if window.end >= horizon:
+        #
+        # A bisected window (#624) puts a boundary *inside* what was one
+        # detected window, and the period at that boundary is owned and
+        # re-solved by the next half -- it already carries that solver's own
+        # flow record. Re-deriving it here would overwrite a record produced
+        # by the solver that chose the action with one derived from the
+        # trajectory, which is exactly the re-derivation P4 forbids. So the
+        # re-derivation applies only to exit periods no resolved window owns.
+        resolved_periods = {p for w in resolved_windows for p in range(w.start, w.end)}
+        for window in resolved_windows:
+            if window.end >= horizon or window.end in resolved_periods:
                 continue
             flows_trajectory[window.end] = _period_flows(
                 power=actions[window.end],

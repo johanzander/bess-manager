@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **A tiny solar surplus is no longer planned as an export the inverter will absorb** — below the export the plan can express, the battery charged anyway and ran fuller than planned, spilling the difference later. ([#630](https://github.com/johanzander/bess-manager/issues/630))
+- **System no longer gets stuck on "initializing" when many consecutive periods are near-tied** — a long run of volatile prices could make every hourly optimization fail, leaving no schedule at all. ([#624](https://github.com/johanzander/bess-manager/issues/624))
 - **Grid charging now reaches the planned amount instead of stopping just short** — the charge rate is written as a whole percent, and rounding it down meant the battery charged slightly less than the plan counted on.
 - **Growatt VPP no longer briefly executes the previous period's power command when switching modes** — enabling remote control commits immediately, so the power target is now written before it, and cleared on release. ([#593](https://github.com/johanzander/bess-manager/issues/593))
 - **The battery now covers house load exactly instead of exporting a few Wh and committing the inverter** — a period whose load fell between two discharge steps was planned as a small export, which forces `grid_first` at a fixed rate and imports any load spike. ([#352](https://github.com/johanzander/bess-manager/issues/352))

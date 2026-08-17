@@ -12,10 +12,43 @@ set -euo pipefail
 
 repo="${REPO:-johanzander/bess-manager}"
 
+# PROJECT_NUMBER and BESS_PO_TOKEN live in the repo's `.env`. Reading it here
+# is the difference between the script working and the script never running:
+# `.env` is gitignored, so nothing exports it, and every fresh shell — every
+# `/loop /backlog` tick, every new session — hit the "board has not been
+# created yet" exit on line one. That message was the worst kind of wrong:
+# the board exists, is populated, and nothing about it needs fixing. The
+# documented workaround (`set -a; . ./.env; set +a; ./scripts/backlog-digest.sh`)
+# cannot survive an unattended pass, because the thing invoking the script is
+# a skill, not a shell the maintainer typed into.
+#
+# `--git-common-dir` is what makes this ONE rule instead of a search over
+# candidate paths. `.env` is gitignored, so it exists only in the main
+# checkout and never in a worktree — and the common dir resolves to the main
+# checkout's `.git` from either location, so its parent is the single
+# directory where `.env` can be. `--path-format=absolute` is required:
+# without it git may answer the relative `.git`, whose dirname is `.`, which
+# silently resolves against the caller's cwd instead of the repo.
+env_file="$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")/.env"
+if [ -f "$env_file" ]; then
+  # The ENVIRONMENT WINS over the file. `set -a` sourcing would otherwise let
+  # `.env` overwrite an explicit `PROJECT_NUMBER=2 scripts/backlog-digest.sh`,
+  # which makes the variable un-overridable and makes any test that pins a
+  # value silently read the maintainer's real board instead.
+  env_project_number="${PROJECT_NUMBER:-}"
+  env_po_token="${BESS_PO_TOKEN:-}"
+  set -a
+  # shellcheck disable=SC1090  # runtime path, by construction
+  . "$env_file"
+  set +a
+  if [ -n "$env_project_number" ]; then PROJECT_NUMBER="$env_project_number"; fi
+  if [ -n "$env_po_token" ]; then BESS_PO_TOKEN="$env_po_token"; fi
+fi
+
 if [ -z "${PROJECT_NUMBER:-}" ]; then
-  echo "backlog-digest.sh: PROJECT_NUMBER is not set — the backlog board has" >&2
-  echo "not been created yet. Run scripts/backlog-board-init.sh (deferred) to" >&2
-  echo "create it, then set PROJECT_NUMBER." >&2
+  echo "backlog-digest.sh: PROJECT_NUMBER is not set, and no PROJECT_NUMBER was" >&2
+  echo "found in $env_file. The board is Project #1 (\"BESS Manager Backlog\");" >&2
+  echo "add PROJECT_NUMBER=1 to that .env, or export it for this shell." >&2
   exit 1
 fi
 
@@ -47,23 +80,48 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
-# Emits, per worktree, a JSON object of {path, branch}. `git worktree list`
-# always emits the main checkout as its first record, and it is excluded
+# Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
+# list` always emits the main checkout as its first record, and it is excluded
 # here — it is never a task worktree, so it must not appear in the orphan
 # scan below.
+#
+# `locked` is the LIVENESS signal, and it is the only one that works. See the
+# session note below.
 worktrees=$(git worktree list --porcelain | awk '
   BEGIN { RS=""; FS="\n" }
   NR==1 { next }
   {
-    path=""; branch=""
+    path=""; branch=""; locked="false"
     for (i = 1; i <= NF; i++) {
       if ($i ~ /^worktree /)      { path = substr($i, 10) }
       else if ($i ~ /^branch /)   { branch = substr($i, 8); sub(/^refs\/heads\//, "", branch) }
+      else if ($i ~ /^locked/)    { locked = "true" }
     }
-    if (path != "") print path "\t" branch
+    if (path != "") print path "\t" branch "\t" locked
   }
-' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // "")}' | jq -s .)
+' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // ""), locked: (.[2] == "true")}' | jq -s .)
 
+# `claude agents` lists BACKGROUND agents only, and this is the trap that made
+# the rhythm pass tell the maintainer to restart work that was actively
+# running. Two independent reasons it cannot answer "is someone on this":
+#
+#   1. A session started in the terminal — `claude` in a CLI, then
+#      `/implement-issue <n>` — is a foreground session and never appears here
+#      at all. That is how #624 was dispatched.
+#   2. Even a background agent carries a generated descriptive name ("Review PR
+#      and create branch for bess-manager"), not the `issue-<n>` the dispatch
+#      convention promises, so the exact-name match below misses it too.
+#
+# Measured: 41 worktrees on disk, `claude agents --json` returning ONE entry.
+# So `session` was null for essentially every item, every worktree read as
+# abandoned, and `resume_implementation` fired on live sessions — against work
+# whose branch commits the skill itself calls the only copy.
+#
+# The worktree LOCK is the signal that actually tracks a live session: 4 of
+# those 41 were locked, and they were exactly the four live sessions. It is
+# local, needs no process list, and covers foreground and background alike.
+# `session` is kept because a name match is strictly more informative when it
+# does happen; it is no longer what liveness rests on.
 sessions=$(claude agents --json)
 
 # No `--field "Priority"` here: verified against the real CLI just now,
@@ -233,6 +291,26 @@ jq -n \
   def awaiting_from_board($n):
       [ $board.items[]? | select(.content.number? == $n) | .awaiting? | select(. != null) ][0] // null;
 
+  # The CURRENT column of the card, straight off the board. `column` below is
+  # the column the evidence says it should be in; without this field the two
+  # could never be compared, and the `board` verb — "reconcile every card
+  # against the derived column, the digest always wins" — had nothing to
+  # reconcile against. A pass had to make a second `gh project item-list` call
+  # by hand to recover exactly this, which is the one thing this script exists
+  # to stop.
+  #
+  # NOTE: no apostrophes anywhere in this jq program. It is a single-quoted
+  # shell string, so one apostrophe in a comment ends it early and jq reports
+  # the useless "Top-level program not given".
+  #
+  # `null` means NO CARD, not "no status": an issue that never made it onto the
+  # board. That is a live trap rather than a cosmetic gap, because
+  # `Ready for Dev` now requires a Priority and priority is a board field — so
+  # an off-board issue can never become dispatchable however well it is
+  # analysed. #621 and #624 were both in that state.
+  def board_status($n):
+      [ $board.items[]? | select(.content.number? == $n) | .status? | select(. != null) ][0] // null;
+
   # A worktree only means work-in-progress while nothing has superseded it.
   # A merged PR for the same issue means the branch already landed and the
   # worktree is just un-pruned rot.
@@ -305,6 +383,9 @@ jq -n \
           # actionable detail (who spoke, when, whether it was the reporter).
           comments: (.comments | length),
           column: $col,
+          # Where the card actually sits today, so a board pass can diff it
+          # against `column` above. null = the issue has no card at all.
+          board_status: board_status(.number),
           # Reported for EVERY column, not just Analysis. Suppressing it
           # elsewhere hid the most common case there is: a Backlog item waiting
           # on a reporter reported `awaiting: null`, so the 14-day chase had
@@ -324,6 +405,10 @@ jq -n \
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),
+          # A LIVE session holds its worktree locked. This, not `session`, is
+          # what says whether anyone is on the item — see the note where the
+          # worktree list is built.
+          worktree_locked: ($wt.locked // false),
           # A worktree whose own branch has already merged is rot, and
           # `sweep-prs` is what removes it. Flagged so a board pass reports it
           # instead of reading it as active work: #593, #571, #542 and #466 all
@@ -343,6 +428,14 @@ jq -n \
       +
       [ $prs[] | select(. as $p | ($issues | map(.number) | any(. as $n | pr_matches_issue($p; $n))) | not)
         | {kind: "pr_no_issue", ref: (.number | tostring), detail: .title} ]
+      +
+      # An open issue with no card. Reported as an orphan because it is
+      # invisible everywhere else: it carries no Priority and no Awaiting, so
+      # it cannot reach `Ready for Dev`, cannot be ranked by `next`, and reads
+      # as a quiet un-groomed Backlog item rather than as a missing card.
+      # Adding it to the board is a triage action, not a bug in the item.
+      [ $issues[] | select(board_status(.number) == null)
+        | {kind: "issue_no_card", ref: (.number | tostring), detail: .title} ]
     )
   }
 '

@@ -22,11 +22,17 @@ Open an individual issue only when you are deciding about that issue.
 ## Prerequisites
 
 The board exists: **Project #1, "BESS Manager Backlog"**. `PROJECT_NUMBER=1`
-lives in the repo's `.env`, which `backlog-digest.sh` does **not** source — so
-export it first, or the digest exits with a "board has not been created yet"
-message that is misleading rather than wrong:
+and `BESS_PO_TOKEN` live in the repo's `.env`, and `backlog-digest.sh` sources
+it itself — **run it plainly, with no `set -a` preamble**. The file is
+gitignored and so exists only in the main checkout; the script resolves it via
+`git rev-parse --git-common-dir`, which points there from inside a worktree
+too.
 
-    set -a; . ./.env; set +a; ./scripts/backlog-digest.sh
+An earlier version required the caller to export those first, which is why an
+unattended `/loop /backlog` pass died on its first line every time: the thing
+invoking the script is a skill, not a shell someone typed into. If the digest
+now exits complaining about `PROJECT_NUMBER`, the variable is genuinely absent
+from `.env` — do not work around it by exporting one.
 
 Board writes need `BESS_PO_TOKEN` with `project` scope.
 
@@ -147,10 +153,16 @@ For each item the digest puts in Backlog or Analysis:
 ## Verb: board
 
 Reconcile every card against the digest's derived `column`. **The digest
-always wins** — never trust a card's current position. Act on each mismatch:
+always wins** — never trust a card's current position.
+
+The comparison is in the digest: every item carries `board_status` (where the
+card sits now) alongside `column` (where the evidence says it belongs), using
+the same six Status strings, so a mismatch is `board_status != column` and
+nothing needs a second `gh project item-list` call. Act on each mismatch:
 
 | Mismatch | Action |
 |---|---|
+| `board_status: null` | the issue has **no card at all**. It carries no Priority, and *Ready for Dev* requires one — so it can never become dispatchable however well it is analysed, while reading as an ordinary Backlog item. Add the card, then triage it normally. Also listed under `orphans` as `issue_no_card` |
 | card *In Progress*, no worktree, no PR | abandoned — move to *Ready for Dev*, report it |
 | `stale_worktree: true` | the branch already merged; the worktree is rot, not work. Hand to `sweep-prs`, and do not read it as progress |
 | worktree present, no session, no PR | the session died mid-issue. The branch's commits survive — resuming is `/implement-issue <n>`, whose Step 0 detects the prior work and re-enters at the right step. **Never silently relaunch**: a session that died twice is telling you something, and a background dispatch that reports `working` may have written nothing at all — verify by work product (`git -C <wt> log`, file mtimes), never by session state |
@@ -165,9 +177,10 @@ always wins** — never trust a card's current position. Act on each mismatch:
 Never auto-park an active conversation, and never chase a reporter for
 something an upstream vendor owns.
 
-Also review the digest's `orphans` list (worktrees with no matching open
-issue, PRs with no `fixes/closes/resolves` reference) and hand any worktree
-or PR rot found there to `sweep-prs`.
+Also review the digest's `orphans` list — worktrees with no matching open
+issue, PRs with no `fixes/closes/resolves` reference, and open issues with no
+board card (`issue_no_card`). Hand worktree or PR rot to `sweep-prs`; a missing
+card is yours to add.
 
 ## Verb: rhythm — the unattended pass
 
@@ -191,7 +204,9 @@ Actions, and who does what:
 | Action | Do |
 |---|---|
 | `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
-| `awaiting_maintainer` | nothing; report it. Out of draft is the finish line |
+| `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line |
+| `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>`. **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
+| `rework_review` | out of draft with changes requested: `/implement-issue <n>` to address them, then a fresh review |
 | `resolve_conflict` | hand to `sweep-prs` |
 | `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
 | `nudge_reporter` | one nudge, as the PO identity |

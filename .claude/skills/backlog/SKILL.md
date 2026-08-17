@@ -14,7 +14,8 @@ never implement, and you never assign. Implementers pull the top of Ready.
 Every pass starts from one command. Do not read issues one by one to build a
 picture:
 
-    ./scripts/backlog-digest.sh
+    ./scripts/backlog-rhythm.sh      # what is DUE now — start here
+    ./scripts/backlog-digest.sh      # the full evidence, when you need detail
 
 Open an individual issue only when you are deciding about that issue.
 
@@ -155,6 +156,53 @@ something an upstream vendor owns.
 Also review the digest's `orphans` list (worktrees with no matching open
 issue, PRs with no `fixes/closes/resolves` reference) and hand any worktree
 or PR rot found there to `sweep-prs`.
+
+## Verb: rhythm — the unattended pass
+
+The one that carries work from incoming to a **ready PR**. Start here on every
+`/loop /backlog` tick:
+
+    scripts/backlog-rhythm.sh
+
+It answers "what is due right now" deterministically — every rule is a
+comparison over the digest, so a quiet backlog costs one process instead of a
+model pass, and `RHYTHM: nothing due.` is a legitimate noop tick. **Do not
+re-derive these by reading issues; act on what it lists.**
+
+Why it exists: every follow-up rule in this skill had been written down and
+**none had ever fired.** They each needed a model to notice them and nothing
+scheduled one, so the 14-day chase, the 28-day park and the reporter-replied
+re-check were decoration.
+
+Actions, and who does what:
+
+| Action | Do |
+|---|---|
+| `mark_ready` | `gh pr ready <n>` — **this is the step that produces something to approve.** Unattended by design |
+| `awaiting_maintainer` | nothing; report it. Approved and out of draft is the finish line |
+| `request_review` | `scripts/request-pr-review.sh <n>`, then `mark_ready` on `APPROVED`. A draft cannot become ready without a review |
+| `rework` | resume with `/implement-issue <n>` — its Step 0 re-enters at the review loop |
+| `resolve_conflict` | hand to `sweep-prs` |
+| `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
+| `nudge_reporter` | one nudge, as the PO identity |
+| `park` | move to *Backlog* — the chase went unanswered |
+| `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
+| `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
+| `dispatchable` | propose for dispatch — needs the maintainer's go-ahead |
+
+**Ordering matters.** Work the PR actions first: they are closest to the finish
+line, and a `mark_ready` is worth more than any amount of triage. `recheck_ready`
+outranks the chases, because nudging someone who has already replied is the worst
+output this pass can produce.
+
+**Quiet time is measured from the last comment, not `updatedAt`** — a label
+change or a board move bumps `updatedAt`, so an issue nobody has spoken on for a
+month would otherwise look active and never age into a chase.
+
+**A `dispatchable` item is a proposal, not a launch.** Dispatch spends real
+money and needs the go-ahead. And verify the item truly meets criterion 4 first:
+`Ready for Dev` is derived, and a design-heavy item will stop and ask a question
+no unattended session can answer.
 
 ## Verb: next
 

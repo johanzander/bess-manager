@@ -304,6 +304,19 @@ worse than the grid segment it replaces. Until that gate exists, any NEW
 reliance on PWL exactness is forbidden; the existing splice path is
 grandfathered, gate pending.
 
+**Window size is the caller's problem, not the solver's (#624).**
+`detect_tie_windows` merges adjacent flagged periods with no cap, while the
+solver's breakpoint set compounds per backward step — so the merged length
+is an unbounded function of the price curve while the exactly-solvable
+horizon is ~8 periods, and no budget raise extends it. Step 2b closes that
+gap by bisecting a window that raises `PWLWindowUnderRefinedError` and
+re-solving each half, terminating at horizon 1 (four breakpoints from the
+pinned terminal row, three orders of magnitude under budget). This does not
+relax P6 and is not the cost-gate: every spliced half carries the same
+certification a whole window would have. It is the one exception that may be
+caught, and only to re-size the work — catching it to keep the grid DP's
+result, or to splice the uncertified table, remains forbidden.
+
 ### P7. Point forecasts stay; risk handling is structural, not stochastic
 
 The DP remains deterministic over point forecasts. Forecast-error

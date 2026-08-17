@@ -69,10 +69,17 @@ class PWLWindowUnderRefinedError(RuntimeError):
     result of *unknown* accuracy and letting it be spliced in as if exact
     would replace one silent inaccuracy with another -- precisely the
     fallback `docs/agents/rules.md` forbids. Raising instead makes the
-    condition impossible to miss; the budgets themselves (see
-    `PWL_MAX_BREAKPOINTS`, `PWL_MAX_REFINE_ITERS`,
-    `PWL_MAX_PREIMAGE_SEED_POINTS`) are the knobs to revisit if it ever
-    fires in practice -- it fires on none of the fixture suite's scenarios.
+    condition impossible to miss.
+
+    It DOES fire in practice, and the budgets are not the knob. #624 hit it
+    in the field on a nine-period merged tie window: the preimage cross
+    product compounds per backward step, so the reachable horizon is ~8
+    periods and no budget raise extends it (`measure_tie_coverage.py`).
+    `dp_battery_algorithm`'s Step 2b therefore catches this exception --
+    alone among the raises here -- and bisects the window, re-solving each
+    half under this same certification. Reaching a caller means either a
+    horizon-1 window that still cannot certify (not a sizing problem) or a
+    solve outside that path.
     """
 
 

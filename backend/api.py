@@ -2962,6 +2962,7 @@ async def run_setup_discovery():
             {
                 "growatt_found": integrations["growatt_found"],
                 "growatt_device_id": integrations["growatt_device_id"],
+                "huawei_found": integrations["huawei_found"],
                 "huawei_device_id": integrations.get("huawei_device_id"),
                 "solax_found": integrations["solax_found"],
                 "solax_has_growatt_tou": integrations.get(

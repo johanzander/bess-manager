@@ -201,9 +201,11 @@ import json, re, sys
 #   gh api repos/johanzander/bess-manager-beta/rulesets
 #
 # What this deliberately does NOT cover: force-pushing or deleting a FEATURE
-# branch (fix/**, feat/**) on origin. That is the accepted residual -- those
-# refs are unprotected on purpose so ordinary work needs no prompt, and the
-# damage is bounded to a branch that has not been merged.
+# branch (fix/**, feat/**) on origin, nor `release-X.Y` (see MUST_NOT_BE_GUARDED
+# below). Accepted residuals -- but NOT because "the damage is bounded to your
+# own unmerged branch". ~20 worktrees push in parallel as the same identity, so
+# a misaimed --force destroys another agent's commits and closes its PR, with
+# the recovering reflog sitting in a different worktree.
 #
 # Every entry below is a rule whose deletion is the exact regression this gate
 # was written for -- the GitHub-reaching and history-destroying guards. Keep
@@ -330,9 +332,22 @@ MUST_NOT_BE_GUARDED = [
     # being guarded against is someone re-adding a `Bash(git push*)` ask
     # because it "looks unguarded", which would silently restore the stall the
     # rulesets were created to remove. If you believe a guard is missing, read
-    # the rulesets before touching this list. The force/delete spellings are
-    # here too -- they are refused by GitHub, not by a prompt, and asserting
-    # that they are locally unguarded is exactly the point.
+    # the rulesets before touching this list.
+    #
+    # These entries assert only that the commands are LOCALLY unguarded. Which
+    # of them GitHub also refuses is a separate question, and the answer is not
+    # "all of them" -- do not read this list as a protection matrix:
+    #
+    #   main --force, +beta-release-*, v9.9.0 (tag)  -> refused by a ruleset
+    #   --delete release-X.Y                         -> NOT refused; no ruleset
+    #                                                   covers `release-*`
+    #
+    # That last line is a real residual, not an oversight to "fix" by putting
+    # the prompt back: `release-X.Y` is the short-lived hotfix branch created
+    # by the release skill (steps 2-6), it is pushed and tagged, and nothing
+    # currently protects it at either layer. The protected TAG preserves the
+    # released commit, so the branch is recoverable after tagging but not
+    # before. Closing it means adding a `release-*` ruleset, not an ask rule.
     "git push", "git push -u origin main",
     "git push origin main --force",
     "git push origin +beta-release-9.9",

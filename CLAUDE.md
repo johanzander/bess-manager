@@ -330,9 +330,9 @@ git push origin v9.9.0                # moves a published release tag
 
 The glob was never what made those safe — it was a blunt instrument
 compensating for having no guard at the only layer that can see a *ref update*
-rather than a command string. That layer now exists. Three **GitHub rulesets**,
-all `enforcement=active` with an **empty `bypass_actors` list**, refuse every
-line above:
+rather than a command string. That layer now exists. Four **GitHub rulesets**,
+all `enforcement=active` with an **empty `bypass_actors` list**, refuse three
+of the four lines above — see the gap called out immediately after the table:
 
 | Repo | Ruleset | Applies to | Rules |
 |---|---|---|---|
@@ -340,6 +340,20 @@ line above:
 | `bess-manager` | Protect beta release branches | `beta-release-*` | deletion, non_fast_forward |
 | `bess-manager` | Protect release tags | `~ALL` tags | deletion, non_fast_forward |
 | `bess-manager-beta` | Protect beta main (fast-forward only) | `~DEFAULT_BRANCH` | deletion, non_fast_forward |
+
+⚠️ **`release-X.Y` is not in that table, and `--delete release-X.Y` is
+therefore unguarded at BOTH layers.** That is the one line of the four above
+which nothing currently refuses. It is the short-lived stable hotfix branch the
+`release` skill creates (steps 2–6), and it *is* pushed and tagged, so it is a
+shared ref by the standard used everywhere else here. The protected tag
+preserves the released commit, which makes the branch recoverable after
+tagging but not before.
+
+Left open knowingly rather than by oversight — closing it means adding a
+`release-*` ruleset (`non_fast_forward`, and deliberately **not** `deletion`,
+since the branch is meant to be cleaned up after the release). Do **not** close
+it by restoring a `Bash(git push*)` ask: that guards every push to fix one
+branch pattern, and `quality-check.sh` fails on it.
 
 The empty bypass list is the load-bearing part: **local pushes authenticate as
 the repo owner**, not as `bess-agent` (the credential helper is osxkeychain and
@@ -368,10 +382,21 @@ Do not add a bypass actor for it — a standing exemption for the identity that
 does every push is the same hole as having no rule.
 
 **What this deliberately leaves open:** force-pushing or deleting a *feature*
-branch (`fix/**`, `feat/**`) on origin. Those refs are unprotected on purpose,
-so ordinary work needs no prompt, and the damage is bounded to a branch nobody
-has merged. This is the one case the old blanket prompt covered and the
-rulesets do not — accepted knowingly, not overlooked.
+branch (`fix/**`, `feat/**`) on origin, so ordinary work needs no prompt.
+
+**Do not describe that residual as "bounded to your own unmerged branch."** It
+was written that way first and the reasoning does not survive this repo's own
+conventions: ~20 worktrees run in parallel, each with its own pushed branch and
+open PR, and every one of them authenticates as the same owner. An unattended
+`--force` or `--delete` aimed at the wrong ref destroys *another agent's*
+pushed commits and closes its PR, and the local reflog that would recover it
+lives in a different worktree. The bound is "one feature branch", not "one
+agent's own work".
+
+Accepted anyway, because the alternative — a `fix/**` + `feat/**`
+`non_fast_forward` ruleset — also blocks the legitimate rebase-and-force-push
+on your own branch, and this project's merge-based flow means a force push
+appearing at all is the finding (see below). Know which trade is being made.
 
 **Do not re-add a `Bash(git push*)` ask because pushing "looks unguarded".**
 `quality-check.sh` pins the new direction: the push spellings live in

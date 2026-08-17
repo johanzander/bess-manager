@@ -202,21 +202,38 @@ fi
 #       mkdir rather than touch, and create the cache dir first: it may not
 #       exist yet on a fresh machine, and creating it is the first thing a
 #       real install does.
-if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+#       `PLAYWRIGHT_BROWSERS_PATH=0` is Playwright's documented sentinel for
+#       "no shared cache, keep browsers inside node_modules" -- NOT a path.
+#       Treating it as one makes the probe `mkdir -p 0` in the repo, which
+#       succeeds and reports a PASS that measured nothing.
+pw_sentinel=no
+if [ "${PLAYWRIGHT_BROWSERS_PATH:-}" = "0" ]; then
+  pw_sentinel=yes
+elif [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
   pw_cache="$PLAYWRIGHT_BROWSERS_PATH"
 elif [ "$(uname -s)" = "Darwin" ]; then
   pw_cache="$HOME/Library/Caches/ms-playwright"
 else
   pw_cache="$HOME/.cache/ms-playwright"
 fi
-mkdir -p "$pw_cache" 2>/dev/null
-if [ -d "$pw_cache" ]; then
-  mkdir "$pw_cache/.sandbox-probe" 2>/dev/null && pw=allowed || pw=blocked
-  rmdir "$pw_cache/.sandbox-probe" 2>/dev/null
+
+if [ "$pw_sentinel" = yes ]; then
+  printf 'SKIP  PLAYWRIGHT_BROWSERS_PATH=0 -- browsers live in node_modules, no shared cache to probe\n'
+else
+  # A cache directory that cannot even be CREATED is the blocked case, not an
+  # inapplicable one. Reporting SKIP here (and counting no failure) is how a
+  # fresh sandboxed machine exits 0 saying the config is safe while both npm
+  # and Playwright are about to fail -- the exact condition this check exists
+  # to catch. Fold it into the same `check`, so it FAILS.
+  mkdir -p "$pw_cache" 2>/dev/null
+  if [ -d "$pw_cache" ]; then
+    mkdir "$pw_cache/.sandbox-probe" 2>/dev/null && pw=allowed || pw=blocked
+    rmdir "$pw_cache/.sandbox-probe" 2>/dev/null
+  else
+    pw=blocked
+  fi
   check "writing the Playwright browser cache is allowed" allowed "$pw" \
     "add the browser cache to sandbox.filesystem.allowWrite (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux). Without it scripts/worktree-setup.sh cannot install browsers, and its timeout reports that as a stalled download -- indistinguishable from the separate extraction hang that timeout was written for. Do NOT point PLAYWRIGHT_BROWSERS_PATH into the repo to dodge this: one shared cache across every worktree is the design."
-else
-  printf 'SKIP  Playwright browser cache %s could not be created\n' "$pw_cache"
 fi
 
 # 4d-ii. The npm package cache. ~/.npm/_logs is writable by default and
@@ -224,15 +241,16 @@ fi
 #        fetch something -- `npm install` in worktree-setup.sh (diverged
 #        lockfile), `npm ci` in e2e/run-e2e.sh (missing frontend/dist), or any
 #        npx that misses the local node_modules.
-if mkdir -p "$HOME/.npm" 2>/dev/null && [ -d "$HOME/.npm" ]; then
-  mkdir -p "$HOME/.npm/_cacache" 2>/dev/null
+#        Same rule as above: "could not be created" IS blocked. Never SKIP it.
+mkdir -p "$HOME/.npm/_cacache" 2>/dev/null
+if [ -d "$HOME/.npm/_cacache" ]; then
   mkdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null && npmc=allowed || npmc=blocked
   rmdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null
-  check "writing the npm package cache is allowed" allowed "$npmc" \
-    "add ~/.npm to sandbox.filesystem.allowWrite. The built-in allow list covers ~/.npm/_logs only, so npm can write its log and not its cache. IGNORE the error npm prints -- it claims the cache 'contains root-owned files' and tells you to run 'sudo chown -R 502:20 ~/.npm'. That is npm guessing at EPERM; the files are not root-owned and sudo is not the fix."
 else
-  printf 'SKIP  ~/.npm could not be created\n'
+  npmc=blocked
 fi
+check "writing the npm package cache is allowed" allowed "$npmc" \
+    "add ~/.npm to sandbox.filesystem.allowWrite. The built-in allow list covers ~/.npm/_logs only, so npm can write its log and not its cache. IGNORE the error npm prints -- it claims the cache 'contains root-owned files' and tells you to run 'sudo chown -R 502:20 ~/.npm'. That is npm guessing at EPERM; the files are not root-owned and sudo is not the fix."
 
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
 #    binary: under the macOS sandbox it cannot reach trustd to verify TLS,

@@ -24,6 +24,12 @@ the `bess-analyst` sub-agent.
 
 - User gives you a bess-manager issue number/URL and asks you to implement,
   fix, or resolve it locally.
+- **Or a PR number, or a `TODO.md` item, or a refactor with no issue at all.**
+  Issue-driven is the common case, not the only one. Step 0 resolves a bare
+  number to whichever it is, since GitHub numbers issues and PRs from one
+  sequence. Where there is no issue, the Step 2 diagnosis comes from the
+  maintainer's own framing rather than a Stage 2 comment, and Step 9 records it
+  in the PR body as usual.
 - Not for the `feature-lifecycle` multi-release integration flow (new
   inverter/price-provider platforms) — that skill owns experimental→stable
   graduation across multiple beta cycles. Use `implement-issue` for
@@ -67,10 +73,28 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 
 ## Process
 
-### 0. Resume check — is there prior work for this issue?
+### 0. Resume check — is there prior work for this number?
 
 Run this before Step 1, every time. A fresh issue costs one cheap check; a
 resumed one would otherwise lose work.
+
+**`<n>` may be an issue OR a pull request, and you resolve which.** GitHub
+numbers issues and PRs from one sequence per repository, so a bare number is
+unambiguous and no flag is needed. This is not an edge case: this skill is used
+for `TODO.md` items and for refactors that never had an issue, so a PR with no
+linked issue is the normal shape for that work, not a defect.
+
+```bash
+gh pr view <n> --json number,headRefName,isDraft,mergeable,reviews 2>/dev/null \
+  || gh issue view <n> --json number,title,labels,body,comments
+```
+
+If `<n>` is a **PR**, resume from it directly — it is the stronger handle,
+carrying the branch, the diff, the `## Scope assessment` and the review verdict,
+which is everything the table below reads. Read its linked issue too if it
+references one, for the diagnosis.
+
+If `<n>` is an **issue**, find its work the usual way:
 
 ```bash
 gh pr list --state open --search "<n>" --json number,headRefName,isDraft,mergeable,reviews
@@ -719,6 +743,7 @@ net is upstream, not this section.
 | "the test asserts the exact command we write to hardware, that's precise" | Precise about the mapping, silent about the outcome. It stays green when the mapping is right and the physics is wrong. Assert realized cost / SoE / flows wherever an execution model exists. |
 | "it's green, so the fix works" | Green means the suite is satisfied. Revert the fix and watch the test fail — if it doesn't, it was never evidence. |
 | "this issue has no PR yet, so I'm starting fresh" | Step 0 checks branches and worktrees too, not just PRs. 8 abandoned branches in one audit had real commits and no PR — one with 32. Starting fresh from `origin/main` deletes them. |
+| "there's no issue for this PR, so it isn't mine to resume" | This skill covers `TODO.md` items and refactors, which never had an issue. A bare number resolves to either — that dead end left #620, #622 and #623 with no owner in the loop. |
 | "the old branch is a mess, cleaner to redo it" | Its commits are the only copy of a diagnosis you no longer have. If you genuinely cannot reconstruct the approach, that is a STOP-and-report, not a licence to reset. |
 | "that worktree's session shows dead, so it's mine to take" | Check unsandboxed. A sandboxed `claude agents --json` returned 1 session where the real answer was 17, because `~/.claude/jobs` is sandbox-denied — every other session read as dead. |
 | "the review said CHANGES_REQUESTED but nobody assigned it to me" | Nothing else will pick it up. Once the opening session exits, an orphaned PR has no owner at all — `sweep-prs` refuses the job by design. Resuming is how it gets one. |

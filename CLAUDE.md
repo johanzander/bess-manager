@@ -588,15 +588,42 @@ redundant:
   guess, not a diagnosis: nothing is root-owned, and `sudo` is on the `ask`
   list and is the wrong fix. Playwright's step is bounded by
   `worktree-setup.sh`'s own timeout, whose message blames a slow download, so a
-  blocked cache is indistinguishable from the real #556 download hang. One
-  session lost a whole worktree setup to that before the cause was probed
-  directly.
+  blocked cache is indistinguishable from the genuine Playwright hang that
+  timeout exists for (see below — a separate bug, and the two must not be
+  conflated). One session lost a whole worktree setup to that before the cause
+  was probed directly.
 
   Do **not** dodge the Playwright half by pointing `PLAYWRIGHT_BROWSERS_PATH`
   into the repo. Browsers are ~170MB and deliberately shared by every worktree;
   a per-worktree cache re-downloads them ~20 times over. `verify-sandbox.sh`
   probes both caches with `mkdir`, creating the directory first so a fresh
   machine reports a real result rather than skipping.
+
+### The Playwright install hang is a version bug, not a slow download
+
+Distinct from the sandbox problem above, and repeatedly misread as one. There
+is **no issue tracking it** — `worktree-setup.sh` cites #556 only because that
+is the work it was first seen during, and #556 (dependency caching) is closed.
+
+Measured 2026-08-17, unsandboxed, on this machine:
+
+| Playwright | Browser build | Result |
+|---|---|---|
+| 1.59.1 (the pin in `e2e/package.json`) | `chromium-1217` | stalls at **exactly** 84 files / 448K, twice |
+| 1.62.1 (current latest) | `chromium-1234` | completes, minutes later, same network |
+
+**It is not the download.** In both stalled runs the full 173MB zip had already
+landed in `$TMPDIR/playwright-download-*`, and `sample`ing the process showed
+`oopDownloadBrowserMain.js` idle at 0% CPU with every libuv worker parked in
+`__psynch_cvwait`. The failure is in *extraction*, after a complete fetch —
+which is why waiting it out never works and why the timeout's "no progress"
+wording sends readers to the network.
+
+So `worktree-setup.sh` cannot install browsers on the pinned version, and the
+likely fix is bumping `@playwright/test` past 1.59.1. Not done yet: it moves
+the E2E runner under 14 CI wizard scenarios and needs its own PR. Until then a
+worktree needing browsers is blocked, and the workaround is to drive an
+already-installed Chrome rather than to keep retrying the install.
 
 `sandbox.excludedCommands` is **not** used and is not needed. It was tried in
 both project and user settings while the four knobs above were missing, appeared

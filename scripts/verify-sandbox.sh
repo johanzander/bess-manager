@@ -191,7 +191,9 @@ fi
 #     -R", sending you to `sudo` -- which is on the ask list and is entirely
 #     the wrong fix. And worktree-setup.sh's Playwright step is bounded by a
 #     timeout whose message blames a slow download, so a blocked cache reads
-#     as the known #556 hang. Both were observed here in one session, and the
+#     as the unrelated extraction hang described in worktree-setup.sh (which
+#     is a real, separate failure -- do not conflate the two). Both the npm and
+#     the Playwright blocks were observed here in one session, and the
 #     Playwright one cost a whole worktree's setup.
 #
 # 4d-i. The Playwright browser cache. Browsers are deliberately NOT
@@ -212,7 +214,7 @@ if [ -d "$pw_cache" ]; then
   mkdir "$pw_cache/.sandbox-probe" 2>/dev/null && pw=allowed || pw=blocked
   rmdir "$pw_cache/.sandbox-probe" 2>/dev/null
   check "writing the Playwright browser cache is allowed" allowed "$pw" \
-    "add the browser cache to sandbox.filesystem.allowWrite (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux). Without it scripts/worktree-setup.sh cannot install browsers, and its timeout reports that as a stalled download -- which is indistinguishable from the real #556 hang. Do NOT point PLAYWRIGHT_BROWSERS_PATH into the repo to dodge this: one shared cache across every worktree is the design."
+    "add the browser cache to sandbox.filesystem.allowWrite (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux). Without it scripts/worktree-setup.sh cannot install browsers, and its timeout reports that as a stalled download -- indistinguishable from the separate extraction hang that timeout was written for. Do NOT point PLAYWRIGHT_BROWSERS_PATH into the repo to dodge this: one shared cache across every worktree is the design."
 else
   printf 'SKIP  Playwright browser cache %s could not be created\n' "$pw_cache"
 fi

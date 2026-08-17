@@ -66,8 +66,19 @@ jobs:
 
               3. Walk through the review checklist in `.github/claude-bot.md`.
                  For each finding, post an INLINE comment on the specific
-                 line using `gh pr review` or `gh api` with the `comments[]`
-                 array. Do not bundle everything in one summary comment.
+                 line. Do not bundle everything in one summary comment.
+
+                 Post inline comments with `gh api`, NOT `gh pr review`:
+                   gh api repos/johanzander/bess-manager/pulls/${{ github.event.issue.number }}/comments \
+                     -f body='...' -f commit_id='<head sha>' -f path='<file>' -F line=<n>
+
+                 This matters for automation. `gh pr review` SUBMITS a review,
+                 so using it for inline notes puts an extra `COMMENTED` review
+                 on the PR before your summary. `scripts/request-pr-review.sh`
+                 waits for a verdict, and a stray `COMMENTED` is
+                 indistinguishable by state from a real COMMENT verdict — that
+                 ambiguity left PR #615 approved but stuck in draft. Submit
+                 exactly ONE review per run: the summary in step 4.
 
               4. End with a single summary review using `gh pr review`:
                    - APPROVE  — no blockers, only nits or none

@@ -544,18 +544,21 @@ scripts/request-pr-review.sh <n>     # run_in_background: true
 ```
 
 The script posts `@claude-bot review` as `bess-agent` and blocks until a
-**terminal** review lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED>
+verdict lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED>
 <submittedAt> <author>` (exit 2 on a 15-minute timeout, after dumping recent
-`PR Review` runs and any non-terminal reviews it saw).
+`PR Review` runs).
 
-**It will never hand you `COMMENTED`, and you must not treat one as a verdict
-if you see it another way.** The bot posts its inline notes first as a
-`COMMENTED` review reading "Inline notes below; summary review to follow.",
-then the real summary seconds later — 50 seconds apart on PR #617. Acting on
-the placeholder is how PR #615 sat `APPROVED` but still a draft overnight:
-the loop exited on a non-`APPROVED` state and never ran `gh pr ready`. If a
-round ends without `APPROVED` or `CHANGES_REQUESTED`, the review stalled
-mid-flight — say so, don't infer a verdict. Like Step 10's
+**`COMMENTED` is ambiguous, and the script resolves it for you — don't
+second-guess it.** `pr-review.yml` allows three final verdicts (`APPROVE`,
+`REQUEST_CHANGES`, `COMMENT`), so a real `COMMENT` verdict is possible and
+carries findings. But the bot historically also submitted its inline notes as
+a separate `COMMENTED` review ("Inline notes below; summary review to follow")
+16–50 seconds ahead of the summary, and the two are identical by state.
+Acting on that placeholder is how PR #615 sat `APPROVED` but still a draft
+overnight. The script holds a `COMMENTED`-only state for 180s to let a summary
+supersede it, so a `COMMENTED` that reaches you **is** the verdict: treat it
+like `CHANGES_REQUESTED` — collect the findings, do not flip the PR ready.
+Like Step 10's
 `--watch`, it blocks rather than polls — so **do not poll it and do not
 re-touch the diagnosis/TDD context while it runs.** You are notified once,
 when it exits. This is a hard session boundary, same as Step 6.
@@ -621,8 +624,8 @@ On the verdict:
   The round cap counts this round like any other. If it lands you on the cap,
   say so and hand over a draft PR with the outstanding state — an honest
   draft beats a ready flag that means less than it claims.
-- **`CHANGES_REQUESTED`** — collect the findings (a bare `COMMENTED` never
-  reaches you; see above):
+- **`CHANGES_REQUESTED` / `COMMENTED`** — both carry findings and neither earns
+  the ready flag. Collect them:
 
   ```bash
   gh api repos/johanzander/bess-manager/pulls/<n>/comments \

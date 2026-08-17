@@ -17,32 +17,61 @@
 #   scripts/request-pr-review.sh <pr-number> [timeout-seconds]
 #
 # Output (stdout, last line):
-#   VERDICT <APPROVED|CHANGES_REQUESTED> <submittedAt-iso> <author>
+#   VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED> <submittedAt-iso> <author>
 #
-# The author is reported rather than filtered on: any TERMINAL review newer than
-# the trigger is a real signal, including one the maintainer submits by hand
-# while the bot is still thinking. The caller decides what to do with it.
+# The author is reported rather than filtered on: any review newer than the
+# trigger is a real signal, including one the maintainer submits by hand while
+# the bot is still thinking. The caller decides what to do with it.
 #
-# `COMMENTED` is NOT terminal, and that distinction is the whole point of this
-# loop. The review bot posts its inline notes first as a COMMENTED review whose
-# body is literally "Inline notes below; summary review to follow.", then submits
-# the real APPROVED/CHANGES_REQUESTED summary seconds later. Measured on PR #617:
-# placeholder at 06:57:13Z, APPROVED at 06:58:03Z -- 50 seconds apart. Returning
-# on the placeholder makes `implement-issue` Step 11 see a non-APPROVED verdict
-# and skip `gh pr ready`, which is how PR #615 sat approved-but-draft overnight
-# with nothing left to do but the merge. Wait for a state that decides something.
+# THE COMMENTED PROBLEM. `pr-review.yml` gives the bot three final verdicts:
+# APPROVE, REQUEST_CHANGES and COMMENT ("questions/observations only"). But the
+# bot ALSO posts its inline notes as a separate review before the summary, and
+# that one is `COMMENTED` too -- body "Inline notes below; summary review to
+# follow.". So `COMMENTED` is ambiguous: either a placeholder that decides
+# nothing, or a legitimate final verdict. The state alone cannot tell them apart.
+#
+# Getting this wrong in either direction has been observed:
+#   - Treating COMMENTED as terminal returns the placeholder. Measured on #617
+#     (06:57:13Z placeholder, 06:58:03Z APPROVED -- 50s) and #622 (08:48:58Z,
+#     08:49:14Z -- 16s). `implement-issue` Step 11 then saw a non-APPROVED
+#     verdict and skipped `gh pr ready`: that is how #615 sat approved-but-draft
+#     overnight with only the merge left to do.
+#   - Treating COMMENTED as never-terminal swallows a real COMMENT verdict. The
+#     loop waits out the full timeout and reports "no summary landed", which is
+#     false when a summary with findings is sitting on the PR.
+#
+# So COMMENTED is resolved by TIME, not by parsing its body. Body text is
+# bot-generated prose with no contract behind it, and a grace window needs no
+# agreement about wording. APPROVED/CHANGES_REQUESTED return immediately; a
+# COMMENTED-only state is held for GRACE seconds to let a summary supersede it,
+# and returned as the verdict if none does.
+#
+# `pr-review.yml` step 3 is also changed so inline notes post via `gh api`
+# instead of `gh pr review`, which stops the placeholder being submitted as a
+# review at all. That removes the ambiguity at its source; the grace window is
+# what keeps this correct for reviews already sitting on older PRs, and if the
+# bot ever regresses.
 #
 # Exit codes:
-#   0  a terminal review landed; verdict on stdout
-#   2  timed out waiting (recent PR Review runs dumped for diagnosis, plus any
-#      non-terminal reviews seen -- "placeholder only" and "total silence" are
-#      different faults and must not look alike)
+#   0  a verdict landed; verdict on stdout
+#   2  timed out waiting (recent PR Review runs dumped for diagnosis)
 #   1  usage/precondition error
 set -euo pipefail
 
 pr="${1:?usage: request-pr-review.sh <pr-number> [timeout-seconds]}"
 timeout="${2:-900}"
 interval=60
+
+# How long a COMMENTED-only state is held before it is accepted as the verdict.
+# The observed placeholder-to-summary gaps are 16s (#622) and 50s (#617), so 180
+# is several times the worst case seen while still leaving a real COMMENT verdict
+# usable well inside the default timeout. Clamped below `timeout` so a caller
+# passing a short timeout still gets its COMMENTED verdict rather than an exit 2.
+grace=180
+if [ "$grace" -ge "$timeout" ]; then
+    grace=$(( timeout / 2 ))
+fi
+first_commented_at=""
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
@@ -64,10 +93,7 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         sleep "$interval"
     fi
 
-    # Last TERMINAL review submitted after the trigger comment, if any.
-    # Filtering on state before taking `last` is load-bearing: the bot's inline
-    # notes arrive as a COMMENTED review first, so `last` unfiltered returns the
-    # placeholder and the caller acts on a verdict that decides nothing.
+    # A decisive verdict wins immediately, whenever it appears.
     verdict=$(gh pr view "$pr" --json reviews \
         --jq "[.reviews[]
                | select(.submittedAt > \"${since}\")
@@ -79,23 +105,35 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         echo "VERDICT ${verdict}"
         exit 0
     fi
+
+    # Otherwise: a COMMENTED-only state. Hold it for GRACE seconds so a summary
+    # can supersede it, then accept it as the verdict. Holding forever would
+    # swallow a real COMMENT verdict; returning at once would take the
+    # placeholder. Both have happened.
+    commented=$(gh pr view "$pr" --json reviews \
+        --jq "[.reviews[]
+               | select(.submittedAt > \"${since}\")
+               | select(.state == \"COMMENTED\")]
+              | last | select(. != null)
+              | \"\(.state) \(.submittedAt) \(.author.login)\"")
+
+    if [ -n "$commented" ]; then
+        if [ -z "$first_commented_at" ]; then
+            first_commented_at=$(date +%s)
+            echo "Saw a COMMENTED review; holding ${grace}s in case a summary follows." >&2
+        elif [ $(( $(date +%s) - first_commented_at )) -ge "$grace" ]; then
+            echo "No summary superseded it within ${grace}s — treating COMMENTED as the verdict." >&2
+            echo "VERDICT ${commented}"
+            exit 0
+        fi
+    fi
 done
 
-echo "No terminal review landed within ${timeout}s." >&2
-
-# Distinguish "the bot posted notes but never a summary" from "nothing ran at
-# all". Both used to print the same message, and they need opposite responses:
-# the first is a review that stalled mid-flight, the second is a trigger that
-# never reached the workflow.
-seen=$(gh pr view "$pr" --json reviews \
-    --jq "[.reviews[] | select(.submittedAt > \"${since}\")]
-          | map(\"\(.state) \(.submittedAt) \(.author.login)\") | join(\"; \")" 2>/dev/null)
-if [ -n "$seen" ]; then
-    echo "Non-terminal reviews seen since the trigger: ${seen}" >&2
-    echo "The review started but never submitted a summary verdict." >&2
-else
-    echo "No reviews of any state landed since the trigger." >&2
-fi
+echo "No review landed within ${timeout}s." >&2
+echo "No reviews of any state were submitted since the trigger, so the review" >&2
+echo "never reached the workflow — this is a trigger fault, not a stalled review." >&2
+echo "(A review that posted notes but no summary would have returned COMMENTED" >&2
+echo " via the grace path above.) PR #619 failed exactly this way, twice." >&2
 
 echo "Recent PR Review runs:" >&2
 gh run list --workflow="PR Review" --limit 3 >&2

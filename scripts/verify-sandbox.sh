@@ -178,6 +178,60 @@ else
     "add the main checkout to sandbox.filesystem.allowWrite -- nested worktrees and every symlink target are then covered by one entry. Without it vitest and vite build fail EPERM in every worktree. NOTE: a SIBLING checkout (../bess-manager-feature) is NOT under that path and needs its own entry."
 fi
 
+# 4d. THE TWO USER-LEVEL CACHES scripts/worktree-setup.sh WRITES. Both sit well
+#     outside the repo, so neither the "." nor the "~/GitHub/bess-manager"
+#     entry reaches them, and the built-in allowOnly list covers only
+#     ~/.npm/_logs -- not the package cache next to it. Setup does BOTH: it
+#     runs `npm install` when a lockfile has diverged from the main checkout,
+#     and then `npx playwright install chromium`.
+#
+#     What makes this worth a check rather than a comment is that NEITHER
+#     failure names the sandbox. npm reports EPERM on ~/.npm/_cacache as
+#     "Your cache folder contains root-owned files ... please run: sudo chown
+#     -R", sending you to `sudo` -- which is on the ask list and is entirely
+#     the wrong fix. And worktree-setup.sh's Playwright step is bounded by a
+#     timeout whose message blames a slow download, so a blocked cache reads
+#     as the known #556 hang. Both were observed here in one session, and the
+#     Playwright one cost a whole worktree's setup.
+#
+# 4d-i. The Playwright browser cache. Browsers are deliberately NOT
+#       per-worktree -- one shared user-level cache serves every checkout, so
+#       redirecting PLAYWRIGHT_BROWSERS_PATH into the repo is not the fix.
+#       mkdir rather than touch, and create the cache dir first: it may not
+#       exist yet on a fresh machine, and creating it is the first thing a
+#       real install does.
+if [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+  pw_cache="$PLAYWRIGHT_BROWSERS_PATH"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  pw_cache="$HOME/Library/Caches/ms-playwright"
+else
+  pw_cache="$HOME/.cache/ms-playwright"
+fi
+mkdir -p "$pw_cache" 2>/dev/null
+if [ -d "$pw_cache" ]; then
+  mkdir "$pw_cache/.sandbox-probe" 2>/dev/null && pw=allowed || pw=blocked
+  rmdir "$pw_cache/.sandbox-probe" 2>/dev/null
+  check "writing the Playwright browser cache is allowed" allowed "$pw" \
+    "add the browser cache to sandbox.filesystem.allowWrite (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux). Without it scripts/worktree-setup.sh cannot install browsers, and its timeout reports that as a stalled download -- which is indistinguishable from the real #556 hang. Do NOT point PLAYWRIGHT_BROWSERS_PATH into the repo to dodge this: one shared cache across every worktree is the design."
+else
+  printf 'SKIP  Playwright browser cache %s could not be created\n' "$pw_cache"
+fi
+
+# 4d-ii. The npm package cache. ~/.npm/_logs is writable by default and
+#        ~/.npm/_cacache is not, so npm looks fine right up until it has to
+#        fetch something -- `npm install` in worktree-setup.sh (diverged
+#        lockfile), `npm ci` in e2e/run-e2e.sh (missing frontend/dist), or any
+#        npx that misses the local node_modules.
+if mkdir -p "$HOME/.npm" 2>/dev/null && [ -d "$HOME/.npm" ]; then
+  mkdir -p "$HOME/.npm/_cacache" 2>/dev/null
+  mkdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null && npmc=allowed || npmc=blocked
+  rmdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null
+  check "writing the npm package cache is allowed" allowed "$npmc" \
+    "add ~/.npm to sandbox.filesystem.allowWrite. The built-in allow list covers ~/.npm/_logs only, so npm can write its log and not its cache. IGNORE the error npm prints -- it claims the cache 'contains root-owned files' and tells you to run 'sudo chown -R 502:20 ~/.npm'. That is npm guessing at EPERM; the files are not root-owned and sudo is not the fix."
+else
+  printf 'SKIP  ~/.npm could not be created\n'
+fi
+
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
 #    binary: under the macOS sandbox it cannot reach trustd to verify TLS,
 #    which surfaces as x509: OSStatus -26276.

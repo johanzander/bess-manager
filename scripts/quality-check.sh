@@ -171,13 +171,39 @@ if ! python3 - <<'PY'
 import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
-# `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
-# dangerous shapes put their marker at an arbitrary argument position
-# (`git push origin main --force`, `git push origin +beta-release-9.9`,
-# `git push origin --delete release-X.Y`, `gh api <path> -X PUT`), which a
-# prefix glob cannot reach. Enumerating them left real holes twice. Narrowing
-# these two back to specific forms re-opens the holes, so the check requires
-# the blanket spelling rather than merely "some rule exists".
+# `gh api` is guarded by a BLANKET rule on purpose: the dangerous shapes put
+# their marker at an arbitrary argument position (`gh api <path> -X PUT`,
+# `gh api <path> -f k=v`), which a prefix glob cannot reach. Enumerating them
+# left real holes twice. Narrowing it back to specific forms re-opens the
+# holes, so the check requires the blanket spelling rather than merely "some
+# rule exists".
+#
+# `git push` USED to be in that same sentence and no longer is. It was never
+# the glob that made it safe -- the glob was a blunt instrument compensating
+# for having no guard at the only layer that can actually see a ref update.
+# The four leaks it was blanket-guarding against are now refused SERVER-SIDE
+# by GitHub rulesets, which evaluate the resulting ref rather than the command
+# string, so argument order cannot evade them:
+#
+#   git push origin main --force        -> non_fast_forward on ~DEFAULT_BRANCH
+#   git push origin +beta-release-9.9   -> non_fast_forward on beta-release-*
+#   git push origin --delete <ref>      -> deletion on both of the above
+#   git push origin v9.9.0 (force/move) -> non_fast_forward on ~ALL tags
+#
+# All rulesets are enforcement=active with an EMPTY bypass_actors list, so
+# they bind the repo owner too -- which matters, because local pushes
+# authenticate as the owner (osxkeychain), never as bess-agent.
+#
+# Do NOT re-add a `Bash(git push*)` ask on the grounds that "a guard is
+# missing". Check the rulesets first:
+#
+#   gh api repos/johanzander/bess-manager/rulesets
+#   gh api repos/johanzander/bess-manager-beta/rulesets
+#
+# What this deliberately does NOT cover: force-pushing or deleting a FEATURE
+# branch (fix/**, feat/**) on origin. That is the accepted residual -- those
+# refs are unprotected on purpose so ordinary work needs no prompt, and the
+# damage is bounded to a branch that has not been merged.
 #
 # Every entry below is a rule whose deletion is the exact regression this gate
 # was written for -- the GitHub-reaching and history-destroying guards. Keep
@@ -191,7 +217,6 @@ REQUIRED = {
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
-        "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
         "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh repo edit*)",
         "Bash(gh release create*)", "Bash(gh release edit*)",
@@ -241,18 +266,9 @@ MUST_BE_GUARDED = [
     # git's global options may precede the subcommand -- the hook this
     # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
     # the cross-checkout idiom, so it is the spelling most likely to be used.
-    "git -C .claude/worktrees/x push origin main",
-    "git -c push.default=current push beta main",
     "git --no-pager gc --prune=now",
     "git -C sub tag -d v9.9.0",
     "git -C sub update-ref -d refs/heads/x",
-    # the marker sits at an arbitrary argument position
-    "git push origin main --force",
-    "git push origin +beta-release-9.9",
-    "git push origin --delete release-9.9",
-    "git push origin v9.9.0",
-    "git push -u origin main",
-    "git push",
     # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
     "git tag --delete v9.9.0", "git tag -d v9.9.0",
     "git tag -f v9.9.0 abc123",
@@ -308,6 +324,22 @@ MUST_NOT_BE_GUARDED = [
     "git -C .claude/worktrees/x diff -- file.py",
     "git -C .claude/worktrees/x apply",
     "git status", "git diff", "git log --oneline",
+    # Pushing. Enforcement moved to GitHub rulesets (see the REQUIRED comment
+    # above), so these must run UNATTENDED -- implement-issue Step 9 and every
+    # PR-refresh push. Pinned in this direction on purpose: the failure mode
+    # being guarded against is someone re-adding a `Bash(git push*)` ask
+    # because it "looks unguarded", which would silently restore the stall the
+    # rulesets were created to remove. If you believe a guard is missing, read
+    # the rulesets before touching this list. The force/delete spellings are
+    # here too -- they are refused by GitHub, not by a prompt, and asserting
+    # that they are locally unguarded is exactly the point.
+    "git push", "git push -u origin main",
+    "git push origin main --force",
+    "git push origin +beta-release-9.9",
+    "git push origin --delete release-9.9",
+    "git push origin v9.9.0",
+    "git -C .claude/worktrees/x push origin main",
+    "git -c push.default=current push beta main",
     # Read-only stash inspection, which CLAUDE.md and rules.md both promise
     # keeps working. A blanket `git -* stash *` DENY caught these, and deny has
     # no override -- so the cross-checkout recipe was hard-blocked, not merely

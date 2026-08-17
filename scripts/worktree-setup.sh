@@ -105,7 +105,22 @@ for pkg in frontend e2e; do
     else
         echo "   $pkg: lockfile differs from the main checkout (or it has no"
         echo "   node_modules) — installing into this worktree instead of sharing"
-        (cd "$pkg" && npm install)
+        # npm's own EPERM message is a guess, not a diagnosis: a sandbox-blocked
+        # ~/.npm/_cacache is reported as "Your cache folder contains root-owned
+        # files ... please run: sudo chown -R", which sends you to `sudo` (on the
+        # ask list) to fix files that are not root-owned. Say what it actually is.
+        if ! (cd "$pkg" && npm install); then
+            echo "" >&2
+            echo "❌ npm install failed in $pkg." >&2
+            echo "   If it blamed root-owned files and told you to run sudo chown," >&2
+            echo "   IGNORE that — it is npm mis-reporting EPERM. Check the sandbox:" >&2
+            echo "" >&2
+            echo "     mkdir ~/.npm/_cacache/.probe   # 'Operation not permitted' = sandbox" >&2
+            echo "" >&2
+            echo "   ~/.npm belongs in sandbox.filesystem.allowWrite; only" >&2
+            echo "   ~/.npm/_logs is granted by default. See scripts/verify-sandbox.sh." >&2
+            exit 1
+        fi
     fi
 done
 
@@ -187,6 +202,16 @@ while kill -0 "$install_pid" 2>/dev/null; do
         echo "" >&2
         echo "     rm -rf \"$BROWSER_CACHE\"/chromium*" >&2
         echo "     cd e2e && npx playwright install chromium" >&2
+        echo "" >&2
+        echo "   If that retry ALSO makes no progress, check the sandbox before" >&2
+        echo "   blaming the network. The browser cache lives outside every repo" >&2
+        echo "   path sandbox.filesystem.allowWrite grants, and a blocked cache" >&2
+        echo "   is indistinguishable from a slow download at this layer:" >&2
+        echo "" >&2
+        echo "     mkdir \"$BROWSER_CACHE/.probe\"   # 'Operation not permitted' = sandbox" >&2
+        echo "" >&2
+        echo "   See CLAUDE.md 'Why each non-default knob is there', and confirm" >&2
+        echo "   with scripts/verify-sandbox.sh in a FRESH session." >&2
         echo "" >&2
         echo "   Dependency sharing above completed — only the browsers are missing." >&2
         exit 1

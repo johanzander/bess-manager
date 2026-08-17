@@ -66,6 +66,11 @@ actions=$(printf '%s' "$digest" | jq \
     --argjson nudge "$NUDGE_DAYS" \
     --argjson park "$PARK_DAYS" \
     --argjson prs "$prs" '
+  # Board cards for PRs, keyed by number. Absent on an older digest, so this
+  # defaults to empty rather than failing -- a rhythm run against a stale
+  # digest then simply defers nothing, which is the pre-existing behaviour.
+  (.pr_board // []) as $pr_board
+  |
 
   # Quiet time is measured from the LAST COMMENT, not from updatedAt. A label
   # change, a board move or a bot touch all bump updatedAt, so an issue nobody
@@ -217,7 +222,50 @@ actions=$(printf '%s' "$digest" | jq \
       | . as $p
       # The issue this PR belongs to, so the handoff can name it.
       | ([ $items[] | select(.pr == $p.number) | .number ] | first) as $issue_no
-      | (if .mergeable == "CONFLICTING"
+      # The board card belonging to this PR, if it has one. This is what lets a
+      # decision about a PR be recorded once instead of re-argued every tick.
+      #
+      # NOTE: no apostrophes anywhere in this jq program. It is a single-quoted
+      # shell string, so one apostrophe in a comment ends it early and bash
+      # fails with "unexpected EOF while looking for matching )" pointing at the
+      # top of the block rather than at the comment.
+      | ([ $pr_board[] | select(.number == $p.number) ] | first) as $card
+      # DEFERRED: a decision the maintainer already made, so stop asking.
+      # An `Awaiting` means it is parked on someone (#167/#354 blocked, #620
+      # parked pending a direction call); P4 means "later, not never" (#437,
+      # #490). Both suppress the ACTION and survive as a count, so the item
+      # stays findable without occupying the list of things to do.
+      #
+      # This is the whole point of putting PRs on the board: before it, there
+      # was nowhere to write those three judgements down, so every pass
+      # reported them as due and the same conversation happened every 30
+      # minutes.
+      | (($card.awaiting // null) != null or ($card.priority // null) == "P4") as $deferred
+      # The APPROVED-but-still-draft state, computed here because it must
+      # OUTRANK the deferral below. #629 sat approved, green and draft while
+      # every pass reported it as ordinary unfinished work, because the session
+      # that owned it went idle one command short of `gh pr ready`. That is a
+      # pipeline failure, not a priority: it is one command from done, so it can
+      # never be something the board quietens.
+      | ([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) as $verdict
+      | (.reviewDecision == "APPROVED"
+         or ($verdict == "APPROVED" and .reviewDecision != "CHANGES_REQUESTED")) as $is_approved
+      | (.isDraft and $is_approved and .mergeable != "CONFLICTING") as $approved_draft
+      | (if $approved_draft
+         then {pr: .number, action: "mark_ready",
+               why: "APPROVED and green, still a draft — Step 11 never ran gh pr ready",
+               detail: "gh pr ready \(.number) — then it is the maintainers to merge"}
+         # `mark_ready` above is the ONLY thing deferral cannot suppress, and
+         # the distinction is deliberate. It is a pipeline failure -- the loop
+         # stopped one command short of finishing -- so no priority the
+         # maintainer sets makes it not worth fixing.
+         #
+         # `awaiting_maintainer` IS suppressible, by contrast: an approved PR
+         # waiting on a merge is not broken, it is the maintainers call when to
+         # take it, and P4 is exactly how they say "later". #490 sat approved
+         # for a day and was reported every tick as though that were news.
+         elif $deferred then empty
+         elif .mergeable == "CONFLICTING"
          then {pr: .number, action: "resolve_conflict",
                why: "CONFLICTING — note a conflicted PR produces no CI run at all",
                detail: "hand to sweep-prs, or resolve if the diff is ours"}
@@ -291,7 +339,30 @@ actions=$(printf '%s' "$digest" | jq \
   | {
       due: length,
       by_action: (group_by(.action) | map({key: .[0].action, value: length}) | from_entries),
-      actions: sort_by(.action, (.issue // .pr))
+      actions: sort_by(.action, (.issue // .pr)),
+      # The PRs suppressed by a board decision, reported as a COUNT AND A LIST
+      # rather than dropped. Silently vanishing would trade one failure for
+      # another: the point is to stop re-asking about a settled decision, not
+      # to lose the item. The reason travels with it so a later reader can see
+      # WHICH decision is doing the suppressing without opening the board.
+      deferred: [
+        $prs[]
+        | . as $p
+        | ([ $pr_board[] | select(.number == $p.number) ] | first) as $c
+        | select(($c.awaiting // null) != null or ($c.priority // null) == "P4")
+        # Mirrors the mark_ready carve-out above: a deferred PR that is APPROVED
+        # and still a draft is NOT deferred, it is reported, so it must not be
+        # counted here as well.
+        | select((.isDraft
+                  and .mergeable != "CONFLICTING"
+                  and (.reviewDecision == "APPROVED"
+                       or (([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) == "APPROVED"
+                           and .reviewDecision != "CHANGES_REQUESTED"))) | not)
+        | {pr: .number,
+           why: (if ($c.awaiting // null) != null
+                 then "awaiting \($c.awaiting)"
+                 else "priority P4" end)}
+      ]
     }
 ')
 
@@ -300,9 +371,19 @@ if [ "$as_json" = true ]; then
     exit 0
 fi
 
+# Built with explicit concatenation rather than jq string interpolation: a
+# `\(...)` inside a `$(...)` command substitution confuses bash's paren
+# matching and fails to parse the script at all.
+deferred_line=$(printf '%s' "$actions" | jq -r '.deferred
+  | if length == 0 then ""
+    else "  deferred: " + (length | tostring) + " ("
+         + (map("#" + (.pr | tostring) + " " + .why) | join("; ")) + ")"
+    end')
+
 due=$(printf '%s' "$actions" | jq -r '.due')
 if [ "$due" -eq 0 ]; then
     echo "RHYTHM: nothing due."
+    [ -n "$deferred_line" ] && printf '%s\n' "$deferred_line"
     exit 0
 fi
 
@@ -313,3 +394,5 @@ printf '%s' "$actions" | jq -r '
   "",
   (.actions[] | "  \(if .pr then "PR #\(.pr)" else "##\(.issue)" end) \(.action)\n      why: \(.why)\n      do : \(.detail)")
 '
+[ -n "$deferred_line" ] && printf '\n%s\n' "$deferred_line"
+exit 0

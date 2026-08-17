@@ -204,6 +204,7 @@ Actions, and who does what:
 | Action | Do |
 |---|---|
 | `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
+| `mark_ready` | `gh pr ready <n>`, then report it. APPROVED, green, still a draft — the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure rather than a priority |
 | `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line |
 | `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>`. **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
 | `rework_review` | out of draft with changes requested: `/implement-issue <n>` to address them, then a fresh review |
@@ -217,10 +218,39 @@ Actions, and who does what:
 
 **This pass does not drive the review loop, and must not learn to.**
 `implement-issue` owns a PR from its first commit to `gh pr ready`; Step 11
-already requests the review, acts on the verdict and flips the PR. So every
+already requests the review, acts on the verdict and flips the PR. So an
 unfinished draft resolves to one action — hand it back — and a second copy of
 that loop is never built here. It is the same argument that put resume in Step 0
 instead of a separate skill: two copies of one loop means one of them goes stale.
+
+**The one carve-out is `mark_ready`, and it earned it.** An APPROVED, green,
+still-draft PR used to hand back like any other, and that is exactly why #629
+sat finished-but-draft: the remedy on offer was a whole `implement-issue`
+session, and nobody spends one of those to run a single command. `gh pr ready`
+is a terminal action, not a loop, so naming it here duplicates nothing.
+
+## Deferring a PR — how a decision gets recorded once
+
+**PRs go on the board too, and carry the same `Priority` and `Awaiting` fields
+issues do.** Before that, a judgement about a PR had nowhere to live: "#167 and
+#354 are blocked", "#437 and #490 are lower priority, later" were real
+decisions, and every pass re-reported all four as due because nothing recorded
+them. The same conversation happened every 30 minutes.
+
+| Decision | Set on the PR card | Effect |
+|---|---|---|
+| blocked / parked on a call | `Awaiting: discussion` (or `upstream`) | suppressed from actions |
+| later, not never | `Priority: P4` | suppressed from actions |
+| actively being driven | no `Awaiting`, `P1`–`P3` | reported every tick |
+
+Suppressed PRs are **counted and listed**, never dropped — the pass ends with
+`deferred: 4 (#490 priority P4; #167 awaiting discussion; …)` so the item stays
+findable and the reason travels with it. Losing the item would trade one
+failure for another.
+
+`mark_ready` ignores all of this, per the carve-out above. `awaiting_maintainer`
+does not: an approved PR waiting on a merge is not broken, it is the
+maintainer's call when to take it, and `P4` is how they say "later".
 
 **Restarting a stalled issue is always a resume, never a fresh start.** Step 0
 re-enters at the earliest incomplete step. A restart runs Step 4, which branches

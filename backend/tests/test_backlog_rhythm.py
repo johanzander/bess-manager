@@ -64,9 +64,27 @@ def _comment(days: int, *, is_reporter: bool = False, is_bot: bool = False) -> d
     }
 
 
-def _run(tmp_path: Path, items: list, prs: list | None = None, **env: str) -> dict:
+def _run(
+    tmp_path: Path,
+    items: list,
+    prs: list | None = None,
+    pr_board: list | None = None,
+    **env: str,
+) -> dict:
     digest = tmp_path / "digest.json"
-    digest.write_text(json.dumps({"counts": {}, "items": items, "orphans": []}))
+    digest.write_text(
+        json.dumps(
+            {
+                "counts": {},
+                "items": items,
+                "orphans": [],
+                # Board cards for PRs. Defaults to empty, which is also what an
+                # older digest produces -- the script tolerates its absence, so
+                # every pre-existing test exercises the no-deferral path.
+                "pr_board": pr_board or [],
+            }
+        )
+    )
     prs_file = tmp_path / "prs.json"
     prs_file.write_text(json.dumps(prs or []))
 
@@ -356,19 +374,24 @@ def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
     through to `gh pr ready`, and its Step 11 already requests the review, acts
     on the verdict and flips the PR.
 
-    So a draft needing a FIRST review, a draft needing REWORK, and a draft that
-    is already APPROVED but never got flipped all resolve to the same action:
-    hand it back to the skill that owns it. Step 0 re-enters at the right step.
-    Re-implementing any of that here would be a second copy of one loop, which
-    is how one of them goes stale.
+    So a draft needing a FIRST review and a draft needing REWORK both resolve
+    to the same action: hand it back to the skill that owns it. Step 0 re-enters
+    at the right step. Re-implementing any of that here would be a second copy
+    of one loop, which is how one of them goes stale.
+
+    THE APPROVED-BUT-DRAFT CASE IS NOW CARVED OUT, deliberately — see
+    `test_an_approved_draft_is_never_deferred`. It used to route here too, and
+    that is precisely why #629 sat approved, green and draft: the remedy on
+    offer was a whole `implement-issue` session, and nobody spends one of those
+    to run a single command. `gh pr ready` is not a review loop, so naming it
+    directly does not duplicate one.
     """
-    approved_but_draft = _pr(615, reviews=[{"state": "APPROVED"}])
     never_reviewed = _pr(619, reviews=[])
     changes_requested = _pr(
         614, reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]
     )
 
-    for pr in (approved_but_draft, never_reviewed, changes_requested):
+    for pr in (never_reviewed, changes_requested):
         actions = _actions_for(_run(tmp_path, [], [pr]), pr["number"])
         assert actions == {"resume_implementation"}, pr["number"]
 
@@ -377,7 +400,9 @@ def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
     """`/implement-issue <n>` takes an issue number, so the action has to carry
     one — otherwise the loop reports work nobody can pick up."""
     item = _item(592, pr=615, column="In Review", last_comment=_comment(1))
-    pr = _pr(615, reviews=[{"state": "APPROVED"}])
+    # Not an approved draft: that case is `mark_ready` now and carries no
+    # issue, because `gh pr ready <n>` needs only the PR number.
+    pr = _pr(615, reviews=[{"state": "CHANGES_REQUESTED"}])
 
     action = next(
         a for a in _run(tmp_path, [item], [pr])["actions"] if a.get("pr") == 615
@@ -526,3 +551,97 @@ def test_conflicting_pr_is_flagged_over_its_review_state(tmp_path: Path) -> None
     never fired" and nobody investigates."""
     pr = _pr(437, mergeable="CONFLICTING", reviews=[])
     assert "resolve_conflict" in _actions_for(_run(tmp_path, [], [pr]), 437)
+
+
+def _card(number: int, **over: object) -> dict:
+    card: dict = {
+        "number": number,
+        "board_status": "Backlog",
+        "priority": None,
+        "awaiting": None,
+    }
+    card.update(over)
+    return card
+
+
+def test_a_pr_awaiting_something_is_deferred_not_reported(tmp_path: Path) -> None:
+    """The reason the board holds PRs at all. "#167 and #354 are blocked" was a
+    real decision with nowhere to live, so every pass re-reported them as
+    conflicts needing action and the same conversation happened every tick."""
+    pr = _pr(167, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr], pr_board=[_card(167, awaiting="discussion")])
+
+    assert _actions_for(result, 167) == set()
+    assert [d["pr"] for d in result["deferred"]] == [167]
+    assert result["deferred"][0]["why"] == "awaiting discussion"
+
+
+def test_a_p4_pr_is_deferred(tmp_path: Path) -> None:
+    """ "Lower priority, I intend to get to it later" — #437 and #490."""
+    pr = _pr(437, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr], pr_board=[_card(437, priority="P4")])
+
+    assert _actions_for(result, 437) == set()
+    assert result["deferred"][0]["why"] == "priority P4"
+
+
+def test_an_approved_pr_can_be_deferred(tmp_path: Path) -> None:
+    """An approved PR waiting on a merge is not broken — it is the maintainers
+    call when to take it, and P4 is how they say later. #490 sat approved for a
+    day and was reported every tick as though that were news."""
+    pr = _pr(490, isDraft=False, reviews=[{"state": "APPROVED"}])
+    result = _run(tmp_path, [], [pr], pr_board=[_card(490, priority="P4")])
+
+    assert "awaiting_maintainer" not in _actions_for(result, 490)
+    assert [d["pr"] for d in result["deferred"]] == [490]
+
+
+def test_an_approved_draft_is_never_deferred(tmp_path: Path) -> None:
+    """The one carve-out. APPROVED-and-still-draft is a pipeline failure, not a
+    priority: the loop stopped one command short of finishing. #629 sat in
+    exactly this state while every pass reported it as ordinary unfinished
+    work, because the session that owned it went idle before gh pr ready."""
+    pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
+    result = _run(tmp_path, [], [pr], pr_board=[_card(629, priority="P4")])
+
+    assert "mark_ready" in _actions_for(result, 629)
+    assert result["deferred"] == []
+
+
+def test_approved_draft_is_reported_even_with_no_card(tmp_path: Path) -> None:
+    pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
+    assert "mark_ready" in _actions_for(_run(tmp_path, [], [pr]), 629)
+
+
+def test_a_stale_approval_does_not_earn_mark_ready(tmp_path: Path) -> None:
+    """The same staleness trap the non-draft rules already guard: an
+    approved-then-reworked draft keeps its APPROVED entry forever."""
+    pr = _pr(
+        700,
+        isDraft=True,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 700)
+    assert "mark_ready" not in actions
+    assert "resume_implementation" in actions
+
+
+def test_a_conflicting_approved_draft_is_not_mark_ready(tmp_path: Path) -> None:
+    """A conflicted PR cannot be merged and gets no CI run, so flipping it
+    ready would hand over something unmergeable."""
+    pr = _pr(
+        701, isDraft=True, mergeable="CONFLICTING", reviews=[{"state": "APPROVED"}]
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 701)
+    assert "mark_ready" not in actions
+    assert "resolve_conflict" in actions
+
+
+def test_a_pr_with_no_card_is_reported_as_before(tmp_path: Path) -> None:
+    """Deferral is opt-in: absent a card, nothing changes."""
+    pr = _pr(614, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr], pr_board=[])
+
+    assert "resolve_conflict" in _actions_for(result, 614)
+    assert result["deferred"] == []

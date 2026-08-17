@@ -295,6 +295,25 @@ MUST_BE_GUARDED = [
     "git push origin HEAD:beta",
     "git push origin beta-release-v10.1.0b10-tmp",
     "git -C x push origin main --force",
+    # A BARE source-side refspec. `refs/heads/main` is an ordinary one-sided
+    # refspec that pushes local main to remote main, and the character before
+    # `main` is `/` -- not the space `* main` needs, nor the colon the
+    # `*:refs/heads/main*` forms need. Verified against a real repo: it reports
+    # `main -> main`. The guards are now spelled `*refs/heads/main*`, without
+    # the colon, which subsumes the destination-side form rather than sitting
+    # beside it.
+    "git push origin refs/heads/main",
+    "git push origin refs/heads/master",
+    "git push origin refs/heads/beta",
+    "git -C x push origin refs/heads/main",
+    # `--all` pushes EVERY local branch, main included, and was missing while
+    # its neighbours --mirror/--prune/--tags were all covered. `--branches` is
+    # a synonym for it (git 2.50 `git push --help`: "--all, --branches"), so
+    # enumerating one without the other would have been the next leak.
+    "git push --all",
+    "git push --all origin",
+    "git push --branches origin",
+    "git -C x push --all origin",
     # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
     "git tag --delete v9.9.0", "git tag -d v9.9.0",
     "git tag -f v9.9.0 abc123",

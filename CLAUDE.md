@@ -303,8 +303,8 @@ object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.
 
 **`gh api` is guarded bluntly, and that is deliberate. `git push` no longer is,
-and that took two tries to get right.** Both were enumerated by shape first, and
-both leaked:
+and that took three tries to get right.** Both were enumerated by shape first,
+and both leaked:
 
 ```
 git push origin main --force          # --force not adjacent to `push`
@@ -312,9 +312,25 @@ git push origin +beta-release-9.9     # force via refspec
 git push origin --delete release-X.Y  # destroys a shared ref
 git push origin v9.9.0                # publishes a release tag
 git push origin HEAD:main             # protected ref via colon refspec
+git push origin refs/heads/main       # bare source-side refspec: no space, no colon
+git push --all                        # every local branch, main included
+git push --branches origin            # exact synonym for --all
 gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
 gh api <path> -f key=val              # any -f/-F makes it a POST
 ```
+
+**The last three were found by the Stage 4 review of the PR that fixed the
+first five**, which is the point worth remembering: each round of this
+enumeration has been incomplete, and each hole was invisible to the round
+before. `refs/heads/main` slipped because every protected-branch rule keyed off
+the character *before* the branch name — a space in `* main`, a colon in
+`*:main` — and in `refs/heads/main` that character is `/`. The guards are now
+spelled `*refs/heads/main*` without the colon, which subsumes the
+destination-side form rather than sitting beside it. `--all` slipped because
+its neighbours `--mirror`, `--prune` and `--tags` were all covered and it
+simply was not; `--branches` is its documented synonym (`git push --help`:
+"--all, --branches") and was added in the same pass rather than waiting to
+become the fourth leak.
 
 The marker sits at an arbitrary argument position. The first enumeration was
 **prefix-anchored** — `Bash(git push --force*)` — which genuinely cannot reach
@@ -327,8 +343,9 @@ greedy globs said so all along; the two contradicted each other for four review
 rounds.
 
 So push is now guarded per *shape* — force in any position, refspec `+`, ref
-deletion, `--mirror`/`--prune`/`--tags`, release tags, and anything naming
-`main`, `master` or `beta` in either the `origin main` or `HEAD:main` spelling.
+deletion, `--mirror`/`--prune`/`--tags`/`--all`/`--branches`, release tags, and
+anything naming `main`, `master` or `beta` in the `origin main`, `HEAD:main` or
+bare `refs/heads/main` spelling.
 A push naming a feature branch runs unattended, which is what
 `implement-issue` Step 9 and `sweep-prs` actually do; branch protection already
 refuses the case the prompt was standing in for. The protected-ref rules anchor
@@ -341,9 +358,16 @@ that isolates the safe subset. If it starts stalling runs, the fix is an
 allow-list of read-only paths, not a shape guard.
 
 `quality-check.sh` pins all of this by COMMAND STRING in three lists, never by
-rule name — 20 shapes that must be guarded, 20 that must stay unattended. Adding
-a rule that "looks right" without adding its command string is how every
-previous version of this section went stale.
+rule name. Adding a rule that "looks right" without adding its command string is
+how every previous version of this section went stale.
+
+**But the gate proves "the strings we thought of are covered", not "no push
+spelling reaches a protected branch"** — and after three incomplete rounds that
+distinction is the honest summary of where this stands. The durable fix is
+normalisation: resolve a refspec's effective destination ref before matching,
+instead of pattern-matching the raw command string. That is tracked separately;
+until it exists, treat any newly-discovered spelling as expected rather than
+surprising, and add it to `MUST_BE_GUARDED` first.
 
 **Patterns match the command as written — prefix globbing, no normalisation.**
 This is the single biggest source of rules that look right and match nothing,

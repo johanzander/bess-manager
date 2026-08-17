@@ -40,17 +40,23 @@
 #     loop waits out the full timeout and reports "no summary landed", which is
 #     false when a summary with findings is sitting on the PR.
 #
-# So COMMENTED is resolved by TIME, not by parsing its body. Body text is
-# bot-generated prose with no contract behind it, and a grace window needs no
-# agreement about wording. APPROVED/CHANGES_REQUESTED return immediately; a
-# COMMENTED-only state is held for GRACE seconds to let a summary supersede it,
-# and returned as the verdict if none does.
+# So COMMENTED is resolved by asking whether the REVIEWER IS STILL WORKING, not
+# by parsing its body and not by a timer. Body text is bot-generated prose with
+# no contract behind it. A timer was tried and was the wrong instrument: sized
+# from those 16s/50s gaps, it still pre-empted a summary, because the gap that
+# matters is not placeholder-to-summary but placeholder-to-END-OF-RUN — the bot
+# posts an early permission check within a couple of minutes and works for five
+# to eight more. No fixed number is both short enough to return a real COMMENT
+# promptly and long enough never to pre-empt.
+#
+# APPROVED/CHANGES_REQUESTED return immediately. A COMMENTED is held while the
+# run is live and accepted as the verdict once the run has finished, which is
+# exactly what COMMENT means in pr-review.yml's own three-verdict contract.
 #
 # `pr-review.yml` step 3 is also changed so inline notes post via `gh api`
 # instead of `gh pr review`, which stops the placeholder being submitted as a
-# review at all. That removes the ambiguity at its source; the grace window is
-# what keeps this correct for reviews already sitting on older PRs, and if the
-# bot ever regresses.
+# review at all — that removes the ambiguity at its source. The run-state check
+# is what keeps this correct for older PRs and if the bot regresses.
 #
 # Exit codes:
 #   0  a verdict landed; verdict on stdout
@@ -60,18 +66,36 @@ set -euo pipefail
 
 pr="${1:?usage: request-pr-review.sh <pr-number> [timeout-seconds]}"
 timeout="${2:-900}"
-interval=60
+# REVIEW_POLL_INTERVAL is a test seam (see BESS_ENV_FILE in gh-agent.sh for the
+# same shape): the decision logic is what needs exercising, not the waiting, and
+# a 60s poll makes every test cost a minute. Unset in normal use.
+interval="${REVIEW_POLL_INTERVAL:-60}"
 
-# How long a COMMENTED-only state is held before it is accepted as the verdict.
-# The observed placeholder-to-summary gaps are 16s (#622) and 50s (#617), so 180
-# is several times the worst case seen while still leaving a real COMMENT verdict
-# usable well inside the default timeout. Clamped below `timeout` so a caller
-# passing a short timeout still gets its COMMENTED verdict rather than an exit 2.
-grace=180
-if [ "$grace" -ge "$timeout" ]; then
-    grace=$(( timeout / 2 ))
-fi
-first_commented_at=""
+# Is a PR Review workflow run still working on this PR?
+#
+# This replaces a fixed grace window, which was the wrong instrument. The window
+# was sized from the observed placeholder-to-summary gaps (16s on #622, 50s on
+# #617) and then failed anyway, because those gaps were not the thing to measure:
+# the bot posts an early permission-check comment ("test permission check -
+# ignore") within a couple of minutes and finishes five to eight minutes later.
+# No fixed number is both short enough to return a real COMMENT verdict promptly
+# and long enough to never pre-empt a summary.
+#
+# Asking the run instead answers the actual question -- is the reviewer still
+# thinking? -- and needs no guess. It also fixes the opposite failure: a run that
+# DIED is indistinguishable from one that is thinking when you only poll for
+# reviews, so a crashed review burned the full timeout. On #623 that cost 16
+# minutes of waiting on a run that had already failed with "Reached maximum
+# number of turns (60)".
+review_run_state() {
+    gh run list --workflow "PR Review" --limit 20 \
+        --json status,conclusion,createdAt \
+        --jq "[ .[] | select(.createdAt > \"${since}\") ] | first
+              | if . == null then \"none\"
+                elif .status != \"completed\" then \"running\"
+                elif .conclusion == \"success\" then \"finished\"
+                else \"failed\" end" 2>/dev/null || echo "unknown"
+}
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
@@ -106,10 +130,18 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         exit 0
     fi
 
-    # Otherwise: a COMMENTED-only state. Hold it for GRACE seconds so a summary
-    # can supersede it, then accept it as the verdict. Holding forever would
-    # swallow a real COMMENT verdict; returning at once would take the
-    # placeholder. Both have happened.
+    # No decisive verdict yet. What that means depends entirely on whether the
+    # reviewer is still working, so ask.
+    state=$(review_run_state)
+
+    if [ "$state" = "failed" ]; then
+        echo "The PR Review run FAILED without submitting a verdict." >&2
+        echo "This is a broken run, not a slow one — do not keep waiting." >&2
+        echo "Check its log; 'Reached maximum number of turns' is the usual cause." >&2
+        gh run list --workflow "PR Review" --limit 3 >&2
+        exit 2
+    fi
+
     commented=$(gh pr view "$pr" --json reviews \
         --jq "[.reviews[]
                | select(.submittedAt > \"${since}\")
@@ -118,22 +150,36 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
               | \"\(.state) \(.submittedAt) \(.author.login)\"")
 
     if [ -n "$commented" ]; then
-        if [ -z "$first_commented_at" ]; then
-            first_commented_at=$(date +%s)
-            echo "Saw a COMMENTED review; holding ${grace}s in case a summary follows." >&2
-        elif [ $(( $(date +%s) - first_commented_at )) -ge "$grace" ]; then
-            echo "No summary superseded it within ${grace}s — treating COMMENTED as the verdict." >&2
+        if [ "$state" = "running" ]; then
+            # The bot posts an early permission-check comment and keeps going,
+            # so a COMMENTED while the run is live decides nothing.
+            echo "COMMENTED seen but the review is still running — waiting." >&2
+        else
+            # The run has finished and its last word was COMMENTED, so that IS
+            # the verdict: `pr-review.yml` lists COMMENT as one of three final
+            # verdicts ("questions/observations only").
+            echo "Review finished with COMMENTED as its last word — that is the verdict." >&2
             echo "VERDICT ${commented}"
             exit 0
         fi
     fi
 done
 
-echo "No review landed within ${timeout}s." >&2
-echo "No reviews of any state were submitted since the trigger, so the review" >&2
-echo "never reached the workflow — this is a trigger fault, not a stalled review." >&2
-echo "(A review that posted notes but no summary would have returned COMMENTED" >&2
-echo " via the grace path above.) PR #619 failed exactly this way, twice." >&2
+echo "No verdict within ${timeout}s. Run state: $(review_run_state)" >&2
+case "$(review_run_state)" in
+    none)
+        echo "No PR Review run started at all — the trigger never reached the" >&2
+        echo "workflow. Check pr-review.yml's actor gate: it accepts the repo" >&2
+        echo "owner and 'bess-agent' only. PR #619 failed this way twice." >&2
+        ;;
+    running)
+        echo "The run is STILL going and simply outlasted this timeout. Re-run" >&2
+        echo "with a longer one; do not re-trigger, that starts a second review." >&2
+        ;;
+    *)
+        echo "The run ended without a verdict this script recognised." >&2
+        ;;
+esac
 
 echo "Recent PR Review runs:" >&2
 gh run list --workflow="PR Review" --limit 3 >&2

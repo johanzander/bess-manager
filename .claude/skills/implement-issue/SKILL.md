@@ -109,7 +109,7 @@ assume it:**
 |---|---|
 | branch or worktree exists | Step 4 |
 | commits ahead of `origin/main`, RED test in the diff | Step 5–7 |
-| open PR with `## Scope assessment` in the body | Step 9 |
+| an open PR exists for the branch | Step 9 |
 | `gh pr checks` green | Step 10 |
 | a terminal review verdict on the PR | Step 11, mid-loop |
 
@@ -122,8 +122,11 @@ the session, and Step 11 depends on holding it. It is recoverable only because
 this skill already forces it to be written down:
 
 - the Stage 2 `@claude-bot analyze` comment on the issue — the root cause
-- the PR body's `## Scope assessment` and `## Test plan` — the agreed approach
-  and what the test was supposed to discriminate
+- the PR body's `## Test plan`, and its `## Scope assessment` **if the PR came
+  from CI mode** — the agreed approach, and what the test was meant to
+  discriminate. Interactive mode keeps its scope assessment conversational, so
+  that heading is absent on most PRs this skill opens; the PR's existence is
+  what proves Step 9 was reached, not any particular heading
 - the diff itself, and any inline review comments
 
 **If those sources do not reconstruct a coherent diagnosis, STOP and report

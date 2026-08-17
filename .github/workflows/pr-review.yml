@@ -65,20 +65,29 @@ jobs:
               2. Identify the linked issue (if any) and read its analysis.
 
               3. Walk through the review checklist in `.github/claude-bot.md`.
-                 For each finding, post an INLINE comment on the specific
-                 line. Do not bundle everything in one summary comment.
 
-                 Post inline comments with `gh api`, NOT `gh pr review`:
+                 **Submit EXACTLY ONE review per run — the summary in step 4.**
+                 This is a hard constraint, not a style preference.
+                 `scripts/request-pr-review.sh` waits for your verdict, and any
+                 extra submitted review is indistinguishable by state from a
+                 real `COMMENT` verdict. That ambiguity left PR #615 approved
+                 but stuck in draft overnight, and a stray "test permission
+                 check" review was submitted to PR #622 while probing what was
+                 available.
+
+                 So: never call `gh pr review` except once, in step 4. Never
+                 call it to probe permissions — it submits.
+
+                 Prefer inline comments on the specific lines, via `gh api`:
                    gh api repos/johanzander/bess-manager/pulls/${{ github.event.issue.number }}/comments \
                      -f body='...' -f commit_id='<head sha>' -f path='<file>' -F line=<n>
 
-                 This matters for automation. `gh pr review` SUBMITS a review,
-                 so using it for inline notes puts an extra `COMMENTED` review
-                 on the PR before your summary. `scripts/request-pr-review.sh`
-                 waits for a verdict, and a stray `COMMENTED` is
-                 indistinguishable by state from a real COMMENT verdict — that
-                 ambiguity left PR #615 approved but stuck in draft. Submit
-                 exactly ONE review per run: the summary in step 4.
+                 `gh api` may be unavailable to you — it is permission-gated in
+                 this repo, and past runs could not use it. If it fails, DO NOT
+                 fall back to `gh pr review` for notes. Fold the findings into
+                 the step 4 summary instead, each with an explicit `file:line`
+                 and the real code quoted. A complete summary review is a fine
+                 outcome; a second submitted review is not.
 
               4. End with a single summary review using `gh pr review`:
                    - APPROVE  — no blockers, only nits or none

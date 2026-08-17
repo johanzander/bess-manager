@@ -59,7 +59,7 @@ if [ -n "${RHYTHM_PRS_FILE:-}" ]; then
     prs=$(cat "$RHYTHM_PRS_FILE")
 else
     prs=$(gh pr list --repo "$repo" --state open --limit 100 \
-        --json number,title,isDraft,mergeable,reviewDecision,reviews,author)
+        --json number,title,isDraft,mergeable,reviewDecision,reviews,author,statusCheckRollup)
 fi
 
 actions=$(printf '%s' "$digest" | jq \
@@ -250,7 +250,21 @@ actions=$(printf '%s' "$digest" | jq \
       | ([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) as $verdict
       | (.reviewDecision == "APPROVED"
          or ($verdict == "APPROVED" and .reviewDecision != "CHANGES_REQUESTED")) as $is_approved
-      | (.isDraft and $is_approved and .mergeable != "CONFLICTING") as $approved_draft
+      # CI MUST BE GREEN, not merely unconflicted. `mergeable` reports only
+      # whether the branch merges cleanly, so it reads MERGEABLE while checks
+      # are still running or have failed -- #633 was APPROVED and MERGEABLE
+      # with Algorithm tests and E2E still in progress, and an earlier version
+      # of this rule duly said to flip it. Flipping a red or pending PR ready
+      # is worse than leaving it draft: `ready` is supposed to mean the
+      # maintainer can merge without checking anything.
+      #
+      # SKIPPED counts as fine (a path-filtered job that correctly did not
+      # run); anything still QUEUED or IN_PROGRESS is not a verdict yet.
+      | ([ .statusCheckRollup[]?
+           | select((.conclusion // "") != "SUCCESS" and (.conclusion // "") != "SKIPPED"
+                    and (.conclusion // "") != "NEUTRAL") ] | length == 0) as $checks_green
+      | (.isDraft and $is_approved and $checks_green
+         and .mergeable != "CONFLICTING") as $approved_draft
       | (if $approved_draft
          then {pr: .number, action: "mark_ready",
                why: "APPROVED and green, still a draft — Step 11 never ran gh pr ready",
@@ -355,6 +369,10 @@ actions=$(printf '%s' "$digest" | jq \
         # counted here as well.
         | select((.isDraft
                   and .mergeable != "CONFLICTING"
+                  and ([ .statusCheckRollup[]?
+                         | select((.conclusion // "") != "SUCCESS"
+                                  and (.conclusion // "") != "SKIPPED"
+                                  and (.conclusion // "") != "NEUTRAL") ] | length == 0)
                   and (.reviewDecision == "APPROVED"
                        or (([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) == "APPROVED"
                            and .reviewDecision != "CHANGES_REQUESTED"))) | not)

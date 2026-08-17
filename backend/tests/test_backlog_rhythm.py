@@ -364,6 +364,10 @@ def _pr(number: int, **over: object) -> dict:
         "reviewDecision": None,
         "reviews": [],
         "author": {"login": "johanzander"},
+        # Defaults to green, so a test that cares about checks says so. An
+        # empty rollup also reads as green, which is correct: a PR with no
+        # checks configured has nothing failing.
+        "statusCheckRollup": [{"name": "CI", "conclusion": "SUCCESS"}],
     }
     pr.update(over)
     return pr
@@ -645,3 +649,71 @@ def test_a_pr_with_no_card_is_reported_as_before(tmp_path: Path) -> None:
 
     assert "resolve_conflict" in _actions_for(result, 614)
     assert result["deferred"] == []
+
+
+def test_mark_ready_needs_green_checks_not_just_a_clean_merge(
+    tmp_path: Path,
+) -> None:
+    """`mergeable` reports only whether the branch merges cleanly, so it reads
+    MERGEABLE while checks are still running. #633 was APPROVED and MERGEABLE
+    with Algorithm tests and E2E in progress, and the first version of this
+    rule duly said to flip it — which would hand the maintainer a PR marked
+    ready whose CI had not finished."""
+    pr = _pr(
+        633,
+        isDraft=True,
+        reviews=[{"state": "APPROVED"}],
+        statusCheckRollup=[
+            {"name": "Fast tests", "conclusion": "SUCCESS"},
+            {"name": "Algorithm tests", "conclusion": ""},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 633)
+    assert "mark_ready" not in actions
+    assert "resume_implementation" in actions
+
+
+def test_mark_ready_is_withheld_on_a_failing_check(tmp_path: Path) -> None:
+    pr = _pr(
+        634,
+        isDraft=True,
+        reviews=[{"state": "APPROVED"}],
+        statusCheckRollup=[
+            {"name": "Fast tests", "conclusion": "SUCCESS"},
+            {"name": "E2E tests", "conclusion": "FAILURE"},
+        ],
+    )
+    assert "mark_ready" not in _actions_for(_run(tmp_path, [], [pr]), 634)
+
+
+def test_a_skipped_check_still_counts_as_green(tmp_path: Path) -> None:
+    """Path-filtered jobs correctly do not run — every backend-only PR in this
+    repo skips Algorithm tests and Docker build, so treating SKIPPED as
+    not-green would withhold mark_ready from almost every PR."""
+    pr = _pr(
+        635,
+        isDraft=True,
+        reviews=[{"state": "APPROVED"}],
+        statusCheckRollup=[
+            {"name": "Fast tests", "conclusion": "SUCCESS"},
+            {"name": "Algorithm tests", "conclusion": "SKIPPED"},
+        ],
+    )
+    assert "mark_ready" in _actions_for(_run(tmp_path, [], [pr]), 635)
+
+
+def test_a_pending_approved_draft_is_not_counted_as_deferred(
+    tmp_path: Path,
+) -> None:
+    """The deferred list mirrors the mark_ready carve-out, so a card-deferred
+    PR that is approved-but-pending must appear in exactly one place."""
+    pr = _pr(
+        636,
+        isDraft=True,
+        reviews=[{"state": "APPROVED"}],
+        statusCheckRollup=[{"name": "CI", "conclusion": ""}],
+    )
+    result = _run(tmp_path, [], [pr], pr_board=[_card(636, priority="P4")])
+
+    assert _actions_for(result, 636) == set()
+    assert [d["pr"] for d in result["deferred"]] == [636]

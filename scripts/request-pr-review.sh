@@ -87,18 +87,47 @@ interval="${REVIEW_POLL_INTERVAL:-60}"
 # reviews, so a crashed review burned the full timeout. On #623 that cost 16
 # minutes of waiting on a run that had already failed with "Reached maximum
 # number of turns (60)".
+#
+# THE RUN MUST BE THIS PR'S. Selecting the newest run by time alone was wrong,
+# and wrong in the direction that costs a review round: `pr-review.yml` triggers
+# on `issue_comment`, which fires for comments on ISSUES too, not only PRs.
+# Those runs are gated out and complete as `skipped` within about ten seconds.
+#
+# So any comment posted anywhere in the repo while a review is running produces
+# a newer `PR Review` run that is `completed` and not `success` -- which this
+# function read as `failed`. Measured on #636: a routine PO comment on issue
+# #441 at 21:13:07 made the script abandon a review that went on to APPROVE at
+# 21:15:45. The caller was told the run was broken while it was still thinking.
+#
+# `displayTitle` carries the PR title for a run triggered on that PR, so it is
+# the discriminator. The title is fetched once, before the loop, and matched
+# through `--arg` rather than string-interpolated -- a title containing a quote
+# would otherwise break the filter.
 review_run_state() {
     gh run list --workflow "PR Review" --limit 20 \
-        --json status,conclusion,createdAt \
-        --jq "[ .[] | select(.createdAt > \"${since}\") ] | first
-              | if . == null then \"none\"
-                elif .status != \"completed\" then \"running\"
-                elif .conclusion == \"success\" then \"finished\"
-                else \"failed\" end" 2>/dev/null || echo "unknown"
+        --json status,conclusion,createdAt,displayTitle 2>/dev/null \
+      | jq -r --arg since "$since" --arg title "$pr_title" '
+            [ .[]
+              | select(.createdAt > $since)
+              | select(.displayTitle == $title) ] | first
+            | if . == null then "none"
+              elif .status != "completed" then "running"
+              elif .conclusion == "success" then "finished"
+              else "failed" end' 2>/dev/null || echo "unknown"
 }
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+
+# The PR title, used to tell THIS PR's review run from any other `PR Review`
+# run that happens to be newer. Fetched before `since` so a slow call cannot
+# push the window past a review that lands immediately.
+pr_title=$(gh pr view "$pr" --json title --jq .title)
+if [ -z "$pr_title" ]; then
+    echo "Could not read PR #${pr} title; refusing to poll without a way to" >&2
+    echo "tell its review run from anyone elses." >&2
+    exit 2
+fi
 
 # Reviews strictly newer than this are the ones this run triggered.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -118,12 +147,19 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
     fi
 
     # A decisive verdict wins immediately, whenever it appears.
+    #
+    # A FAILED READ IS NOT A RESULT, and `set -e` used to turn one into a fatal
+    # error: a single transient 503 on this call killed the script with exit 1
+    # AFTER the trigger comment had already posted, so re-running it spent a
+    # second paid review round on a review already in flight. GitHub returned
+    # 503s for roughly ninety minutes on 2026-08-17 and this fired twice.
+    # Swallowing the failure costs one wasted poll; the next iteration retries.
     verdict=$(gh pr view "$pr" --json reviews \
         --jq "[.reviews[]
                | select(.submittedAt > \"${since}\")
                | select(.state == \"APPROVED\" or .state == \"CHANGES_REQUESTED\")]
               | last | select(. != null)
-              | \"\(.state) \(.submittedAt) \(.author.login)\"")
+              | \"\(.state) \(.submittedAt) \(.author.login)\"" 2>/dev/null) || verdict=""
 
     if [ -n "$verdict" ]; then
         echo "VERDICT ${verdict}"
@@ -142,12 +178,13 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
         exit 2
     fi
 
+    # Same transient-failure tolerance as the verdict read above.
     commented=$(gh pr view "$pr" --json reviews \
         --jq "[.reviews[]
                | select(.submittedAt > \"${since}\")
                | select(.state == \"COMMENTED\")]
               | last | select(. != null)
-              | \"\(.state) \(.submittedAt) \(.author.login)\"")
+              | \"\(.state) \(.submittedAt) \(.author.login)\"" 2>/dev/null) || commented=""
 
     if [ -n "$commented" ]; then
         if [ "$state" = "running" ] || [ "$state" = "unknown" ]; then

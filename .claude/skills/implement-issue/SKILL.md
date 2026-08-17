@@ -58,7 +58,7 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 
 | Step | CI mode |
 |---|---|
-| 0. Resume check | Applies, and matters more here: Stage 3 is re-triggered by hand, so a second `@claude-bot fix` on an issue that already has a `has-fix-pr` PR is a resume, not a restart. Detect the existing PR and continue it — never open a second PR for one issue. The CI checkout has no worktrees, so branch existence on `origin` is the only signal available. |
+| 0. Resume check | Applies, and matters more here: Stage 3 is re-triggered by hand, so a second `@claude-bot fix` on an issue that already has a `has-fix-pr` PR is a resume, not a restart. Detect the existing PR and continue it — never open a second PR for one issue. The CI checkout has no worktrees, so branch existence on `origin` is the only signal available. Reading the PR's **conversation comments** matters more here too, not less: the re-trigger is itself a comment, so the maintainer has very often said *why* in the same thread. |
 | 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
 | 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
 | 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
@@ -85,9 +85,13 @@ for `TODO.md` items and for refactors that never had an issue, so a PR with no
 linked issue is the normal shape for that work, not a defect.
 
 ```bash
-gh pr view <n> --json number,headRefName,isDraft,mergeable,reviews 2>/dev/null \
+gh pr view <n> --json number,headRefName,isDraft,mergeable,reviews,comments 2>/dev/null \
   || gh issue view <n> --json number,title,labels,body,comments
 ```
+
+**`comments` is in that list deliberately — do not drop it.** It is a separate
+feed from `reviews`, it is where the maintainer sets direction, and omitting it
+has already cost one full rework (see Rehydrate, below).
 
 If `<n>` is a **PR**, resume from it directly — it is the stronger handle,
 carrying the branch, the diff, the `## Scope assessment` and the review verdict,
@@ -127,7 +131,37 @@ this skill already forces it to be written down:
   discriminate. Interactive mode keeps its scope assessment conversational, so
   that heading is absent on most PRs this skill opens; the PR's existence is
   what proves Step 9 was reached, not any particular heading
+- **the PR CONVERSATION comments, not only its reviews** — see below
 - the diff itself, and any inline review comments
+
+**Reviews and conversation comments are two different feeds, and `gh pr view
+--json reviews` returns only the first.** Read both, every time:
+
+```bash
+gh pr view <n> --json reviews  --jq '.reviews[]  | "\(.author.login) \(.state) \(.submittedAt)\n\(.body)"'
+gh pr view <n> --json comments --jq '.comments[] | "\(.author.login) \(.createdAt)\n\(.body)"'
+```
+
+**A maintainer conversation comment OUTRANKS every bot review on the PR**,
+including ones submitted after it. The bot reviews the diff; the maintainer
+decides the direction, and they change direction in comments — that is the
+only place they can, since a review has to attach to a diff.
+
+This is not hypothetical. On #620 the maintainer posted "**this PR should
+shrink**" with a four-step plan: branch protection now rejects pushes to `main`
+server-side, so the protected-ref *enumeration* should be **deleted** rather
+than extended. A later session read the reviews, did not read the comments,
+and spent a full rework **adding** protected-ref patterns — the exact opposite
+of the standing instruction, on a PR whose own thread already said so. Two
+further holes the maintainer had found by hand (`git push origin
+refs/tags/v1.2.3`, `git push origin HEAD`) were in that comment too, and stayed
+open because nobody read it.
+
+So: **before touching code on a resumed PR, read the human comments first, and
+newest-first.** If one sets a direction the diff contradicts, that is a
+STOP-and-confirm, not something to reconcile silently — the maintainer may have
+changed their mind since, and asking costs one message where guessing costs a
+rework.
 
 **If those sources do not reconstruct a coherent diagnosis, STOP and report
 it.** Do not re-diagnose from scratch on top of someone else's half-finished
@@ -674,6 +708,20 @@ On the verdict:
   silently ignore it either.
 - **A review from the maintainer rather than the bot** (the `<author>` field):
   treat it as authoritative and stop the loop — a human has taken over.
+- **A maintainer CONVERSATION comment, which is not a review at all**, is
+  equally authoritative and arrives on a feed the verdict never touches. Check
+  it each round, not only at Step 0 — a direction posted mid-loop is invisible
+  to `gh pr view --json reviews`, and to the bot, which will keep reviewing the
+  diff as if nothing had been said:
+
+  ```bash
+  gh pr view <n> --json comments \
+    --jq '.comments[] | select(.createdAt > "<submittedAt from the round before>") | "\(.author.login)\n\(.body)"'
+  ```
+
+  If one lands, stop the loop and act on it before the next round. A bot
+  APPROVED on a diff the maintainer has already asked you to redo is worth
+  nothing.
 
 Fix the blockers, park genuine nits in `TODO.md`, run
 `./scripts/quality-check.sh`, commit, and push. Step 9's frontend rule carries
@@ -756,6 +804,8 @@ net is upstream, not this section.
 | "the old branch is a mess, cleaner to redo it" | Its commits are the only copy of a diagnosis you no longer have. If you genuinely cannot reconstruct the approach, that is a STOP-and-report, not a licence to reset. |
 | "that worktree's session shows dead, so it's mine to take" | Check unsandboxed. A sandboxed `claude agents --json` returned 1 session where the real answer was 17, because `~/.claude/jobs` is sandbox-denied — every other session read as dead. |
 | "the review said CHANGES_REQUESTED but nobody assigned it to me" | Nothing else will pick it up. Once the opening session exits, an orphaned PR has no owner at all — `sweep-prs` refuses the job by design. Resuming is how it gets one. |
+| "I read the reviews, so I know what this PR needs" | Reviews and conversation comments are separate feeds and `--json reviews` returns only one. The maintainer sets *direction* in comments, because a review can only attach to a diff. On #620 that cost a full rework in the opposite direction. |
+| "the bot approved it, so the direction must be fine" | The bot reviews the diff against a checklist; it has no idea what the maintainer asked for in the thread. An approval on a diff you were told to redo is worth nothing. |
 | "I can see the assertion is right, no need to run it red" | Assertions that look right have repeatedly bounded only one side, or compared a quantity a second varying term swamped. Seeing it fail is the cheap part. |
 | "quality-check.sh passed, that's enough" | Green tests prove the suite is satisfied, not that the fix behaves correctly against the real scenario. Step 8 requires observed output, every time. |
 | "the diagnosis is obviously right, skip the confirm gate" | Wrong diagnoses are exactly when confidence is highest. One message, cheap insurance. |
@@ -787,6 +837,12 @@ net is upstream, not this section.
 - About to re-diagnose from scratch on top of someone else's half-finished
   branch because the Stage 2 comment and PR body didn't reconstruct the
   approach. That is a STOP-and-report.
+- **About to change code on a resumed PR without having read its conversation
+  comments** — not just its reviews. They are separate feeds, and the
+  maintainer's direction lives in the one `--json reviews` does not return.
+- About to implement a diff that contradicts a maintainer comment already on
+  the thread. Stop and confirm; they may have moved on, but guessing costs a
+  rework and asking costs one message.
 - About to open a second PR for an issue that already has one.
 - About to relaunch an issue that has already died twice without saying so.
 - About to commit or open the PR without having actually run/observed the

@@ -28,6 +28,10 @@ def _item(number: int, **over: object) -> dict:
         "last_activity_days": 1,
         "comments": 0,
         "column": "Backlog",
+        # Defaults to matching `column`, so the default item is a reconciled
+        # card and no board action fires. A test that overrides one and not the
+        # other is asserting a mismatch on purpose.
+        "board_status": "Backlog",
         "awaiting": None,
         "awaiting_source": None,
         "awaiting_suggested": None,
@@ -38,6 +42,9 @@ def _item(number: int, **over: object) -> dict:
         "merged_pr": None,
         "worktree": None,
         "worktree_branch": None,
+        # A live session holds its worktree locked. Defaults to unlocked so the
+        # pre-existing stalled-work tests keep asserting what they always did.
+        "worktree_locked": False,
         "stale_worktree": False,
         "session": None,
         "blocked_by": [],
@@ -178,6 +185,34 @@ def test_missing_priority_and_missing_labels_are_grooming_debt(tmp_path: Path) -
     assert {"set_priority", "triage_labels"} <= actions
 
 
+def test_an_issue_with_no_card_asks_for_a_card_not_a_priority(
+    tmp_path: Path,
+) -> None:
+    """Both causes leave Priority null, and conflating them sent the PO to set
+    a field on a card that does not exist."""
+    item = _item(621, board_status=None, priority=None)
+    actions = _actions_for(_run(tmp_path, [item]), 621)
+    assert "add_card" in actions
+    assert "set_priority" not in actions
+
+
+def test_a_card_in_the_wrong_column_is_a_move(tmp_path: Path) -> None:
+    item = _item(602, board_status="Ready for Dev", column="In Progress")
+    result = _run(tmp_path, [item])
+    assert "move_card" in _actions_for(result, 602)
+    move = next(
+        a
+        for a in result["actions"]
+        if a.get("issue") == 602 and a["action"] == "move_card"
+    )
+    assert "In Progress" in move["detail"]
+
+
+def test_a_reconciled_card_is_not_moved(tmp_path: Path) -> None:
+    item = _item(603, board_status="Analysis", column="Analysis")
+    assert "move_card" not in _actions_for(_run(tmp_path, [item]), 603)
+
+
 def test_stale_worktree_is_handed_to_sweep_prs(tmp_path: Path) -> None:
     item = _item(
         9,
@@ -213,6 +248,36 @@ def test_a_worktree_with_no_session_is_stalled_work(tmp_path: Path) -> None:
     # A resume, never a restart: Step 4 would branch fresh from origin/main and
     # delete the commits that only exist on this branch.
     assert "never restart" in action["detail"]
+
+
+def test_a_locked_worktree_is_never_reported_as_stalled(tmp_path: Path) -> None:
+    """`claude agents` lists background agents only, so a foreground
+    `/implement-issue` started from the terminal is invisible and its worktree
+    reads as abandoned. #624 was reported "no live session" while actively
+    being worked, advising a second session onto the same branch. The lock is
+    what a live session actually holds."""
+    item = _item(
+        624,
+        worktree="/repo/worktrees/fix-issue-624",
+        worktree_branch="fix/issue-624-pwl-window-bisect",
+        worktree_locked=True,
+        session=None,
+    )
+    assert "resume_implementation" not in _actions_for(_run(tmp_path, [item]), 624)
+
+
+def test_an_unlocked_worktree_with_no_session_is_still_stalled(
+    tmp_path: Path,
+) -> None:
+    """The lock must not swallow the case this rule exists for."""
+    item = _item(
+        625,
+        worktree="/repo/worktrees/fix-issue-625",
+        worktree_branch="fix/issue-625",
+        worktree_locked=False,
+        session=None,
+    )
+    assert "resume_implementation" in _actions_for(_run(tmp_path, [item]), 625)
 
 
 def test_a_worktree_with_a_live_session_is_left_alone(tmp_path: Path) -> None:
@@ -343,6 +408,116 @@ def test_a_draft_with_no_linked_issue_resumes_by_pr(tmp_path: Path) -> None:
 
 def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:
     pr = _pr(490, isDraft=False, reviews=[{"state": "APPROVED"}])
+    assert "awaiting_maintainer" in _actions_for(_run(tmp_path, [], [pr]), 490)
+
+
+def test_an_unreviewed_non_draft_is_never_reported_as_mergeable(
+    tmp_path: Path,
+) -> None:
+    """The draft flag is not a review. #626 was flipped out of draft by hand
+    because it looked stuck, had zero reviews, and was reported as "nothing
+    left but your merge" — routing straight around Stage 4, which is the gate
+    the whole pipeline is built on."""
+    pr = _pr(626, isDraft=False, reviews=[])
+    actions = _actions_for(_run(tmp_path, [], [pr]), 626)
+    assert "request_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_commented_review_alone_is_not_an_approval(tmp_path: Path) -> None:
+    """The bot posts its inline notes as a COMMENTED review BEFORE its real
+    verdict, so COMMENTED alone means the review is still in flight."""
+    pr = _pr(627, isDraft=False, reviews=[{"state": "COMMENTED"}])
+    actions = _actions_for(_run(tmp_path, [], [pr]), 627)
+    assert "request_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_non_draft_with_changes_requested_needs_rework(tmp_path: Path) -> None:
+    pr = _pr(
+        628,
+        isDraft=False,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "CHANGES_REQUESTED"}],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 628)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_stale_approval_does_not_survive_a_later_changes_requested(
+    tmp_path: Path,
+) -> None:
+    """GitHub never rewrites an old review when a later round requests
+    changes, so an approved-then-reworked PR keeps its APPROVED entry forever.
+    Asking "is there an APPROVED anywhere" reported a PR with changes
+    outstanding as ready to merge — the same failure, reintroduced by the first
+    attempt at fixing it."""
+    pr = _pr(
+        700,
+        isDraft=False,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 700)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_an_approval_is_honoured_when_review_decision_is_empty(
+    tmp_path: Path,
+) -> None:
+    """`reviewDecision` is only populated when the repo REQUIRES reviews, and
+    this one does not — #490 carries two real APPROVED reviews and still reads
+    "". Keying on reviewDecision alone would report it as never reviewed."""
+    pr = _pr(
+        490,
+        isDraft=False,
+        reviewDecision="",
+        reviews=[
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 490)
+    assert "awaiting_maintainer" in actions
+    assert "request_review" not in actions
+
+
+def test_a_stale_approval_loses_to_changes_requested_without_review_decision(
+    tmp_path: Path,
+) -> None:
+    """The same staleness trap with no reviewDecision to lean on: the LAST
+    non-COMMENTED verdict decides, not the presence of an APPROVED."""
+    pr = _pr(
+        701,
+        isDraft=False,
+        reviewDecision="",
+        reviews=[
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+            {"state": "CHANGES_REQUESTED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 701)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_an_approval_followed_by_notes_still_counts(tmp_path: Path) -> None:
+    """A trailing COMMENTED must not un-approve a PR — #490 carries exactly
+    this shape (COMMENTED, APPROVED, COMMENTED, APPROVED)."""
+    pr = _pr(
+        490,
+        isDraft=False,
+        reviews=[
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+        ],
+    )
     assert "awaiting_maintainer" in _actions_for(_run(tmp_path, [], [pr]), 490)
 
 

@@ -120,10 +120,28 @@ actions=$(printf '%s' "$digest" | jq \
      else empty end),
 
     # No priority means the item cannot be ranked, so it can never be "next".
-    (if .priority == null
+    #
+    # The two causes need different actions, and conflating them sent the PO
+    # to set a field on a card that does not exist. `board_status: null` is
+    # the stronger one: no card at all, so there is nothing to set a Priority
+    # on until one is added. #621 and #624 were both in that state while
+    # reporting the milder "no Priority on the board".
+    (if .board_status == null
+     then {issue: .number, action: "add_card",
+           why: "open issue with no card on the board",
+           detail: "add it to Project #1, then set Priority — until then it is unrankable and invisible to every board pass"}
+     elif .priority == null
      then {issue: .number, action: "set_priority",
            why: "no Priority on the board",
            detail: "set P1-P4; without it the item is unrankable and never Ready"}
+     else empty end),
+
+    # The card sits somewhere the evidence does not support. The digest wins;
+    # this is always a card move, never a re-derivation.
+    (if .board_status != null and .board_status != .column
+     then {issue: .number, action: "move_card",
+           why: "card is \(.board_status) but the evidence says \(.column)",
+           detail: "move the card to \(.column)"}
      else empty end),
 
     # Un-pruned worktrees are what made four issues read as In Progress.
@@ -153,9 +171,18 @@ actions=$(printf '%s' "$digest" | jq \
     # The branch survives, so this is a resume and never a restart -- Step 0
     # re-enters at the earliest incomplete step. Restarting would run Step 4,
     # which branches fresh from origin/main and would delete those commits.
-    (if .worktree != null and (.stale_worktree | not) and .session == null and .pr == null
+    #
+    # A LOCKED worktree means a session is holding it right now, and that check
+    # is what stops this rule from firing on live work. `session` alone could
+    # not: `claude agents` sees background agents only, so a foreground
+    # `/implement-issue` started from the terminal was invisible and its
+    # worktree read as abandoned. #624 was reported "no live session" while
+    # actively being worked, with the advice to re-enter it -- a second session
+    # on the same branch, against work the detail line itself calls the only
+    # copy.
+    (if .worktree != null and (.stale_worktree | not) and (.worktree_locked | not) and .session == null and .pr == null
      then {issue: .number, action: "resume_implementation",
-           why: "worktree \(.worktree_branch) on disk, no live session",
+           why: "worktree \(.worktree_branch) on disk, unlocked, no live session",
            detail: "/implement-issue \(.number) — Step 0 resumes it; never restart, the branch commits are the only copy"}
      else empty end),
 
@@ -194,10 +221,53 @@ actions=$(printf '%s' "$digest" | jq \
          then {pr: .number, action: "resolve_conflict",
                why: "CONFLICTING — note a conflicted PR produces no CI run at all",
                detail: "hand to sweep-prs, or resolve if the diff is ours"}
+         # OUT OF DRAFT IS NOT THE SAME AS REVIEWED, and treating it as such
+         # told the maintainer to merge an unreviewed PR. The old rule was
+         # `isDraft == false -> nothing left but your merge`, resting on the
+         # assumption that only Step 11 clears the draft flag, and only after
+         # an APPROVED verdict. Two things break that: a maintainer can flip
+         # the flag by hand (#626 was flipped because it LOOKED stuck, and had
+         # zero reviews at the time), and a Stage 3 CI-mode PR never runs Step
+         # 11 at all. Stage 4 is the gate the whole pipeline is built around;
+         # a surface that routes around it is worse than no surface.
+         #
+         # NEITHER SIGNAL ALONE IS CORRECT, and each fails in the merge-happy
+         # direction, so the ORDER below is the whole content of this rule.
+         #
+         # `reviews[]` is history, not state: GitHub never rewrites an old
+         # review when a later round requests changes, so an
+         # approved-then-reworked PR keeps its stale APPROVED entry forever.
+         # Asking "is there an APPROVED anywhere" first therefore reported
+         # "nothing left but your merge" for a PR with changes outstanding --
+         # exactly the failure this rule exists to prevent, reintroduced by the
+         # first attempt at fixing it.
+         #
+         # `reviewDecision` is the current state, but it is only populated when
+         # the repo REQUIRES reviews, and this one does not: it reads
+         # CHANGES_REQUESTED for #619/#620/#614 and "" for #490, which carries
+         # two real APPROVED reviews. So keying on it alone would report a
+         # genuinely approved PR as never reviewed.
+         #
+         # Hence: trust `reviewDecision` whenever it is set, and only then fall
+         # back to the LAST non-COMMENTED review. Last, not any -- same staleness
+         # trap. COMMENTED is skipped because the bot posts its inline notes as
+         # a COMMENTED review before its real verdict (see request-pr-review.sh).
          elif (.isDraft | not)
-         then {pr: .number, action: "awaiting_maintainer",
-               why: "out of draft",
-               detail: "nothing left but your merge"}
+         then ([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) as $last_verdict
+              | (if .reviewDecision == "CHANGES_REQUESTED" or
+                    (.reviewDecision == "" and $last_verdict == "CHANGES_REQUESTED") or
+                    (.reviewDecision == null and $last_verdict == "CHANGES_REQUESTED")
+                 then {pr: .number, issue: $issue_no, action: "rework_review",
+                       why: "out of draft but the current review asks for changes",
+                       detail: "address the review, then request a fresh one"}
+                 elif .reviewDecision == "APPROVED" or $last_verdict == "APPROVED"
+                 then {pr: .number, action: "awaiting_maintainer",
+                       why: "out of draft and approved",
+                       detail: "nothing left but your merge"}
+                 else {pr: .number, issue: $issue_no, action: "request_review",
+                       why: "out of draft but never reviewed — Stage 4 has not run",
+                       detail: "scripts/request-pr-review.sh \(.number) — do NOT merge on the draft flag alone"}
+                 end)
          else {pr: .number, issue: $issue_no, action: "resume_implementation",
                why: "draft PR, review loop unfinished",
                # `implement-issue` is used for TODO.md items and refactors too,

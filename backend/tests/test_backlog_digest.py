@@ -288,14 +288,64 @@ def test_blocked_label_is_never_ready(bin_dir: Path) -> None:
     assert item["blocked"] is True
 
 
-def test_blocked_by_reference_is_never_ready(bin_dir: Path) -> None:
+def test_open_blocked_by_reference_is_never_ready(bin_dir: Path) -> None:
+    """The blocker (#500) is itself open, so the wait is real."""
     issue = _issue(702, labels=[{"name": "analyzed"}], body="Blocked by #500\n")
+    blocker = _issue(500)
     board = [{"content": {"number": 702}, "priority": "P1"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue, blocker], [], board))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 702)
+    assert item["column"] == "Analysis"
+    assert item["blocked_by"] == [500]
+    assert item["blocked_by_open"] == [500]
+    assert item["blocked"] is True
+
+
+def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
+    """A `Blocked by #N` line is never edited out once N lands, so a pure text
+    scan pins the item out of Ready for Dev forever.
+
+    That is the same failure this script exists to fix, pointing the other way:
+    an item reading wrong relative to its real state. Only blockers still on the
+    open-issue list count. The reference stays visible in `blocked_by`.
+    """
+    issue = _issue(703, labels=[{"name": "analyzed"}], body="Blocked by #499\n")
+    board = [{"content": {"number": 703}, "priority": "P1"}]
+    # #499 is absent from the open-issue list, i.e. closed.
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
 
     item = _run(bin_dir)["items"][0]
+    assert item["blocked_by"] == [499]
+    assert item["blocked_by_open"] == []
+    assert item["blocked"] is False
+    assert item["column"] == "Ready for Dev"
+
+
+def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
+    bin_dir: Path,
+) -> None:
+    """Confirming intent, per review of #623.
+
+    A recorded wait beats a live worktree in `column`, because an item whose
+    scope is unsettled must not read as progressing — that is the whole point of
+    the precedence fix. The risk is hiding active undelivered code, so the
+    worktree is still reported on the item; only the column defers to the wait.
+    """
+    issue = _issue(704, labels=[{"name": "needs-debug-log"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
+    _write_shim(
+        bin_dir, "git", _git_shim(_porcelain(("/repo/wt/704", "fix/issue-704-live")))
+    )
+
+    item = _run(bin_dir)["items"][0]
+
     assert item["column"] == "Analysis"
-    assert item["blocked_by"] == [500]
+    assert item["awaiting"] == "reporter"
+    # The code is still visible — the wait changes the column, not the evidence.
+    assert item["worktree"] == "/repo/wt/704"
+    assert item["worktree_branch"] == "fix/issue-704-live"
+    assert item["stale_worktree"] is False
 
 
 def test_worktree_whose_branch_merged_is_not_in_progress(bin_dir: Path) -> None:

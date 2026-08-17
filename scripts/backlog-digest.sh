@@ -159,6 +159,18 @@ jq -n \
   def blocked_by:
     [ (.body // "") | scan("(?i)blocked by #(\\d+)") | .[0] | tonumber ];
 
+  # Only blockers that are STILL OPEN count. `$issues` is the open-issue list,
+  # so membership decides it — no extra API call.
+  #
+  # A raw text scan cannot tell a live blocker from a settled one, and a
+  # `Blocked by #N` line is never edited out once N merges. Treating the raw
+  # scan as "unresolved" pins an item out of Ready for Dev permanently, which
+  # is the same failure this script exists to fix, pointing the other way:
+  # an item reading wrong relative to its real state. `blocked_by` stays the
+  # raw parse so the reference remains visible.
+  def blocked_by_open($refs):
+    [ $refs[] | select(. as $n | ($issues | any(.number == $n))) ];
+
   # WHO SPOKE LAST. Without this the digest could not represent the single
   # transition that matters most to grooming: the reporter answering the
   # question we asked them. A comment COUNT and a last-activity DATE cannot
@@ -261,10 +273,12 @@ jq -n \
       | (awaiting_from_board(.number)) as $aw_board
       | (($aw_board // $aw_label)) as $aw
       # Definition of Ready criterion 5: no unresolved blocker. The `blocked`
-      # label and an unresolved `Blocked by #N` line both fail it, so neither
-      # item can be Ready however far its analysis got. #571 was reporting
-      # `Ready for Dev` while labelled `blocked`.
-      | (($labels | index("blocked")) != null or ((blocked_by | length) > 0)) as $blocked
+      # label and a still-open `Blocked by #N` both fail it, so neither item can
+      # be Ready however far its analysis got. #571 was reporting `Ready for Dev`
+      # while labelled `blocked`.
+      | (blocked_by) as $bb
+      | (blocked_by_open($bb)) as $bb_open
+      | (($labels | index("blocked")) != null or (($bb_open | length) > 0)) as $blocked
       | (column($labels; $pr; $wt_live; $aw; $prio; $blocked)) as $col
       | {
           number: .number,
@@ -305,7 +319,9 @@ jq -n \
           # #579, #591, #517) had already merged.
           stale_worktree: $wt_stale,
           session: session_for(.number),
-          blocked_by: blocked_by,
+          blocked_by: $bb,
+          # The subset still open, and the only one that fails Ready.
+          blocked_by_open: $bb_open,
           blocked: $blocked
         }
     ],

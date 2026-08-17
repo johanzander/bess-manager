@@ -74,7 +74,15 @@ caused a real misclassification:
 | `awaiting_suggested` | What the labels imply, so an unset field can be reconciled without guessing. |
 | `last_comment` | `{author, days, is_reporter, is_bot}`. **The reporter-replied signal.** A comment count and a last-activity date cannot tell "the reporter answered us" from "we posted a nudge", which is why the follow-up chase never fired. |
 | `stale_worktree` | The worktree's own branch has already merged, so it is rot, not progress. Hand it to `sweep-prs`. |
-| `blocked` | `blocked` label or an unresolved `Blocked by #N`. Fails Ready outright. |
+| `blocked` | `blocked` label, or a `Blocked by #N` whose blocker is **still open**. Fails Ready outright. |
+| `blocked_by` / `blocked_by_open` | Every parsed reference, and the subset still open. Only the latter blocks — a `Blocked by #N` line is never edited out once N lands, so treating the raw scan as unresolved pins an item out of Ready forever. |
+
+**A wait outranks a live worktree, deliberately.** An item with a recorded wait
+reports *Analysis* even when a worktree is checked out for it, because unsettled
+scope must not read as progress. The worktree is still reported on the item
+(`worktree`, `worktree_branch`), so active undelivered code stays visible — the
+wait changes the column, not the evidence. Check those fields before assuming an
+*Analysis* item has no code behind it.
 
 **A human comment is not a wait.** `awaiting: discussion` used to be returned
 for any human comment, which pushed items to *Analysis* for ordinary traffic —

@@ -185,6 +185,26 @@ def test_a_conflict_outranks_ci_because_a_conflicted_pr_has_no_run(run) -> None:
     assert "[sweep]" in out
 
 
+def test_unknown_mergeability_is_never_reported_as_clean(run) -> None:
+    """`mergeable` is computed LAZILY: the first query on a cold PR returns
+    UNKNOWN and only then triggers the computation.
+
+    This was measured, not theorised. A first live fleet run classified #167 and
+    #619 with no conflict flag; once earlier queries had warmed them, the
+    identical command returned `needs-refresh` for both. They were CONFLICTING
+    throughout. Treating UNKNOWN as "not conflicted" therefore hides exactly the
+    stale PRs this script exists to surface — the same trap `sweep-prs`
+    documents and retries for.
+
+    The script retries while anything is UNKNOWN. This pins the fallback: if it
+    still is, say so rather than falling through to the clean branch.
+    """
+    out = run([_pr(9, mergeable="UNKNOWN", merge_state="UNKNOWN")])
+
+    assert "UNKNOWN" in _rows(out)
+    assert "re-run" in _rows(out)
+
+
 def test_red_ci_belongs_to_the_executor(run) -> None:
     out = run(
         [

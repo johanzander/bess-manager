@@ -45,10 +45,54 @@ pr_filter="${1:-}"
 # decides whose turn it is. Compute it from reviews vs commits instead.
 fields='number,title,isDraft,mergeable,mergeStateStatus,headRefName,reviews,commits,statusCheckRollup,updatedAt'
 
-if [ -n "$pr_filter" ]; then
-    raw=$(gh pr view "$pr_filter" --json "$fields" | jq -c '[.]')
-else
-    raw=$(gh pr list --state open --limit 100 --json "$fields")
+# `commits` is what bounds this, and the bound is GitHub's, not a preference.
+# `--json commits` expands each commit's authors connection, so gh's cost
+# estimate is limit x commits x authors: at --limit 100 that is 100 x 100 x 100 =
+# 1,000,000 possible nodes and the query is REJECTED outright --
+#
+#   GraphQL: By the time this query traverses to the authors connection, it is
+#   requesting up to 1,000,000 possible nodes which exceeds the maximum limit of
+#   500,000.
+#
+# Found by running this against a real fleet; the fixture tests could not see it.
+# 30 keeps the worst case at 300,000, inside the ceiling. There is no cheaper
+# field for "when did HEAD last move" -- `gh pr list --json` offers no
+# last-commit date, and a review's own commit SHA is REST-only (`gh api`, which
+# is on CLAUDE.md's ask list).
+PR_LIMIT=30
+
+fetch() {
+    if [ -n "$pr_filter" ]; then
+        gh pr view "$pr_filter" --json "$fields" | jq -c '[.]'
+    else
+        gh pr list --state open --limit "$PR_LIMIT" --json "$fields"
+    fi
+}
+
+# `mergeable` is computed LAZILY, and this is the single most dangerous thing
+# about reading it. The first query on a cold PR returns UNKNOWN *and* triggers
+# the computation, so a one-shot pass reports UNKNOWN for precisely the stale
+# PRs worth finding -- and if UNKNOWN is treated as "not conflicted", every
+# conflicted PR in a cold fleet reads as fine.
+#
+# Measured here while building this: a first fleet run classified #167 and #619
+# as `needs-fix`/CI-red with no conflict flag; after the queries above had
+# warmed them, the identical command returned `needs-refresh` for both. Both
+# were CONFLICTING the whole time. `sweep-prs` documents the same trap and
+# retries for the same reason.
+#
+# So: ask again while anything is UNKNOWN, and if it still is, SAY SO rather
+# than letting it fall through to the not-conflicted branch.
+for _ in 1 2 3; do
+    raw=$(fetch)
+    [ "$(echo "$raw" | jq '[.[] | select(.mergeable == "UNKNOWN")] | length')" -eq 0 ] && break
+    sleep 3
+done
+
+if [ -z "$pr_filter" ] && [ "$(echo "$raw" | jq 'length')" -eq "$PR_LIMIT" ]; then
+    # No silent caps (sweep-prs): a truncated fleet must not read as a clean one.
+    echo "WARNING: hit the ${PR_LIMIT}-PR ceiling — older open PRs were NOT" >&2
+    echo "classified. Pass a PR number to inspect one directly." >&2
 fi
 
 # A quoted heredoc, not a single-quoted argument: the program below contains
@@ -69,6 +113,9 @@ read -r -d '' classify <<'JQ' || true
   | (verdict) as $v
   | (pushed) as $push
   | (.mergeable == "CONFLICTING" or .mergeStateStatus == "DIRTY") as $conflicted
+  # UNKNOWN survived the retries above. It is NOT "not conflicted" -- it is "we
+  # never found out", and it must never render as a clean PR.
+  | (.mergeable == "UNKNOWN") as $mergeUnknown
   | ($v != null and $v.submittedAt > $push) as $unconsumed
 
   # Order matters, and it is ordered by WHAT THE DIFF STILL OWES rather than by
@@ -103,6 +150,7 @@ read -r -d '' classify <<'JQ' || true
 
   | "#\($p.number) \(if $p.isDraft then "draft" else "ready" end)  \($state)  [\($owner)]"
   + (if $conflicted and $state != "needs-refresh" then "  (+conflicted)" else "" end)
+  + (if $mergeUnknown then "  (+mergeability UNKNOWN — re-run)" else "" end)
   + "\n    \($p.title[0:72])\n    \($why)\n"
 JQ
 

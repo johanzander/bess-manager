@@ -313,6 +313,7 @@ git push origin --delete release-X.Y  # destroys a shared ref
 git push origin v9.9.0                # publishes a release tag
 git push origin HEAD:main             # protected ref via colon refspec
 git push origin refs/heads/main       # bare source-side refspec: no space, no colon
+git push origin refs/tags/v1.2.3      # same, for a TAG: `*:refs/tags/*` saw only the colon form
 git push --all                        # every local branch, main included
 git push --branches origin            # exact synonym for --all
 gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
@@ -331,6 +332,12 @@ its neighbours `--mirror`, `--prune` and `--tags` were all covered and it
 simply was not; `--branches` is its documented synonym (`git push --help`:
 "--all, --branches") and was added in the same pass rather than waiting to
 become the fourth leak.
+
+`refs/tags/` had the same colon-shaped blind spot as `refs/heads/`, and it is
+the one entry here that **branch protection can never replace**: a tag is not a
+branch, so no protected-branch setting covers publishing a release tag. Both
+guards are now spelled without the colon (`*refs/tags/*`, `*refs/heads/main*`),
+each subsuming its destination-side form rather than sitting beside it.
 
 The marker sits at an arbitrary argument position. The first enumeration was
 **prefix-anchored** — `Bash(git push --force*)` — which genuinely cannot reach

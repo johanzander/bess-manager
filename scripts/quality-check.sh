@@ -310,6 +310,17 @@ MUST_BE_GUARDED = [
     # its neighbours --mirror/--prune/--tags were all covered. `--branches` is
     # a synonym for it (git 2.50 `git push --help`: "--all, --branches"), so
     # enumerating one without the other would have been the next leak.
+    # A TAG push, source-side. `*:refs/tags/*` only ever saw the
+    # destination-side spelling, so `git push origin refs/tags/v1.2.3` -- the
+    # ordinary one-sided form -- published a release tag unattended. The guard
+    # is now `*refs/tags/*` without the colon, covering both sides.
+    #
+    # This one is guarded regardless of how the protected-BRANCH argument is
+    # settled: a tag is not a branch, so branch protection never covers it, and
+    # `git push origin v9.9.0` (no refs/ prefix) is not covered by this pattern
+    # either -- `* v*` is what catches that, and it stays.
+    "git push origin refs/tags/v1.2.3",
+    "git -C x push origin refs/tags/v1.2.3",
     "git push --all",
     "git push --all origin",
     "git push --branches origin",

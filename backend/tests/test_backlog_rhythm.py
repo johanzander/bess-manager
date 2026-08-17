@@ -42,6 +42,9 @@ def _item(number: int, **over: object) -> dict:
         "merged_pr": None,
         "worktree": None,
         "worktree_branch": None,
+        # A live session holds its worktree locked. Defaults to unlocked so the
+        # pre-existing stalled-work tests keep asserting what they always did.
+        "worktree_locked": False,
         "stale_worktree": False,
         "session": None,
         "blocked_by": [],
@@ -247,6 +250,36 @@ def test_a_worktree_with_no_session_is_stalled_work(tmp_path: Path) -> None:
     assert "never restart" in action["detail"]
 
 
+def test_a_locked_worktree_is_never_reported_as_stalled(tmp_path: Path) -> None:
+    """`claude agents` lists background agents only, so a foreground
+    `/implement-issue` started from the terminal is invisible and its worktree
+    reads as abandoned. #624 was reported "no live session" while actively
+    being worked, advising a second session onto the same branch. The lock is
+    what a live session actually holds."""
+    item = _item(
+        624,
+        worktree="/repo/worktrees/fix-issue-624",
+        worktree_branch="fix/issue-624-pwl-window-bisect",
+        worktree_locked=True,
+        session=None,
+    )
+    assert "resume_implementation" not in _actions_for(_run(tmp_path, [item]), 624)
+
+
+def test_an_unlocked_worktree_with_no_session_is_still_stalled(
+    tmp_path: Path,
+) -> None:
+    """The lock must not swallow the case this rule exists for."""
+    item = _item(
+        625,
+        worktree="/repo/worktrees/fix-issue-625",
+        worktree_branch="fix/issue-625",
+        worktree_locked=False,
+        session=None,
+    )
+    assert "resume_implementation" in _actions_for(_run(tmp_path, [item]), 625)
+
+
 def test_a_worktree_with_a_live_session_is_left_alone(tmp_path: Path) -> None:
     item = _item(
         590,
@@ -408,6 +441,67 @@ def test_a_non_draft_with_changes_requested_needs_rework(tmp_path: Path) -> None
         reviews=[{"state": "CHANGES_REQUESTED"}],
     )
     actions = _actions_for(_run(tmp_path, [], [pr]), 628)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_stale_approval_does_not_survive_a_later_changes_requested(
+    tmp_path: Path,
+) -> None:
+    """GitHub never rewrites an old review when a later round requests
+    changes, so an approved-then-reworked PR keeps its APPROVED entry forever.
+    Asking "is there an APPROVED anywhere" reported a PR with changes
+    outstanding as ready to merge — the same failure, reintroduced by the first
+    attempt at fixing it."""
+    pr = _pr(
+        700,
+        isDraft=False,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 700)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_an_approval_is_honoured_when_review_decision_is_empty(
+    tmp_path: Path,
+) -> None:
+    """`reviewDecision` is only populated when the repo REQUIRES reviews, and
+    this one does not — #490 carries two real APPROVED reviews and still reads
+    "". Keying on reviewDecision alone would report it as never reviewed."""
+    pr = _pr(
+        490,
+        isDraft=False,
+        reviewDecision="",
+        reviews=[
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 490)
+    assert "awaiting_maintainer" in actions
+    assert "request_review" not in actions
+
+
+def test_a_stale_approval_loses_to_changes_requested_without_review_decision(
+    tmp_path: Path,
+) -> None:
+    """The same staleness trap with no reviewDecision to lean on: the LAST
+    non-COMMENTED verdict decides, not the presence of an APPROVED."""
+    pr = _pr(
+        701,
+        isDraft=False,
+        reviewDecision="",
+        reviews=[
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+            {"state": "CHANGES_REQUESTED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 701)
     assert "rework_review" in actions
     assert "awaiting_maintainer" not in actions
 

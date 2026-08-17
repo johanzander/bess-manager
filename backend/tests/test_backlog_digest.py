@@ -59,15 +59,24 @@ def _run_expect_failure(bin_dir: Path, **extra_env: str) -> subprocess.Completed
     )
 
 
-def _porcelain(*worktrees: tuple[str, str | None]) -> str:
+def _porcelain(*worktrees: tuple[str, str | None], locked: tuple[str, ...] = ()) -> str:
     """Build `git worktree list --porcelain` output for a main checkout
-    followed by the given (path, branch) pairs. branch=None means detached."""
+    followed by the given (path, branch) pairs. branch=None means detached.
+
+    Paths named in `locked` get a `locked` record in the real shape Claude Code
+    writes it -- `locked claude session <name> (pid N start ...)`, a reason
+    string rather than the bare keyword, which a `== "locked"` match would miss.
+    """
     records = [
         "worktree /repo\nHEAD 0000000000000000000000000000000000000\nbranch refs/heads/main"
     ]
     for path, branch in worktrees:
         lines = [f"worktree {path}", "HEAD 1111111111111111111111111111111111111"]
         lines.append(f"branch refs/heads/{branch}" if branch else "detached")
+        if path in locked:
+            lines.append(
+                "locked claude session wt (pid 97626 start Mon Aug 17 15:50:14 2026)"
+            )
         records.append("\n".join(lines))
     return "\n\n".join(records) + "\n"
 
@@ -890,6 +899,46 @@ def test_issue_with_no_card_reports_null_status_and_is_an_orphan(
     assert digest["items"][0]["board_status"] is None
     orphans = [o for o in digest["orphans"] if o["kind"] == "issue_no_card"]
     assert [o["ref"] for o in orphans] == ["624"]
+
+
+def test_a_locked_worktree_is_reported_as_locked(bin_dir: Path) -> None:
+    """The lock is the liveness signal `claude agents` cannot provide: it lists
+    background agents only, so a foreground `/implement-issue` is invisible and
+    its worktree reads as abandoned."""
+    issue = _issue(624)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-624", "fix/issue-624-pwl"),
+                locked=("/repo/worktrees/issue-624",),
+            )
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-624"
+    assert item["worktree_locked"] is True
+    # ...and the name-matched session is still null, which is the whole point.
+    assert item["session"] is None
+
+
+def test_an_unlocked_worktree_is_reported_as_unlocked(bin_dir: Path) -> None:
+    issue = _issue(625)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/worktrees/issue-625", "fix/issue-625"))),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-625"
+    assert item["worktree_locked"] is False
 
 
 def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:

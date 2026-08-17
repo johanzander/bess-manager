@@ -80,23 +80,48 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
-# Emits, per worktree, a JSON object of {path, branch}. `git worktree list`
-# always emits the main checkout as its first record, and it is excluded
+# Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
+# list` always emits the main checkout as its first record, and it is excluded
 # here — it is never a task worktree, so it must not appear in the orphan
 # scan below.
+#
+# `locked` is the LIVENESS signal, and it is the only one that works. See the
+# session note below.
 worktrees=$(git worktree list --porcelain | awk '
   BEGIN { RS=""; FS="\n" }
   NR==1 { next }
   {
-    path=""; branch=""
+    path=""; branch=""; locked="false"
     for (i = 1; i <= NF; i++) {
       if ($i ~ /^worktree /)      { path = substr($i, 10) }
       else if ($i ~ /^branch /)   { branch = substr($i, 8); sub(/^refs\/heads\//, "", branch) }
+      else if ($i ~ /^locked/)    { locked = "true" }
     }
-    if (path != "") print path "\t" branch
+    if (path != "") print path "\t" branch "\t" locked
   }
-' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // "")}' | jq -s .)
+' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // ""), locked: (.[2] == "true")}' | jq -s .)
 
+# `claude agents` lists BACKGROUND agents only, and this is the trap that made
+# the rhythm pass tell the maintainer to restart work that was actively
+# running. Two independent reasons it cannot answer "is someone on this":
+#
+#   1. A session started in the terminal — `claude` in a CLI, then
+#      `/implement-issue <n>` — is a foreground session and never appears here
+#      at all. That is how #624 was dispatched.
+#   2. Even a background agent carries a generated descriptive name ("Review PR
+#      and create branch for bess-manager"), not the `issue-<n>` the dispatch
+#      convention promises, so the exact-name match below misses it too.
+#
+# Measured: 41 worktrees on disk, `claude agents --json` returning ONE entry.
+# So `session` was null for essentially every item, every worktree read as
+# abandoned, and `resume_implementation` fired on live sessions — against work
+# whose branch commits the skill itself calls the only copy.
+#
+# The worktree LOCK is the signal that actually tracks a live session: 4 of
+# those 41 were locked, and they were exactly the four live sessions. It is
+# local, needs no process list, and covers foreground and background alike.
+# `session` is kept because a name match is strictly more informative when it
+# does happen; it is no longer what liveness rests on.
 sessions=$(claude agents --json)
 
 # No `--field "Priority"` here: verified against the real CLI just now,
@@ -380,6 +405,10 @@ jq -n \
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),
+          # A LIVE session holds its worktree locked. This, not `session`, is
+          # what says whether anyone is on the item — see the note where the
+          # worktree list is built.
+          worktree_locked: ($wt.locked // false),
           # A worktree whose own branch has already merged is rot, and
           # `sweep-prs` is what removes it. Flagged so a board pass reports it
           # instead of reading it as active work: #593, #571, #542 and #466 all

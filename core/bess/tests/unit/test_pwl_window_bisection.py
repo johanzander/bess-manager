@@ -26,7 +26,6 @@ from core.bess.exceptions import PWLWindowUnderRefinedError
 from core.bess.pwl_window_dp import run_pwl_window_backward_induction
 from core.bess.tests.helpers import _scenario_inputs, run_scenario_realized
 from core.bess.tests.integration.test_plan_faithfulness import (
-    KNOWN_PLAN_EXECUTION_GAP_SEK,
     PLAN_EXECUTION_TOLERANCE_SEK,
 )
 from core.bess.tests.unit.golden_capture import DATA_DIR
@@ -125,19 +124,28 @@ def test_the_bisected_schedule_is_executable_as_planned(scenario):
     value there. Getting that wrong shows up here as a plan the hardware
     cannot execute, and nowhere in the economics pins.
 
-    This fixture carries a registered pre-existing gap (sub-grid-step passive
-    solar charging at IDLE, see `KNOWN_PLAN_EXECUTION_GAP_SEK`) that has
-    nothing to do with bisection -- it reproduces bit-identically with tie
-    resolution disabled entirely. So the assertion is that bisection adds
-    NOTHING to that gap, at the corpus-wide 0.001 SEK gate rather than a
-    looser local band. Written first at 0.01 SEK, this passed while telling
-    the reader nothing: a tolerance ten times the effect it guards cannot
+    This fixture used to carry a registered +0.0016 gap in
+    `KNOWN_PLAN_EXECUTION_GAP_SEK`, which had nothing to do with bisection --
+    it reproduced bit-identically with tie resolution disabled entirely -- so
+    the assertion was that bisection adds NOTHING to that gap. #630 removed
+    the gap's actual cause (the DP planned a solar surplus too small to
+    classify SOLAR_EXPORT as exported, while the IDLE command it derived
+    absorbed it), so the pin is now the plain equality it was always trying
+    to approximate. Strictly stronger: any bisection seam error has nowhere
+    to hide, since there is no longer a nonzero expected value for one to sit
+    inside.
+
+    The 0.001 SEK gate is the corpus-wide one, deliberately, not a looser
+    local band. Written first at 0.01 SEK, this passed while telling the
+    reader nothing: a tolerance ten times the effect it guards cannot
     distinguish a clean seam from a broken one.
     """
     result, realized_cost = run_scenario_realized(scenario)
 
     planned = result.economic_summary.battery_solar_cost
-    expected_gap = KNOWN_PLAN_EXECUTION_GAP_SEK[FIXTURE]
     assert realized_cost - planned == pytest.approx(
-        expected_gap, abs=PLAN_EXECUTION_TOLERANCE_SEK
+        0.0, abs=PLAN_EXECUTION_TOLERANCE_SEK
+    ), (
+        f"the bisected plan is not executable as planned: "
+        f"R={realized_cost:.6f} P={planned:.6f} gap={realized_cost - planned:+.6f}"
     )

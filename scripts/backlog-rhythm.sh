@@ -72,7 +72,8 @@ actions=$(printf '%s' "$digest" | jq \
   # has spoken on for a month can look active and never age into a chase.
   def quiet_days: if .last_comment == null then .age_days else .last_comment.days end;
 
-  [ .items[]
+  (.items) as $items
+  | [ $items[]
 
     # The reporter answered us. This is the transition that matters most and
     # the one the digest could not previously see: a wait on the reporter may
@@ -139,6 +140,25 @@ actions=$(printf '%s' "$digest" | jq \
            detail: "classify it"}
      else empty end),
 
+    # STALLED WORK. A live worktree with no session behind it is an
+    # implementation that stopped mid-flight: the machine restarted, the
+    # session was killed, or the agent exited between steps. Nothing used to
+    # pick these up, and a fleet audit found 34 such worktrees -- 8 of them
+    # holding real unpushed commits, one with 32.
+    #
+    # `pr == null` guards against double-reporting: once a PR exists the PR
+    # branch below owns the handoff, and both firing would list the same work
+    # twice.
+    #
+    # The branch survives, so this is a resume and never a restart -- Step 0
+    # re-enters at the earliest incomplete step. Restarting would run Step 4,
+    # which branches fresh from origin/main and would delete those commits.
+    (if .worktree != null and (.stale_worktree | not) and .session == null and .pr == null
+     then {issue: .number, action: "resume_implementation",
+           why: "worktree \(.worktree_branch) on disk, no live session",
+           detail: "/implement-issue \(.number) — Step 0 resumes it; never restart, the branch commits are the only copy"}
+     else empty end),
+
     # The positive case: actually dispatchable.
     (if .column == "Ready for Dev"
      then {issue: .number, action: "dispatchable",
@@ -147,37 +167,43 @@ actions=$(printf '%s' "$digest" | jq \
      else empty end)
   ]
 
-  # --- the PR half: driving work to a READY PR ---------------------------
+  # --- the PR half -------------------------------------------------------
   #
-  # Ordered by how close each state is to the finish line, because the whole
-  # point of the loop is to hand over something approvable.
+  # This pass does NOT drive the review loop. `implement-issue` owns a PR from
+  # its first commit to `gh pr ready`, and Step 11 already requests the review,
+  # acts on the verdict and flips the PR when it is approved. Re-implementing
+  # any of that here would be a second copy of one loop, which is how one of
+  # them goes stale -- the same argument that put resume in Step 0 rather than
+  # in a separate skill.
+  #
+  # So an unfinished PR resolves to ONE action: hand it back to the skill that
+  # owns it. Step 0 detects the prior work and re-enters at the right step,
+  # whether the PR needs a first review, a rework, or just the ready flag it
+  # never got. #615 and #617 sat APPROVED-but-draft not because nothing was
+  # watching for that state, but because the sessions that owned them exited
+  # before Step 11 completed.
+  #
+  # Two exceptions stay here, because they are fleet-level and
+  # `implement-issue` deliberately does not widen to them (its Step 10 owns
+  # exactly one PR).
   + [ $prs[]
-      | (.reviews // []) as $rv
-      # The last review that DECIDED something. A bare COMMENTED may be the
-      # bot inline-notes placeholder rather than a verdict, so it does not
-      # count as one here.
-      | ([ $rv[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED") ] | last) as $decided
-      | (if .isDraft and ($decided.state? == "APPROVED")
-         then {pr: .number, action: "mark_ready",
-               why: "approved but still a draft",
-               detail: "gh pr ready \(.number) — this is what makes it approvable"}
-         elif (.isDraft | not) and ($decided.state? == "APPROVED")
-         then {pr: .number, action: "awaiting_maintainer",
-               why: "approved and out of draft",
-               detail: "nothing left but your merge"}
-         elif .mergeable == "CONFLICTING"
+      | . as $p
+      # The issue this PR belongs to, so the handoff can name it.
+      | ([ $items[] | select(.pr == $p.number) | .number ] | first) as $issue_no
+      | (if .mergeable == "CONFLICTING"
          then {pr: .number, action: "resolve_conflict",
                why: "CONFLICTING — note a conflicted PR produces no CI run at all",
                detail: "hand to sweep-prs, or resolve if the diff is ours"}
-         elif ($decided.state? == "CHANGES_REQUESTED")
-         then {pr: .number, action: "rework",
-               why: "changes requested",
-               detail: "resume with /implement-issue — its Step 0 re-enters at the review loop"}
-         elif .isDraft and ($rv | length) == 0
-         then {pr: .number, action: "request_review",
-               why: "draft with no review at all",
-               detail: "scripts/request-pr-review.sh \(.number) — a draft cannot become ready without one"}
-         else empty end)
+         elif (.isDraft | not)
+         then {pr: .number, action: "awaiting_maintainer",
+               why: "out of draft",
+               detail: "nothing left but your merge"}
+         else {pr: .number, issue: $issue_no, action: "resume_implementation",
+               why: "draft PR, review loop unfinished",
+               detail: (if $issue_no != null
+                        then "/implement-issue \($issue_no) — Step 0 re-enters at the review loop and drives it to gh pr ready"
+                        else "no issue references this PR; finish it by hand or link it" end)}
+         end)
     ]
 
   | {

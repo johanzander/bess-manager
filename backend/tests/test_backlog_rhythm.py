@@ -189,6 +189,79 @@ def test_stale_worktree_is_handed_to_sweep_prs(tmp_path: Path) -> None:
     assert "prune_worktree" in _actions_for(_run(tmp_path, [item]), 9)
 
 
+def test_a_worktree_with_no_session_is_stalled_work(tmp_path: Path) -> None:
+    """The machine-died case, and the one the fleet was full of.
+
+    A live worktree with no session behind it is an implementation that stopped
+    mid-flight — restart, kill, or an agent that exited between steps. An audit
+    found 34 such worktrees, 8 holding real unpushed commits (one with 32), and
+    nothing picked any of them up.
+    """
+    item = _item(
+        589,
+        worktree="/repo/wt/589",
+        worktree_branch="feat/issue-589",
+        session=None,
+        last_comment=_comment(1),
+    )
+    action = next(
+        a
+        for a in _run(tmp_path, [item])["actions"]
+        if a["action"] == "resume_implementation"
+    )
+    assert action["issue"] == 589
+    # A resume, never a restart: Step 4 would branch fresh from origin/main and
+    # delete the commits that only exist on this branch.
+    assert "never restart" in action["detail"]
+
+
+def test_a_worktree_with_a_live_session_is_left_alone(tmp_path: Path) -> None:
+    item = _item(
+        590,
+        worktree="/repo/wt/590",
+        worktree_branch="feat/issue-590",
+        session="issue-590",
+        last_comment=_comment(1),
+    )
+    assert "resume_implementation" not in _actions_for(_run(tmp_path, [item]), 590)
+
+
+def test_a_stale_worktree_is_pruned_not_resumed(tmp_path: Path) -> None:
+    """Its branch already merged, so there is nothing to resume — only rot to
+    clear. Resuming here would re-enter a finished issue."""
+    item = _item(
+        593,
+        worktree="/repo/wt/593",
+        worktree_branch="fix/issue-593",
+        stale_worktree=True,
+        session=None,
+        last_comment=_comment(1),
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 593)
+    assert "prune_worktree" in actions
+    assert "resume_implementation" not in actions
+
+
+def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> None:
+    """Both halves could fire on the same work. The PR branch owns the handoff
+    once a PR exists, so the issue rule stands down to avoid listing it twice."""
+    item = _item(
+        592,
+        pr=619,
+        worktree="/repo/wt/592",
+        worktree_branch="fix/issue-592",
+        session=None,
+        column="In Review",
+        last_comment=_comment(1),
+    )
+    pr = _pr(619, reviews=[])
+
+    result = _run(tmp_path, [item], [pr])
+    resumes = [a for a in result["actions"] if a["action"] == "resume_implementation"]
+    assert len(resumes) == 1
+    assert resumes[0]["pr"] == 619
+
+
 def test_ready_for_dev_is_reported_as_dispatchable(tmp_path: Path) -> None:
     item = _item(
         10, labels=["analyzed"], column="Ready for Dev", last_comment=_comment(1)
@@ -213,41 +286,52 @@ def _pr(number: int, **over: object) -> dict:
     return pr
 
 
-def test_approved_draft_is_flagged_to_mark_ready(tmp_path: Path) -> None:
-    """The step that actually hands the maintainer something to approve.
+def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
+    """This pass does NOT drive the review loop; `implement-issue` owns a PR
+    through to `gh pr ready`, and its Step 11 already requests the review, acts
+    on the verdict and flips the PR.
 
-    #615 was APPROVED and still a draft overnight; #617 the same. Nothing was
-    watching for this transition, which is the entire point of the loop.
+    So a draft needing a FIRST review, a draft needing REWORK, and a draft that
+    is already APPROVED but never got flipped all resolve to the same action:
+    hand it back to the skill that owns it. Step 0 re-enters at the right step.
+    Re-implementing any of that here would be a second copy of one loop, which
+    is how one of them goes stale.
     """
-    pr = _pr(615, isDraft=True, reviews=[{"state": "APPROVED"}])
-    actions = _actions_for(_run(tmp_path, [], [pr]), 615)
-    assert actions == {"mark_ready"}
+    approved_but_draft = _pr(615, reviews=[{"state": "APPROVED"}])
+    never_reviewed = _pr(619, reviews=[])
+    changes_requested = _pr(
+        614, reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}]
+    )
+
+    for pr in (approved_but_draft, never_reviewed, changes_requested):
+        actions = _actions_for(_run(tmp_path, [], [pr]), pr["number"])
+        assert actions == {"resume_implementation"}, pr["number"]
+
+
+def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
+    """`/implement-issue <n>` takes an issue number, so the action has to carry
+    one — otherwise the loop reports work nobody can pick up."""
+    item = _item(592, pr=615, column="In Review", last_comment=_comment(1))
+    pr = _pr(615, reviews=[{"state": "APPROVED"}])
+
+    action = next(
+        a for a in _run(tmp_path, [item], [pr])["actions"] if a.get("pr") == 615
+    )
+    assert action["issue"] == 592
+    assert "/implement-issue 592" in action["detail"]
+
+
+def test_a_draft_with_no_linked_issue_says_so(tmp_path: Path) -> None:
+    """Rather than emitting an un-actionable `/implement-issue null`."""
+    pr = _pr(700, reviews=[])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
+    assert action["issue"] is None
+    assert "no issue references this PR" in action["detail"]
 
 
 def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:
     pr = _pr(490, isDraft=False, reviews=[{"state": "APPROVED"}])
     assert "awaiting_maintainer" in _actions_for(_run(tmp_path, [], [pr]), 490)
-
-
-def test_draft_with_no_review_asks_for_one(tmp_path: Path) -> None:
-    """A draft cannot become ready without a review, and #619 sat unreviewed."""
-    assert "request_review" in _actions_for(_run(tmp_path, [], [_pr(619)]), 619)
-
-
-def test_changes_requested_becomes_rework(tmp_path: Path) -> None:
-    pr = _pr(614, reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}])
-    assert "rework" in _actions_for(_run(tmp_path, [], [pr]), 614)
-
-
-def test_a_bare_commented_review_does_not_count_as_a_verdict(tmp_path: Path) -> None:
-    """The review bot posts its inline notes as a COMMENTED review before the
-    summary, so COMMENTED alone decides nothing — the PR still needs a review.
-    Treating it as a verdict is how an approved PR stayed a draft.
-    """
-    pr = _pr(623, reviews=[{"state": "COMMENTED"}])
-    actions = _actions_for(_run(tmp_path, [], [pr]), 623)
-    assert "mark_ready" not in actions
-    assert "rework" not in actions
 
 
 def test_conflicting_pr_is_flagged_over_its_review_state(tmp_path: Path) -> None:

@@ -178,10 +178,8 @@ Actions, and who does what:
 
 | Action | Do |
 |---|---|
-| `mark_ready` | `gh pr ready <n>` — **this is the step that produces something to approve.** Unattended by design |
-| `awaiting_maintainer` | nothing; report it. Approved and out of draft is the finish line |
-| `request_review` | `scripts/request-pr-review.sh <n>`, then `mark_ready` on `APPROVED`. A draft cannot become ready without a review |
-| `rework` | resume with `/implement-issue <n>` — its Step 0 re-enters at the review loop |
+| `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
+| `awaiting_maintainer` | nothing; report it. Out of draft is the finish line |
 | `resolve_conflict` | hand to `sweep-prs` |
 | `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
 | `nudge_reporter` | one nudge, as the PO identity |
@@ -190,10 +188,29 @@ Actions, and who does what:
 | `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
 | `dispatchable` | propose for dispatch — needs the maintainer's go-ahead |
 
-**Ordering matters.** Work the PR actions first: they are closest to the finish
-line, and a `mark_ready` is worth more than any amount of triage. `recheck_ready`
-outranks the chases, because nudging someone who has already replied is the worst
-output this pass can produce.
+**This pass does not drive the review loop, and must not learn to.**
+`implement-issue` owns a PR from its first commit to `gh pr ready`; Step 11
+already requests the review, acts on the verdict and flips the PR. So every
+unfinished draft resolves to one action — hand it back — and a second copy of
+that loop is never built here. It is the same argument that put resume in Step 0
+instead of a separate skill: two copies of one loop means one of them goes stale.
+
+**Restarting a stalled issue is always a resume, never a fresh start.** Step 0
+re-enters at the earliest incomplete step. A restart runs Step 4, which branches
+from `origin/main` and deletes commits that exist nowhere else — an audit found 8
+abandoned branches carrying real work, one with 32 commits.
+
+**A session reporting `working` may have written nothing.** Three background
+dispatches in one day produced zero tracked-file writes while reporting healthy
+state, and `claude logs` returns only spinner frames. Read `claude agents --json`
+**unsandboxed** (`~/.claude/jobs` is sandbox-denied, so a sandboxed listing
+silently truncates — it returned 1 session where the truth was 17), and confirm
+progress by work product: commits, `MERGE_HEAD`, file mtimes.
+
+**Ordering matters.** Work `resume_implementation` first — it is the only action
+that ends in something approvable. `recheck_ready` outranks the chases, because
+nudging someone who has already replied is the worst output this pass can
+produce.
 
 **Quiet time is measured from the last comment, not `updatedAt`** — a label
 change or a board move bumps `updatedAt`, so an issue nobody has spoken on for a

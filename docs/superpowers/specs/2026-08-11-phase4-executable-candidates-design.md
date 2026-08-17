@@ -63,6 +63,30 @@ executor is configured not to deliver. That is a structural R≠P divergence on
 the charge path, untouched by #511 and #517 (both discharge-side). **Phase 4
 stands.**
 
+> ⚠️ **The second sentence of that paragraph is WRONG, and 4c's premise check
+> found it (2026-08-16).** `battery_system_manager` does not write
+> `charging_power_rate` to the inverter. It writes
+> `get_period_settings(period)["charge_rate"]` — the *intent-derived* rate:
+> `INTENT_TO_CONTROL` gives a flat `charge_rate: 100` for `SOLAR_STORAGE`,
+> `GRID_CHARGING` and `IDLE`, and for `GRID_CHARGING` that is then replaced by
+> `_compute_charge_rate`, which scales it from the plan's own action.
+> `charging_power_rate` (default **40%**) reaches hardware only as
+> `power_monitor.py:67`'s *initial* `target_charging_power_pct`, and
+> `power_monitoring_enabled` defaults to **False**; even when enabled, that
+> target is overwritten every period by `update_target_charging_power`.
+>
+> **So the executor is not configured to deliver less than the planner
+> assumes, and the savings this attributed to 4c do not exist.** Measured over
+> the corpus: of 493 charging periods, 4 under-deliver — all `GRID_CHARGING`,
+> worst −0.0288 kWh — and the cause is `_scale_to_percent` rounding the charge
+> rate to *nearest*, so a plan between two lattice steps is written as the step
+> below. That is the charge-side twin of #352, not a configured-throttle
+> problem. The first bullet above ("the plan charges at nominal power in six
+> places") remains true and is what 4c-full still has to address.
+>
+> Do not re-derive the old premise from this paragraph; it is kept only so the
+> correction has something to point at.
+
 ### The #352 evidence reproduces — the earlier 0 was a tautology (resolved 2026-08-13)
 
 The 2026-08-11 revision of this section recorded "0 periods" and called it a

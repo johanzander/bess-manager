@@ -176,7 +176,7 @@ def _residual_cover_p(
       nearest and a ceiling rounded *down* under-delivers the plan (repro:
       residual 0.12 kW -> 1% of 10 kW = 0.10 kW ceiling -> realized 0.10 for
       a planned 0.12). The write path now rounds ceilings up
-      (`execution_model.discharge_command_index`), so the whole round-DOWN
+      (`execution_model.command_index`), so the whole round-DOWN
       band is executable and the gate reduces to "is the ceiling
       commandable at all", i.e. at or below 100%. Rejecting 39% of the
       corpus's deficits was never the intent; it was the conversion's

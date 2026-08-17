@@ -239,8 +239,9 @@ frontend/node_modules` first) rather than installing through it. Re-running
 already contains.** Prompts are the cost, not the safety: a stalled autonomous
 run is a guaranteed loss, while anything the sandbox bounds is recoverable.
 `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
-remove` all run unattended. **Every `git push` asks**, `--force-with-lease`
-included — see below for why that one is not carved out.
+remove` all run unattended. **A `git push` naming a feature branch runs
+unattended too**; a push that forces, deletes a ref, publishes a tag, or targets
+`main`/`master`/`beta` asks — see below for how that line is drawn.
 
 What still asks is one closed list, and every entry is there because the
 **sandbox cannot contain it** — it bounds the filesystem, not the network, and
@@ -248,7 +249,7 @@ not `.git`'s own recovery data:
 
 | Category | Rules |
 |---|---|
-| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Escapes to GitHub | **a `git push` that forces / deletes a ref / publishes a tag / targets `main`, `master` or `beta`**, **every `gh api`**, `gh pr merge`, `gh release create` / `edit` / `delete` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
 | Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
 | Leaves the user boundary | `sudo` |
 
@@ -290,24 +291,48 @@ because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.
 
-**`git push` and `gh api` are guarded bluntly, and that is deliberate.** Both
-were enumerated by shape first, and both leaked, twice:
+**`gh api` is guarded bluntly, and that is deliberate. `git push` no longer is,
+and that took two tries to get right.** Both were enumerated by shape first, and
+both leaked:
 
 ```
 git push origin main --force          # --force not adjacent to `push`
 git push origin +beta-release-9.9     # force via refspec
 git push origin --delete release-X.Y  # destroys a shared ref
 git push origin v9.9.0                # publishes a release tag
+git push origin HEAD:main             # protected ref via colon refspec
 gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
 gh api <path> -f key=val              # any -f/-F makes it a POST
 ```
 
-The marker sits at an arbitrary argument position, and **prefix globbing cannot
-reach it.** Narrowing these two back to specific forms re-opens every line
-above, so `quality-check.sh` requires the blanket spelling rather than merely
-"some push rule exists". The cost is one prompt at Step 9 per issue, and a
-prompt during release work — which the release skill requires explicit approval
-for anyway.
+The marker sits at an arbitrary argument position. The first enumeration was
+**prefix-anchored** — `Bash(git push --force*)` — which genuinely cannot reach
+position 3, so it leaked every line above and was replaced by a blanket
+`Bash(git push *)`. That blanket rule was justified here by the claim that "a
+prefix glob cannot reach it", **and that claim was wrong**: `*` compiles to `.*`
+under `re.fullmatch` and spans spaces, so `Bash(git push *--force*)` matches
+`git push origin main --force` perfectly well. The very next paragraph about
+greedy globs said so all along; the two contradicted each other for four review
+rounds.
+
+So push is now guarded per *shape* — force in any position, refspec `+`, ref
+deletion, `--mirror`/`--prune`/`--tags`, release tags, and anything naming
+`main`, `master` or `beta` in either the `origin main` or `HEAD:main` spelling.
+A push naming a feature branch runs unattended, which is what
+`implement-issue` Step 9 and `sweep-prs` actually do; branch protection already
+refuses the case the prompt was standing in for. The protected-ref rules anchor
+on the end of the token (`* main`, not `* main*`) so a branch legitimately
+containing "main" — `maintenance-cleanup` — does not prompt.
+
+`gh api` keeps its blanket rule because it is **not** separable this way: any
+`-f`, `-F` or `-X` turns a read into a mutation, so there is no lexical marker
+that isolates the safe subset. If it starts stalling runs, the fix is an
+allow-list of read-only paths, not a shape guard.
+
+`quality-check.sh` pins all of this by COMMAND STRING in three lists, never by
+rule name — 20 shapes that must be guarded, 20 that must stay unattended. Adding
+a rule that "looks right" without adding its command string is how every
+previous version of this section went stale.
 
 **Patterns match the command as written — prefix globbing, no normalisation.**
 This is the single biggest source of rules that look right and match nothing,
@@ -544,22 +569,22 @@ and won't remove a worktree holding uncommitted or untracked files). A second
 prompt there buys nothing and costs a stall on every run — `implement-issue`
 Step 4's prune loop alone would have hit ~24 of them.
 
-`git push --force-with-lease` **used to** be excluded on the same reasoning, and
-is not any more. It is a push, and the push guard has to be blanket (above): the
-only spellings that would exempt it — `Bash(git push --force-with-lease*)` — are
-prefix-anchored, so they cannot exempt `git push origin main
---force-with-lease`, while any pattern loose enough to catch that also catches
-plain `--force`. Exempting it means re-opening the hole. It asks.
+`git push --force-with-lease` **still asks**, and unlike the ordinary
+feature-branch push it is not carved out. `Bash(git push *--force*)` catches it
+at any argument position, and that is intended: a lease makes the force safer
+against a *concurrent* writer, not against a wrong local history.
 
-**That prompt costs nothing here, which is why the hole stays closed rather
-than the rule loosened.** Neither `implement-issue` nor `release` mentions
-`rebase`, `--force` or `--force-with-lease` anywhere, and this project merges
-the target branch before a PR instead of rebasing — a merge-based flow never
-needs a force push. So the rule should lie dormant. **If it ever fires, treat
-that as the finding**: an agent has gone off-script into a rebase or an amend
-of already-pushed commits. Answer the prompt on its merits; do not "fix" it by
-narrowing the push rule — that is how the gaps PR #596 had to close were
-introduced in #588.
+**That prompt costs nothing here, which is why it stays.** Neither
+`implement-issue` nor `release` mentions `rebase`, `--force` or
+`--force-with-lease` anywhere, and this project merges the target branch before
+a PR instead of rebasing — a merge-based flow never needs a force push. So the
+rule should lie dormant. **If it ever fires, treat that as the finding**: an
+agent has gone off-script into a rebase or an amend of already-pushed commits.
+Answer the prompt on its merits; do not "fix" it by widening what runs
+unattended — that is how the gaps PR #596 had to close were introduced in #588.
+The feature-branch carve-out is safe precisely because it is defined by what the
+command *lacks* (no force, no `+`, no `--delete`, no tag, no protected ref),
+with every one of those shapes pinned by command string in the gate.
 
 **What the unattended set actually risks is uncommitted work**, since the
 sandbox contains writes to the repo but cannot distinguish a wanted write from

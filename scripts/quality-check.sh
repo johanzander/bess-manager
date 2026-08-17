@@ -171,13 +171,31 @@ if ! python3 - <<'PY'
 import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
-# `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
-# dangerous shapes put their marker at an arbitrary argument position
-# (`git push origin main --force`, `git push origin +beta-release-9.9`,
-# `git push origin --delete release-X.Y`, `gh api <path> -X PUT`), which a
-# prefix glob cannot reach. Enumerating them left real holes twice. Narrowing
-# these two back to specific forms re-opens the holes, so the check requires
-# the blanket spelling rather than merely "some rule exists".
+#
+# `git push` USED to be guarded by a blanket `Bash(git push *)`, justified here
+# by the claim that a marker at an arbitrary argument position (`git push
+# origin main --force`, `git push origin +beta-release-9.9`, `git push origin
+# --delete release-X.Y`) is unreachable by a prefix glob. That claim was FALSE,
+# and matches() below is the proof: `*` becomes `.*` under re.fullmatch, which
+# spans spaces. So `Bash(git push *--force*)` DOES match `git push origin main
+# --force`. The note further down about greedy globs said as much all along --
+# the two comments contradicted each other and the blanket rule was built on
+# the wrong one.
+#
+# The earlier enumerations leaked twice because they were prefix-ANCHORED
+# (`Bash(git push --force*)`), which genuinely cannot reach position 3. The
+# `*marker*` spelling can. So the guard is now per-shape: force in any
+# position, refspec `+`, ref deletion, `--mirror`/`--prune`/`--tags`, release
+# tags, and anything targeting main/master/beta. A push naming a feature branch
+# explicitly runs unattended, which is the shape implement-issue and sweep-prs
+# actually use -- a blanket ask there stalls every autonomous run for no gain,
+# since branch-protection already refuses the case that matters.
+#
+# `gh api` keeps its blanket rule: any `-f`/`-F`/`-X` turns a read into a
+# mutation, and the safe subset is not separable by shape the way push is.
+#
+# MUST_BE_GUARDED and MUST_NOT_BE_GUARDED below are what actually holds this
+# together. Do not re-narrow by trusting rule NAMES -- add the command string.
 #
 # Every entry below is a rule whose deletion is the exact regression this gate
 # was written for -- the GitHub-reaching and history-destroying guards. Keep
@@ -191,7 +209,13 @@ REQUIRED = {
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
-        "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
+        # Bare `git push` names no target, so it is guarded by NAME here. The
+        # per-shape push rules are NOT listed by name on purpose: there are 52
+        # of them, and pinning names would just re-create the presence-check
+        # failure mode. They are held by MUST_BE_GUARDED command strings
+        # instead -- deleting any one of them breaks at least one pinned
+        # command, which is the check that actually catches regressions.
+        "Bash(git push)",
         "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
         "Bash(gh repo delete*)", "Bash(gh secret*)", "Bash(gh workflow run*)",
@@ -243,13 +267,31 @@ MUST_BE_GUARDED = [
     "git --no-pager gc --prune=now",
     "git -C sub tag -d v9.9.0",
     "git -C sub update-ref -d refs/heads/x",
-    # the marker sits at an arbitrary argument position
+    # The marker sits at an arbitrary argument position. Reachable by a
+    # `*marker*` glob, NOT by a prefix-anchored one -- that distinction is the
+    # whole reason the blanket rule could be retired. Every line here failed
+    # against at least one earlier enumeration.
     "git push origin main --force",
+    "git push origin main --force-with-lease",
+    "git push -f origin main",
     "git push origin +beta-release-9.9",
     "git push origin --delete release-9.9",
+    "git push origin :main",
     "git push origin v9.9.0",
+    "git push origin --tags",
+    "git push --mirror origin",
     "git push -u origin main",
     "git push",
+    # Protected refs by every spelling, including the colon-refspec forms that
+    # `* main` cannot see. `git push origin HEAD:main` was a live hole in the
+    # first draft of this rule set.
+    "git push origin master",
+    "git push origin HEAD:main",
+    "git push origin HEAD:refs/heads/main",
+    "git push beta main",
+    "git push origin HEAD:beta",
+    "git push origin beta-release-v10.1.0b10-tmp",
+    "git -C x push origin main --force",
     # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
     "git tag --delete v9.9.0", "git tag -d v9.9.0",
     "git tag -f v9.9.0 abc123",
@@ -279,12 +321,14 @@ MUST_BE_GUARDED = [
 #   entries here; they would fail against a matcher that is correct for what it
 #   models. Verifying the decomposition claim needs a live permission test, not
 #   this gate.
-# * GREEDY GLOBS. `*` compiles to `.*`, which spans spaces, so `git -* push*`
-#   also matches e.g. a commit whose MESSAGE contains " push". That is a false
-#   PROMPT, not a hole, and it is accepted: the alternative is dropping the
-#   global-option guard on push, which is a real bypass. Precision here is
-#   bounded by prefix globbing -- when the choice is between an extra prompt
-#   and a gap, take the prompt.
+# * GREEDY GLOBS. `*` compiles to `.*`, which spans spaces. This is what makes
+#   the per-shape push rules possible at all -- `*--force*` reaches a marker at
+#   any argument position -- and it is also why `git -* push *--force*` still
+#   matches e.g. a commit whose MESSAGE contains " push --force". That is a
+#   false PROMPT, not a hole, and it is accepted. When the choice is between an
+#   extra prompt and a gap, take the prompt. The reverse trade is NOT
+#   acceptable: a shape that must ask belongs in MUST_BE_GUARDED, not in a
+#   comment explaining why it is fine.
 
 # Read-only git must NOT be caught: an autonomous run executing rules.md's
 # cross-checkout procedure (`git diff -- f | git -C <wt> apply`, then
@@ -309,6 +353,20 @@ MUST_NOT_BE_GUARDED = [
     # `remote prune` through the same greedy glob, so the twin was dropped.
     "git -C /main worktree prune", "git worktree prune",
     "git -C sub remote prune origin",
+    # Pushing a feature branch BY NAME. This is the shape implement-issue Step 9
+    # and sweep-prs run, and the blanket `Bash(git push *)` stalled every one of
+    # them. Branch protection already refuses the case a blanket rule was
+    # protecting against, so the prompt bought nothing and cost an autonomous
+    # run. These entries are what stops the blanket rule being reintroduced.
+    "git push origin HEAD:fix/issue-592-vpp-idle-at-floor",
+    "git push origin feat/phase4c-charge-commands",
+    "git push -u origin fix/issue-604-signed-pair-aliases",
+    "git push origin worktree-po-followups",
+    "git -C .claude/worktrees/x push origin HEAD:fix/issue-592-vpp-idle-at-floor",
+    # The `main` SUBSTRING trap: a branch may legitimately contain "main".
+    # `Bash(git push * main*)` would prompt on this, which is why the protected
+    # -ref rules anchor on the end of the token instead.
+    "git push origin maintenance-cleanup",
 ]
 
 

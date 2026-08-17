@@ -502,6 +502,17 @@ battery has room.  With the cap set:
   the DP chooses it ahead of the above-cap window.  These periods classify as
   **SOLAR_EXPORT** with `battery_action = 0` and a not-full battery, meaning
   "deliberately holding for later overflow".
+- **The bypass is only offered where that classification actually lands
+  (#630)**: nothing commands "hold and export" directly — it is delivered by
+  the SOLAR_EXPORT label writing `charge_rate=0`.  That label needs
+  `grid_exported > 0.01 kWh` (`FLOW_NOISE_FLOOR_KWH`); below it the period
+  falls through to **IDLE**, whose command is `load_first` at charge rate
+  100, which absorbs the surplus instead.  Planning the export anyway meant
+  the battery ran fuller than planned until it hit a bound and spilled the
+  difference.  `_solar_export_bypass_is_unexecutable` in `action_selector.py`
+  withholds the candidate there, so a sub-floor surplus is planned as
+  absorbed — which is what the hardware does.  Charge-side twin of
+  `_residual_cover_p`'s LOAD_SUPPORT gate, on the same constant.
 - **Hardware mapping**: SOLAR_EXPORT blocks passive charging (#313), stopping
   `load_first` from filling the battery from surplus solar. On a genuinely
   full battery this is a no-op. The mechanism differs by platform: register-

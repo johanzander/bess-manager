@@ -1243,7 +1243,10 @@ def _run_dynamic_programming(
     # for the reward/transition primitives, so a top-level import would be
     # circular -- the same arrangement pwl_window_dp already has with this
     # file.
-    from core.bess.action_selector import _residual_cover_p
+    from core.bess.action_selector import (
+        _residual_cover_p,
+        _solar_export_bypass_is_unexecutable,
+    )
 
     # Set defaults if not provided
     if solar_production is None:
@@ -1385,27 +1388,40 @@ def _run_dynamic_programming(
         # to preserve headroom for above-cap solar: ac_flows_grid caps the
         # exported surplus and the DP weighs the clipped remainder against
         # the value of keeping the room (no separate HOLD action needed).
-        zeros_col = np.zeros_like(soe_col)
-        reward_bypass, grid_imported_bypass = _compute_reward_grid(
-            zeros_col,
-            soe_col,
-            soe_col,
-            home_consumption=home_consumption[t],
-            battery_settings=battery_settings,
-            dt=dt,
-            current_buy_price=buy_price[t],
-            current_sell_price=sell_price[t],
-            solar_production=solar_production[t],
-            import_cap_kwh=import_cap_kwh,
-        )
-        value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
-        if effective_import_cap is not None:
-            bypass_feasible = (
-                grid_imported_bypass.reshape(-1)
-                <= effective_import_cap.reshape(-1) + 1e-9
+        #
+        # Withheld entirely where the classifier would call the period IDLE
+        # rather than SOLAR_EXPORT (#630) -- there the bypass is not a
+        # commandable action at all, and plain IDLE is what the hardware
+        # does. Unlike the discharge mask above, this one DOES apply here:
+        # that exception rests on the coarse lattice having no exact-cover
+        # point nearby, so an in-band action is the better proxy. Nothing
+        # analogous holds here -- the bypass is an exact action, not a
+        # lattice approximation, and its executable neighbour (plain IDLE)
+        # is already in the action set at every state.
+        if not _solar_export_bypass_is_unexecutable(
+            solar_production[t], home_consumption[t], battery_settings, dt
+        ):
+            zeros_col = np.zeros_like(soe_col)
+            reward_bypass, grid_imported_bypass = _compute_reward_grid(
+                zeros_col,
+                soe_col,
+                soe_col,
+                home_consumption=home_consumption[t],
+                battery_settings=battery_settings,
+                dt=dt,
+                current_buy_price=buy_price[t],
+                current_sell_price=sell_price[t],
+                solar_production=solar_production[t],
+                import_cap_kwh=import_cap_kwh,
             )
-            value_bypass = np.where(bypass_feasible, value_bypass, -np.inf)
-        V[t, :] = np.maximum(V[t, :], value_bypass)
+            value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
+            if effective_import_cap is not None:
+                bypass_feasible = (
+                    grid_imported_bypass.reshape(-1)
+                    <= effective_import_cap.reshape(-1) + 1e-9
+                )
+                value_bypass = np.where(bypass_feasible, value_bypass, -np.inf)
+            V[t, :] = np.maximum(V[t, :], value_bypass)
 
         # Residual load-cover candidate (#466 follow-up): one extra
         # O(n_states) column discharging exactly this period's forecast net

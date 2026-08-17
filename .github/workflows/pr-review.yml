@@ -49,7 +49,19 @@ jobs:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude-bot"
-          claude_args: "--max-turns 60 --permission-mode bypassPermissions"
+          # 60 turns was not enough and failed SILENTLY-ish: on PR #623 the run
+          # ended `Execution failed: Reached maximum number of turns (60)` after
+          # posting only an early scratch comment, so the PR showed a stray
+          # review and no verdict for 16 minutes while the run was already dead.
+          # A caller waiting on a verdict cannot tell that from a slow review.
+          #
+          # The cap is hit because this reviewer earns its keep: it checks the
+          # branch out, runs the suite, REVERTS the fix to confirm the tests go
+          # red without it, then runs black/ruff/mypy/shellcheck. That is the
+          # behaviour worth paying for, and it costs turns proportional to the
+          # diff. 120 leaves headroom for a multi-file PR while still bounding a
+          # runaway.
+          claude_args: "--max-turns 120 --permission-mode bypassPermissions"
           prompt: |
             You are the **PR Review** bot for PR #${{ github.event.issue.number }} in johanzander/bess-manager.
 

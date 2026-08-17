@@ -953,6 +953,7 @@ class TestDiscoverLocaleDefaults:
         integrations = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
@@ -986,6 +987,7 @@ class TestDiscoverLocaleDefaults:
         integrations = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": True,
             "nordpool_area": "SE3",
@@ -1019,6 +1021,7 @@ class TestDiscoverLocaleDefaults:
         integrations = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": True,
             "nordpool_area": "NO1",
@@ -1049,6 +1052,7 @@ class TestDiscoverLocaleDefaults:
         integrations = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
@@ -1080,6 +1084,7 @@ class TestDiscoverLocaleDefaults:
         integrations = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,
@@ -1108,6 +1113,96 @@ class TestDiscoverLocaleDefaults:
         )
 
 
+class TestDiscoverForwardsInverterDetectionFlags:
+    """POST /api/setup/discover must forward a detection flag for EVERY
+    inverter platform the wizard shows (#621).
+
+    `discover_integrations()` produces `huawei_found`, but the endpoint
+    dropped it while forwarding the other three. The wizard's
+    `DiscoveryResult` declares `huaweiFound: boolean` (non-optional), so the
+    missing key surfaced as `undefined` rather than a type error, and the
+    Huawei detection dot read grey for every user including a correctly
+    detected stock `huawei_solar` install.
+
+    Asserting the flag on `discover_integrations()` alone is what let this
+    through — `test_scenario_discovery.py::...` already did that and passed.
+    The gap is in the endpoint's payload, so that is what these assert.
+    """
+
+    def _run_discover(self, ctrl, integrations):
+        ha = ctrl.ha_controller
+        ha.discover_integrations.return_value = (integrations, [])
+        ha.fetch_entity_registry.return_value = []
+        ha.discover_sensors_from_registry.return_value = ({}, None, {})
+        ha.discover_current_sensors.return_value = {}
+        ha.discover_optional_sensors.return_value = {}
+        ha.discover_octopus_entities.return_value = {}
+        ha.ENTITY_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_MIN_SUFFIX_MAP = {}
+        ha.SOLAX_GROWATT_SPH_SUFFIX_MAP = {}
+        ha.SOLAX_NATIVE_SUFFIX_MAP = {}
+        sys.modules["app"].bess_controller = ctrl
+        return _client.post("/api/setup/discover")
+
+    @staticmethod
+    def _integrations(**overrides):
+        base = {
+            "growatt_found": False,
+            "growatt_device_id": None,
+            "huawei_found": False,
+            "huawei_device_id": None,
+            "solax_found": False,
+            "solis_found": False,
+            "nordpool_found": False,
+            "nordpool_area": None,
+            "nordpool_custom_area": None,
+            "nordpool_custom_entity": None,
+            "nordpool_config_entry_id": None,
+            "octopus_found": False,
+            "detected_inverter_platforms": [],
+            "detected_phase_count": None,
+            "currency": None,
+            "vat_multiplier": None,
+        }
+        base.update(overrides)
+        return base
+
+    def test_every_platform_detection_flag_is_present_in_the_payload(self):
+        """All four wizard platform tabs need their flag, not just three."""
+        ctrl = _make_discover_controller(deepcopy(_PRE_EXISTING_STORE))
+        resp = self._run_discover(ctrl, self._integrations())
+
+        assert resp.status_code == 200
+        body = resp.json()
+        for key in ("growattFound", "solaxFound", "solisFound", "huaweiFound"):
+            assert key in body, f"{key} missing from /api/setup/discover payload"
+
+    def test_detected_huawei_is_reported_as_found(self):
+        """A stock huawei_solar install must light the Huawei dot green."""
+        ctrl = _make_discover_controller(deepcopy(_PRE_EXISTING_STORE))
+        resp = self._run_discover(
+            ctrl,
+            self._integrations(
+                huawei_found=True,
+                huawei_device_id="dev-huawei-1",
+                detected_inverter_platforms=["huawei_solar_luna2000"],
+            ),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["huaweiFound"] is True
+
+    def test_undetected_huawei_is_reported_as_not_found(self):
+        """The reporter's case: EMMA integration, so the flag is False --
+        False, not absent. The wizard must still be able to offer the tab.
+        """
+        ctrl = _make_discover_controller(deepcopy(_PRE_EXISTING_STORE))
+        resp = self._run_discover(ctrl, self._integrations(huawei_found=False))
+
+        assert resp.status_code == 200
+        assert resp.json()["huaweiFound"] is False
+
+
 class TestDiscoverReportsDisabledSensors:
     """POST /api/setup/discover must tell the wizard which sensors are
     unmapped because their entity is disabled in HA (#549).
@@ -1123,6 +1218,7 @@ class TestDiscoverReportsDisabledSensors:
             {
                 "growatt_found": False,
                 "growatt_device_id": None,
+                "huawei_found": False,
                 "solax_found": True,
                 "nordpool_found": False,
                 "nordpool_area": None,
@@ -1243,6 +1339,7 @@ class TestDiscoverPricingDefaults:
         base = {
             "growatt_found": False,
             "growatt_device_id": None,
+            "huawei_found": False,
             "solax_found": False,
             "nordpool_found": False,
             "nordpool_area": None,

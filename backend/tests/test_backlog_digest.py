@@ -302,6 +302,55 @@ def test_open_blocked_by_reference_is_never_ready(bin_dir: Path) -> None:
     assert item["blocked"] is True
 
 
+def test_a_bulleted_blocked_by_line_still_counts(bin_dir: Path) -> None:
+    """Anchoring to the line start must still allow the markdown form people
+    actually write."""
+    issue = _issue(705, labels=[{"name": "analyzed"}], body="- Blocked by #500\n")
+    board = [{"content": {"number": 705}, "priority": "P1"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], board))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 705)
+    assert item["blocked_by"] == [500]
+    assert item["blocked"] is True
+
+
+def test_a_negated_blocked_by_is_not_a_blocker(bin_dir: Path) -> None:
+    """ "not blocked by #500 anymore" and "no longer blocked by #500" are the
+    natural way to update an issue once its blocker resolves — so a free
+    substring scan fires exactly when the blocker is GONE.
+
+    Matched per line and anchored to the line start, which rejects these without
+    a negation blacklist that would only cover the phrasings someone thought of.
+    This was inert on main (`blocked_by` was extracted and never used); gating
+    `column()` on it is what gave the bad parse teeth.
+    """
+    for body in (
+        "This is not blocked by #500 anymore.\n",
+        "We are no longer blocked by #500.\n",
+        "Was blocked by #500 but that shipped.\n",
+    ):
+        issue = _issue(706, labels=[{"name": "analyzed"}], body=body)
+        board = [{"content": {"number": 706}, "priority": "P1"}]
+        _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], board))
+
+        item = next(i for i in _run(bin_dir)["items"] if i["number"] == 706)
+        assert item["blocked_by"] == [], body
+        assert item["blocked"] is False, body
+        assert item["column"] == "Ready for Dev", body
+
+
+def test_an_incidental_mid_sentence_mention_does_not_reclassify(bin_dir: Path) -> None:
+    """`$blocked` is tested before the analyzed/priority branch, so an untriaged
+    issue that merely mentions a blocker in prose would move Backlog -> Analysis
+    with no human triage behind it."""
+    issue = _issue(707, labels=[], body="Might be blocked by #500, not sure yet.\n")
+    _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], []))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 707)
+    assert item["blocked"] is False
+    assert item["column"] == "Backlog"
+
+
 def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
     """A `Blocked by #N` line is never edited out once N lands, so a pure text
     scan pins the item out of Ready for Dev forever.

@@ -99,16 +99,12 @@ jq -n \
 
   def label_names: [.labels[].name];
 
-  # Automation identities whose comments do not count as human discussion.
-  # Stage 1 triage (issue-triage.yml) posts a comment on every issue it
-  # processes, in every one of its four buckets, and a deferred task turns
-  # that workflow into this very agent, as its own intake arm — at which point every
-  # issue would carry a bot comment and a raw comment-count heuristic would
-  # degenerate to "everything is a discussion". bess-product-owner and
-  # bess-developer are the renamed/future identities (see scripts/gh-agent.sh).
+  # Automation identities, so `last_comment.is_bot` can mark a comment that
+  # carries no human signal. Stage 1 triage (issue-triage.yml) comments on every
+  # issue it processes, so without this every issue looks like it has been
+  # spoken on. bess-product-owner and bess-developer are the renamed/future
+  # identities (see scripts/gh-agent.sh).
   def bot_authors: ["bess-manager-claude-bot", "bess-agent", "bess-product-owner", "bess-developer"];
-
-  def human_comments($comments): [ $comments[] | select((.author.login // "") as $a | (bot_authors | index($a)) | not) ];
 
   def pr_matches_issue($p; $n):
     ($p.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
@@ -156,8 +152,24 @@ jq -n \
     ([ $sessions[] | select(.name? == "issue-\($n)") | .name ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0] end;
 
+  # Matched per LINE and anchored to its start, because `Blocked by #N` is a
+  # convention -- a line in the body, optionally bulleted -- not a phrase to be
+  # found anywhere in prose.
+  #
+  # A free `scan` over the whole body matched the substring regardless of what
+  # preceded it, so "not blocked by #50 anymore" and "no longer blocked by #12"
+  # both registered as live blockers. Those are the natural way to update an
+  # issue once a blocker resolves, so the false positive fires exactly when the
+  # blocker is gone. Anchoring rejects them without a negation blacklist, which
+  # would only ever cover the phrasings someone thought of.
+  #
+  # This matters more than it looks: on main `blocked_by` was extracted and
+  # never used, so the bad parse was inert. Gating `column()` on it is what
+  # gives it teeth.
   def blocked_by:
-    [ (.body // "") | scan("(?i)blocked by #(\\d+)") | .[0] | tonumber ];
+    [ (.body // "") | split("\n")[]
+      | select(test("^[[:space:]]*(?:[-*][[:space:]]*)?blocked by #[0-9]+"; "i"))
+      | capture("blocked by #(?<n>[0-9]+)"; "i") | .n | tonumber ];
 
   # Only blockers that are STILL OPEN count. `$issues` is the open-issue list,
   # so membership decides it — no extra API call.
@@ -287,10 +299,10 @@ jq -n \
           author: .author.login,
           age_days: days_since(.createdAt),
           last_activity_days: days_since(.updatedAt),
-          # Total comment count (bots included) — an activity signal, not
-          # the discussion trigger. `awaiting: discussion` above is driven
-          # by human_comments only; this field stays a raw total so the
-          # digest still shows how much traffic (bot or human) an issue has.
+          # Total comment count, bots included — a volume signal only. Nothing
+          # derives a column from it: `awaiting` no longer comes from comment
+          # activity at all, and `last_comment` below is what carries the
+          # actionable detail (who spoke, when, whether it was the reporter).
           comments: (.comments | length),
           column: $col,
           # Reported for EVERY column, not just Analysis. Suppressing it

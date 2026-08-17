@@ -28,9 +28,21 @@ message that is misleading rather than wrong:
 
     set -a; . ./.env; set +a; ./scripts/backlog-digest.sh
 
-Board writes need `BESS_PO_TOKEN` with `project` scope. The custom-field JSON
-shape is confirmed: `gh project item-list --format json` puts each single-select
-value at the item's top level, so `.priority` and `.awaiting` both read directly.
+Board writes need `BESS_PO_TOKEN` with `project` scope.
+
+The custom-field JSON shape is **confirmed against the live board**, not
+assumed: `gh project item-list --format json` puts each single-select value at
+the item's top level, so `.priority` and `.awaiting` read directly. Re-verify
+with the command itself rather than trusting this paragraph — the tests fabricate
+that shape, so they cannot prove it:
+
+    gh project item-list 1 --owner johanzander --format json \
+      | jq '[.items[] | {n: .content.number, p: .priority, a: .awaiting}] | .[0:3]'
+
+That returned populated `P1`–`P3` values and 17 items with `Awaiting` set. It
+matters because a wrong path fails silently — `.priority?` / `.awaiting?` resolve
+to `null` for every item with no error, which reads exactly like an ungroomed
+board.
 
 Field options, as they actually exist — do not invent values outside these sets:
 

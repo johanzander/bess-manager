@@ -435,6 +435,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        at_reserve_floor: bool = False,
     ) -> tuple[int, bool]:
         """Display-facing alias for _intent_to_vpp().
 
@@ -443,9 +444,18 @@ class SolaxModbusGrowattController(GrowattMinController):
         core/bess/inverter_controller.py) rather than duck-typing a
         subclass-private method name. This is a pure interface unification
         wrapper -- _intent_to_vpp()'s own logic is unchanged.
+
+        at_reserve_floor is derived from the *plan's* SoE trajectory by
+        _planned_at_reserve_floor(), where the write path derives it from live
+        SoC -- see #592. Passing it is what keeps the displayed period equal to
+        the commanded one.
         """
         return self._intent_to_vpp(
-            grid_charge, discharge_rate, block_passive_charging, strategic_intent
+            grid_charge,
+            discharge_rate,
+            block_passive_charging,
+            strategic_intent,
+            at_reserve_floor,
         )
 
     def _ensure_vpp_status_enabled(self, controller) -> None:

@@ -2811,12 +2811,31 @@ class BatterySystemManager:
         the case that decides this branch is exact equality -- a battery
         parked on its floor overnight, which is precisely the reported
         scenario.
+
+        **An unreadable SoC holds, and says so.** `get_battery_soc()` is
+        `float | None`, so a transient unavailable/unknown sensor must be
+        decided here rather than propagating: this runs for every platform on
+        every period write, and two of its callers (the retry closure's
+        apscheduler job and the every-minute discharge-inhibit job) have no
+        exception handling at all, so raising would take down far more than
+        this flag. Holding is chosen over releasing because it is the safe
+        direction and is exactly the pre-#592 behaviour -- releasing is what
+        could let the inverter's own self-use draw the battery down, so it
+        must never happen on a reading we could not verify. This is an
+        explicit, logged branch, not a silent fallback: rules.md forbids
+        degrading quietly, not choosing a safe outcome loudly.
+
+        Validation is `_get_current_battery_soc()`'s, reused rather than
+        restated, so the definition of a valid reading stays in one place.
         """
-        current_soe = (
-            self.battery_settings.total_capacity
-            * self.controller.get_battery_soc()
-            / 100.0
-        )
+        soc = self._get_current_battery_soc()
+        if soc is None:
+            logger.warning(
+                "Reserve-floor check: SoC unreadable — holding the battery "
+                "(not releasing VPP control) until a valid reading returns"
+            )
+            return False
+        current_soe = self.battery_settings.total_capacity * soc / 100.0
         return current_soe <= self.battery_settings.min_soe_kwh
 
     _PERIOD_RETRY_DELAYS_MIN: ClassVar[list[int]] = [

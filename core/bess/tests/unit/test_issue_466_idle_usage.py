@@ -31,8 +31,8 @@ import pytest
 
 from core.bess.simulation.vpp_simulator import (
     VppCommand,
-    derive_vpp_commands,
     simulate_vpp,
+    simulate_vpp_commands,
 )
 from core.bess.tests.helpers import make_battery_settings, run_scenario
 
@@ -131,14 +131,9 @@ class TestExecutionHalf:
         periods = 48  # 12 h at 15 min
         start_soe = 8.0
 
-        commands = derive_vpp_commands(["IDLE"] * periods, [0.0] * periods, settings)
-        assert commands[0] == VppCommand(power_pct=1, remote_control_enabled=True), (
-            "IDLE must command battery_first hold (#466) — if this changed, "
-            "the outcome assertion below is testing something else"
-        )
-
         sim = simulate_vpp(
-            commands,
+            ["IDLE"] * periods,
+            [0.0] * periods,
             solar_production=[0.0] * periods,
             home_consumption=[0.5] * periods,  # 2 kW draw, no solar
             buy_price=[1.0] * periods,
@@ -146,6 +141,15 @@ class TestExecutionHalf:
             initial_soe=start_soe,
             settings=settings,
             dt=0.25,
+        )
+
+        assert sim.commands[0] == VppCommand(
+            power_pct=1, remote_control_enabled=True
+        ), (
+            "IDLE must command battery_first hold (#466) — if this changed, "
+            "the outcome assertion below is testing something else. Note the "
+            "start SoE is deliberately above min_soe_kwh, so #592's "
+            "reserve-floor release does not apply here."
         )
 
         end_soe = sim.period_data[-1].energy.battery_soe_end
@@ -174,7 +178,7 @@ class TestExecutionHalf:
         periods = 48
         start_soe = 8.0
 
-        sim = simulate_vpp(
+        sim = simulate_vpp_commands(
             [VppCommand(power_pct=0, remote_control_enabled=False)] * periods,
             solar_production=[0.0] * periods,
             home_consumption=[0.5] * periods,

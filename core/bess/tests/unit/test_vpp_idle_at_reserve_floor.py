@@ -26,7 +26,10 @@ proved separately in
 from types import SimpleNamespace
 
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.dp_schedule import DPSchedule
 from core.bess.price_manager import MockSource
+from core.bess.settings import BatterySettings
+from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 from core.bess.tests.conftest import MockHomeAssistantController
 
 PERIOD = 12  # 03:00 -- the overnight idle stretch from the report
@@ -98,6 +101,40 @@ class TestIdleAtReserveFloorReleasesControl:
             "period -- re-asserting is what kept the BMS awake"
         )
 
+    def test_unreadable_soc_holds_rather_than_releasing(self):
+        """`get_battery_soc()` is typed `float | None`, so a transient
+        unavailable/unknown HA sensor must not decide this.
+
+        Holding is the safe direction and is exactly today's behaviour: the
+        release is what could let the inverter's own self-use draw the battery
+        down, so acting on an unreadable reading is the only outcome that can
+        make things worse. Deliberately NOT a silent default -- the branch is
+        explicit and logged, per rules.md. Releasing on bad data would be the
+        unsafe direction; crashing on it would take down the whole period
+        write, including grid_charge and discharge_rate.
+        """
+        bsm, controller = _make_vpp_bsm(soc=50.0)
+        controller.settings["battery_soc"] = None
+
+        bsm._apply_period_schedule(PERIOD)
+
+        command = _last_vpp_command(controller)
+        assert command["power_pct"] == 1
+        assert command["remote_control_enabled"] is True
+
+    def test_out_of_range_soc_holds_rather_than_releasing(self):
+        """Same branch, the other invalid shape a sensor can report. Mirrors
+        the existing `0 <= soc <= 100` validation in
+        `_get_current_battery_soc()` rather than inventing a second rule."""
+        bsm, controller = _make_vpp_bsm(soc=50.0)
+        controller.settings["battery_soc"] = -1.0
+
+        bsm._apply_period_schedule(PERIOD)
+
+        command = _last_vpp_command(controller)
+        assert command["power_pct"] == 1
+        assert command["remote_control_enabled"] is True
+
     def test_hold_still_re_asserts_every_period_above_the_floor(self):
         """Guard rail on the test above: the every-period refresh is correct
         and must be preserved wherever remote control is genuinely active,
@@ -108,3 +145,40 @@ class TestIdleAtReserveFloorReleasesControl:
             bsm._apply_period_schedule(period)
 
         assert len(controller.calls["growatt_vpp_periods"]) == 4
+
+
+def _vpp_controller_with_plan(soe: float) -> SolaxModbusGrowattController:
+    """A VPP controller whose plan idles all day at the given SoE."""
+    settings = BatterySettings(total_capacity=50.0, min_soc=10.0, max_soc=95.0)
+    controller = SolaxModbusGrowattController(settings, control_mode="vpp")
+    controller.strategic_intents = ["IDLE"] * 96
+    controller.current_schedule = DPSchedule(
+        actions=[0.0] * 96,
+        state_of_energy=[soe] * 97,
+        prices=[0.1] * 96,
+        original_dp_results={"strategic_intent": ["IDLE"] * 96},
+    )
+    return controller
+
+
+class TestDisplayAgreesWithWhatIsWritten:
+    """`get_period_settings()` feeds the API/UI, and `_mode_display_fields`'s
+    contract is that it "never fabricates a label the hardware doesn't back".
+
+    A displayed period is a *prediction*, so it reads the plan's own SoE
+    trajectory where the production write path reads live SoC -- different
+    inputs, same rule. Without this the UI reports the battery_first hold for
+    exactly the periods production releases.
+    """
+
+    def test_predicted_idle_at_the_floor_displays_the_release(self):
+        controller = _vpp_controller_with_plan(soe=5.0)  # == min_soe_kwh
+        fields = controller.get_period_settings(PERIOD)
+        assert fields["vpp_power_pct"] == 0
+        assert fields["vpp_remote_control"] is False
+
+    def test_predicted_idle_above_the_floor_displays_the_hold(self):
+        controller = _vpp_controller_with_plan(soe=25.0)
+        fields = controller.get_period_settings(PERIOD)
+        assert fields["vpp_power_pct"] == 1
+        assert fields["vpp_remote_control"] is True

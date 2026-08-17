@@ -319,7 +319,16 @@ class TestPlanShape:
         reads as a plan change rather than as a harness bug, so it is rejected
         at the input instead."""
         s = _settings()
+        soe = [5.0, 5.0, 5.0]
         with pytest.raises(ValueError, match="inconsistent"):
-            derive_vpp_commands(["IDLE", "IDLE"], [0.0], s)
+            derive_vpp_commands(["IDLE", "IDLE"], [0.0], s, soe)
         with pytest.raises(ValueError, match="inconsistent"):
-            derive_vpp_commands(["IDLE"], [0.0, 0.0], s)
+            derive_vpp_commands(["IDLE"], [0.0, 0.0], s, soe)
+
+    def test_short_soe_trajectory_raises(self):
+        """Same reasoning for the SoE trajectory #592 added: one entry short
+        and the last periods would be derived against the wrong floor state,
+        silently, rather than failing at the input."""
+        s = _settings()
+        with pytest.raises(ValueError, match="inconsistent"):
+            derive_vpp_commands(["IDLE", "IDLE"], [0.0, 0.0], s, [5.0])

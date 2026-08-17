@@ -667,9 +667,31 @@ class InverterController(ABC):
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             **self._mode_display_fields(
-                intent, grid_charge, discharge_rate, block_passive_charging
+                intent,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                self._planned_at_reserve_floor(period),
             ),
         }
+
+    def _planned_at_reserve_floor(self, period: int) -> bool:
+        """Whether the *plan* has the battery on its reserve floor entering
+        this period (#592).
+
+        The display counterpart to `BatterySystemManager._at_reserve_floor()`,
+        which reads live SoC. A displayed period is a prediction, so the plan's
+        own SoE trajectory is the correct input -- but it must answer the same
+        question, or the UI shows a hold for periods production releases and
+        `_mode_display_fields` breaks its own no-fabrication contract.
+
+        False when there is no plan to read: with no trajectory there is no
+        prediction to display, and the hold is the unchanged-behaviour answer.
+        """
+        soe = getattr(self.current_schedule, "state_of_energy", None)
+        if not soe or period >= len(soe):
+            return False
+        return soe[period] <= self.battery_settings.min_soe_kwh
 
     def _mode_display_fields(
         self,
@@ -677,6 +699,7 @@ class InverterController(ABC):
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool,
+        at_reserve_floor: bool = False,
     ) -> dict:
         """Single source of truth for what mode-related fields a period
         gets, branching on CONTROL_MODEL. Never fabricates a label the
@@ -703,7 +726,11 @@ class InverterController(ABC):
             # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
             # subclass-private method name.
             power_pct, remote_control = self._vpp_display_state(
-                grid_charge, discharge_rate, block_passive_charging, intent
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                intent,
+                at_reserve_floor,
             )
             return {
                 "vpp_power_pct": power_pct,

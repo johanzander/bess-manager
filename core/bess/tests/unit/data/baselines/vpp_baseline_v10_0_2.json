@@ -58,12 +58,12 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -98,8 +98,8 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -239,12 +239,12 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -279,8 +279,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -422,100 +422,100 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 282.789,
@@ -603,100 +603,100 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 282.789,
@@ -874,12 +874,12 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 242.10225,
@@ -1051,16 +1051,16 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 249.82524999999998,
@@ -1150,20 +1150,20 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -1190,60 +1190,60 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 202.6295,
@@ -1331,20 +1331,20 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -1371,60 +1371,60 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 206.4265,
@@ -2356,84 +2356,84 @@
      true
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 76.86995541980933,
@@ -3076,84 +3076,84 @@
       true
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 77.04414291980679,
@@ -3458,164 +3458,100 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
-    ],
-    [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -3714,32 +3650,36 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
+    ],
+    [
+     0,
+     false
     ],
     [
      0,
@@ -3782,28 +3722,16 @@
      true
     ],
     [
-     0,
-     false
+     1,
+     true
     ],
     [
      1,
      true
     ],
     [
-     0,
-     false
-    ],
-    [
      1,
      true
-    ],
-    [
-     0,
-     false
-    ],
-    [
-     0,
-     false
     ],
     [
      1,
@@ -3826,8 +3754,80 @@
      false
     ],
     [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
      1,
      true
+    ],
+    [
+     1,
+     true
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     1,
+     true
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     1,
+     true
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
+    ],
+    [
+     0,
+     false
     ]
    ],
    "realized_cost": 156.50553355122588,
@@ -4122,136 +4122,260 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
+     ],
+     [
+      0,
+      false
      ],
      [
       1,
@@ -4368,130 +4492,6 @@
      [
       0,
       false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      1,
-      true
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      0,
-      false
-     ],
-     [
-      1,
-      true
      ]
     ],
     "realized_cost": 156.51699111352838,
@@ -6520,8 +6520,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -7142,80 +7142,80 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -7575,72 +7575,72 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -8152,12 +8152,12 @@
      true
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -8552,32 +8552,32 @@
      true
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": -11.69591867487236,
@@ -8984,8 +8984,8 @@
       true
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -9004,36 +9004,36 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -9396,20 +9396,20 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": -11.301916799528653,
@@ -9828,40 +9828,40 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -10565,72 +10565,72 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -11426,36 +11426,36 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -11718,48 +11718,48 @@
      true
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 43.59318322658715,
@@ -12170,96 +12170,96 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -17252,10 +17252,6 @@
      false
     ],
     [
-     1,
-     true
-    ],
-    [
      0,
      false
     ],
@@ -17268,12 +17264,16 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
+    ],
+    [
+     0,
+     false
     ],
     [
      0,
@@ -18051,12 +18051,12 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -18604,28 +18604,28 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -19163,28 +19163,28 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -20253,8 +20253,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": -2.1552708985981246,
@@ -22539,48 +22539,44 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
-     ],
-     [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -22623,8 +22619,12 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
+     ],
+     [
+      0,
+      false
      ],
      [
       0,
@@ -23552,8 +23552,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -28678,12 +28678,12 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -28718,8 +28718,8 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -28770,8 +28770,8 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 137.50640028125002,
@@ -28859,12 +28859,12 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -28951,8 +28951,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 134.52257028125,
@@ -29130,12 +29130,12 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 128.5692115526316,
@@ -29311,12 +29311,12 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 125.8380408026316,
@@ -29550,116 +29550,116 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      0,
@@ -30235,116 +30235,116 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       0,
@@ -30778,16 +30778,16 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -30959,20 +30959,20 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -31051,8 +31051,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": -28.517384,
@@ -31142,8 +31142,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -31226,16 +31226,16 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 161.7166355789474,
@@ -31323,8 +31323,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -31411,12 +31411,12 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 159.15923157894738,
@@ -31506,8 +31506,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -31590,16 +31590,16 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 255.77730000000003,
@@ -31687,8 +31687,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -31771,16 +31771,16 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 252.18980000000002,
@@ -31870,8 +31870,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -31954,16 +31954,16 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": -31.029999999999994,
@@ -32051,8 +32051,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -32135,16 +32135,16 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": -31.089999999999996,
@@ -32234,8 +32234,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -32415,8 +32415,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -32499,16 +32499,16 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 23.814333972299185,
@@ -32766,8 +32766,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -32850,16 +32850,16 @@
      true
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 15.32763157894737,
@@ -32947,8 +32947,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -33031,16 +33031,16 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 14.787631578947371,
@@ -33130,12 +33130,12 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -33311,12 +33311,12 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -33403,8 +33403,8 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 13.011740000000007,
@@ -33494,8 +33494,8 @@
    },
    "commands": [
     [
-     1,
-     true
+     0,
+     false
     ],
     [
      100,
@@ -33578,16 +33578,16 @@
      false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ],
     [
-     1,
-     true
+     0,
+     false
     ]
    ],
    "realized_cost": 119.09993557894738,
@@ -33675,8 +33675,8 @@
    "current": {
     "commands": [
      [
-      1,
-      true
+      0,
+      false
      ],
      [
       100,
@@ -33763,12 +33763,12 @@
       false
      ],
      [
-      1,
-      true
+      0,
+      false
      ],
      [
-      1,
-      true
+      0,
+      false
      ]
     ],
     "realized_cost": 116.54253157894738,

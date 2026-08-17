@@ -191,25 +191,15 @@ KNOWN_PLAN_EXECUTION_GAP_SEK = {
     # curtailment-affected export volume shifts slightly with the plan);
     # was +0.0203 under the 0.2 kW / 0.05 kWh grid.
     "regression_2026_08_08_143843": +0.0214,
-    # Sub-grid-step passive solar charging at IDLE. Period 32 has a 0.0034 kWh
-    # solar surplus -- an order of magnitude below SOE_STEP_KWH (0.025), so the
-    # DP's snapped SOE trajectory cannot represent absorbing it and plans it as
-    # export. The command it derives (load_first, charge_rate_pct=100) makes
-    # the inverter absorb it anyway, so the battery runs slightly fuller than
-    # planned. The drift is costless until period 64, where the battery reaches
-    # max_soe: being 0.0033 kWh fuller leaves that much less room for solar,
-    # which is exported instead, for a +0.0016 SEK realized-vs-planned gap.
-    #
-    # NOT caused by #624's window bisection, and measured rather than assumed:
-    # with `detect_tie_windows` patched to return no windows -- no PWL solve,
-    # no splice, no bisection -- this fixture's gap is bit-identical at
-    # +0.001555. Two reviewers independently attributed it to the bisection
-    # seam; the seam's own measured contribution is 0.000000 SEK.
-    #
-    # Goes to zero when the DP's IDLE flow model credits passive charging
-    # below one SOE step, or when the trajectory stops being snapped. This
-    # entry is the record of a real defect, not a tolerance for one.
-    "regression_2026_08_17_624": +0.0016,
+    # `regression_2026_08_17_624`'s +0.0016 entry lived here between #629 and
+    # #630 and is now gone: that fixture's gap is +0.000000. The cause was not
+    # the SOE-grid snapping this entry described -- the forward replay carries
+    # continuous SoE, and period 32's SoE was held bit-exactly, which snapping
+    # would not produce. The DP was choosing the SOLAR_EXPORT-below-max bypass
+    # (#313) for a surplus too small to classify SOLAR_EXPORT, so the derived
+    # IDLE command absorbed what the plan exported. See
+    # `_solar_export_bypass_is_unexecutable` and
+    # `test_subfloor_solar_export_is_never_planned` below (#630).
 }
 
 

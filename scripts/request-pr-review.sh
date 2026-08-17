@@ -150,10 +150,19 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
               | \"\(.state) \(.submittedAt) \(.author.login)\"")
 
     if [ -n "$commented" ]; then
-        if [ "$state" = "running" ]; then
+        if [ "$state" = "running" ] || [ "$state" = "unknown" ]; then
             # The bot posts an early permission-check comment and keeps going,
             # so a COMMENTED while the run is live decides nothing.
-            echo "COMMENTED seen but the review is still running — waiting." >&2
+            #
+            # `unknown` waits for the same reason. It means `gh run list` itself
+            # failed -- a network blip, a rate limit, a transient auth error --
+            # so whether the reviewer is still working was never determined.
+            # Treating "I could not tell" as "it finished" re-opens the exact
+            # race this script exists to close, gated on API flakiness instead
+            # of timing. Not knowing must never promote a placeholder to a
+            # verdict; waiting costs one more poll, and a genuine COMMENT
+            # verdict still returns as soon as the state resolves.
+            echo "COMMENTED seen but the review is ${state} — waiting." >&2
         else
             # The run has finished and its last word was COMMENTED, so that IS
             # the verdict: `pr-review.yml` lists COMMENT as one of three final
@@ -182,5 +191,8 @@ case "$(review_run_state)" in
 esac
 
 echo "Recent PR Review runs:" >&2
-gh run list --workflow="PR Review" --limit 3 >&2
+# `|| true` because this is diagnostics, not a check: if `gh` is what is broken
+# (the `unknown` state above), `set -e` would abort here and the caller would
+# get exit 1 instead of the exit 2 that means "no verdict".
+gh run list --workflow="PR Review" --limit 3 >&2 || true
 exit 2

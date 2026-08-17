@@ -64,12 +64,19 @@ def _gh(bin_dir: Path, reviews: list, run_state: str) -> None:
     `run list`, which is how the script decides whether the reviewer is still
     working.
     """
-    runs = {
-        "running": [{"status": "in_progress", "conclusion": None}],
-        "finished": [{"status": "completed", "conclusion": "success"}],
-        "failed": [{"status": "completed", "conclusion": "failure"}],
-        "none": [],
-    }[run_state]
+    # `unknown` is not a run shape but a FAILURE to read one: `gh run list`
+    # exits non-zero, which is what a network blip or rate limit looks like.
+    runs_fail = run_state == "unknown"
+    runs = (
+        []
+        if runs_fail
+        else {
+            "running": [{"status": "in_progress", "conclusion": None}],
+            "finished": [{"status": "completed", "conclusion": "success"}],
+            "failed": [{"status": "completed", "conclusion": "failure"}],
+            "none": [],
+        }[run_state]
+    )
     # createdAt must sort after the script's `since`, which it computes at start.
     for r in runs:
         r["createdAt"] = "2099-01-01T00:00:00Z"
@@ -93,7 +100,12 @@ done
 
 case "$*" in
   *'pr view'*)  src='{bin_dir}/reviews.json' ;;
-  *'run list'*) src='{bin_dir}/runs.json' ;;
+  *'run list'*)
+      if [ "{int(runs_fail)}" = "1" ]; then
+          echo "simulated transient gh failure" >&2
+          exit 1
+      fi
+      src='{bin_dir}/runs.json' ;;
   *'pr comment'*) exit 0 ;;
   *) echo "unexpected gh: $*" >&2; exit 1 ;;
 esac
@@ -188,7 +200,7 @@ def test_commented_while_running_is_not_a_verdict(
 
     assert proc.returncode == 2
     assert "VERDICT" not in proc.stdout
-    assert "still running" in proc.stderr
+    assert "the review is running" in proc.stderr
 
 
 def test_commented_after_the_run_finished_is_the_verdict(
@@ -230,6 +242,32 @@ def test_no_run_at_all_is_reported_as_a_trigger_fault(
     assert proc.returncode == 2
     assert "No PR Review run started at all" in proc.stderr
     assert "actor gate" in proc.stderr
+
+
+def test_an_unreadable_run_state_does_not_promote_a_placeholder(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """ "I could not tell" must never mean "it finished".
+
+    `review_run_state` falls back to `unknown` when `gh run list` itself fails —
+    a network blip, a rate limit, a transient auth error. An earlier version
+    tested only `state = running` and let everything else through, so `unknown`
+    reported the bot's placeholder as the verdict. That re-opened the exact race
+    this script exists to close, gated on API flakiness instead of timing.
+
+    Waiting costs one more poll; a genuine COMMENT verdict still returns as soon
+    as the state resolves.
+    """
+    _gh(
+        bin_dir,
+        [_review("COMMENTED", body="test permission check - ignore")],
+        "unknown",
+    )
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 2
+    assert "VERDICT" not in proc.stdout
+    assert "unknown" in proc.stderr
 
 
 def test_a_decisive_verdict_wins_over_an_earlier_commented(

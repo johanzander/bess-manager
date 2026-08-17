@@ -578,13 +578,19 @@ verdict lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED>
 **`COMMENTED` is ambiguous, and the script resolves it for you — don't
 second-guess it.** `pr-review.yml` allows three final verdicts (`APPROVE`,
 `REQUEST_CHANGES`, `COMMENT`), so a real `COMMENT` verdict is possible and
-carries findings. But the bot historically also submitted its inline notes as
-a separate `COMMENTED` review ("Inline notes below; summary review to follow")
-16–50 seconds ahead of the summary, and the two are identical by state.
-Acting on that placeholder is how PR #615 sat `APPROVED` but still a draft
-overnight. The script holds a `COMMENTED`-only state for 180s to let a summary
-supersede it, so a `COMMENTED` that reaches you **is** the verdict: treat it
-like `CHANGES_REQUESTED` — collect the findings, do not flip the PR ready.
+carries findings. But the bot has also submitted extra `COMMENTED` reviews
+ahead of its summary — inline notes, and a stray "test permission check" while
+probing what it could call — and those are identical to a verdict by state.
+Acting on one is how PR #615 sat `APPROVED` but still a draft overnight.
+
+The script disambiguates by asking whether the **workflow run is still
+going**, not by waiting a fixed time. A timer was tried first and was wrong:
+the gap that matters is placeholder-to-end-of-run, not placeholder-to-summary,
+and no constant covers both. So a `COMMENTED` that reaches you arrived after
+the run finished and **is** the verdict: treat it like `CHANGES_REQUESTED` —
+collect the findings, do not flip the PR ready. If the run state cannot be read
+at all, the script keeps waiting rather than guessing.
+
 Like Step 10's
 `--watch`, it blocks rather than polls — so **do not poll it and do not
 re-touch the diagnosis/TDD context while it runs.** You are notified once,

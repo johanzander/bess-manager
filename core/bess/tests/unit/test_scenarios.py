@@ -872,3 +872,204 @@ def test_exact_cover_is_delivered_in_the_round_down_band():
     assert sim.realized_cost == pytest.approx(
         result.economic_summary.battery_solar_cost, abs=1e-6
     )
+
+
+def test_grid_charge_plan_is_deliverable_by_the_written_command():
+    """Phase 4c: a planned grid charge must be a quantity the written command
+    can actually deliver.
+
+    The charge rate is written as an integer percent of `max_charge_power_kw`
+    scaled from the plan's own action (`_compute_charge_rate`), and until 4c
+    that scaling rounded to *nearest*. A planned power landing between two
+    steps therefore rounded **down** and the inverter charged less than the
+    plan assumed -- the charge-side twin of the discharge defect #352 fixed.
+
+    Measured across the corpus before the fix: 4 of 493 charging periods
+    under-deliver, worst `synthetic_extreme_volatility` period 13 at
+    -0.0288 kWh (plan 0.4488 kWh, command 7% = 0.4200 kWh). Small, and worth
+    fixing structurally rather than economically: the realized-*cost* gap is
+    0.00000 on every affected fixture, so `test_realized_matches_planned_across_all_fixtures`
+    stays green while the plan is not actually executable. Energy fidelity is
+    what this asserts, because money cannot see it.
+
+    **Only where a grid top-up is planned.** SOLAR_STORAGE writes a flat 100%
+    (`INTENT_TO_CONTROL`), so its plan is never scaled and never rounds --
+    311 of the corpus's 323 off-lattice charging periods are SOLAR_STORAGE
+    and are correct as they stand. Quantizing those too would discard 3.70
+    kWh of solar the battery can demonstrably store.
+    """
+    from core.bess.dp_schedule import DPSchedule
+    from core.bess.growatt_min_controller import GrowattMinController
+    from core.bess.simulation.inverter_simulator import (
+        derive_control_command,
+    )
+
+    scenario = load_test_scenario("synthetic_extreme_volatility")
+    inp = _scenario_inputs(scenario)
+    result = optimize_battery_schedule(**inp)
+    dt = inp["period_duration_hours"]
+
+    commands = [
+        derive_control_command(
+            p.decision.strategic_intent,
+            p.decision.battery_action / dt,
+            inp["battery_settings"],
+            intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+        )
+        for p in result.period_data
+    ]
+
+    grid_charging = [
+        t
+        for t, p in enumerate(result.period_data)
+        if p.decision.strategic_intent == "GRID_CHARGING"
+        and p.energy.battery_charged > 1e-6
+    ]
+    assert grid_charging, "fixture plans no grid charging -- pins nothing"
+
+    # Asserted against what the written command can deliver, not against the
+    # simulator's `battery_charged` -- deliberately, and this is the documented
+    # exception to "assert the outcome, not the command".
+    #
+    # `simulate()` derives its flows from `_period_flows`, the same record the
+    # DP uses, and that computes charge throughput from
+    # `max_charge_power_kw` (the binary-store-physics assumption noted at
+    # dp_battery_algorithm.py:974) rather than from the commanded rate. So the
+    # simulator reproduces the plan by construction on this quantity and
+    # cannot disagree with it -- `sim.period_data[t].energy.battery_charged`
+    # equals the plan even when the command is 7% of nominal. Closing that
+    # blindness *is* 4c; until then the only faithful comparison is against
+    # the command itself. `mode_to_power` already models it correctly
+    # (returns 0.42 kW for a 7% command); it is `_period_flows` that discards
+    # it.
+    # Both the production write path and the simulator's mirror of it: the
+    # rate the *controller* computes is what reaches hardware, and the
+    # simulator's copy has to agree or plan and execution drift apart again
+    # (#282/#497). An earlier version of this test checked only the
+    # simulator and stayed green when the controller was mutated back to
+    # nearest-rounding.
+    actions = [p.decision.battery_action for p in result.period_data]
+    controller = GrowattMinController(battery_settings=inp["battery_settings"])
+    controller.strategic_intents = [
+        p.decision.strategic_intent for p in result.period_data
+    ]
+    controller.current_schedule = DPSchedule(
+        actions=actions,
+        state_of_energy=[p.energy.battery_soe_end for p in result.period_data],
+        prices=list(inp["buy_price"][: len(actions)]),
+    )
+    max_charge = inp["battery_settings"].max_charge_power_kw
+
+    for t in grid_charging:
+        planned = result.period_data[t].energy.battery_charged
+        written_pct = controller.get_period_settings(t)["charge_rate"]
+        assert written_pct == commands[t].charge_rate_pct, (
+            f"period {t}: the controller writes {written_pct}% but the "
+            f"simulator models {commands[t].charge_rate_pct}% -- the two "
+            f"charge mappings have drifted"
+        )
+        deliverable = (written_pct / 100) * max_charge * dt
+        assert deliverable >= planned - 1e-6, (
+            f"period {t}: planned {planned:.4f} kWh of charge but the written "
+            f"command ({written_pct}% of {max_charge:.1f} kW) can deliver "
+            f"only {deliverable:.4f} kWh -- the plan is not a quantity the "
+            f"integer-percent charge lattice can express"
+        )
+
+
+def test_import_capped_grid_charge_command_stays_under_the_fuse():
+    """Phase 4c, the import-capped half: where the house fuse is what limits
+    a grid charge, the *plan* comes down to the lattice instead of the
+    command going up to the plan.
+
+    Rounding a charge command up is safe only because the battery's own
+    remaining room binds above it -- the inverter stops when full. When
+    `import_cap_kwh` (#429) is what limited the plan, nothing binds above the
+    command, and rounding up would draw more from the grid than the fuse
+    allows. So `execution_model.lattice_grid_charge` floors the planned grid
+    top-up onto the lattice first, and the round-up is then a no-op.
+
+    Constructed because **no corpus fixture reaches this path**: every one of
+    them runs with power monitoring off, so `import_cap_kwh` is None and the
+    flooring never fires. Without this test the function added for it has no
+    coverage at all -- which is exactly what review round 1 caught.
+
+    1-phase, 230 V, 20 A fuse -> a 4.6 kWh/period cap on a 6 kW battery,
+    whose 1% step is 0.06 kW. 4.6 is 76.67 steps: off the lattice. Floored to
+    76 steps = 4.56 kWh, which the 76% command delivers exactly. Unfloored,
+    the plan would be 4.6 and `ceil(76.67) = 77%` would command 4.62 kWh --
+    **over the fuse**, which is the failure this pins.
+    """
+    from core.bess.dp_battery_algorithm import _effective_import_cap_kwh
+    from core.bess.dp_schedule import DPSchedule
+    from core.bess.growatt_min_controller import GrowattMinController
+
+    # 24 hourly periods: `DPSchedule` derives its period length as
+    # `24 / len(actions)`, so a shorter horizon would make the controller
+    # scale the rate against the wrong hour length.
+    scenario = {
+        "period_duration_hours": 1.0,
+        # Cheap early, expensive late: grid-charge hard, then export.
+        "buy_price": [0.1] * 12 + [5.0] * 12,
+        "sell_price": [0.05] * 12 + [4.9] * 12,
+        "home_consumption": [0.0] * 24,
+        "solar_production": [0.0] * 24,
+        "home": {
+            "power_monitoring_enabled": True,
+            "max_fuse_current": 20,
+            "voltage": 230,
+            "phase_count": 1,
+        },
+        "battery": {
+            "max_soe_kwh": 40.0,
+            "min_soe_kwh": 2.0,
+            "max_charge_power_kw": 6.0,
+            "max_discharge_power_kw": 6.0,
+            "efficiency_charge": 1.0,
+            "efficiency_discharge": 1.0,
+            "cycle_cost_per_kwh": 0.0,
+            "initial_soe": 2.0,
+        },
+    }
+    inp = _scenario_inputs(scenario)
+    dt = inp["period_duration_hours"]
+    cap_kwh = _effective_import_cap_kwh(inp.get("home_settings"), dt)
+    assert cap_kwh == pytest.approx(
+        4.6, abs=1e-9
+    ), f"scenario no longer produces the intended off-lattice cap: {cap_kwh}"
+
+    result = optimize_battery_schedule(**inp)
+    controller = GrowattMinController(battery_settings=inp["battery_settings"])
+    controller.strategic_intents = [
+        p.decision.strategic_intent for p in result.period_data
+    ]
+    controller.current_schedule = DPSchedule(
+        actions=[p.decision.battery_action for p in result.period_data],
+        state_of_energy=[p.energy.battery_soe_end for p in result.period_data],
+        prices=list(inp["buy_price"]),
+    )
+    max_charge = inp["battery_settings"].max_charge_power_kw
+
+    capped = [
+        t
+        for t, p in enumerate(result.period_data)
+        if p.decision.strategic_intent == "GRID_CHARGING"
+        and p.energy.grid_to_battery > 1e-6
+    ]
+    assert capped, "scenario plans no grid charging -- pins nothing"
+
+    for t in capped:
+        planned = result.period_data[t].energy.battery_charged
+        written_pct = controller.get_period_settings(t)["charge_rate"]
+        commanded = (written_pct / 100) * max_charge * dt
+        assert commanded <= cap_kwh + 1e-9, (
+            f"period {t}: the written command ({written_pct}% of "
+            f"{max_charge:.1f} kW = {commanded:.4f} kWh) exceeds the house "
+            f"import cap of {cap_kwh:.4f} kWh -- rounding a charge up is only "
+            f"safe when the battery's own room binds above it"
+        )
+        assert commanded == pytest.approx(planned, abs=1e-6), (
+            f"period {t}: planned {planned:.4f} kWh but the command delivers "
+            f"{commanded:.4f} -- an import-capped plan must be exactly "
+            f"expressible, since it can be neither exceeded nor rounded up"
+        )

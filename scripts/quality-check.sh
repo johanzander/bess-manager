@@ -193,7 +193,10 @@ REQUIRED = {
     "ask": [
         "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
         "Bash(gh api)", "Bash(gh api *)",
-        "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
+        "Bash(gh pr merge*)", "Bash(gh repo edit*)",
+        "Bash(gh release create*)", "Bash(gh release edit*)",
+        "Bash(gh release delete*)", "Bash(gh release delete-asset*)",
+        "Bash(gh release upload*)",
         "Bash(gh repo delete*)", "Bash(gh secret*)", "Bash(gh workflow run*)",
         "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
         "Bash(git maintenance*)",
@@ -260,7 +263,15 @@ MUST_BE_GUARDED = [
     # gh reaching GitHub, including the raw API path
     "gh api repos/o/r/pulls/1/merge -X PUT",
     "gh api repos/o/r/releases -f tag_name=v1",
-    "gh pr merge 588 --squash", "gh release create v9.9.0",
+    "gh pr merge 588 --squash",
+    # Publishing a release escapes to GitHub irreversibly. The read-only verbs
+    # are exempt (see MUST_NOT_BE_GUARDED) -- the gate pins both directions so
+    # the split cannot silently collapse back to a blanket rule or a hole.
+    "gh release create v9.9.0", "gh release create v9.9.0 -R owner/repo",
+    "gh release edit v9.9.0 --draft=false",
+    "gh release delete v9.9.0 --yes",
+    "gh release delete-asset v9.9.0 addon.zip",
+    "gh release upload v9.9.0 addon.zip",
     "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
     # Unrecoverable gh mutations. `gh repo delete` was unguarded while the far
     # milder `gh repo edit` asked -- it escapes to GitHub and git cannot undo
@@ -309,6 +320,13 @@ MUST_NOT_BE_GUARDED = [
     # `remote prune` through the same greedy glob, so the twin was dropped.
     "git -C /main worktree prune", "git worktree prune",
     "git -C sub remote prune origin",
+    # Reading releases changes nothing on GitHub, and the release/beta flows
+    # check the published version constantly ("always check the current
+    # published version before tagging"). A blanket `gh release*` ask made
+    # every one of those a prompt, which is why these verbs are named.
+    "gh release list -L 5 -R johanzander/bess-manager-beta",
+    "gh release list", "gh release view v9.9.0",
+    "gh release view --json tagName",
 ]
 
 

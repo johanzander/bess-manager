@@ -65,7 +65,11 @@ from core.bess.dp_constants import (
     POWER_STEP_KW,
     SOE_STEP_KWH,
 )
-from core.bess.execution_model import DEFAULT_CAPABILITIES, PlatformCapabilities
+from core.bess.execution_model import (
+    DEFAULT_CAPABILITIES,
+    PlatformCapabilities,
+    lattice_grid_charge,
+)
 from core.bess.models import (
     EconomicData,
     EconomicSummary,
@@ -372,6 +376,16 @@ def _period_flows(
             grid_to_battery = min(
                 grid_to_battery, max(0.0, import_cap_kwh - grid_imported)
             )
+            # Only under the cap: with the cap binding, nothing physical
+            # stops the command overshooting, so the plan must come down to
+            # the lattice instead (4c).
+            grid_to_battery = float(
+                lattice_grid_charge(
+                    solar_to_battery,
+                    grid_to_battery,
+                    battery_settings.max_charge_power_kw / 100 * dt,
+                )
+            )
         energy_stored = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -489,6 +503,15 @@ def _state_transition(
             grid_to_battery = min(
                 grid_to_battery, max(0.0, import_cap_kwh - load_import)
             )
+            # Same quantization as the flow record, so the state transition
+            # and the flows agree on what was charged (4c).
+            grid_to_battery = float(
+                lattice_grid_charge(
+                    solar_to_battery,
+                    grid_to_battery,
+                    battery_settings.max_charge_power_kw / 100 * dt,
+                )
+            )
         charge_energy = (
             solar_to_battery + grid_to_battery
         ) * battery_settings.efficiency_charge
@@ -561,6 +584,13 @@ def _state_transition_grid(
         )
         grid_to_battery = np.minimum(
             grid_to_battery, np.maximum(0.0, import_cap_kwh - load_import)
+        )
+        # Mirrors the replay's quantization so both passes value the same
+        # charge (4c) -- the one-action-set requirement on the charge side.
+        grid_to_battery = lattice_grid_charge(
+            solar_to_battery,
+            grid_to_battery,
+            battery_settings.max_charge_power_kw / 100 * dt,
         )
     store_charge_energy = (solar_to_battery + grid_to_battery) * eff_charge
     store_next_soe = np.minimum(max_soe, soe + store_charge_energy)
@@ -655,6 +685,12 @@ def _compute_reward_grid(
         # the house fuse's import cap (#429).
         grid_to_battery = np.minimum(
             grid_to_battery, np.maximum(0.0, import_cap_kwh - grid_imported_store)
+        )
+        # Same quantization as the other three sites (4c).
+        grid_to_battery = lattice_grid_charge(
+            solar_to_battery,
+            grid_to_battery,
+            battery_settings.max_charge_power_kw / 100 * dt,
         )
     energy_stored_store = (solar_to_battery + grid_to_battery) * eff_charge
     battery_wear_cost_store = energy_stored_store * cycle_cost

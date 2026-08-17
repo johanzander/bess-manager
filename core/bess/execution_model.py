@@ -30,6 +30,8 @@ from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Any
 
+import numpy as np
+
 from .dp_constants import POWER_CLASSIFICATION_THRESHOLD_KW
 from .settings import BatterySettings
 
@@ -110,7 +112,7 @@ def intra_period_discharge_gate(allowed: bool) -> int:
 # by float dust: 2.70 kW on a 0.15 kW step is index 18, not 19.
 #
 # One owner, per P5. Every site that floors or ceilings a power onto the
-# percent lattice uses this: `discharge_command_index` below,
+# percent lattice uses this: `command_index` below,
 # `action_selector._discharge_candidates`' `max_pct`, and both of
 # `pwl_window_dp`'s mirrors of that arithmetic -- where it is re-exported as
 # `DISCHARGE_LATTICE_PCT_EPS`, whose comment records the #450 constraint that
@@ -124,7 +126,7 @@ def intra_period_discharge_gate(allowed: bool) -> int:
 LATTICE_EPS = 1e-9
 
 
-def discharge_command_index(
+def command_index(
     power_kw: float,
     step_kw: float,
     *,
@@ -132,8 +134,10 @@ def discharge_command_index(
     max_index: int = 100,
 ) -> int:
     """The lattice index (percent, on the default 1%-of-max lattice) to write
-    for a planned discharge of `power_kw` -- **rounded in the direction the
-    written number's own semantics require** (Phase 4b).
+    for a planned power of `power_kw` -- **rounded in the direction the
+    written number's own semantics require** (Phase 4b for discharge, 4c for
+    charge; `step_kw` is the caller's lattice, so the same function serves
+    both).
 
     This is the one place the planned-power -> written-command conversion
     happens. Both ends of it used to round to nearest and neither knew what
@@ -145,7 +149,16 @@ def discharge_command_index(
       under-delivers it -- measured over the corpus, 539 of 1377 house
       deficits round down. So a ceiling must be at least the plan, and
       `ceil` is the **smallest** lattice value that is: not a free choice,
-      the tightest admissible one. This is what makes exact cover exact, and
+      the tightest admissible one.
+
+      A **charge** rate takes this branch too (4c), but for a different
+      reason: what binds above the command there is the battery's own
+      remaining room -- the inverter stops when full -- not house load. The
+      distinction matters because it fails where an import cap is what
+      limited the plan, and `lattice_grid_charge` handles that case by
+      bringing the plan down instead.
+
+      This is what makes exact cover exact, and
       the property the whole exact-cover candidate rests on
       (`action_selector._residual_cover_p`).
 
@@ -188,6 +201,52 @@ def discharge_command_index(
     raw = power_kw / step_kw
     index = math.ceil(raw - LATTICE_EPS) if rate_is_ceiling else round(raw)
     return min(max_index, max(0, int(index)))
+
+
+def lattice_grid_charge(solar_to_battery, grid_to_battery, charge_step_kwh):
+    """A planned grid top-up, reduced so the **total** charge lands on the
+    command lattice (Phase 4c, narrow fix).
+
+    Only a grid-charging period needs this. `INTENT_TO_CONTROL` writes a flat
+    `charge_rate: 100` for SOLAR_STORAGE and IDLE, so their plan is never
+    scaled and never rounds; GRID_CHARGING is the one intent whose rate is
+    derived from the plan itself (`_compute_charge_rate`, which rounded to
+    nearest until 4c). A planned power between two steps was
+    therefore written as the step *below* and the inverter charges less than
+    the plan assumed -- measured pre-fix as 4 of 493 charging periods, worst
+    -0.0288 kWh.
+
+    The reduction lands on the grid component, never on solar: the total is
+    what gets scaled (`battery_action` is `solar_to_battery +
+    grid_to_battery`), but solar is free and already in the battery's reach,
+    so giving up grid energy is the cheap side. Quantizing solar as well
+    would floor 311 further periods and discard 3.70 kWh of storable solar
+    across the corpus for no fidelity gain, since those periods are commanded
+    at 100% anyway.
+
+    **Down, never up** -- the asymmetry with the discharge side is physical,
+    not stylistic. A discharge ceiling can be rounded up because actual house
+    load binds below it (Phase 4b). Nothing binds a *charge* command from
+    above: where `import_cap_kwh` is what limited the plan (#429), rounding
+    up would draw more from the grid than the house fuse allows. So the plan
+    comes down to the lattice instead of the command going up to the plan.
+
+    Accepts scalars or arrays; returns the matching shape. Where no grid
+    top-up is planned the value passes through untouched.
+
+    The step is `max_charge_power_kw / 100`, matching what the controller
+    scales against. A declared per-platform charge resolution (the charge-side twin
+    of `discharge_resolution_kw`) does not exist yet -- that belongs with the
+    full P3 charge work, which also has to stop `_period_flows` deriving
+    throughput from nominal power.
+    """
+    total = solar_to_battery + grid_to_battery
+    floored = np.floor(total / charge_step_kwh + LATTICE_EPS) * charge_step_kwh
+    # Never negative (solar alone may already exceed the floored total, in
+    # which case the grid contributes nothing and the period stops being a
+    # grid charge at all), and never more than was planned.
+    reduced = np.maximum(0.0, np.minimum(grid_to_battery, floored - solar_to_battery))
+    return np.where(grid_to_battery > 0.0, reduced, grid_to_battery)
 
 
 @dataclass(frozen=True)
@@ -339,9 +398,7 @@ class PlatformCapabilities:
         max_index = math.floor(
             battery_settings.max_discharge_power_kw / step + LATTICE_EPS
         )
-        index = discharge_command_index(
-            power_kw, step, rate_is_ceiling=True, max_index=max_index
-        )
+        index = command_index(power_kw, step, rate_is_ceiling=True, max_index=max_index)
         ceiling = index * step
         if ceiling + LATTICE_EPS < power_kw:
             return None

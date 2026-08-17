@@ -46,7 +46,7 @@ from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.execution_model import (
-    discharge_command_index,
+    command_index,
     intra_period_discharge_gate,
 )
 from core.bess.models import (
@@ -203,7 +203,7 @@ def test_load_support_ceiling_follows_the_gate_on_real_data():
         # direction command-dependent (a load_first ceiling rounds up, or it
         # under-delivers the plan), which a hand-written `round()` here got
         # wrong the moment production changed.
-        baseline = discharge_command_index(
+        baseline = command_index(
             abs(action_kw),
             settings.max_discharge_power_kw / 100,
             rate_is_ceiling=True,

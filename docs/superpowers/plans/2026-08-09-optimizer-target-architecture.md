@@ -619,6 +619,30 @@ configured not to deliver. That is a structural R≠P divergence on the
 discharge executability), and it is precisely what "candidates are
 executable commands" fixes. Phase 4 stands.
 
+> ⚠️ **Correction (2026-08-16, 4c's premise check): the second bullet's
+> conclusion is false.** `battery_system_manager` writes
+> `get_period_settings(period)["charge_rate"]`, not `charging_power_rate` —
+> the intent-derived rate, which is a flat 100% for `SOLAR_STORAGE`/`IDLE`
+> and scaled from the plan's own action for `GRID_CHARGING`.
+> `charging_power_rate` (default 40%) is only the power monitor's *initial*
+> target, `power_monitoring_enabled` defaults to False, and the target is
+> overwritten every period anyway. **The executor is not throttled below what
+> the planner assumes**, so the SEK this paragraph implies for 4c are not
+> there.
+>
+> The *first* bullet stands: the plan does charge at nominal power in six
+> places, and `_period_flows` derives charge throughput from
+> `max_charge_power_kw` regardless of what was commanded. Because the DP and
+> the inverter simulator share that record, the simulator reproduces the plan
+> by construction and **cannot disagree with it about charge** — which is why
+> the corpus R==P harness shows a 0.00000 gap while the written command is
+> genuinely short. Closing that blindness is what "4c-full" would mean.
+>
+> Measured defect after the correction: 4 of 493 charging periods plan a
+> charge the written command cannot deliver (worst −0.0288 kWh), caused by
+> nearest-rounding the `GRID_CHARGING` rate. Fixed narrowly — see "4c as
+> built" below.
+
 **Phase 4's live driver is #352, not #320.** #320 is closed (see the issue
 map). Recorded for #352 on 2026-08-10: 22 sub-load `grid_first` periods live,
 16 of them in the 0.1–0.5 kWh band #511 does not reach, 5 clearly
@@ -736,9 +760,47 @@ from Phase 4** and becomes its own phase; see below.
   commands; folds in #511/#517's tests as regression cover. Closes #352
   **Shape B** with the exact-cover candidate, gated on 4a's load-following
   capability. Gated on 4a and the beta.
-- **4c — charge commands.** The six hardcoded `rate_throughput` sites above
-  collapse to the configured rate; this is where the measured R≠P divergence
-  closes.
+- **4c — charge commands. NARROW VERSION BUILT 2026-08-16; the full one is
+  deliberately not.** The original scope ("collapse the six `rate_throughput`
+  sites to the configured rate") rests on a premise that does not hold — there
+  is no configured rate being written; see the correction above. What was
+  measured instead: 4 of 493 charging periods plan a charge the written
+  command cannot deliver, because the `GRID_CHARGING` rate is scaled from the
+  plan and rounded to *nearest*, landing below it.
+
+  **Built:** the charge command rounds **up** (`command_index(...,
+  rate_is_ceiling=True)`), the same conversion 4b introduced, for the same
+  reason — the battery's own remaining room binds above the command, so a
+  rate above the plan still delivers exactly the plan, while nearest charges
+  less. Fixes all 4. **Corpus cost: +0.00000 SEK, 0 of 38 fixtures moved** —
+  it changes only what is written, not what is planned, so no golden or
+  baseline re-pin.
+
+  **The asymmetry with 4b is physical and worth keeping straight.** A
+  discharge ceiling can be rounded up because actual house load binds below
+  it. Nothing binds a *charge* command from above except the battery's own
+  room — so where `import_cap_kwh` is what limited the plan (#429), rounding
+  up would draw more than the house fuse allows. There the DP floors the plan
+  onto the lattice instead (`execution_model.lattice_grid_charge`), which is
+  safe because under-drawing never violates a fuse. That path is unexercised
+  by the corpus (power monitoring is off in every fixture).
+
+  **Rejected, with the measurement:** flooring *every* grid charge onto the
+  lattice regardless of what bound it. Costs **+1.33 SEK** across the corpus
+  and moves 11 fixtures, because charging less than the battery could compounds
+  into lost arbitrage — the same shape as D3's +3.67 SEK. Flooring *all*
+  charging (solar included) is worse still: 311 further periods and 3.70 kWh
+  of storable solar discarded, for no fidelity gain, since SOLAR_STORAGE is
+  commanded at a flat 100% and never rounds.
+
+  **Left open, deliberately:** `_period_flows` still derives charge throughput
+  from `max_charge_power_kw` rather than the commanded rate, so the inverter
+  simulator cannot see a charge-rate divergence at all (it shares that record
+  with the DP under P4). Also unfixed: one `SOLAR_EXPORT` period plans a
+  0.0089 kWh charge against a deliberate 0% command (#313 blocks passive
+  charging) — a sub-noise-floor plan/command inconsistency of a different
+  kind. Both are worth their own measurement before anyone spends a phase on
+  them; neither is worth SEK today.
 
 4b and 4c are independent of each other and can run in parallel after 4a.
 

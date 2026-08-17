@@ -378,6 +378,55 @@ def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:
     assert "awaiting_maintainer" in _actions_for(_run(tmp_path, [], [pr]), 490)
 
 
+def test_an_unreviewed_non_draft_is_never_reported_as_mergeable(
+    tmp_path: Path,
+) -> None:
+    """The draft flag is not a review. #626 was flipped out of draft by hand
+    because it looked stuck, had zero reviews, and was reported as "nothing
+    left but your merge" — routing straight around Stage 4, which is the gate
+    the whole pipeline is built on."""
+    pr = _pr(626, isDraft=False, reviews=[])
+    actions = _actions_for(_run(tmp_path, [], [pr]), 626)
+    assert "request_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_commented_review_alone_is_not_an_approval(tmp_path: Path) -> None:
+    """The bot posts its inline notes as a COMMENTED review BEFORE its real
+    verdict, so COMMENTED alone means the review is still in flight."""
+    pr = _pr(627, isDraft=False, reviews=[{"state": "COMMENTED"}])
+    actions = _actions_for(_run(tmp_path, [], [pr]), 627)
+    assert "request_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_a_non_draft_with_changes_requested_needs_rework(tmp_path: Path) -> None:
+    pr = _pr(
+        628,
+        isDraft=False,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "CHANGES_REQUESTED"}],
+    )
+    actions = _actions_for(_run(tmp_path, [], [pr]), 628)
+    assert "rework_review" in actions
+    assert "awaiting_maintainer" not in actions
+
+
+def test_an_approval_followed_by_notes_still_counts(tmp_path: Path) -> None:
+    """A trailing COMMENTED must not un-approve a PR — #490 carries exactly
+    this shape (COMMENTED, APPROVED, COMMENTED, APPROVED)."""
+    pr = _pr(
+        490,
+        isDraft=False,
+        reviews=[
+            {"state": "COMMENTED"},
+            {"state": "APPROVED"},
+            {"state": "COMMENTED"},
+        ],
+    )
+    assert "awaiting_maintainer" in _actions_for(_run(tmp_path, [], [pr]), 490)
+
+
 def test_conflicting_pr_is_flagged_over_its_review_state(tmp_path: Path) -> None:
     """A CONFLICTING PR produces no CI run at all, so it presents as "checks
     never fired" and nobody investigates."""

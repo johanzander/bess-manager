@@ -204,7 +204,9 @@ Actions, and who does what:
 | Action | Do |
 |---|---|
 | `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
-| `awaiting_maintainer` | nothing; report it. Out of draft is the finish line |
+| `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line |
+| `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>`. **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
+| `rework_review` | out of draft with changes requested: `/implement-issue <n>` to address them, then a fresh review |
 | `resolve_conflict` | hand to `sweep-prs` |
 | `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
 | `nudge_reporter` | one nudge, as the PO identity |

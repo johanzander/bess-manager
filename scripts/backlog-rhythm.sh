@@ -212,10 +212,34 @@ actions=$(printf '%s' "$digest" | jq \
          then {pr: .number, action: "resolve_conflict",
                why: "CONFLICTING — note a conflicted PR produces no CI run at all",
                detail: "hand to sweep-prs, or resolve if the diff is ours"}
+         # OUT OF DRAFT IS NOT THE SAME AS REVIEWED, and treating it as such
+         # told the maintainer to merge an unreviewed PR. The old rule was
+         # `isDraft == false -> nothing left but your merge`, resting on the
+         # assumption that only Step 11 clears the draft flag, and only after
+         # an APPROVED verdict. Two things break that: a maintainer can flip
+         # the flag by hand (#626 was flipped because it LOOKED stuck, and had
+         # zero reviews at the time), and a Stage 3 CI-mode PR never runs Step
+         # 11 at all. Stage 4 is the gate the whole pipeline is built around;
+         # a surface that routes around it is worse than no surface.
+         #
+         # An APPROVED review is the bar, matching Step 11 exactly. Not
+         # `reviewDecision`, which is "" both for never-reviewed and for
+         # approved-then-dismissed, and not COMMENTED, which the bot also
+         # posts as a placeholder before its real verdict (see
+         # request-pr-review.sh).
          elif (.isDraft | not)
-         then {pr: .number, action: "awaiting_maintainer",
-               why: "out of draft",
-               detail: "nothing left but your merge"}
+         then (if ([ .reviews[]? | select(.state == "APPROVED") ] | length) > 0
+               then {pr: .number, action: "awaiting_maintainer",
+                     why: "out of draft and approved",
+                     detail: "nothing left but your merge"}
+               elif .reviewDecision == "CHANGES_REQUESTED"
+               then {pr: .number, issue: $issue_no, action: "rework_review",
+                     why: "out of draft but review asked for changes",
+                     detail: "address the review, then request a fresh one"}
+               else {pr: .number, issue: $issue_no, action: "request_review",
+                     why: "out of draft but never reviewed — Stage 4 has not run",
+                     detail: "scripts/request-pr-review.sh \(.number) — do NOT merge on the draft flag alone"}
+               end)
          else {pr: .number, issue: $issue_no, action: "resume_implementation",
                why: "draft PR, review loop unfinished",
                # `implement-issue` is used for TODO.md items and refactors too,

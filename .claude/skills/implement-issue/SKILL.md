@@ -28,6 +28,19 @@ the `bess-analyst` sub-agent.
   inverter/price-provider platforms) — that skill owns experimental→stable
   graduation across multiple beta cycles. Use `implement-issue` for
   single-PR bug fixes and small enhancements.
+- **Also for picking an issue back up after a session died mid-flight.** Same
+  invocation, `/implement-issue <n>`; Step 0 detects the prior work and
+  re-enters at the right step. This is not a separate skill because the loop
+  that acts on review feedback is Step 11 and lives here — a second skill
+  would duplicate it, and duplicating a review loop is how one of them goes
+  stale.
+
+**Sessions die mid-issue routinely, and nothing used to pick them up.** A
+fleet audit found 34 worktrees whose sessions had exited: 8 with real
+unpushed commits and no PR, and three PRs sitting green-or-reviewed with
+nobody left to finish them. #615 was `APPROVED` and still a draft the next
+morning; #614 had `CHANGES_REQUESTED` with no owner to act on it. That is the
+gap Step 0 closes.
 
 ## CI mode (GitHub Actions)
 
@@ -39,6 +52,7 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 
 | Step | CI mode |
 |---|---|
+| 0. Resume check | Applies, and matters more here: Stage 3 is re-triggered by hand, so a second `@claude-bot fix` on an issue that already has a `has-fix-pr` PR is a resume, not a restart. Detect the existing PR and continue it — never open a second PR for one issue. The CI checkout has no worktrees, so branch existence on `origin` is the only signal available. |
 | 2. Diagnose | Stage 2 comment absent → STOP. Post "No deep analysis found. Run `@claude-bot analyze` first" and exit — never self-diagnose in CI; the analyze/fix split *is* the human gate. |
 | 3. Confirm gate | The owner's `@claude-bot fix` comment is the go-ahead. Still perform the workaround check and scope assessment — put them in a `## Scope assessment` section of the PR body instead of chat. Escalation path (can't confidently pass the workaround check) still applies: dispatch a fresh general-purpose `Agent` to critique the design before implementing. |
 | 4. Worktree | Skip — the CI checkout is already isolated. Create the branch directly (naming per Step 1). |
@@ -52,6 +66,63 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 12. Hard constraints | Apply verbatim. |
 
 ## Process
+
+### 0. Resume check — is there prior work for this issue?
+
+Run this before Step 1, every time. A fresh issue costs one cheap check; a
+resumed one would otherwise lose work.
+
+```bash
+gh pr list --state open --search "<n>" --json number,headRefName,isDraft,mergeable,reviews
+git worktree list                       # a worktree already on this issue's branch?
+git branch --list '*issue-<n>*'         # a branch even without a worktree?
+```
+
+**Completion is observable from outside the dead session — read state, never
+assume it:**
+
+| Evidence | The dead session got at least to |
+|---|---|
+| branch or worktree exists | Step 4 |
+| commits ahead of `origin/main`, RED test in the diff | Step 5–7 |
+| open PR with `## Scope assessment` in the body | Step 9 |
+| `gh pr checks` green | Step 10 |
+| a terminal review verdict on the PR | Step 11, mid-loop |
+
+Re-enter at the **earliest incomplete** step and run forward normally. A PR
+carrying `CHANGES_REQUESTED` re-enters at Step 11's `CHANGES_REQUESTED` branch;
+one carrying `APPROVED` needs only `gh pr ready`.
+
+**Rehydrate the diagnosis before touching code.** Step 2's analysis died with
+the session, and Step 11 depends on holding it. It is recoverable only because
+this skill already forces it to be written down:
+
+- the Stage 2 `@claude-bot analyze` comment on the issue — the root cause
+- the PR body's `## Scope assessment` and `## Test plan` — the agreed approach
+  and what the test was supposed to discriminate
+- the diff itself, and any inline review comments
+
+**If those sources do not reconstruct a coherent diagnosis, STOP and report
+it.** Do not re-diagnose from scratch on top of someone else's half-finished
+branch: you would be building on a design you cannot see, and the commits
+already there encode decisions you would silently contradict.
+
+Hard rules, each from an observed failure:
+
+- **Never create a fresh worktree when a branch for this issue already has
+  commits.** Step 4 branches from `origin/main`, which discards them. One
+  abandoned branch held 32 commits that existed nowhere else.
+- **Never `git reset` or force-push a resumed branch.** Its commits are the
+  only copy; the session that made them is gone.
+- **Check for a live session on that worktree first** (`claude agents --json`,
+  run unscoped **and unsandboxed** — the sandbox denies `~/.claude/jobs`, so a
+  sandboxed listing silently truncates and a session reads as dead). Two
+  sessions on one branch is worse than a stalled one.
+- **A worktree with uncommitted tracked changes is unfinished work, not
+  debris.** Commit it as a WIP commit before doing anything else, so it is
+  recoverable by SHA.
+- **If the same issue has died twice, say so and stop.** A second silent
+  relaunch is how a real blocker gets mistaken for bad luck.
 
 ### 1. Fetch & scope
 
@@ -644,6 +715,10 @@ net is upstream, not this section.
 |---|---|
 | "the test asserts the exact command we write to hardware, that's precise" | Precise about the mapping, silent about the outcome. It stays green when the mapping is right and the physics is wrong. Assert realized cost / SoE / flows wherever an execution model exists. |
 | "it's green, so the fix works" | Green means the suite is satisfied. Revert the fix and watch the test fail — if it doesn't, it was never evidence. |
+| "this issue has no PR yet, so I'm starting fresh" | Step 0 checks branches and worktrees too, not just PRs. 8 abandoned branches in one audit had real commits and no PR — one with 32. Starting fresh from `origin/main` deletes them. |
+| "the old branch is a mess, cleaner to redo it" | Its commits are the only copy of a diagnosis you no longer have. If you genuinely cannot reconstruct the approach, that is a STOP-and-report, not a licence to reset. |
+| "that worktree's session shows dead, so it's mine to take" | Check unsandboxed. A sandboxed `claude agents --json` returned 1 session where the real answer was 17, because `~/.claude/jobs` is sandbox-denied — every other session read as dead. |
+| "the review said CHANGES_REQUESTED but nobody assigned it to me" | Nothing else will pick it up. Once the opening session exits, an orphaned PR has no owner at all — `sweep-prs` refuses the job by design. Resuming is how it gets one. |
 | "I can see the assertion is right, no need to run it red" | Assertions that look right have repeatedly bounded only one side, or compared a quantity a second varying term swamped. Seeing it fail is the cheap part. |
 | "quality-check.sh passed, that's enough" | Green tests prove the suite is satisfied, not that the fix behaves correctly against the real scenario. Step 8 requires observed output, every time. |
 | "the diagnosis is obviously right, skip the confirm gate" | Wrong diagnoses are exactly when confidence is highest. One message, cheap insurance. |
@@ -669,6 +744,14 @@ net is upstream, not this section.
 
 ## Red Flags — Stop and Go Back
 
+- About to run Step 4 (fresh worktree from `origin/main`) when a branch for
+  this issue already carries commits. That deletes them.
+- About to `git reset` or force-push a branch a dead session left behind.
+- About to re-diagnose from scratch on top of someone else's half-finished
+  branch because the Stage 2 comment and PR body didn't reconstruct the
+  approach. That is a STOP-and-report.
+- About to open a second PR for an issue that already has one.
+- About to relaunch an issue that has already died twice without saying so.
 - About to commit or open the PR without having actually run/observed the
   fix — only ran automated tests.
 - About to skip the Step 3 confirm gate, or the Step 7 gate for a frontend
@@ -708,6 +791,7 @@ net is upstream, not this section.
 
 | Step | Skill/Tool | Skippable? |
 |---|---|---|
+| 0. Resume check | `gh pr list` + `git worktree list` + unscoped/unsandboxed `claude agents --json` | No |
 | 1. Fetch & scope | `gh issue view` | No |
 | 2. Diagnose | `bess-analyst` (if no bot comment) | Conditional |
 | 3. Confirm gate | — | No |

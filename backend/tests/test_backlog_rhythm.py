@@ -321,12 +321,24 @@ def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
     assert "/implement-issue 592" in action["detail"]
 
 
-def test_a_draft_with_no_linked_issue_says_so(tmp_path: Path) -> None:
-    """Rather than emitting an un-actionable `/implement-issue null`."""
+def test_a_draft_with_no_linked_issue_resumes_by_pr(tmp_path: Path) -> None:
+    """`implement-issue` is used for TODO.md items and refactors too, so a PR
+    with no linked issue is normal, not a defect.
+
+    Reporting "no issue, finish it by hand" left every self-directed PR with no
+    owner in the loop — which is how #620, #622 and #623 all ended up driven by
+    hand.
+
+    No flag distinguishes the two: GitHub numbers issues and PRs from one
+    sequence per repo, so a bare number is unambiguous and Step 0 resolves
+    whichever it is.
+    """
     pr = _pr(700, reviews=[])
     action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
+
     assert action["issue"] is None
-    assert "no issue references this PR" in action["detail"]
+    assert "/implement-issue 700" in action["detail"]
+    assert "--pr" not in action["detail"]
 
 
 def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:

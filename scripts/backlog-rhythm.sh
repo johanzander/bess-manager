@@ -200,9 +200,21 @@ actions=$(printf '%s' "$digest" | jq \
                detail: "nothing left but your merge"}
          else {pr: .number, issue: $issue_no, action: "resume_implementation",
                why: "draft PR, review loop unfinished",
+               # `implement-issue` is used for TODO.md items and refactors too,
+               # not only for issues, so a PR with no linked issue is normal
+               # rather than a defect -- reporting "no issue, finish it by hand"
+               # left every self-directed PR with no owner in the loop.
+               #
+               # No flag distinguishes the two: GitHub numbers issues and PRs
+               # from ONE sequence per repo, so a bare number is already
+               # unambiguous and Step 0 resolves whichever it is. Where an issue
+               # is linked it is named, because it carries the diagnosis; where
+               # none is, the PR number is the handle, and it is a strong one --
+               # it holds the branch, the diff, the scope assessment and the
+               # review verdict, which is everything Step 0 reads.
                detail: (if $issue_no != null
                         then "/implement-issue \($issue_no) — Step 0 re-enters at the review loop and drives it to gh pr ready"
-                        else "no issue references this PR; finish it by hand or link it" end)}
+                        else "/implement-issue \(.number) — the PR number; no linked issue (TODO item or refactor)" end)}
          end)
     ]
 

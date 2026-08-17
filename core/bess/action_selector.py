@@ -17,7 +17,8 @@ and `pwl_window_dp._pwl_candidate_values_at` -- keep their own numpy
 evaluators for speed (P1 permits this explicitly: they estimate V over a
 whole state grid at once and never emit an action). They consume this
 module's candidate-space definitions -- `_residual_cover_p`,
-`_discharge_is_unexecutable` -- and the platform lattice from
+`_discharge_is_unexecutable`, `_solar_export_bypass_is_unexecutable` -- and
+the platform lattice from
 `execution_model.PlatformCapabilities` rather than restating them, so the
 action space itself has one definition even where the evaluation loop does
 not.
@@ -31,6 +32,7 @@ import numpy as np
 from core.bess.dp_battery_algorithm import (
     POWER_TOLERANCE_KW,
     PeriodFlows,
+    _ac_flows,
     _compute_reward,
     _effective_ac_cap_kwh,
     _soe_floor,
@@ -114,6 +116,60 @@ def _discharge_is_unexecutable(
     return (discharge_power_kw > deficit_kw) & (
         discharge_power_kw <= deficit_kw + GRID_FLOW_RESOLUTION_KWH / dt
     )
+
+
+def _solar_export_bypass_is_unexecutable(
+    solar_production: float,
+    home_consumption: float,
+    battery_settings: BatterySettings,
+    dt: float,
+) -> bool:
+    """Is the SOLAR_EXPORT-below-max bypass (#313) one no inverter can carry
+    out as commanded this period? (#630)
+
+    The bypass holds SoE exactly and lets the period's own solar surplus
+    export instead of passively charging. Nothing commands that directly --
+    it is delivered by `classify_strategic_intent` labelling the period
+    SOLAR_EXPORT, which is the intent that writes charge rate 0 and so stops
+    the inverter absorbing the surplus. That label needs
+    `grid_exported > FLOW_NOISE_FLOOR_KWH`; at or below it the period falls
+    through to IDLE, whose command is `load_first` at charge rate 100 --
+    which absorbs. So the plan books export revenue on energy the hardware
+    puts in the battery, and the battery runs fuller than planned until it
+    hits a bound and spills the difference (#630: +0.0016 SEK over one
+    quarterly day, from a single 0.0034 kWh surplus).
+
+    This is the charge-side twin of `_residual_cover_p`'s first gate, which
+    excludes discharges the same classifier would call IDLE (the #282 shape),
+    and it gates on the same constant for the same reason -- one threshold,
+    so the candidate space and the classifier cannot drift apart.
+
+    Withholding the candidate is always safe: plain IDLE is offered
+    unconditionally, and wherever the bypass diverts nothing (no surplus, or
+    a battery already at `max_soe`) the two coincide exactly -- the same
+    duplication `_tie_margin` already documents.
+
+    Scalar per period, not per state: with no battery flow at all,
+    `_ac_flows` reads only solar, load and the AC cap, so the export this
+    candidate produces does not depend on SoE. The backward passes evaluate
+    it once for the whole bypass column rather than per grid state.
+
+    The AC cap is derived here rather than accepted as an argument, even
+    though all three call sites already hold the identical value. That
+    repeated call is deliberate, for the reason `_period_flows`' docstring
+    gives: a cap passed in is a cap a caller can get wrong, and gating this
+    candidate under a different cap than `_period_flows` prices it under is
+    the reward-vs-flows divergence P4 exists to remove. One derivation per
+    period is not a cost worth reopening that seam for.
+    """
+    _, grid_exported, _ = _ac_flows(
+        solar_production,
+        home_consumption,
+        0.0,
+        0.0,
+        _effective_ac_cap_kwh(battery_settings, dt),
+    )
+    return grid_exported <= FLOW_NOISE_FLOOR_KWH
 
 
 def _residual_cover_p(
@@ -641,8 +697,11 @@ def select_action(
     # rationale. Bypasses _state_transition (whose power=0 branch always
     # charges as much as room/rate permit) to force next_soe == soe
     # directly, then reuses the same _compute_reward call every other
-    # candidate uses.
-    consider(0.0, forced_next_soe=soe)
+    # candidate uses. Withheld where the classifier would call the period
+    # IDLE rather than SOLAR_EXPORT, since nothing then commands the hold
+    # (#630).
+    if not _solar_export_bypass_is_unexecutable(solar, home, battery_settings, dt):
+        consider(0.0, forced_next_soe=soe)
 
     # Discharge -- exact breakpoint enumeration (Finding 1/2/3/5).
     for p in _discharge_candidates(
@@ -673,12 +732,16 @@ def select_action(
             c for c in candidates if c.grid_imported <= effective_import_cap + 1e-9
         ]
 
-    # The SOLAR_EXPORT-below-max candidate holds soe exactly unchanged, so it
-    # is feasible at every state, and the import-cap filter above cannot empty
-    # a non-empty list (its threshold is floored at the minimum grid_imported
-    # any candidate achieves, so that candidate always survives) --
-    # `candidates` is never empty and an IndexError below would be a real bug,
-    # not a case to defend against.
+    # Plain IDLE is offered unconditionally and holds soe within bounds at
+    # every state, so it is always feasible, and the import-cap filter above
+    # cannot empty a non-empty list (its threshold is floored at the minimum
+    # grid_imported any candidate achieves, so that candidate always
+    # survives) -- `candidates` is never empty and an IndexError below would
+    # be a real bug, not a case to defend against.
+    #
+    # This used to name the SOLAR_EXPORT-below-max candidate instead. That
+    # stopped being the guarantee when #630 made the bypass conditional; IDLE
+    # is the unconditional one, and always was.
     argmax_index = 0
     best_value = float("-inf")
     for index, candidate in enumerate(candidates):

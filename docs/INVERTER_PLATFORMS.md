@@ -274,6 +274,26 @@ semantics" below):
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
   remote control **enabled** (`grid_first` hold)
 
+**Register write ordering (issue [#593](https://github.com/johanzander/bess-manager/issues/593)):**
+Growatt VPP has no separate trigger entity — writing `vpp_remote_control`
+(30407) *is* the commit, so the inverter immediately executes whatever
+30409/30408 already hold. The write order is therefore load-bearing, not
+stylistic:
+
+- **Activating** a period: `vpp_power` (30409) → `vpp_time` (30408) →
+  `vpp_remote_control=Enabled` (30407) **last**. Arming first would execute
+  the previous active period's power value until the new one lands — up to
+  ±100%, i.e. a full-rated charge or export spike on every mode switch.
+- **Releasing** to `load_first`: `vpp_remote_control=Disabled` **first**, then
+  `vpp_power=0`. The zero clears the latch so the *next* activation can't
+  inherit a stale value; it must come after the disable, because a 0 written
+  while remote control is still enabled selects the `grid_first` hold (see
+  "SOLAR_EXPORT semantics" below) rather than being inert.
+
+A consequence worth knowing when reading logs: a failed power or timer write
+now leaves remote control untouched, so the period degrades to `load_first`
+self-use instead of executing a stale command.
+
 **LOAD_SUPPORT semantics (fixed — issue [#413](https://github.com/johanzander/bess-manager/issues/413)):**
 Unlike TOU mode (where `LOAD_SUPPORT` maps to `load_first`, letting the
 inverter's own control loop follow actual house load), VPP mode previously

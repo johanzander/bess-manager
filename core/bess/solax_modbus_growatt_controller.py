@@ -528,7 +528,8 @@ class SolaxModbusGrowattController(GrowattMinController):
                 fallback_minutes=_VPP_FALLBACK_MINUTES,
             )
             self._last_written_vpp_remote_control = remote_control_enabled
-            self._last_written_vpp_power = power_pct if remote_control_enabled else None
+            # Release zeroes 30409 (#593), so 0 -- not None -- is the truth.
+            self._last_written_vpp_power = power_pct if remote_control_enabled else 0
             return True, ""
         except Exception as e:
             logger.error("FAILED: Growatt VPP period write: %s", e)

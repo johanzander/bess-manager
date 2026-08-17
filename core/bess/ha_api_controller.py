@@ -2361,20 +2361,32 @@ class HomeAssistantAPIController:
     def set_growatt_vpp_period(
         self, remote_control_enabled: bool, power_pct: int, fallback_minutes: int
     ) -> None:
-        """Write one period's VPP command: remote control, power, and fallback timer.
+        """Write one period's VPP command: power, fallback timer, remote control.
+
+        Register 30407 (remote control) is the commit: Growatt VPP has no
+        separate trigger entity, so enabling it executes whatever 30409/30408
+        currently hold. Both are therefore written *before* arming, and the
+        power latch is cleared on release — otherwise the next activation
+        arms against the previous active period's value, which can be ±100%
+        (issue #593).
 
         ``vpp_time`` is rewritten every period the command is active, resetting
         the inverter's own fallback timer (register 30408) — if BESS stops
         writing (crash, restart), the inverter reverts to ``load_first`` on its
         own once the timer lapses, giving a hardware dead-man's-switch.
 
+        Either way a power/timer failure is fail-safe: on activation it leaves
+        remote control untouched, so the period degrades to ``load_first``
+        self-use instead of executing a stale command; on release the disable
+        has already landed, so only the latch-clearing courtesy is lost.
+
         Args:
             remote_control_enabled: Whether VPP Remote Control (30407) should
                 be enabled for this period. False reverts the inverter to
-                load_first.
+                load_first and zeroes 30409.
             power_pct: Target power as a percentage (-100..100). Negative =
                 discharge/export, positive = charge from grid. Ignored when
-                ``remote_control_enabled`` is False.
+                ``remote_control_enabled`` is False, which always writes 0.
             fallback_minutes: Value to (re)write to ``vpp_time`` (30408) when
                 ``remote_control_enabled`` is True.
         """
@@ -2387,17 +2399,35 @@ class HomeAssistantAPIController:
             option,
             f", power={power_pct}%" if remote_control_enabled else "",
         )
-        self._service_call_with_retry(
-            "select",
-            "select_option",
-            operation=f"Growatt VPP remote control -> {option}",
-            entity_id=remote_control_entity,
-            option=option,
-        )
+
+        def _arm(value: str) -> None:
+            self._service_call_with_retry(
+                "select",
+                "select_option",
+                operation=f"Growatt VPP remote control -> {value}",
+                entity_id=remote_control_entity,
+                option=value,
+            )
 
         if not remote_control_enabled:
+            # Release first, then clear the latch. Writing 0 while remote
+            # control is still Enabled would select the grid_first hold for
+            # the duration, changing release behaviour on every load_first
+            # entry; this order leaves release identical to before.
+            #
+            # The power entity is resolved only *after* the disable has
+            # landed: getting back to load_first is the safety-critical half,
+            # and clearing the latch is a courtesy to the next activation, so
+            # a mis-provisioned power entity must not block the release.
+            _arm("Disabled")
+            power_entity = self._get_entity_for_service("growatt_vpp_power")
+            self._set_number_like(
+                power_entity, 0, "Growatt VPP clear power latch -> 0%"
+            )
             return
 
+        # Resolved before any write, so a mis-provisioned install fails with
+        # the inverter untouched rather than armed on a stale command.
         power_entity = self._get_entity_for_service("growatt_vpp_power")
         self._set_number_like(
             power_entity, power_pct, f"Growatt VPP set power -> {power_pct}%"
@@ -2409,6 +2439,9 @@ class HomeAssistantAPIController:
             fallback_minutes,
             f"Growatt VPP reset fallback timer -> {fallback_minutes} min",
         )
+
+        # Arm last: enabling remote control IS the commit on Growatt VPP.
+        _arm("Enabled")
 
     # ── Growatt export-limit curtailment (registers 122/123) ──────────────────
     #

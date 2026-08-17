@@ -248,7 +248,7 @@ not `.git`'s own recovery data:
 
 | Category | Rules |
 |---|---|
-| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release create` / `edit` / `delete` / `delete-asset` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
 | Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
 | Leaves the user boundary | `sudo` |
 
@@ -284,8 +284,19 @@ no content (the diff was already public — the `git push` that created it
 prompted), and it is the codified endpoint of `implement-issue` Step 11's
 review loop. Prompting there would stall the one flow whose entire point is to
 reach that state without you. Contrast `gh pr merge` one row up, which is the
-same category and *is* gated: nothing undoes a merge to `main`. The
-second category exists
+same category and *is* gated: nothing undoes a merge to `main`.
+
+**`gh release` names its verbs for the same reason.** The standard is "the
+effect escapes the repo *and* git cannot undo it" — `gh release list` and `gh
+release view` fail the first half outright, since reading changes nothing on
+GitHub. A blanket `gh release*` therefore prompted on the exact command the
+release rule above *requires* ("always check the current published version
+before tagging"), and on every beta/stable version comparison. `create`,
+`edit`, `delete`, `delete-asset` and `upload` still ask; `list`, `view` and
+`download` run unattended, and `quality-check.sh` pins both halves so the
+split cannot collapse back into either a blanket rule or a hole.
+
+The second category exists
 because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.

@@ -330,30 +330,28 @@ git push origin v9.9.0                # moves a published release tag
 
 The glob was never what made those safe — it was a blunt instrument
 compensating for having no guard at the only layer that can see a *ref update*
-rather than a command string. That layer now exists. Four **GitHub rulesets**,
-all `enforcement=active` with an **empty `bypass_actors` list**, refuse three
-of the four lines above — see the gap called out immediately after the table:
+rather than a command string. That layer now exists. Five **GitHub rulesets**,
+all `enforcement=active` with an **empty `bypass_actors` list**. They refuse
+every *rewrite* above; the one thing they still permit is deleting a spent
+`release-*` branch, which is explained under the table:
 
 | Repo | Ruleset | Applies to | Rules |
 |---|---|---|---|
 | `bess-manager` | Protect Main Branch | `~DEFAULT_BRANCH` | deletion, non_fast_forward, pull_request |
 | `bess-manager` | Protect beta release branches | `beta-release-*` | deletion, non_fast_forward |
 | `bess-manager` | Protect release tags | `~ALL` tags | deletion, non_fast_forward |
+| `bess-manager` | Protect stable hotfix branches | `release-*` | non_fast_forward |
 | `bess-manager-beta` | Protect beta main (fast-forward only) | `~DEFAULT_BRANCH` | deletion, non_fast_forward |
 
-⚠️ **`release-X.Y` is not in that table, and `--delete release-X.Y` is
-therefore unguarded at BOTH layers.** That is the one line of the four above
-which nothing currently refuses. It is the short-lived stable hotfix branch the
-`release` skill creates (steps 2–6), and it *is* pushed and tagged, so it is a
-shared ref by the standard used everywhere else here. The protected tag
-preserves the released commit, which makes the branch recoverable after
-tagging but not before.
-
-Left open knowingly rather than by oversight — closing it means adding a
-`release-*` ruleset (`non_fast_forward`, and deliberately **not** `deletion`,
-since the branch is meant to be cleaned up after the release). Do **not** close
-it by restoring a `Bash(git push*)` ask: that guards every push to fix one
-branch pattern, and `quality-check.sh` fails on it.
+**`release-*` carries `non_fast_forward` and deliberately NOT `deletion`**,
+which is the one asymmetry in the table and the one line of the four above that
+is still permitted. It is the short-lived stable hotfix branch the `release`
+skill creates (steps 2–6): it is pushed and tagged, so *rewriting* it must
+fail, while deleting it once the release is out is ordinary cleanup and must
+not. What makes dropping the deletion guard safe is the tag ruleset one row up
+— the published tag pins the released commit, so a deleted `release-*` branch
+costs nothing after tagging. Before tagging it is still recoverable only from
+a local reflog, so delete it after, not during.
 
 The empty bypass list is the load-bearing part: **local pushes authenticate as
 the repo owner**, not as `bess-agent` (the credential helper is osxkeychain and

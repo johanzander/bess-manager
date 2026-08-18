@@ -32,8 +32,17 @@ if ! gh auth status 2>&1 | grep -q "project"; then
   exit 1
 fi
 
-existing=$(gh project list --owner "$owner" --format json \
-  --jq ".projects[] | select(.title == \"$title\") | .number" || true)
+# `|| true` here would be the difference between "no such board" and "the
+# lookup failed", and this script creates a board when it sees the former. A
+# rate limit or a transient GraphQL error would therefore produce a SECOND
+# "BESS Manager Backlog" project, breaking the idempotence promised above. So
+# a failed lookup stops the run instead of being read as an empty result.
+if ! existing=$(gh project list --owner "$owner" --format json \
+  --jq ".projects[] | select(.title == \"$title\") | .number"); then
+  echo "backlog-board-init.sh: could not list projects for '$owner'." >&2
+  echo "  Refusing to create a board without knowing whether one exists." >&2
+  exit 1
+fi
 
 if [ -n "$existing" ]; then
   echo "Board already exists — nothing changed." >&2

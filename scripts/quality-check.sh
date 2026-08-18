@@ -267,7 +267,8 @@ MUST_BE_DENIED = [
 # Checked against deny + ask: a prompt is an acceptable outcome for these.
 MUST_BE_GUARDED = [
     # git's global options may precede the subcommand -- the hook this
-    # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
+    # replaced normalised for exactly this, and local-agent-environment.md
+    # teaches `git -C` as
     # the cross-checkout idiom, so it is the spelling most likely to be used.
     "git --no-pager gc --prune=now",
     "git -C sub tag -d v9.9.0",
@@ -356,14 +357,16 @@ MUST_NOT_BE_GUARDED = [
     "git push origin v9.9.0",
     "git -C .claude/worktrees/x push origin main",
     "git -c push.default=current push beta main",
-    # Read-only stash inspection, which CLAUDE.md and rules.md both promise
+    # Read-only stash inspection, which local-agent-environment.md and
+    # rules.md both promise
     # keeps working. A blanket `git -* stash *` DENY caught these, and deny has
     # no override -- so the cross-checkout recipe was hard-blocked, not merely
     # prompted. That is why the stash twins name a verb.
     "git stash list", "git stash show",
     "git -C sub stash list",
     "git -C .claude/worktrees/x stash show",
-    # implement-issue Step 4 prunes worktrees in a loop; CLAUDE.md argues that
+    # implement-issue Step 4 prunes worktrees in a loop;
+    # local-agent-environment.md argues that
     # must stay unattended. A `git -* prune*` twin caught `worktree prune` and
     # `remote prune` through the same greedy glob, so the twin was dropped.
     "git -C /main worktree prune", "git worktree prune",
@@ -510,6 +513,39 @@ print(f"✅ Bot workflow publish contract intact ({len(PUBLISHERS)} publishers "
 PY
 then
     ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
+echo "📋 Checking agent context budget..."
+echo "-------------------------------------------"
+
+# Every bot stage loads CLAUDE.md before it does anything, on the main agent
+# and again on its sub-agent, and re-sends it on every turn. It is the largest
+# single item in the fixed context floor, so its size is a per-run cost on
+# Stages 1-5 and on every local session.
+#
+# It reached 45,488 B once, of which 33,743 B (74%) was one section describing
+# this machine -- the macOS sandbox, podman, worktrees, Playwright, the
+# permission rules. None of it can apply on a fresh ubuntu runner under
+# `--permission-mode bypassPermissions`, and it was billed on every turn of
+# every stage anyway (#650).
+#
+# The fix was to RELOCATE that content, not delete it: it lives in
+# docs/agents/local-agent-environment.md and is reached through the Agent
+# Documentation Index like every other doc. This gate keeps it from creeping
+# back inline. If you need to raise the cap, move content into docs/agents/
+# and link it instead -- that is the mechanism CLAUDE.md already uses.
+CLAUDE_MD_MAX_BYTES=16000
+CLAUDE_MD_BYTES=$(wc -c < CLAUDE.md | tr -d ' ')
+
+if [ "$CLAUDE_MD_BYTES" -gt "$CLAUDE_MD_MAX_BYTES" ]; then
+    echo "❌ CLAUDE.md is ${CLAUDE_MD_BYTES} B, over the ${CLAUDE_MD_MAX_BYTES} B budget"
+    echo "   Every bot stage loads this file on every turn, on two agents."
+    echo "   Move the new material into docs/agents/ and link it from the"
+    echo "   Agent Documentation Index rather than raising the cap (#650)."
+    ERRORS=$((ERRORS + 1))
+else
+    echo "✅ CLAUDE.md within context budget (${CLAUDE_MD_BYTES} B / ${CLAUDE_MD_MAX_BYTES} B)"
 fi
 
 echo ""

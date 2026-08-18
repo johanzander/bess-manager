@@ -77,6 +77,8 @@ def _rows(out: str) -> str:
 @pytest.fixture
 def run(tmp_path: Path):
     """Shim `gh pr list` with a fixture and return the script's stdout."""
+    outside_a_repo = tmp_path / "not-a-repo"
+    outside_a_repo.mkdir()
 
     def _run(prs: list[dict]) -> str:
         bin_dir = tmp_path / "bin"
@@ -94,7 +96,12 @@ cat '{bin_dir}/prs.json'
             capture_output=True,
             text=True,
             env=dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}"),
-            cwd=REPO_ROOT,
+            # NOT the repo: the script's local-writer section walks real
+            # worktrees and fetches, which would make every classifier test slow,
+            # networked, and dependent on whatever branches happen to exist.
+            # Outside a checkout it takes the documented skip path instead, which
+            # `test_the_local_writer_check_skips_loudly` pins.
+            cwd=outside_a_repo,
         )
         assert proc.returncode == 0, proc.stderr
         return proc.stdout
@@ -314,3 +321,14 @@ def test_liveness_is_reported_as_unknown_rather_than_guessed(run) -> None:
 
     assert "not a GitHub fact and is not" in out
     assert "guessed here" in out
+
+
+def test_the_local_writer_check_skips_loudly_outside_a_checkout(run) -> None:
+    """The script is meant to run against a container fleet too, where no
+    worktree exists. A silent skip there would read as "no divergence found",
+    which is the same silent-cap failure `sweep-prs` warns about — so the skip
+    has to say that it proves nothing."""
+    out = run([_pr(1)])
+
+    assert "SKIPPED" in out
+    assert "says nothing about writers" in out

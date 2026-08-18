@@ -167,6 +167,59 @@ JQ
 
 echo "$raw" | jq -r "$classify"
 
+# --- Local join: is more than one writer on this branch? --------------------
+#
+# GitHub cannot answer this. A branch with two writers looks entirely normal
+# through the API -- the divergence exists only between a local checkout and the
+# remote, and it collapses into an ordinary merge the moment someone reconciles.
+#
+# #619 is the worked example. One writer took the branch at 08:09 and worked
+# from that base all day; another pushed 23031e78 at 09:34. The reviewer
+# reviewed 23031e78 three times, twice with blocking findings, while the first
+# line never held that commit at all. Fifteen hours later it landed as
+# `Merge remote-tracking branch 'origin/fix/...' into fix/...` -- a branch merged
+# into itself, which is the fingerprint of exactly this.
+#
+# `git rev-list --left-right` would have caught it at 09:34.
+#
+# Skipped LOUDLY when there is no checkout to compare: this script is also meant
+# to run against a container fleet, where no worktree exists and a silent skip
+# would read as "no divergence found".
+echo ""
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+    echo "Local writer check SKIPPED — not inside a git checkout, so no worktree"
+    echo "could be compared against its remote. This says nothing about writers."
+else
+    git fetch origin --quiet 2>/dev/null || true
+    echo "Local writers (worktrees whose branch has an open PR):"
+    git worktree list --porcelain |
+        awk '/^worktree /{w=$2} /^branch /{sub("refs/heads/","",$2); print w"\t"$2}' |
+        while IFS="$(printf '\t')" read -r wt branch; do
+            pr=$(echo "$raw" | jq -r --arg b "$branch" \
+                '.[] | select(.headRefName == $b) | .number')
+            [ -z "$pr" ] && continue
+            counts=$(git rev-list --left-right --count \
+                "refs/remotes/origin/${branch}...${branch}" 2>/dev/null || true)
+            if [ -z "$counts" ]; then
+                echo "  #${pr} ${branch} — never pushed (no remote-tracking ref)"
+                continue
+            fi
+            behind=$(echo "$counts" | cut -f1)
+            ahead=$(echo "$counts" | cut -f2)
+            if [ "$behind" -gt 0 ] && [ "$ahead" -gt 0 ]; then
+                echo "  #${pr} ${branch}"
+                echo "      *** DIVERGED: ${ahead} local / ${behind} remote — TWO WRITERS ***"
+                echo "      ${wt}"
+            elif [ "$ahead" -gt 0 ]; then
+                echo "  #${pr} ${branch} — ${ahead} unpushed commit(s)"
+            elif [ "$behind" -gt 0 ]; then
+                echo "  #${pr} ${branch} — ${behind} behind its own remote"
+            else
+                echo "  #${pr} ${branch} — in sync"
+            fi
+        done
+fi
+
 cat <<'EOF'
 Liveness (is an agent working RIGHT NOW) is not a GitHub fact and is not
 guessed here. `needs-fix`, `needs-refresh` and `needs-review-request` are

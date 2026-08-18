@@ -43,6 +43,9 @@ Issue opened/edited  → issue-triage.yml      [auto, ~$0.05]
                        → delegates to `bess-analyst` sub-agent
                        → posts Root cause / Evidence / Proposed fix
                        → label `analyzed` (or `needs-human-review`)
+                       → job FAILS if it posted no comment or applied
+                         neither label — a run that analysed nothing
+                         must not report success (#646)
 
 @claude-bot fix      → issue-fix.yml        [manual, ~$1–4]
                        → reads Stage 2 diagnosis comment

@@ -600,6 +600,23 @@ redundant:
   one from outside. `verify-sandbox.sh` skips its symlink check outside a
   linked worktree rather than reporting a PASS that proves nothing.
 
+- **`filesystem.allowWrite: "~/.claude/jobs"`** — `claude agents --json` reads
+  the session list from there, and a sandboxed call does not fail, it silently
+  **TRUNCATES**. Measured in one session, seconds apart: **sandboxed returns 1
+  agent, unsandboxed returns 14, of which 7 are live sessions sitting in
+  worktrees.** All seven read as dead.
+
+  That is not cosmetic. `backlog-rhythm.sh` keys `resume_implementation` off
+  "worktree on disk, no live session", so with a truncated listing it told the
+  maintainer to re-enter a worktree a live session was actively working — a
+  second session on one branch, against commits the advice itself calls the
+  only copy. `implement-issue` Step 0 reads the same list before touching a
+  resumed branch, and both skills already carry a warning to run it
+  unsandboxed. This makes the warning unnecessary rather than merely repeated.
+
+  **An under-count, not an error, is the dangerous shape**: nothing about a
+  short list looks wrong, so the wrong answer is acted on with full confidence.
+
 - **`filesystem.allowWrite`: the two user-level caches `worktree-setup.sh`
   writes** — `~/Library/Caches/ms-playwright` (plus its Linux spelling
   `~/.cache/ms-playwright`) and `~/.npm`. Setup runs `npm install` when a

@@ -617,6 +617,21 @@ redundant:
   **An under-count, not an error, is the dangerous shape**: nothing about a
   short list looks wrong, so the wrong answer is acted on with full confidence.
 
+  **`allowWrite`, not `allowRead`, and that is measured rather than assumed** —
+  the obvious objection is that `claude agents --json` only *reads* the list.
+  Two probes in a sandboxed session settle it:
+
+  ```
+  ls ~/.claude/jobs             ->  16 entries              # read:  ALLOWED
+  touch ~/.claude/jobs/.probe   ->  Operation not permitted # write: DENIED
+  ```
+
+  Reads were never blocked; the read policy denies only `~/.claude/ide`.
+  Enumeration needs to WRITE, and a dropped entry rather than an error is what
+  produces the truncation. Same lesson as the podman entry below, where
+  `filesystem.allowRead` was tried and disproved: read the actual error instead
+  of reasoning about what ought to be blocked.
+
 - **`filesystem.allowWrite`: the two user-level caches `worktree-setup.sh`
   writes** — `~/Library/Caches/ms-playwright` (plus its Linux spelling
   `~/.cache/ms-playwright`) and `~/.npm`. Setup runs `npm install` when a

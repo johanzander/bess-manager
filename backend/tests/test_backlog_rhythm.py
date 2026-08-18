@@ -786,7 +786,9 @@ def test_three_changes_requested_rounds_escalate(tmp_path: Path) -> None:
 
 def test_two_resume_handoffs_escalate(tmp_path: Path) -> None:
     item = _item(702, resume_count=2, worktree="/wt", worktree_branch="fix/issue-702")
-    assert "escalated" in _actions_for(_run(tmp_path, [item]), 702)
+    actions = _actions_for(_run(tmp_path, [item]), 702)
+    assert "escalated" in actions
+    assert "resume_implementation" not in actions
 
 
 def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:

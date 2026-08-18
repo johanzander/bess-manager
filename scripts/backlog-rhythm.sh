@@ -106,7 +106,7 @@ actions=$(printf '%s' "$digest" | jq \
     # and the wait that matters is the PR review, which the PR half of this
     # pass already reports. Nudging the reporter of a 46-day-stale conflicted
     # PR asks the wrong person about the wrong thing.
-    (if .pr != null then empty
+    (if (.prs | length) > 0 then empty
      elif .awaiting == "reporter"
         and ((.last_comment.is_reporter // false) | not)
         and quiet_days >= $park
@@ -199,7 +199,7 @@ actions=$(printf '%s' "$digest" | jq \
     # actively being worked, with the advice to re-enter it -- a second session
     # on the same branch, against work the detail line itself calls the only
     # copy.
-    (if .worktree != null and (.stale_worktree | not) and (.worktree_locked | not) and .session == null and .pr == null
+    (if .worktree != null and (.stale_worktree | not) and (.worktree_locked | not) and .session == null and (.prs | length) == 0
      then {issue: .number, action: "resume_implementation",
            why: "worktree \(.worktree_branch) on disk, unlocked, no live session",
            detail: "/implement-issue \(.number) — Step 0 resumes it; never restart, the branch commits are the only copy"}
@@ -235,7 +235,7 @@ actions=$(printf '%s' "$digest" | jq \
   + [ $prs[]
       | . as $p
       # The issue this PR belongs to, so the handoff can name it.
-      | ([ $items[] | select(.pr == $p.number) | .number ] | first) as $issue_no
+      | ([ $items[] | select(.prs | map(.number) | index($p.number)) | .number ] | first) as $issue_no
       # The board card belonging to this PR, if it has one. This is what lets a
       # decision about a PR be recorded once instead of re-argued every tick.
       #

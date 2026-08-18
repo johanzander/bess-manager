@@ -37,8 +37,7 @@ def _item(number: int, **over: object) -> dict:
         "awaiting_suggested": None,
         "last_comment": None,
         "priority": "P2",
-        "pr": None,
-        "pr_state": None,
+        "prs": [],
         "merged_pr": None,
         "worktree": None,
         "worktree_branch": None,
@@ -174,7 +173,7 @@ def test_an_open_pr_suppresses_the_chase_and_the_park(tmp_path: Path) -> None:
             162,
             labels=["b"],
             awaiting="reporter",
-            pr=167,
+            prs=[{"number": 167, "mergeable": "MERGEABLE", "isDraft": True}],
             column="In Review",
             board_status="In Review",
             last_comment=_comment(days),
@@ -363,7 +362,7 @@ def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> Non
     once a PR exists, so the issue rule stands down to avoid listing it twice."""
     item = _item(
         592,
-        pr=619,
+        prs=[{"number": 619, "mergeable": "MERGEABLE", "isDraft": True}],
         worktree="/repo/wt/592",
         worktree_branch="fix/issue-592",
         session=None,
@@ -436,7 +435,12 @@ def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
 def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
     """`/implement-issue <n>` takes an issue number, so the action has to carry
     one — otherwise the loop reports work nobody can pick up."""
-    item = _item(592, pr=615, column="In Review", last_comment=_comment(1))
+    item = _item(
+        592,
+        prs=[{"number": 615, "mergeable": "MERGEABLE", "isDraft": True}],
+        column="In Review",
+        last_comment=_comment(1),
+    )
     # Not an approved draft: that case is `mark_ready` now and carries no
     # issue, because `gh pr ready <n>` needs only the PR number.
     pr = _pr(615, reviews=[{"state": "CHANGES_REQUESTED"}])

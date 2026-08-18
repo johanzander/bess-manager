@@ -194,6 +194,52 @@ def _comment(login: str, body: str = "...", at: str = "2026-08-10T00:00:00Z") ->
     return {"body": body, "author": {"login": login}, "createdAt": at}
 
 
+def _pr(number: int, **over: object) -> dict:
+    """A PR as `gh pr list --json ...` returns it to the digest."""
+    pr: dict = {
+        "number": number,
+        "title": f"pr {number}",
+        "body": "",
+        "headRefName": f"fix/pr-{number}",
+        "isDraft": True,
+        "mergeable": "MERGEABLE",
+    }
+    pr.update(over)
+    return pr
+
+
+def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
+    """The no-auto-close rule means a beta PR and a graduation PR both point at
+    one issue. Returning only the first made the second invisible to every
+    board pass, and derived the column from an arbitrary one of the two.
+
+    Branch names here deliberately carry NO issue number, so the association is
+    proved by the body reference alone -- including the new `Refs` verb, which
+    is the only spelling an intermediate PR is allowed."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(500, labels=[{"name": "bug"}])],
+            [
+                _pr(501, body="Refs #500", headRefName="fix/beta-work"),
+                _pr(
+                    502,
+                    body="Closes #500",
+                    headRefName="fix/graduation",
+                    mergeable="CONFLICTING",
+                ),
+            ],
+            [],
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+    assert [p["number"] for p in item["prs"]] == [501, 502]
+    assert item["prs"][1]["mergeable"] == "CONFLICTING"
+    assert "pr" not in item
+
+
 def test_human_comment_alone_does_not_move_the_column(bin_dir: Path) -> None:
     """A human comment is NOT a blocker, and used to be treated as one.
 
@@ -529,12 +575,12 @@ def test_conflicting_pr_is_reported_on_its_issue(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     item = digest["items"][0]
-    assert item["pr"] == 610
-    assert item["pr_state"] == "CONFLICTING"
+    assert [p["number"] for p in item["prs"]] == [610]
+    assert item["prs"][0]["mergeable"] == "CONFLICTING"
     assert item["column"] == "In Review"
 
 
-def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
+def test_issue_matched_by_two_prs_emits_one_item_with_both_prs(
     bin_dir: Path,
 ) -> None:
     """Regression test for a real bug found while implementing this script:
@@ -544,10 +590,10 @@ def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
     matches `select(...)` is a stream and the whole expression becomes a
     stream of PR objects rather than a single scalar. Downstream that stream
     gets cross-multiplied into the `items[]` comprehension, silently emitting
-    one duplicate item row per extra match instead of picking a single PR
-    deterministically. This issue has two open PRs that both match it (one by
+    one duplicate item row per extra match instead of joining all of them onto
+    one item. This issue has two open PRs that both match it (one by
     `Fixes #N` in the body, one by headRefName pattern), which triggers the
-    bug if `pr_for` regresses back to the `// null` idiom."""
+    bug if `prs_for` regresses back to a `// null`-style single-scalar pick."""
     issue = {
         "number": 606,
         "title": "Two competing fix attempts",
@@ -582,10 +628,7 @@ def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
     )
     item = digest["items"][0]
     assert item["number"] == 606
-    assert isinstance(item["pr"], int), (
-        "pr must be a single scalar issue number, not a list — " f"got {item['pr']!r}"
-    )
-    assert item["pr"] == 620
+    assert [p["number"] for p in item["prs"]] == [620, 621]
 
 
 def test_worktree_branch_without_issue_prefix_joins_by_delimited_number(
@@ -714,7 +757,9 @@ def test_pr_joined_only_by_headref_is_not_an_orphan(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     item = digest["items"][0]
-    assert item["pr"] == 630, "PR must still join the issue via headRefName"
+    assert [p["number"] for p in item["prs"]] == [
+        630
+    ], "PR must still join the issue via headRefName"
     pr_orphans = [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"]
     assert pr_orphans == [], (
         "a PR joined to an open issue by headRefName must not be reported as "

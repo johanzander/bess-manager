@@ -77,7 +77,7 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
   | jq -c '[ .[] | {
       number,
       headRefName,
-      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves) #([0-9]+)") | .[0] | tonumber ]
+      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
@@ -164,13 +164,21 @@ jq -n \
   # identities (see scripts/gh-agent.sh).
   def bot_authors: ["bess-manager-claude-bot", "bess-agent", "bess-product-owner", "bess-developer"];
 
+  # `refs` joins the closing verbs deliberately. The project rule is that a beta
+  # or intermediate PR must NOT close the reporters issue -- only the graduation
+  # PR does -- so an intermediate PR carries `Refs #N` and would otherwise
+  # associate with nothing at all.
   def pr_matches_issue($p; $n):
-    ($p.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
+    ($p.body // "" | test("(?i)(fixes|closes|resolves|refs) #\($n)\\b"))
     or ($p.headRefName | test("issue-\($n)(\\D|$)"));
 
-  def pr_for($n):
-    ([ $prs[] | select(pr_matches_issue(.; $n)) ]) as $matches
-    | if ($matches | length) == 0 then null else $matches[0] end;
+  # Returns EVERY matching PR, ascending. Taking `[0]` discarded the rest, and
+  # with one issue routinely carrying several PRs that meant the column was
+  # derived from whichever happened to sort first.
+  def prs_for($n):
+    [ $prs[] | select(pr_matches_issue(.; $n))
+             | {number: .number, mergeable: .mergeable, isDraft: .isDraft} ]
+    | sort_by(.number);
 
   # Matches a worktree whose path OR branch contains the issue number in a
   # delimited position: preceded by start-of-string, "-" or "/"; followed by
@@ -336,7 +344,7 @@ jq -n \
   # the condition was left out because no board existed and it would have made
   # Ready unreachable. The board exists, and every item carries P1-P4.
   def column($labels; $pr; $wt_live; $awaiting; $priority; $blocked):
-      if $pr != null then "In Review"
+      if ($pr | length) > 0 then "In Review"
       elif $blocked then "Analysis"
       elif $awaiting != null then "Analysis"
       elif $wt_live then "In Progress"
@@ -353,7 +361,7 @@ jq -n \
     },
     items: [ $issues[] | . as $i
       | (label_names) as $labels
-      | (pr_for(.number)) as $pr
+      | (prs_for(.number)) as $open_prs
       | (merged_pr_for(.number)) as $merged_pr
       | (worktree_for(.number)) as $wt
       | (worktree_is_stale($wt)) as $wt_stale
@@ -369,7 +377,7 @@ jq -n \
       | (blocked_by) as $bb
       | (blocked_by_open($bb)) as $bb_open
       | (($labels | index("blocked")) != null or (($bb_open | length) > 0)) as $blocked
-      | (column($labels; $pr; $wt_live; $aw; $prio; $blocked)) as $col
+      | (column($labels; $open_prs; $wt_live; $aw; $prio; $blocked)) as $col
       | {
           number: .number,
           title: .title,
@@ -400,8 +408,7 @@ jq -n \
           awaiting_suggested: $aw_label,
           last_comment: last_comment(.comments; .author.login),
           priority: $prio,
-          pr: ($pr.number // null),
-          pr_state: ($pr.mergeable // null),
+          prs: $open_prs,
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),

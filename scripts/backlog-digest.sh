@@ -332,24 +332,30 @@ jq -n \
     | if ($matches | length) == 0 then null else $matches[0].number end;
 
   # Column names match the board`s Status options exactly (Backlog, Analysis,
-  # Ready for Dev, In Progress, In Review, Done) so reconciling a card against
-  # this value is a string comparison and not a translation table.
+  # Ready for Dev, In Progress, In Review, In Verification, Done) so
+  # reconciling a card against this value is a string comparison and not a
+  # translation table.
   #
-  # PRECEDENCE IS THE FIX. `analyzed` used to be tested BEFORE any wait, so an
-  # analysed-but-blocked item reported "Ready" and looked dispatchable. Waits
-  # now win: an item whose scope is unsettled goes back to Analysis no matter
-  # how far it got.
-  #
-  # `Ready for Dev` also now requires a Priority. The design always said so;
-  # the condition was left out because no board existed and it would have made
+  # `Ready for Dev` also requires a Priority. The design always said so; the
+  # condition was left out because no board existed and it would have made
   # Ready unreachable. The board exists, and every item carries P1-P4.
-  def column($labels; $pr; $wt_live; $awaiting; $priority; $blocked):
-      if ($pr | length) > 0 then "In Review"
-      elif $blocked then "Analysis"
-      elif $awaiting != null then "Analysis"
+  #
+  # PHASE COMES FROM ARTIFACTS. `Status` says what stage the work is at;
+  # `Awaiting` says who is being waited on, and the two are orthogonal -- a
+  # wait no longer rewrites the phase. The safety property survives in
+  # `Ready for Dev` below, which still requires no blocker and no wait, so an
+  # unsettled item cannot be dispatched however far its analysis got.
+  #
+  # ORDER IS THE CONTENT. Live work outranks landed work: an issue whose
+  # graduation PR is still open is In Review, not In Verification.
+  def column($labels; $open_prs; $merged_pr; $wt_live; $awaiting; $priority; $blocked):
+      if ($open_prs | length) > 0 then "In Review"
       elif $wt_live then "In Progress"
-      elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
+      elif $merged_pr != null then "In Verification"
+      elif ($labels | index("analyzed")) and $priority != null
+           and ($blocked | not) and $awaiting == null then "Ready for Dev"
       elif ($labels | index("analyzed")) then "Analysis"
+      elif $blocked or $awaiting != null then "Analysis"
       else "Backlog" end;
 
   {
@@ -377,7 +383,7 @@ jq -n \
       | (blocked_by) as $bb
       | (blocked_by_open($bb)) as $bb_open
       | (($labels | index("blocked")) != null or (($bb_open | length) > 0)) as $blocked
-      | (column($labels; $open_prs; $wt_live; $aw; $prio; $blocked)) as $col
+      | (column($labels; $open_prs; $merged_pr; $wt_live; $aw; $prio; $blocked)) as $col
       | {
           number: .number,
           title: .title,

@@ -475,15 +475,13 @@ def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
     assert item["column"] == "Ready for Dev"
 
 
-def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
+def test_a_wait_no_longer_outranks_a_live_worktree(
     bin_dir: Path,
 ) -> None:
-    """Confirming intent, per review of #623.
-
-    A recorded wait beats a live worktree in `column`, because an item whose
-    scope is unsettled must not read as progressing — that is the whole point of
-    the precedence fix. The risk is hiding active undelivered code, so the
-    worktree is still reported on the item; only the column defers to the wait.
+    """Supersedes the #623 intent test now that Task 3 makes Status and
+    Awaiting orthogonal (see task-3-brief.md). A live worktree is still real
+    progress even while a wait is recorded — the wait is reported alongside
+    it, not as a phase override.
     """
     issue = _issue(704, labels=[{"name": "needs-debug-log"}])
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
@@ -493,9 +491,9 @@ def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
 
     item = _run(bin_dir)["items"][0]
 
-    assert item["column"] == "Analysis"
+    assert item["column"] == "In Progress"
     assert item["awaiting"] == "reporter"
-    # The code is still visible — the wait changes the column, not the evidence.
+    # The code is still visible — the wait is reported, not folded into the column.
     assert item["worktree"] == "/repo/wt/704"
     assert item["worktree_branch"] == "fix/issue-704-live"
     assert item["stale_worktree"] is False
@@ -535,6 +533,39 @@ def test_worktree_on_an_unmerged_branch_is_in_progress(bin_dir: Path) -> None:
 
     assert item["stale_worktree"] is False
     assert item["column"] == "In Progress"
+
+
+def test_a_merged_pr_with_the_issue_open_is_in_verification(bin_dir: Path) -> None:
+    """Merged to main, not yet in a stable release. The digest used to leave
+    this period unnamed, so a fix awaiting real-world confirmation sat in
+    whatever column it happened to be in."""
+    issue = _issue(510, labels=[{"name": "bug"}, {"name": "analyzed"}])
+    merged = [_pr(511, body="Refs #510", headRefName="fix/issue-510")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    assert _run(bin_dir)["items"][0]["column"] == "In Verification"
+
+
+def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
+    """A graduation PR still open means the work is In Review, not verified."""
+    issue = _issue(512, labels=[{"name": "bug"}])
+    prs = [_pr(514, body="Closes #512", headRefName="fix/issue-512-b")]
+    merged = [_pr(513, body="Refs #512", headRefName="fix/issue-512-a")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, [], merged))
+
+    assert _run(bin_dir)["items"][0]["column"] == "In Review"
+
+
+def test_a_wait_no_longer_rewrites_the_phase(bin_dir: Path) -> None:
+    """Status is the phase, Awaiting is the wait, and they are orthogonal. An
+    In Review item blocked on the maintainer must not report Analysis."""
+    issue = _issue(515, labels=[{"name": "bug"}, {"name": "blocked"}])
+    prs = [_pr(516, body="Refs #515", headRefName="fix/issue-515")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, []))
+
+    item = _run(bin_dir)["items"][0]
+    assert item["column"] == "In Review"
+    assert item["blocked"] is True
 
 
 def test_merged_pr_does_not_close_an_open_issue(bin_dir: Path) -> None:

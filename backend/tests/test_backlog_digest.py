@@ -1120,3 +1120,36 @@ def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     assert [o for o in digest["orphans"] if o["kind"] == "issue_no_card"] == []
+
+
+def test_resume_handoffs_are_counted(bin_dir: Path) -> None:
+    """A session that died twice is telling you something -- but nothing
+    counted, so nothing could act on it. The marker is an HTML comment so the
+    handoff still reads as prose on GitHub."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [
+                _issue(
+                    520,
+                    labels=[{"name": "bug"}],
+                    comments=[
+                        _comment(
+                            "bess-developer",
+                            "Resuming implementation.\n<!-- resume-handoff -->",
+                        ),
+                        _comment("johanzander", "thanks"),
+                        _comment(
+                            "bess-developer",
+                            "Resuming implementation.\n<!-- resume-handoff -->",
+                        ),
+                    ],
+                )
+            ],
+            [],
+            [],
+        ),
+    )
+
+    assert _run(bin_dir)["items"][0]["resume_count"] == 2

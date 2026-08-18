@@ -164,6 +164,13 @@ jq -n \
   # identities (see scripts/gh-agent.sh).
   def bot_authors: ["bess-manager-claude-bot", "bess-agent", "bess-product-owner", "bess-developer"];
 
+  # How many times an implementation session has been handed back on this
+  # issue. The marker is an HTML comment, so the handoff reads as ordinary
+  # prose on GitHub while staying exactly countable here -- no local file, and
+  # no guessing from prose.
+  def resume_count($comments):
+    [ $comments[]? | select((.body // "") | contains("<!-- resume-handoff -->")) ] | length;
+
   # `refs` joins the closing verbs deliberately. The project rule is that a beta
   # or intermediate PR must NOT close the reporters issue -- only the graduation
   # PR does -- so an intermediate PR carries `Refs #N` and would otherwise
@@ -429,6 +436,7 @@ jq -n \
           # #579, #591, #517) had already merged.
           stale_worktree: $wt_stale,
           session: session_for(.number),
+          resume_count: resume_count(.comments),
           blocked_by: $bb,
           # The subset still open, and the only one that fails Ready.
           blocked_by_open: $bb_open,

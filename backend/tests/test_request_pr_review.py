@@ -57,7 +57,16 @@ def env_file(tmp_path: Path) -> Path:
     return p
 
 
-def _gh(bin_dir: Path, reviews: list, run_state: str) -> None:
+PR_TITLE = "fix: the pr under review"
+
+
+def _gh(
+    bin_dir: Path,
+    reviews: list,
+    run_state: str,
+    extra_runs: list | None = None,
+    title: str = PR_TITLE,
+) -> None:
     """A `gh` answering the two queries the script makes.
 
     `reviews` is returned for `pr view --json reviews`; `run_state` drives
@@ -78,14 +87,24 @@ def _gh(bin_dir: Path, reviews: list, run_state: str) -> None:
         }[run_state]
     )
     # createdAt must sort after the script's `since`, which it computes at start.
+    # displayTitle is what scopes a run to THIS PR — a run carrying any other
+    # title belongs to a different PR (or to an issue comment, which spawns a
+    # gated-out `skipped` run) and must be ignored.
     for r in runs:
         r["createdAt"] = "2099-01-01T00:00:00Z"
+        r.setdefault("displayTitle", title)
+
+    # `extra_runs` are NEWER runs belonging to something else. Real gh returns
+    # newest-first, so they go in front — which is exactly how they used to be
+    # mistaken for this PR's run.
+    runs = (extra_runs or []) + runs
 
     # The shim must APPLY --jq, like real gh does. An earlier version echoed the
     # raw JSON and the script happily reported it as a verdict — the shim has to
     # be faithful about the part under test, which here is the jq filter.
     (bin_dir / "reviews.json").write_text(json.dumps({"reviews": reviews}))
     (bin_dir / "runs.json").write_text(json.dumps(runs))
+    (bin_dir / "title.json").write_text(json.dumps({"title": title}))
 
     _write(
         bin_dir / "gh",
@@ -99,6 +118,7 @@ for a in "$@"; do
 done
 
 case "$*" in
+  *'pr view'*'--json title'*) src='{bin_dir}/title.json' ;;
   *'pr view'*)  src='{bin_dir}/reviews.json' ;;
   *'run list'*)
       if [ "{int(runs_fail)}" = "1" ]; then
@@ -286,3 +306,96 @@ def test_a_decisive_verdict_wins_over_an_earlier_commented(
 
     assert proc.returncode == 0
     assert "VERDICT CHANGES_REQUESTED" in proc.stdout
+
+
+def _foreign_run(title: str, conclusion: str = "skipped") -> dict:
+    """A newer `PR Review` run belonging to something else.
+
+    `pr-review.yml` triggers on `issue_comment`, which fires for comments on
+    ISSUES as well as PRs. Those runs are gated out and complete as `skipped`
+    within about ten seconds, so any comment posted anywhere in the repo while a
+    review is running produces one of these.
+    """
+    return {
+        "status": "completed",
+        "conclusion": conclusion,
+        "createdAt": "2099-01-01T00:00:30Z",
+        "displayTitle": title,
+    }
+
+
+def test_a_newer_run_for_a_different_pr_is_not_this_review(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The bug that cost a real review round. A routine PO comment on issue
+    #441 spawned a gated-out `skipped` run, which was newer than #636's and so
+    was read as "this review failed" — while #636 went on to APPROVE two
+    minutes later. The caller abandoned a review that was still thinking.
+    """
+    _gh(
+        bin_dir,
+        [],
+        "running",
+        extra_runs=[_foreign_run("Question: Is it always counting with 15 minutes?")],
+    )
+    proc = _run(bin_dir, env_file, timeout=2)
+
+    # Times out waiting, which is correct: the review is still running.
+    assert proc.returncode == 2
+    assert "FAILED without submitting a verdict" not in proc.stderr
+
+
+def test_this_prs_own_failed_run_is_still_reported(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The scoping must not swallow a genuine failure — that is the other half
+    of the same rule, and the reason a fixed grace window was replaced by
+    asking the run in the first place."""
+    _gh(
+        bin_dir,
+        [],
+        "failed",
+        extra_runs=[_foreign_run("some unrelated issue")],
+    )
+    proc = _run(bin_dir, env_file, timeout=2)
+
+    assert proc.returncode == 2
+    assert "FAILED without submitting a verdict" in proc.stderr
+
+
+def test_a_transient_api_failure_does_not_kill_the_poll(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """`set -e` used to turn one 503 on the verdict read into a fatal exit 1,
+    AFTER the trigger comment had posted — so re-running spent a second paid
+    review round on a review already in flight. GitHub returned 503s for about
+    ninety minutes on 2026-08-17 and this fired twice.
+
+    The shim fails `pr view --json reviews` once, then serves normally.
+    """
+    _gh(bin_dir, [_review("APPROVED")], "running")
+
+    # Wrap the shim: first reviews read fails, subsequent ones succeed.
+    gh = bin_dir / "gh"
+    real = gh.read_text()
+    (bin_dir / "gh-real").write_text(real)
+    (bin_dir / "gh-real").chmod(0o755)
+    _write(
+        gh,
+        f"""#!/bin/sh
+case "$*" in
+  *'pr view'*'--json reviews'*)
+      if [ ! -f {bin_dir}/tripped ]; then
+          touch {bin_dir}/tripped
+          echo "HTTP 503: no server is currently available" >&2
+          exit 1
+      fi ;;
+esac
+exec {bin_dir}/gh-real "$@"
+""",
+    )
+
+    proc = _run(bin_dir, env_file, timeout=6)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "VERDICT APPROVED" in proc.stdout

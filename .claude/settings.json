@@ -16,6 +16,7 @@
       "allowWrite": [
         ".",
         "~/GitHub/bess-manager",
+        "~/.claude/jobs",
         "~/Library/Caches/ms-playwright",
         "~/.cache/ms-playwright",
         "~/.npm"

@@ -58,6 +58,27 @@ issues=$(gh issue list --repo "$repo" --state open --limit 200 \
 prs=$(gh pr list --repo "$repo" --state open --limit 100 \
   --json number,title,headRefName,mergeable,body,isDraft)
 
+# The EXACT half of the collision gate: what every open PR already touches.
+# One gh pr diff per open PR, bounded by the WIP limit in practice. The
+# alternative -- predicting a PRs touch-set from issue text alone -- is what
+# let several PRs race to rewrite the same files; this reads the real diff
+# instead of guessing.
+#
+# No `2>/dev/null || true` here: a PR whose diff cannot be read is NOT the
+# same as a PR that touches no files. Swallowing the error would silently
+# report that PR as touching nothing, which the collision gate would read as
+# safe to dispatch against -- exactly the failure this key exists to prevent.
+# A gh failure here is left to fail the whole digest, same as every other gh
+# call above.
+in_flight_files='{}'
+for n in $(printf '%s' "$prs" | jq -r '.[].number'); do
+  files=$(gh pr diff "$n" --repo "$repo" --name-only)
+  in_flight_files=$(printf '%s' "$in_flight_files" | jq \
+    --argjson n "$n" \
+    --argjson f "$(printf '%s' "$files" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+    'reduce $f[] as $p (.; .[$p] = ((.[$p] // []) + [$n] | unique))')
+done
+
 # Merged PRs are needed to tell a LIVE worktree from a DEAD one. Without this,
 # any worktree left on disk pins its issue to In Progress forever: #602, #593
 # and #542 all reported In Progress while their PRs (#610, #618, #591) had
@@ -152,6 +173,7 @@ jq -n \
   --argjson worktrees "$worktrees" \
   --argjson sessions "$sessions" \
   --argjson board "$board" \
+  --argjson in_flight "$in_flight_files" \
   --arg now "$(date -u +%s)" '
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
@@ -465,6 +487,7 @@ jq -n \
     # Emitted as a lookup rather than merged into a PR list, because the digest
     # does not own the open-PR list — `backlog-rhythm.sh` fetches that with the
     # review fields it needs, and joins this in by number.
+    in_flight_files: $in_flight,
     pr_board: [
       $board.items[]?
       | select(.content.type? == "PullRequest")

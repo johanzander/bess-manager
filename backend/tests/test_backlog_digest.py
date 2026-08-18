@@ -116,17 +116,29 @@ def _gh_shim(
     prs: list,
     project_items: list,
     merged_prs: list | None = None,
+    pr_files: dict[int, list[str]] | None = None,
 ) -> str:
-    """A `gh` that answers the four subcommands the digest calls.
+    """A `gh` that answers the subcommands the digest calls.
 
     `pr list` is called twice with different `--state` values, so this shim
     branches on the whole argument string rather than just `$1 $2`. Matching
     only the subcommand returned the OPEN list for both calls, which made every
     open PR look merged and reported every issue as having landed.
+
+    `pr diff <n> --name-only` answers from `pr_files`, keyed by PR number. The
+    match requires `--name-only` literally in the call -- a shim that answered
+    from the subcommand alone could not catch the digest asking for the full
+    diff (or forgetting the flag entirely) and paying for -- or mis-parsing --
+    the whole patch instead of a bare path list.
     """
+    files_by_pr = {str(k): v for k, v in (pr_files or {}).items()}
     return f"""
 merged=$(cat <<'EOF'
 {json.dumps(merged_prs or [])}
+EOF
+)
+pr_files_json=$(cat <<'EOF'
+{json.dumps(files_by_pr)}
 EOF
 )
 case "$*" in
@@ -134,6 +146,11 @@ case "$*" in
 {json.dumps(issues)}
 EOF
     ;;
+  *"pr diff "*"--name-only"*)
+    n=$(printf '%s' "$*" | awk '{{for(i=1;i<=NF;i++) if($i=="diff"){{print $(i+1); exit}}}}')
+    printf '%s' "$pr_files_json" | jq -r --arg n "$n" '(.[$n] // [])[]'
+    ;;
+  *"pr diff"*) echo "gh pr diff missing --name-only: $*" >&2; exit 1 ;;
   *"pr list"*"--state merged"*) printf '%s\\n' "$merged" ;;
   *"pr list"*) cat <<'EOF'
 {json.dumps(prs)}
@@ -258,6 +275,7 @@ case "$*" in
 {json.dumps([issue])}
 EOF
     ;;
+  *"pr diff "*"--name-only"*) : ;;
   *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
   *"pr list"*)
     case "$*" in
@@ -1153,3 +1171,38 @@ def test_resume_handoffs_are_counted(bin_dir: Path) -> None:
     )
 
     assert _run(bin_dir)["items"][0]["resume_count"] == 2
+
+
+def test_in_flight_files_map_paths_to_the_prs_touching_them(bin_dir: Path) -> None:
+    """The collision gate needs to know what is already being edited. Half of
+    that is exact -- the changed-file set of every open PR -- and only the
+    candidate's own touch-set has to be predicted."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(530, labels=[{"name": "bug"}])],
+            [
+                _pr(531, body="Refs #530", headRefName="fix/a-530"),
+                _pr(532, body="Refs #530", headRefName="fix/b-530"),
+            ],
+            [],
+            pr_files={
+                531: ["CLAUDE.md", "scripts/backlog-rhythm.sh"],
+                532: ["CLAUDE.md"],
+            },
+        ),
+    )
+
+    in_flight = _run(bin_dir)["in_flight_files"]
+    assert in_flight["CLAUDE.md"] == [531, 532]
+    assert in_flight["scripts/backlog-rhythm.sh"] == [531]
+
+
+def test_no_open_prs_gives_empty_in_flight_files(bin_dir: Path) -> None:
+    """Pre-existing shims report no open PRs; the map must still be an empty
+    object, not null, so a caller can index into it unconditionally."""
+    issue = _issue(601, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    assert _run(bin_dir)["in_flight_files"] == {}

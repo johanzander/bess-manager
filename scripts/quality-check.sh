@@ -361,6 +361,25 @@ MUST_BE_GUARDED = [
 # commands. A blanket `Bash(git -*)` did exactly that, which is why the
 # global-option rules name a verb.
 MUST_NOT_BE_GUARDED = [
+    # THE HEADLINE BEHAVIOUR OF THE PROTECTED-REF SHRINK, pinned. These used to
+    # sit in MUST_BE_GUARDED; deleting them from there proved nothing, because
+    # a list that no longer mentions a command cannot tell you whether it is
+    # guarded. So the exact commands the redesign turns on are asserted to run
+    # UNATTENDED -- by the same command-string method the rest of this gate
+    # uses, and for the same reason: a rule that looks right and matches
+    # nothing is the failure this file exists to catch.
+    #
+    # This is where the decision reverses. If `enforce_admins` or the blocking
+    # rule ever goes away -- the branch-protection check above fires when it
+    # does -- restore the `* main` / `*:main` / `*refs/heads/main*` patterns in
+    # .claude/settings.json AND move these back to MUST_BE_GUARDED. They are a
+    # pair; moving one without the other leaves the gate contradicting itself.
+    "git push origin main",
+    "git push -u origin main",
+    "git push origin HEAD:main",
+    "git push origin refs/heads/main",
+    "git push origin master",
+    "git -C x push origin main",
     "git -C sub status --short",
     "git --no-pager log --oneline -5",
     "git -C .claude/worktrees/x diff -- file.py",
@@ -476,21 +495,43 @@ echo "-------------------------------------------"
 # genuinely different outcomes -- "I could not check" is not "it is off" -- and
 # collapsing them either way would make the gate lie in one direction or the
 # other.
-protection_checked=0
+# TWO conditions, because `enforce_admins` ALONE PROTECTS NOTHING. It only
+# extends whatever rules already exist to admins and the owner token; with no
+# such rule it extends nothing, and `git push origin main` would succeed while
+# this check reported green. Measured on this repo today: `required_reviews`
+# and `restrictions` are both absent, and `required_status_checks` is the rule
+# actually doing the blocking -- so asserting the flag without the rule would
+# have been checking the wrong half.
+#
+# Any ONE blocking rule is enough, so the check accepts whichever is in force
+# rather than pinning today's choice: required status checks, required reviews,
+# a push restriction list, or a hard branch lock.
 for remote_repo in "johanzander/bess-manager" "johanzander/bess-manager-beta"; do
-    enforced=$(gh api "repos/${remote_repo}/branches/main/protection" \
-        --jq '.enforce_admins.enabled' 2>/dev/null) || enforced=""
-    if [ -z "$enforced" ]; then
+    prot=$(gh api "repos/${remote_repo}/branches/main/protection" \
+        --jq '{admins: (.enforce_admins.enabled // false),
+               blocking: ((.required_status_checks != null)
+                          or (.required_pull_request_reviews != null)
+                          or (.restrictions != null)
+                          or (.lock_branch.enabled // false))}
+              | "\(.admins) \(.blocking)"' 2>/dev/null) || prot=""
+    admins="${prot%% *}"
+    blocking="${prot##* }"
+    if [ -z "$prot" ]; then
         echo "⚠️  Could not read branch protection for ${remote_repo} (needs admin rights)"
         WARNINGS=$((WARNINGS + 1))
-    elif [ "$enforced" != "true" ]; then
+    elif [ "$blocking" != "true" ]; then
+        echo "❌ ${remote_repo}: main has NO rule that blocks a push."
+        echo "   enforce_admins only extends existing rules; on its own it protects nothing."
+        echo "   Enable required status checks (or required reviews / push restrictions),"
+        echo "   or restore the protected-ref patterns in .claude/settings.json."
+        ERRORS=$((ERRORS + 1))
+    elif [ "$admins" != "true" ]; then
         echo "❌ ${remote_repo}: enforce_admins is FALSE on main."
-        echo "   The push rules assume GitHub rejects pushes to main server-side."
+        echo "   The rules exist but do not apply to the owner token every agent uses."
         echo "   Re-enable it, or restore the protected-ref patterns in .claude/settings.json."
         ERRORS=$((ERRORS + 1))
     else
-        echo "✅ ${remote_repo}: enforce_admins on main"
-        protection_checked=$((protection_checked + 1))
+        echo "✅ ${remote_repo}: main is protected and enforced for admins"
     fi
 done
 

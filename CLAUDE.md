@@ -582,6 +582,19 @@ redundant:
   one from outside. `verify-sandbox.sh` skips its symlink check outside a
   linked worktree rather than reporting a PASS that proves nothing.
 
+- **`~/.claude/jobs` in the same `allowWrite`** — `claude agents --json` reads
+  the session list from there, and a sandboxed call silently TRUNCATES it
+  rather than failing: it returned **1 session where the truth was 12**, so
+  every other session read as dead. That is not cosmetic. `backlog-rhythm.sh`
+  keys `resume_implementation` off "no live session", and with a truncated
+  listing it told the maintainer to re-enter a worktree that a live session was
+  actively working — a second session on one branch, against commits the advice
+  itself calls the only copy. `implement-issue` Step 0 depends on the same
+  reading before it touches a resumed branch.
+
+  The failure mode is the dangerous one: not an error, an under-count. Nothing
+  about a short list looks wrong.
+
 `sandbox.excludedCommands` is **not** used and is not needed. It was tried in
 both project and user settings while the four knobs above were missing, appeared
 to do nothing, and is now moot.

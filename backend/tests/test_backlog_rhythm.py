@@ -49,6 +49,7 @@ def _item(number: int, **over: object) -> dict:
         "blocked_by": [],
         "blocked_by_open": [],
         "blocked": False,
+        "resume_count": 0,
     }
     item.update(over)
     return item
@@ -754,3 +755,42 @@ def test_a_pending_approved_draft_is_not_counted_as_deferred(
 
     assert _actions_for(result, 636) == set()
     assert [d["pr"] for d in result["deferred"]] == [636]
+
+
+def test_awaiting_maintainer_escalates_instead_of_suppressing(tmp_path: Path) -> None:
+    """Awaiting is signed. reporter/upstream/discussion mean they owe us, and
+    stay quiet; maintainer means YOU owe us, and must be loud. Today every
+    value suppresses, so an item blocked on the maintainer gets quieter."""
+    item = _item(700, awaiting="maintainer", awaiting_source="board")
+    result = _run(tmp_path, [item])
+    assert "escalated" in _actions_for(result, 700)
+    assert result["actions"][0]["issue"] == 700
+
+
+def test_three_changes_requested_rounds_escalate(tmp_path: Path) -> None:
+    """Three rounds of disagreement is a design argument, not a bug -- the
+    implement-issue cap already says so. Another round will not settle it."""
+    pr = _pr(
+        701,
+        isDraft=True,
+        reviews=[
+            {"state": "CHANGES_REQUESTED"},
+            {"state": "CHANGES_REQUESTED"},
+            {"state": "CHANGES_REQUESTED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], prs=[pr]), 701)
+    assert "escalated" in actions
+    assert "resume_implementation" not in actions
+
+
+def test_two_resume_handoffs_escalate(tmp_path: Path) -> None:
+    item = _item(702, resume_count=2, worktree="/wt", worktree_branch="fix/issue-702")
+    assert "escalated" in _actions_for(_run(tmp_path, [item]), 702)
+
+
+def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:
+    item = _item(703, resume_count=1, worktree="/wt", worktree_branch="fix/issue-703")
+    actions = _actions_for(_run(tmp_path, [item]), 703)
+    assert "escalated" not in actions
+    assert "resume_implementation" in actions

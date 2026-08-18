@@ -80,12 +80,32 @@ actions=$(printf '%s' "$digest" | jq \
   (.items) as $items
   | [ $items[]
 
+    # ESCALATION IS SIGNED AWAITING, POINTED THE OTHER WAY. Every other value
+    # means someone else owes us and correctly goes quiet; `maintainer` means
+    # the loop cannot advance without a decision, so it must be the loudest
+    # thing in the pass. An escalation that ranks by column is an escalation
+    # that waits, which defeats the valve.
+    | (if .awaiting == "maintainer"
+     then {issue: .number, action: "escalated",
+           why: "awaiting the maintainer",
+           detail: "read the open question on the issue and decide; or send it back to Analysis"}
+     else empty end),
+
+    # A session that died twice is telling you something. Nothing counted
+    # before, so `resume_implementation` was re-reported forever on work that
+    # had already failed twice.
+    (if .resume_count >= 2
+     then {issue: .number, action: "escalated",
+           why: "\(.resume_count) implementation sessions have been handed back",
+           detail: "the item is not implementable as specified -- decide, or send it back to Analysis"}
+     else empty end),
+
     # The reporter answered us. This is the transition that matters most and
     # the one the digest could not previously see: a wait on the reporter may
     # now be satisfied, so the Definition of Ready needs re-checking. It is
     # listed before the chases on purpose — chasing someone who has already
     # replied is the worst output this pass could produce.
-    | (if .awaiting == "reporter" and (.last_comment.is_reporter // false)
+    (if .awaiting == "reporter" and (.last_comment.is_reporter // false)
        then {issue: .number, action: "recheck_ready",
              why: "reporter replied \(.last_comment.days)d ago while awaiting them",
              detail: "re-check Definition of Ready; clear Awaiting if satisfied"}
@@ -199,7 +219,7 @@ actions=$(printf '%s' "$digest" | jq \
     # actively being worked, with the advice to re-enter it -- a second session
     # on the same branch, against work the detail line itself calls the only
     # copy.
-    (if .worktree != null and (.stale_worktree | not) and (.worktree_locked | not) and .session == null and (.prs | length) == 0
+    (if .worktree != null and (.stale_worktree | not) and (.worktree_locked | not) and .session == null and (.prs | length) == 0 and .resume_count < 2
      then {issue: .number, action: "resume_implementation",
            why: "worktree \(.worktree_branch) on disk, unlocked, no live session",
            detail: "/implement-issue \(.number) — Step 0 resumes it; never restart, the branch commits are the only copy"}
@@ -255,6 +275,12 @@ actions=$(printf '%s' "$digest" | jq \
       # reported them as due and the same conversation happened every 30
       # minutes.
       | (($card.awaiting // null) != null or ($card.priority // null) == "P4") as $deferred
+      # Three CHANGES_REQUESTED rounds without an intervening approval is a
+      # design disagreement, not something a fourth round will settle -- the
+      # same cap `implement-issue` already enforces. Computed here, ahead of
+      # $approved_draft, so it can chain as an elif and never also report
+      # resume_implementation for the same PR.
+      | ([ .reviews[]? | select(.state == "CHANGES_REQUESTED") ] | length) as $rounds
       # The APPROVED-but-still-draft state, computed here because it must
       # OUTRANK the deferral below. #629 sat approved, green and draft while
       # every pass reported it as ordinary unfinished work, because the session
@@ -279,7 +305,11 @@ actions=$(printf '%s' "$digest" | jq \
                     and (.conclusion // "") != "NEUTRAL") ] | length == 0) as $checks_green
       | (.isDraft and $is_approved and $checks_green
          and .mergeable != "CONFLICTING") as $approved_draft
-      | (if $approved_draft
+      | (if $rounds >= 3
+         then {pr: .number, action: "escalated",
+               why: "\($rounds) CHANGES_REQUESTED rounds without an approval",
+               detail: "the reviewer and the implementer disagree about the design; another round will not settle it"}
+         elif $approved_draft
          then {pr: .number, action: "mark_ready",
                why: "APPROVED and green, still a draft — Step 11 never ran gh pr ready",
                detail: "gh pr ready \(.number) — then it is the maintainers to merge"}
@@ -367,7 +397,7 @@ actions=$(printf '%s' "$digest" | jq \
   | {
       due: length,
       by_action: (group_by(.action) | map({key: .[0].action, value: length}) | from_entries),
-      actions: sort_by(.action, (.issue // .pr)),
+      actions: sort_by((if .action == "escalated" then 0 else 1 end), .action, (.issue // .pr)),
       # The PRs suppressed by a board decision, reported as a COUNT AND A LIST
       # rather than dropped. Silently vanishing would trade one failure for
       # another: the point is to stop re-asking about a settled decision, not

@@ -704,11 +704,16 @@ class InverterController(ABC):
         on the way back up -- exactly the display/write disagreement this
         method exists to prevent.
 
-        Period 0 has no predecessor in the array. `combined_soe[0]` is that
-        period's own *entering* SoE in the one case where period 0 is a
-        prediction rather than history (period 0 being the optimization
-        period, written as `current_soe`), so index 0 is the correct read
-        there rather than a fallback.
+        Period 0 has no predecessor in the array, so it reads index 0. That is
+        exact only when period 0 *is* the optimization period, where
+        `combined_soe[0]` is written as `current_soe` — an entering value. On a
+        schedule re-optimized mid-day, index 0 is a historical period holding
+        `battery_soe_end` like every other index, so the read is one period
+        early there. Display-only and bounded to period 0: `get_period_settings`
+        never writes hardware, and the live write path reads SoC directly. Left
+        as-is rather than papered over, because the array has no entering value
+        for period 0 to read — recording one is a change to
+        `_create_updated_schedule`, not to this method.
 
         False when there is no plan to read: with no trajectory there is no
         prediction to display, and the hold is the unchanged-behaviour answer.

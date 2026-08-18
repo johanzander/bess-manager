@@ -308,8 +308,11 @@ inverter under continuous remote control, preventing the BMS from sleeping.
 VPP-mode IDLE with the battery at the floor releases instead
 (`remote_control=Disabled`, `vpp_power=0`). Flow-neutral — released
 `load_first` absorbs passive solar exactly as the hold does, and there is no
-headroom to discharge — so the VPP regression baseline is unchanged. Above
-the floor, nothing changes.
+headroom to discharge. The VPP regression baseline's **commands** therefore
+change at every such period (499 periods across 50 entries) while **realized
+cost and SoE are unchanged to 0.000000000000** — the commands moving with the
+energy fixed is the evidence, not a regression. Above the floor, nothing
+changes.
 
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
 

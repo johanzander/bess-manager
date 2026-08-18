@@ -395,8 +395,13 @@ is flow-neutral: `load_first` still absorbs passive solar surplus exactly as
 the `battery_first` hold does, whereas `grid_first` holds against charging
 and would bypass that surplus to the grid — a real change, since IDLE's DP
 cost model does credit passive absorption. Verified across the fixture
-corpus: the v10.0.2 VPP regression baseline is unchanged by this fix, on all
-37 fixtures, 24 of which contain IDLE-at-floor periods.
+corpus: the v10.0.2 VPP regression baseline's **commands** move at every
+IDLE-at-floor period — 499 periods across 50 entries, `[1, true]` →
+`[0, false]` — while **realized cost and the SoE trajectory are bit-identical**
+(0.000000000000 on both halves of the pin). Commands changing with no energy
+moving is precisely what flow-neutral means here; an unchanged baseline would
+have meant the branch was never exercised, which is what an earlier revision
+of this fix wrongly reported.
 
 **Caveat — the floor that actually binds is the inverter's own.** How far
 the battery can fall under released self-use is governed by the inverter's

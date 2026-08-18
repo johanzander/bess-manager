@@ -57,12 +57,21 @@ def env_file(tmp_path: Path) -> Path:
     return p
 
 
-def _gh(bin_dir: Path, reviews: list, run_state: str) -> None:
+def _gh(
+    bin_dir: Path, reviews: list, run_state: str, commits: list | None = None
+) -> None:
     """A `gh` answering the two queries the script makes.
 
     `reviews` is returned for `pr view --json reviews`; `run_state` drives
     `run list`, which is how the script decides whether the reviewer is still
     working.
+
+    `commits` feeds the precondition gate, which compares the newest verdict
+    against the newest push to decide whether the last verdict was consumed.
+    It defaults to a commit NEWER than `_review`'s default `submittedAt`, i.e.
+    "the last verdict was acted on" — the state every pre-gate test was
+    implicitly written against. A test that wants to exercise the gate passes
+    a commit older than its reviews.
     """
     # `unknown` is not a run shape but a FAILURE to read one: `gh run list`
     # exits non-zero, which is what a network blip or rate limit looks like.
@@ -84,7 +93,11 @@ def _gh(bin_dir: Path, reviews: list, run_state: str) -> None:
     # The shim must APPLY --jq, like real gh does. An earlier version echoed the
     # raw JSON and the script happily reported it as a verdict — the shim has to
     # be faithful about the part under test, which here is the jq filter.
-    (bin_dir / "reviews.json").write_text(json.dumps({"reviews": reviews}))
+    if commits is None:
+        commits = [{"committedDate": "2099-06-01T00:00:00Z"}]
+    (bin_dir / "reviews.json").write_text(
+        json.dumps({"reviews": reviews, "commits": commits})
+    )
     (bin_dir / "runs.json").write_text(json.dumps(runs))
 
     _write(
@@ -124,7 +137,10 @@ def _review(state: str, at: str = "2099-01-01T00:00:01Z", body: str = "x") -> di
 
 
 def _run(
-    bin_dir: Path, env_file: Path, timeout: int = 2
+    bin_dir: Path,
+    env_file: Path,
+    timeout: int = 2,
+    flags: list[str] | None = None,
 ) -> subprocess.CompletedProcess:
     env = dict(
         os.environ,
@@ -133,7 +149,7 @@ def _run(
         BESS_ENV_FILE=str(env_file),
     )
     return subprocess.run(
-        ["bash", str(SCRIPT), "622", str(timeout)],
+        ["bash", str(SCRIPT), *(flags or []), "622", str(timeout)],
         capture_output=True,
         text=True,
         env=env,
@@ -286,3 +302,142 @@ def test_a_decisive_verdict_wins_over_an_earlier_commented(
 
     assert proc.returncode == 0
     assert "VERDICT CHANGES_REQUESTED" in proc.stdout
+
+
+# The gate prints this immediately before posting the trigger comment, so its
+# absence is proof the trigger path was never reached — a refusal that still
+# posted `@claude-bot review` would have spent the round it was refusing.
+TRIGGERED = "Requesting review"
+
+# --- The precondition gate: is another round legal at all? ---
+#
+# Every test below is PR #619's timeline. Four `@claude-bot review` comments,
+# two paid verdicts, one diff that never changed between them. Step 11's prose
+# already forbade it; prose could not enforce it because the round count and
+# "did I act on the last verdict" lived in a session that died.
+
+OLD_PUSH = [{"committedDate": "2098-01-01T00:00:00Z"}]
+"""A push OLDER than `_review`'s default verdict, i.e. verdict not yet acted on."""
+
+
+def test_an_unconsumed_changes_requested_refuses_the_next_round(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """#619 at 10:50. A CHANGES_REQUESTED landed at 09:40, HEAD had not moved
+    since 07:35, and the loop asked for another review anyway — collecting a
+    second, different blocking finding on byte-identical code."""
+    _gh(bin_dir, [_review("CHANGES_REQUESTED")], "finished", commits=OLD_PUSH)
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 1
+    assert TRIGGERED not in proc.stdout
+    assert "unconsumed CHANGES_REQUESTED" in proc.stderr
+    assert "address them and push" in proc.stderr
+
+
+def test_an_approved_verdict_on_the_current_diff_is_not_re_reviewed(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The other half of the same mistake: re-reviewing an approval cannot
+    improve on it, and the next move is `gh pr ready` — which is exactly what
+    #615 failed to reach, sitting approved-but-draft overnight."""
+    _gh(bin_dir, [_review("APPROVED")], "finished", commits=OLD_PUSH)
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 1
+    assert TRIGGERED not in proc.stdout
+    assert "already APPROVED" in proc.stderr
+    assert "gh pr ready" in proc.stderr
+
+
+def test_a_push_after_the_verdict_makes_the_next_round_legal(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The gate must not seize up on the normal path. A verdict that has been
+    acted on — findings fixed, commit pushed — is what earns the next round."""
+    _gh(
+        bin_dir,
+        [_review("CHANGES_REQUESTED", at="2099-01-01T00:00:01Z")],
+        "finished",
+        commits=[{"committedDate": "2099-03-01T00:00:00Z"}],
+    )
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 0
+    assert TRIGGERED in proc.stdout
+
+
+def test_allow_unconsumed_is_the_reviewer_was_wrong_escape_hatch(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """Step 11 sanctions one case with no push: the finding was wrong and you
+    replied on the PR saying why. A flag makes that a decision someone takes,
+    rather than the default a stalled loop falls into."""
+    _gh(bin_dir, [_review("CHANGES_REQUESTED")], "finished", commits=OLD_PUSH)
+    proc = _run(bin_dir, env_file, flags=["--allow-unconsumed"])
+
+    assert proc.returncode == 0
+    assert TRIGGERED in proc.stdout
+
+
+def test_the_round_cap_is_enforced_here_not_remembered(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """Step 11 caps the loop at 3 rounds. A resumed session cannot remember how
+    many have happened, but the PR knows: count the decisive reviews. All three
+    here are consumed (a push follows them), so the cap is what refuses."""
+    _gh(
+        bin_dir,
+        [
+            _review("CHANGES_REQUESTED", at="2099-01-01T00:00:01Z"),
+            _review("CHANGES_REQUESTED", at="2099-01-01T00:00:02Z"),
+            _review("CHANGES_REQUESTED", at="2099-01-01T00:00:03Z"),
+        ],
+        "finished",
+        commits=[{"committedDate": "2099-03-01T00:00:00Z"}],
+    )
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 1
+    assert TRIGGERED not in proc.stdout
+    assert "3 decisive review rounds" in proc.stderr
+
+
+def test_commented_reviews_do_not_count_toward_the_cap_or_block_a_round(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The bot's placeholder and permission-check reviews are `COMMENTED`. #619
+    collected one ("test-permission-check-only, will be replaced") 60 seconds
+    before the real verdict. Counting those would refuse legal rounds and
+    exhaust the cap on noise — the gate looks only at decisive states."""
+    _gh(
+        bin_dir,
+        [
+            _review("COMMENTED", body="test-permission-check-only"),
+            _review("COMMENTED", body="Inline notes below; summary to follow."),
+            _review("COMMENTED", body="more notes"),
+        ],
+        "finished",
+        commits=OLD_PUSH,
+    )
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 0
+    assert TRIGGERED in proc.stdout
+
+
+def test_an_unreadable_gate_refuses_rather_than_spending_a_round(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """Symmetry with the run-state rule above: "I could not tell" must not
+    license the expensive action. A needless round costs a paid review of an
+    unchanged diff; re-running this command costs nothing."""
+    _write(
+        bin_dir / "gh",
+        "#!/bin/sh\necho 'simulated gh failure' >&2\nexit 1\n",
+    )
+    proc = _run(bin_dir, env_file)
+
+    assert proc.returncode == 1
+    assert TRIGGERED not in proc.stdout
+    assert "never determined" in proc.stderr

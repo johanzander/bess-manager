@@ -121,6 +121,30 @@ Re-enter at the **earliest incomplete** step and run forward normally. A PR
 carrying `CHANGES_REQUESTED` re-enters at Step 11's `CHANGES_REQUESTED` branch;
 one carrying `APPROVED` needs only `gh pr ready`.
 
+**A verdict alone does not say how far Step 11 got — compare it against the
+last push.** The loop is request → verdict → fix → push → request, so the same
+`CHANGES_REQUESTED` means two different things depending on which side of it
+HEAD sits:
+
+| Newest verdict vs newest commit | The dead session had |
+|---|---|
+| verdict **newer** than last commit | received the findings and not yet acted on them — resume by fixing them |
+| last commit **newer** than verdict | already fixed and pushed — resume by requesting the next round |
+
+```bash
+gh pr view <n> --json reviews,commits --jq \
+  '{verdict: ([.reviews[] | select(.state=="APPROVED" or .state=="CHANGES_REQUESTED")]
+              | sort_by(.submittedAt) | last | .submittedAt),
+    pushed: ([.commits[].committedDate] | sort | last)}'
+```
+
+Getting this backwards is what happened on #619: four `@claude-bot review`
+comments, two paid verdicts, and one diff that never changed between them,
+because "have I acted on this yet" was held in a session that had died.
+`request-pr-review.sh` now refuses the illegal round rather than trusting the
+caller to have checked, but read it here too — the answer also tells you *what
+to do*, which the script cannot.
+
 **Rehydrate the diagnosis before touching code.** Step 2's analysis died with
 the session, and Step 11 depends on holding it. It is recoverable only because
 this skill already forces it to be written down:
@@ -608,6 +632,30 @@ The script posts `@claude-bot review` as `bess-agent` and blocks until a
 verdict lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED>
 <submittedAt> <author>` (exit 2 on a 15-minute timeout, after dumping recent
 `PR Review` runs).
+
+**Exit 1 means the round was illegal and no review was requested — read the
+message, do not retry.** The script checks, before posting anything, whether
+asking can possibly help:
+
+| Refusal | What it means | The actual next move |
+|---|---|---|
+| unconsumed `CHANGES_REQUESTED` | the newest verdict is newer than the last push, so it describes the diff as it stands | address the findings and push; then the next round is legal |
+| already `APPROVED` | approved on the current diff, nothing pushed since | re-check mergeability, then `gh pr ready` |
+| 3 decisive rounds | the cap below, enforced rather than remembered | hand the outstanding findings to the user verbatim |
+| gate unreadable | `gh` failed, so legality was never established | re-run; it costs nothing, a needless round costs a paid review |
+
+This exists because **the cap and "have I acted on the last verdict" are the
+two pieces of loop state a dead session takes with it**, and asking again is
+the one move a confused loop can always make. On #619 that produced four
+requests, zero consumed verdicts, and two paid reviews of byte-identical code.
+Both facts are already on the PR — decisive review count, and whether a commit
+follows the newest verdict — so the script reads them instead of trusting the
+caller to remember.
+
+`--allow-unconsumed` overrides the first row, for the one case this step
+sanctions: the finding was wrong, and you have replied on the PR saying why
+rather than pushing. It is a flag so that "the reviewer is mistaken" is a
+decision you take deliberately, not the path a stalled loop slides into.
 
 **`COMMENTED` is ambiguous, and the script resolves it for you — don't
 second-guess it.** `pr-review.yml` allows three final verdicts (`APPROVE`,

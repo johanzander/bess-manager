@@ -58,13 +58,58 @@
 # review at all — that removes the ambiguity at its source. The run-state check
 # is what keeps this correct for older PRs and if the bot regresses.
 #
+# THE UNCONSUMED-VERDICT PROBLEM. Everything above concerns waiting for a
+# verdict. This block concerns whether asking for one is legal at all.
+#
+# Step 11's contract is a cycle: request -> verdict -> fix -> push -> request.
+# The round count and "have I acted on the last verdict yet" lived only in the
+# agent's head, so a session that died, timed out, or simply lost the thread
+# re-entered the loop by doing the one thing it could always do -- ask again.
+#
+# Observed on PR #619, verbatim:
+#   06:55  @claude-bot review          (no run -- actor gate, see `none` below)
+#   07:12  @claude-bot review          (no run)
+#   09:33  @claude-bot review
+#   09:40  CHANGES_REQUESTED           two blocking findings
+#   10:50  @claude-bot review          <-- HEAD unchanged since 07:35
+#   10:55  CHANGES_REQUESTED           a different blocking finding
+# Four requests, zero verdicts consumed, one byte-identical diff, and two paid
+# review rounds spent re-reviewing code nobody had touched. Step 11's prose
+# already forbids this ("Fix the blockers ... Then start the next round") and
+# already caps rounds at 3. Prose was not the enforcement mechanism, because the
+# state it reasons about did not survive the session.
+#
+# It does not need to. Both facts are already on the PR and are read here
+# instead of remembered:
+#   rounds so far  = decisive reviews (APPROVED/CHANGES_REQUESTED) on the PR
+#   consumed?      = is the newest commit newer than the newest verdict?
+# A verdict newer than the last push is a verdict about the current diff, so the
+# only legal next move is to change the diff. Asking again cannot help.
+#
+# `--allow-unconsumed` is the escape hatch for the one case Step 11 does
+# sanction: the reviewer was wrong, you replied on the PR saying why, and no
+# push was warranted. It is a flag rather than the default so that "the reviewer
+# is mistaken" has to be a decision someone makes, not the path of least
+# resistance a stalled loop falls into.
+#
+# committedDate is the authored date, not the push date. Those diverge under
+# rebase and cherry-pick; this repo merges the target branch instead of rebasing
+# (CLAUDE.md, Release Workflow), so on any branch this script is pointed at they
+# agree to within seconds of the push.
+#
 # Exit codes:
 #   0  a verdict landed; verdict on stdout
 #   2  timed out waiting (recent PR Review runs dumped for diagnosis)
-#   1  usage/precondition error
+#   1  usage/precondition error, INCLUDING an illegal round (see above)
 set -euo pipefail
 
-pr="${1:?usage: request-pr-review.sh <pr-number> [timeout-seconds]}"
+allow_unconsumed=0
+if [ "${1:-}" = "--allow-unconsumed" ]; then
+    allow_unconsumed=1
+    shift
+fi
+
+pr="${1:?usage: request-pr-review.sh [--allow-unconsumed] <pr-number> [timeout-seconds]}"
 timeout="${2:-900}"
 # REVIEW_POLL_INTERVAL is a test seam (see BESS_ENV_FILE in gh-agent.sh for the
 # same shape): the decision logic is what needs exercising, not the waiting, and
@@ -99,6 +144,65 @@ review_run_state() {
 
 repo_root=$(git rev-parse --show-toplevel)
 cd "$repo_root"
+
+# --- Is another round legal at all? (see THE UNCONSUMED-VERDICT PROBLEM) ---
+#
+# One `gh pr view`, deliberately not `gh api`: that is on CLAUDE.md's ask list,
+# and this script is run with run_in_background, where a permission prompt is an
+# indefinite stall rather than a question anyone sees.
+gate=$(gh pr view "$pr" --json reviews,commits --jq '
+    ([.reviews[]
+      | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")]
+     | sort_by(.submittedAt)) as $decisive
+    | ($decisive | last) as $latest
+    | ([.commits[].committedDate] | sort | last) as $pushed
+    | "\($decisive | length) \($latest.state // "none")" +
+      " \($latest.submittedAt // "-") \($pushed // "-")"
+  ' 2>/dev/null || echo "")
+
+if [ -z "$gate" ] && [ "$allow_unconsumed" -eq 0 ]; then
+    echo "Could not read PR #${pr}'s reviews and commits, so whether another" >&2
+    echo "round is legal was never determined. Refusing rather than guessing." >&2
+    echo "A needless round costs a paid review of an unchanged diff; re-running" >&2
+    echo "this command costs nothing. --allow-unconsumed overrides." >&2
+    exit 1
+fi
+
+if [ -n "$gate" ] && [ "$allow_unconsumed" -eq 0 ]; then
+    read -r rounds latest_state latest_at last_push <<<"$gate"
+
+    # A verdict newer than the last push is a verdict about the diff as it
+    # stands. Asking again re-reviews the same bytes -- #619 did this twice.
+    if [ "$latest_state" != "none" ] && [ "$last_push" != "-" ] &&
+        [[ "$latest_at" > "$last_push" ]]; then
+        if [ "$latest_state" = "APPROVED" ]; then
+            echo "PR #${pr} is already APPROVED (${latest_at}) on the current" >&2
+            echo "diff -- nothing has been pushed since. Another round cannot" >&2
+            echo "improve on an approval. Step 11's next move is 'gh pr ready'," >&2
+            echo "after re-checking mergeability." >&2
+        else
+            echo "PR #${pr} has an unconsumed CHANGES_REQUESTED (${latest_at})" >&2
+            echo "and HEAD has not moved since (last commit ${last_push})." >&2
+            echo "The findings are still outstanding, so the only move that can" >&2
+            echo "change the answer is to address them and push. Requesting" >&2
+            echo "another review here is what burned two paid rounds on #619." >&2
+            echo "" >&2
+            echo "If the reviewer is wrong, reply on the PR saying why and pass" >&2
+            echo "--allow-unconsumed to request the next round deliberately." >&2
+        fi
+        exit 1
+    fi
+
+    # Step 11's cap, enforced here because a resumed session cannot remember it.
+    if [ "$rounds" -ge 3 ]; then
+        echo "PR #${pr} already has ${rounds} decisive review rounds. Step 11" >&2
+        echo "caps this at 3: three rounds of disagreement means the reviewer" >&2
+        echo "and the author disagree about the design, not about a bug, and a" >&2
+        echo "fourth will not settle it. Hand the outstanding findings to the" >&2
+        echo "user verbatim instead." >&2
+        exit 1
+    fi
+fi
 
 # Reviews strictly newer than this are the ones this run triggered.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)

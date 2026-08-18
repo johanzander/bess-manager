@@ -23,7 +23,7 @@ fixed so the comparison isolates planner changes.
 import json
 from pathlib import Path
 
-from core.bess.simulation.vpp_simulator import derive_vpp_commands, simulate_vpp
+from core.bess.simulation.vpp_simulator import simulate_vpp
 from core.bess.tests.helpers import _scenario_inputs, run_scenario
 
 DATA_DIR = Path(__file__).parent / "data"
@@ -58,9 +58,9 @@ def simulate_plan(name: str, plan: dict) -> dict:
     settings = inputs["battery_settings"]
     dt = inputs["period_duration_hours"]
 
-    commands = derive_vpp_commands(plan["intents"], plan["actions_kw"], settings)
     sim = simulate_vpp(
-        commands,
+        plan["intents"],
+        plan["actions_kw"],
         inputs["solar_production"],
         inputs["home_consumption"],
         inputs["buy_price"],
@@ -70,7 +70,7 @@ def simulate_plan(name: str, plan: dict) -> dict:
         dt,
     )
     return {
-        "commands": [[c.power_pct, c.remote_control_enabled] for c in commands],
+        "commands": [[c.power_pct, c.remote_control_enabled] for c in sim.commands],
         "realized_cost": sim.realized_cost,
         "soe_trajectory": [inputs["initial_soe"]]
         + [p.energy.battery_soe_end for p in sim.period_data],

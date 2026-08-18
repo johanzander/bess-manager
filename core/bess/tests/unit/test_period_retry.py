@@ -11,6 +11,11 @@ def _make_bsm_with_mocks():
     bsm = BatterySystemManager.__new__(BatterySystemManager)
     bsm._inverter_controller = MagicMock()
     bsm._controller = MagicMock()
+    # A real SoC, not a bare MagicMock: the write path reads it to decide
+    # whether the battery is on its reserve floor (#592). Well above the
+    # default min_soc, so these retry tests keep exercising the ordinary
+    # (not-at-floor) case they were written for.
+    bsm._controller.get_battery_soc.return_value = 50.0
     bsm._runtime_failure_tracker = MagicMock()
     bsm._scheduler = MagicMock()
     bsm._last_applied_discharge_rate = 0

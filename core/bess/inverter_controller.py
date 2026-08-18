@@ -578,6 +578,7 @@ class InverterController(ABC):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        at_reserve_floor: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -599,6 +600,12 @@ class InverterController(ABC):
                 BATTERY_EXPORT to the same values, so platforms that need to
                 treat them differently (VPP-style -- see #413) require the
                 intent itself. Register-based platforms ignore this.
+            at_reserve_floor: Whether the battery is at (or below) its
+                configured minimum SoE right now. Register-based platforms
+                ignore this -- their min_soc register already stops discharge
+                at the floor. Forced-power platforms use it to stop holding a
+                battery that has nothing left to hold, releasing the inverter
+                so its BMS can sleep -- see #592.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -668,9 +675,56 @@ class InverterController(ABC):
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             **self._mode_display_fields(
-                intent, grid_charge, discharge_rate, block_passive_charging
+                intent,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                self._planned_at_reserve_floor(period),
             ),
         }
+
+    def _planned_at_reserve_floor(self, period: int) -> bool:
+        """Whether the *plan* has the battery on its reserve floor entering
+        this period (#592).
+
+        The display counterpart to `BatterySystemManager._at_reserve_floor()`,
+        which reads live SoC. A displayed period is a prediction, so the plan's
+        own SoE trajectory is the correct input -- but it must answer the same
+        question, or the UI shows a hold for periods production releases and
+        `_mode_display_fields` breaks its own no-fabrication contract.
+
+        **Index p-1, not p.** `state_of_energy` is `combined_soe`, whose only
+        writer stores `period_data.energy.battery_soe_end` (see
+        `BatterySystemManager._create_updated_schedule`) -- `battery_soe_end`
+        and `battery_soe_start` are distinct fields on `EnergyData`. So
+        `state_of_energy[p]` is the SoE *leaving* period p, and the SoE
+        *entering* it is index p-1. Reading index p directly would answer for
+        the wrong period: at the boundary where the plan first reaches the
+        floor it would report "at floor" one period early, and one period late
+        on the way back up -- exactly the display/write disagreement this
+        method exists to prevent.
+
+        Period 0 has no predecessor in the array, so it reads index 0. That is
+        exact only when period 0 *is* the optimization period, where
+        `combined_soe[0]` is written as `current_soe` — an entering value. On a
+        schedule re-optimized mid-day, index 0 is a historical period holding
+        `battery_soe_end` like every other index, so the read is one period
+        early there. Display-only and bounded to period 0: `get_period_settings`
+        never writes hardware, and the live write path reads SoC directly. Left
+        as-is rather than papered over, because the array has no entering value
+        for period 0 to read — recording one is a change to
+        `_create_updated_schedule`, not to this method.
+
+        False when there is no plan to read: with no trajectory there is no
+        prediction to display, and the hold is the unchanged-behaviour answer.
+        """
+        if self.current_schedule is None:
+            return False
+        soe = self.current_schedule.state_of_energy
+        if period >= len(soe):
+            return False
+        entering_soe = soe[period - 1] if period > 0 else soe[0]
+        return entering_soe <= self.battery_settings.min_soe_kwh
 
     def _mode_display_fields(
         self,
@@ -678,6 +732,7 @@ class InverterController(ABC):
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool,
+        at_reserve_floor: bool = False,
     ) -> dict:
         """Single source of truth for what mode-related fields a period
         gets, branching on CONTROL_MODEL. Never fabricates a label the
@@ -704,7 +759,11 @@ class InverterController(ABC):
             # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
             # subclass-private method name.
             power_pct, remote_control = self._vpp_display_state(
-                grid_charge, discharge_rate, block_passive_charging, intent
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                intent,
+                at_reserve_floor,
             )
             return {
                 "vpp_power_pct": power_pct,

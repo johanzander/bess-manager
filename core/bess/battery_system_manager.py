@@ -2715,6 +2715,8 @@ class BatterySystemManager:
                         error=e,
                     )
 
+        at_reserve_floor = self._at_reserve_floor()
+
         # Store the schedule's desired discharge rate before inhibit check so that
         # apply_discharge_inhibit() can restore it when the inhibit sensor clears.
         self._desired_discharge_rate = discharge_rate
@@ -2764,6 +2766,7 @@ class BatterySystemManager:
             discharge_rate,
             block_passive_charging,
             strategic_intent,
+            at_reserve_floor,
         )
 
         if not success:
@@ -2789,6 +2792,51 @@ class BatterySystemManager:
 
         # Apply charging power rate (BSM-level concern: uses power monitor)
         self.adjust_charging_power()
+
+    def _at_reserve_floor(self) -> bool:
+        """Whether the battery is sitting on its reserve floor right now (#592).
+
+        Read live rather than taken from the plan: an IDLE hold exists to
+        protect stored energy from self-consumption, so what decides whether
+        the hold is worth anything is whether energy is actually there now. A
+        plan that expected a reserve does not mean one survived.
+
+        Called fresh at each write, including retries minutes later, for the
+        same reason -- a captured flag would command the inverter on a SoC
+        that has since moved.
+
+        The SoE conversion deliberately mirrors `min_soe_kwh`'s own
+        (`total_capacity * pct / 100`, settings.py) rather than the equivalent
+        `pct / 100 * total_capacity`. The two can differ in the last bit, and
+        the case that decides this branch is exact equality -- a battery
+        parked on its floor overnight, which is precisely the reported
+        scenario.
+
+        **An unreadable SoC holds, and says so.** `get_battery_soc()` is
+        `float | None`, so a transient unavailable/unknown sensor must be
+        decided here rather than propagating: this runs for every platform on
+        every period write, and two of its callers (the retry closure's
+        apscheduler job and the every-minute discharge-inhibit job) have no
+        exception handling at all, so raising would take down far more than
+        this flag. Holding is chosen over releasing because it is the safe
+        direction and is exactly the pre-#592 behaviour -- releasing is what
+        could let the inverter's own self-use draw the battery down, so it
+        must never happen on a reading we could not verify. This is an
+        explicit, logged branch, not a silent fallback: rules.md forbids
+        degrading quietly, not choosing a safe outcome loudly.
+
+        Validation is `_get_current_battery_soc()`'s, reused rather than
+        restated, so the definition of a valid reading stays in one place.
+        """
+        soc = self._get_current_battery_soc()
+        if soc is None:
+            logger.warning(
+                "Reserve-floor check: SoC unreadable — holding the battery "
+                "(not releasing VPP control) until a valid reading returns"
+            )
+            return False
+        current_soe = self.battery_settings.total_capacity * soc / 100.0
+        return current_soe <= self.battery_settings.min_soe_kwh
 
     _PERIOD_RETRY_DELAYS_MIN: ClassVar[list[int]] = [
         3,
@@ -2838,6 +2886,7 @@ class BatterySystemManager:
                 discharge_rate,
                 block_passive_charging,
                 strategic_intent,
+                self._at_reserve_floor(),
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -3456,6 +3505,10 @@ class BatterySystemManager:
             target_rate,
             self._desired_block_passive_charging,
             self._desired_strategic_intent,
+            # Fresh, not the value from the scheduled write: this runs
+            # mid-period, and omitting it would default to False and
+            # re-assert the battery_first hold #592 released.
+            self._at_reserve_floor(),
         )
         self._last_applied_discharge_rate = target_rate
 

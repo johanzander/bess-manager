@@ -10,7 +10,7 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 from .dp_schedule import DPSchedule
-from .execution_model import INTENT_TO_MODE, discharge_command_index
+from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
 
 logger = logging.getLogger(__name__)
@@ -481,19 +481,11 @@ class InverterController(ABC):
         block_passive_charging = self.INTENT_TO_CONTROL[intent]["charge_rate"] == 0
         return grid_charge, discharge_rate, block_passive_charging
 
-    @staticmethod
-    def _scale_to_percent(power_kw: float, max_power_kw: float) -> int:
-        """Scale a *charge* power to a 0-100 percent rate, clamped to range.
-
-        Charge only, since 4b: the discharge path goes through
-        `execution_model.discharge_command_index`, which knows whether the
-        number it produces is a ceiling or a target. A charge rate is always
-        a target, so nearest-rounding is right here and this stays a plain
-        scale -- but it is the same conversion, and Phase 4c collapses it
-        into the shared function along with the six `rate_throughput` sites
-        that assume nominal charge power.
-        """
-        return min(100, max(0, round(power_kw / max_power_kw * 100)))
+    # `_scale_to_percent` lived here and did this conversion by nearest
+    # rounding for both rate paths. Both now go through
+    # `execution_model.command_index`, which rounds by what the written
+    # number means -- discharge in 4b, charge in 4c -- so it has no callers
+    # left and is gone rather than kept as a second way to do the same thing.
 
     def _compute_charge_rate(
         self, intent: str, control: dict[str, bool | int], battery_action_kw: float
@@ -509,7 +501,23 @@ class InverterController(ABC):
             Charge rate percent (0-100)
         """
         if intent == "GRID_CHARGING" and battery_action_kw > 0.01:
-            return self._scale_to_percent(battery_action_kw, self.max_charge_power_kw)
+            # Rounded UP, like a discharge ceiling and for the same reason
+            # (Phase 4c): the battery's own remaining room binds above the
+            # command -- the inverter stops when full -- so a rate above the
+            # plan delivers the plan exactly, while nearest-rounding lands
+            # below it and silently charges less. Measured pre-fix: 4 of 493
+            # charging periods short, worst -0.0288 kWh.
+            #
+            # Safe because the DP floors a plan the *import cap* limited
+            # (`lattice_grid_charge`), which is the one case where nothing
+            # physical binds above the command and rounding up would draw
+            # more from the grid than the house fuse allows. With that plan
+            # already on the lattice, rounding up is a no-op there.
+            return command_index(
+                battery_action_kw,
+                self.max_charge_power_kw / 100,
+                rate_is_ceiling=True,
+            )
         return control["charge_rate"]
 
     def _map_intent_to_rates(
@@ -530,7 +538,7 @@ class InverterController(ABC):
             return False, 0
         elif intent in ("LOAD_SUPPORT", "BATTERY_EXPORT"):
             if battery_action_kw < -0.01:
-                discharge_rate = discharge_command_index(
+                discharge_rate = command_index(
                     abs(battery_action_kw),
                     # The platform's own lattice, not a hardcoded 1%: the
                     # planner enumerates candidates on
@@ -545,7 +553,7 @@ class InverterController(ABC):
                     # LOAD_SUPPORT writes load_first, where the number is a
                     # ceiling on hardware that load-follows -- so it must be
                     # rounded UP or it under-delivers the plan (Phase 4b;
-                    # see discharge_command_index). BATTERY_EXPORT writes
+                    # see command_index). BATTERY_EXPORT writes
                     # grid_first, where the number is the delivered power on
                     # every platform, so nearest stays correct.
                     rate_is_ceiling=(
@@ -570,6 +578,7 @@ class InverterController(ABC):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        at_reserve_floor: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -591,6 +600,12 @@ class InverterController(ABC):
                 BATTERY_EXPORT to the same values, so platforms that need to
                 treat them differently (VPP-style -- see #413) require the
                 intent itself. Register-based platforms ignore this.
+            at_reserve_floor: Whether the battery is at (or below) its
+                configured minimum SoE right now. Register-based platforms
+                ignore this -- their min_soc register already stops discharge
+                at the floor. Forced-power platforms use it to stop holding a
+                battery that has nothing left to hold, releasing the inverter
+                so its BMS can sleep -- see #592.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -660,9 +675,56 @@ class InverterController(ABC):
             "discharge_rate": discharge_rate,
             "strategic_intent": intent,
             **self._mode_display_fields(
-                intent, grid_charge, discharge_rate, block_passive_charging
+                intent,
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                self._planned_at_reserve_floor(period),
             ),
         }
+
+    def _planned_at_reserve_floor(self, period: int) -> bool:
+        """Whether the *plan* has the battery on its reserve floor entering
+        this period (#592).
+
+        The display counterpart to `BatterySystemManager._at_reserve_floor()`,
+        which reads live SoC. A displayed period is a prediction, so the plan's
+        own SoE trajectory is the correct input -- but it must answer the same
+        question, or the UI shows a hold for periods production releases and
+        `_mode_display_fields` breaks its own no-fabrication contract.
+
+        **Index p-1, not p.** `state_of_energy` is `combined_soe`, whose only
+        writer stores `period_data.energy.battery_soe_end` (see
+        `BatterySystemManager._create_updated_schedule`) -- `battery_soe_end`
+        and `battery_soe_start` are distinct fields on `EnergyData`. So
+        `state_of_energy[p]` is the SoE *leaving* period p, and the SoE
+        *entering* it is index p-1. Reading index p directly would answer for
+        the wrong period: at the boundary where the plan first reaches the
+        floor it would report "at floor" one period early, and one period late
+        on the way back up -- exactly the display/write disagreement this
+        method exists to prevent.
+
+        Period 0 has no predecessor in the array, so it reads index 0. That is
+        exact only when period 0 *is* the optimization period, where
+        `combined_soe[0]` is written as `current_soe` — an entering value. On a
+        schedule re-optimized mid-day, index 0 is a historical period holding
+        `battery_soe_end` like every other index, so the read is one period
+        early there. Display-only and bounded to period 0: `get_period_settings`
+        never writes hardware, and the live write path reads SoC directly. Left
+        as-is rather than papered over, because the array has no entering value
+        for period 0 to read — recording one is a change to
+        `_create_updated_schedule`, not to this method.
+
+        False when there is no plan to read: with no trajectory there is no
+        prediction to display, and the hold is the unchanged-behaviour answer.
+        """
+        if self.current_schedule is None:
+            return False
+        soe = self.current_schedule.state_of_energy
+        if period >= len(soe):
+            return False
+        entering_soe = soe[period - 1] if period > 0 else soe[0]
+        return entering_soe <= self.battery_settings.min_soe_kwh
 
     def _mode_display_fields(
         self,
@@ -670,6 +732,7 @@ class InverterController(ABC):
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool,
+        at_reserve_floor: bool = False,
     ) -> dict:
         """Single source of truth for what mode-related fields a period
         gets, branching on CONTROL_MODEL. Never fabricates a label the
@@ -696,7 +759,11 @@ class InverterController(ABC):
             # SolaxModbusGrowattController) -- no hasattr() duck-typing on a
             # subclass-private method name.
             power_pct, remote_control = self._vpp_display_state(
-                grid_charge, discharge_rate, block_passive_charging, intent
+                grid_charge,
+                discharge_rate,
+                block_passive_charging,
+                intent,
+                at_reserve_floor,
             )
             return {
                 "vpp_power_pct": power_pct,

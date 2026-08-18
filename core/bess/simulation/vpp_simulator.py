@@ -49,8 +49,21 @@ def derive_vpp_commands(
     intents: list[str],
     actions_kw: list[float],
     settings: BatterySettings,
+    soe_trajectory: list[float],
 ) -> list[VppCommand]:
     """The VPP commands production would write for a planned schedule.
+
+    `soe_trajectory` supplies the state of energy entering each period, which
+    `_intent_to_vpp` needs to answer the reserve-floor question (#592). It is
+    required, not defaulted: an optional one is exactly how this harness came
+    to derive every command with `at_reserve_floor=False`, leaving the release
+    branch unreachable through the whole 37-fixture corpus while the baseline
+    looked like it covered it.
+
+    Note this derives commands *eagerly*, so it is only correct where the
+    trajectory is already known. `simulate_vpp` does not use it -- there the
+    SoE is produced by the simulation itself, so each command is derived from
+    the running SoE as the loop reaches it.
 
     Drives the production path end to end:
     `compute_rates_for_period` -> `_intent_to_vpp`, the same two calls
@@ -82,27 +95,55 @@ def derive_vpp_commands(
             f"{len(actions_kw)} actions"
         )
 
+    if len(soe_trajectory) < len(actions_kw):
+        raise ValueError(
+            f"plan is inconsistent: {len(soe_trajectory)} SoE entries for "
+            f"{len(actions_kw)} actions"
+        )
+
+    controller = _vpp_controller(intents, settings)
+    return [
+        _derive_vpp_command(
+            controller,
+            period,
+            action_kw,
+            at_reserve_floor=soe_trajectory[period] <= settings.min_soe_kwh,
+        )
+        for period, action_kw in enumerate(actions_kw)
+    ]
+
+
+def _vpp_controller(
+    intents: list[str], settings: BatterySettings
+) -> SolaxModbusGrowattController:
+    """The production controller, configured for one plan's intents."""
     controller = SolaxModbusGrowattController(settings, control_mode="vpp")
     controller.strategic_intents = list(intents)
+    return controller
 
-    commands = []
-    for period, action_kw in enumerate(actions_kw):
-        grid_charge, discharge_rate, block_passive_charging = (
-            controller.compute_rates_for_period(period, action_kw)
-        )
-        power_pct, remote_control_enabled = controller._intent_to_vpp(
-            grid_charge,
-            discharge_rate,
-            block_passive_charging,
-            intents[period],
-        )
-        commands.append(
-            VppCommand(
-                power_pct=power_pct,
-                remote_control_enabled=remote_control_enabled,
-            )
-        )
-    return commands
+
+def _derive_vpp_command(
+    controller: SolaxModbusGrowattController,
+    period: int,
+    action_kw: float,
+    at_reserve_floor: bool,
+) -> VppCommand:
+    """One period's command, via the same two production calls
+    `BatterySystemManager._apply_period_schedule` makes."""
+    grid_charge, discharge_rate, block_passive_charging = (
+        controller.compute_rates_for_period(period, action_kw)
+    )
+    power_pct, remote_control_enabled = controller._intent_to_vpp(
+        grid_charge,
+        discharge_rate,
+        block_passive_charging,
+        controller.strategic_intents[period],
+        at_reserve_floor,
+    )
+    return VppCommand(
+        power_pct=power_pct,
+        remote_control_enabled=remote_control_enabled,
+    )
 
 
 def vpp_command_to_power(
@@ -258,10 +299,15 @@ def vpp_command_to_power(
 class VppSimulationResult:
     period_data: list = field(default_factory=list)
     realized_cost: float = 0.0
+    # The commands actually issued, derived per period as the run reached it.
+    # Returned rather than taken as input because #592 made the command a
+    # function of the SoE the simulation itself produces.
+    commands: list = field(default_factory=list)
 
 
 def simulate_vpp(
-    commands: list[VppCommand],
+    intents: list[str],
+    actions_kw: list[float],
     solar_production: list[float],
     home_consumption: list[float],
     buy_price: list[float],
@@ -274,10 +320,93 @@ def simulate_vpp(
     """Execute a VPP command sequence, carrying SoE forward, using the
     optimizer's own flow and accounting primitives -- same arrangement as
     `inverter_simulator.simulate`, so realized cost is comparable between the
-    two platforms."""
+    two platforms.
+
+    Takes the *plan* rather than a prebuilt command list: since #592 a
+    command depends on whether the battery is at its reserve floor, which is
+    only known once the run has carried SoE forward to that period. Deriving
+    the list up front is what made the release branch unreachable here, and
+    with it the whole corpus's claim to cover it.
+
+    To execute a command list that no plan would produce -- a hypothetical, to
+    contrast against what production actually writes -- use
+    `simulate_vpp_commands` instead."""
+    if len(intents) != len(actions_kw):
+        raise ValueError(
+            f"plan is inconsistent: {len(intents)} intents vs "
+            f"{len(actions_kw)} actions"
+        )
+
+    controller = _vpp_controller(intents, settings)
+    return _simulate(
+        lambda t, soe: _derive_vpp_command(
+            controller, t, actions_kw[t], at_reserve_floor=soe <= settings.min_soe_kwh
+        ),
+        len(actions_kw),
+        solar_production,
+        home_consumption,
+        buy_price,
+        sell_price,
+        initial_soe,
+        settings,
+        dt,
+        currency,
+    )
+
+
+def simulate_vpp_commands(
+    commands: list[VppCommand],
+    solar_production: list[float],
+    home_consumption: list[float],
+    buy_price: list[float],
+    sell_price: list[float],
+    initial_soe: float,
+    settings: BatterySettings,
+    dt: float,
+    currency: str = "SEK",
+) -> VppSimulationResult:
+    """Execute an explicit command sequence, bypassing derivation.
+
+    For hypotheticals only -- "what would the battery have done had it been
+    commanded this instead". Anything asserting what production *does* must go
+    through `simulate_vpp`, which derives the commands the way production
+    does.
+    """
+    return _simulate(
+        lambda t, _soe: commands[t],
+        len(commands),
+        solar_production,
+        home_consumption,
+        buy_price,
+        sell_price,
+        initial_soe,
+        settings,
+        dt,
+        currency,
+    )
+
+
+def _simulate(
+    command_at,
+    n_periods: int,
+    solar_production: list[float],
+    home_consumption: list[float],
+    buy_price: list[float],
+    sell_price: list[float],
+    initial_soe: float,
+    settings: BatterySettings,
+    dt: float,
+    currency: str,
+) -> VppSimulationResult:
+    """The one execution loop. `command_at(period, soe)` supplies each
+    period's command against the SoE the run has reached, which is what lets
+    a derived command depend on the reserve floor (#592)."""
     soe = initial_soe
     period_data = []
-    for t, cmd in enumerate(commands):
+    commands = []
+    for t in range(n_periods):
+        cmd = command_at(t, soe)
+        commands.append(cmd)
         power = vpp_command_to_power(
             cmd, solar_production[t], home_consumption[t], soe, settings, dt
         )
@@ -324,4 +453,5 @@ def simulate_vpp(
     return VppSimulationResult(
         period_data=period_data,
         realized_cost=sum(pd.economic.hourly_cost for pd in period_data),
+        commands=commands,
     )

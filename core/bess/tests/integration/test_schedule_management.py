@@ -630,6 +630,11 @@ class TestChargeRateHardwareWrite:
         actions[8] = 0.17
         mock_schedule = MagicMock(spec=DPSchedule)
         mock_schedule.actions = actions
+        # `spec=DPSchedule` specs off the class, but `state_of_energy` is set
+        # in `__init__`, so the spec does not include it while every real
+        # DPSchedule has it. Well above the reserve floor -- this test is
+        # about the charge rate, not #592's release.
+        mock_schedule.state_of_energy = [25.0] * 96
         mgr.current_schedule = mock_schedule
 
         mock_controller.calls["charge_rate"].clear()

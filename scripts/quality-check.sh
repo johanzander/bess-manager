@@ -113,12 +113,17 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
     #
     # A file deleted on this branch still appears in the diff, hence the -e
     # test. No changed Python files is a pass, not a skip-with-warning.
+    #
+    # An unresolvable origin/main is an ERROR, not a warning: warnings exit
+    # 0, so a run that type-checked nothing would print "Errors: 0" and
+    # report success for a check that never happened.
     if MYPY=$(py_tool mypy); then
         echo "🔸 Checking mypy on changed files..."
         base=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
         if [ -z "$base" ]; then
-            echo "⚠️  Cannot resolve origin/main — skipping mypy (run: git fetch origin main)"
-            WARNINGS=$((WARNINGS + 1))
+            echo "❌ Cannot resolve origin/main — mypy checked nothing."
+            echo "   Run: git fetch origin main"
+            ERRORS=$((ERRORS + 1))
         else
             # sort -u is load-bearing: a file changed on the branch AND dirty
             # in the working tree appears in both diffs, and mypy fails with
@@ -219,13 +224,42 @@ if ! python3 - <<'PY'
 import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
-# `git push` and `gh api` are guarded by a BLANKET rule on purpose: the
-# dangerous shapes put their marker at an arbitrary argument position
-# (`git push origin main --force`, `git push origin +beta-release-9.9`,
-# `git push origin --delete release-X.Y`, `gh api <path> -X PUT`), which a
-# prefix glob cannot reach. Enumerating them left real holes twice. Narrowing
-# these two back to specific forms re-opens the holes, so the check requires
-# the blanket spelling rather than merely "some rule exists".
+# `gh api` is guarded by a BLANKET rule on purpose: the dangerous shapes put
+# their marker at an arbitrary argument position (`gh api <path> -X PUT`,
+# `gh api <path> -f k=v`), which a prefix glob cannot reach. Enumerating them
+# left real holes twice. Narrowing it back to specific forms re-opens the
+# holes, so the check requires the blanket spelling rather than merely "some
+# rule exists".
+#
+# `git push` USED to be in that same sentence and no longer is. It was never
+# the glob that made it safe -- the glob was a blunt instrument compensating
+# for having no guard at the only layer that can actually see a ref update.
+# The four leaks it was blanket-guarding against are now refused SERVER-SIDE
+# by GitHub rulesets, which evaluate the resulting ref rather than the command
+# string, so argument order cannot evade them:
+#
+#   git push origin main --force        -> non_fast_forward on ~DEFAULT_BRANCH
+#   git push origin +beta-release-9.9   -> non_fast_forward on beta-release-*
+#   git push origin +release-9.9        -> non_fast_forward on release-*
+#   git push origin --delete <ref>      -> deletion on both of the above
+#   git push origin v9.9.0 (force/move) -> non_fast_forward on ~ALL tags
+#
+# All rulesets are enforcement=active with an EMPTY bypass_actors list, so
+# they bind the repo owner too -- which matters, because local pushes
+# authenticate as the owner (osxkeychain), never as bess-agent.
+#
+# Do NOT re-add a `Bash(git push*)` ask on the grounds that "a guard is
+# missing". Check the rulesets first:
+#
+#   gh api repos/johanzander/bess-manager/rulesets
+#   gh api repos/johanzander/bess-manager-beta/rulesets
+#
+# What this deliberately does NOT cover: force-pushing or deleting a FEATURE
+# branch (fix/**, feat/**) on origin. An accepted residual -- but NOT because
+# "the damage is bounded to your own unmerged branch". ~20 worktrees push in
+# parallel as the same identity, so a misaimed --force destroys another agent's
+# commits and closes its PR, with the recovering reflog sitting in a different
+# worktree.
 #
 # Every entry below is a rule whose deletion is the exact regression this gate
 # was written for -- the GitHub-reaching and history-destroying guards. Keep
@@ -239,9 +273,11 @@ REQUIRED = {
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
-        "Bash(git push)", "Bash(git push *)", "Bash(git -* push*)",
         "Bash(gh api)", "Bash(gh api *)",
-        "Bash(gh pr merge*)", "Bash(gh release*)", "Bash(gh repo edit*)",
+        "Bash(gh pr merge*)", "Bash(gh repo edit*)",
+        "Bash(gh release create*)", "Bash(gh release edit*)",
+        "Bash(gh release delete*)", "Bash(gh release delete-asset*)",
+        "Bash(gh release upload*)",
         "Bash(gh repo delete*)", "Bash(gh secret*)", "Bash(gh workflow run*)",
         "Bash(git gc*)", "Bash(git prune*)", "Bash(git repack*)",
         "Bash(git maintenance*)",
@@ -284,20 +320,12 @@ MUST_BE_DENIED = [
 # Checked against deny + ask: a prompt is an acceptable outcome for these.
 MUST_BE_GUARDED = [
     # git's global options may precede the subcommand -- the hook this
-    # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
+    # replaced normalised for exactly this, and local-agent-environment.md
+    # teaches `git -C` as
     # the cross-checkout idiom, so it is the spelling most likely to be used.
-    "git -C .claude/worktrees/x push origin main",
-    "git -c push.default=current push beta main",
     "git --no-pager gc --prune=now",
     "git -C sub tag -d v9.9.0",
     "git -C sub update-ref -d refs/heads/x",
-    # the marker sits at an arbitrary argument position
-    "git push origin main --force",
-    "git push origin +beta-release-9.9",
-    "git push origin --delete release-9.9",
-    "git push origin v9.9.0",
-    "git push -u origin main",
-    "git push",
     # history destruction, incl. the spellings that are NOT `gc`/`reflog expire`
     "git tag --delete v9.9.0", "git tag -d v9.9.0",
     "git tag -f v9.9.0 abc123",
@@ -308,7 +336,15 @@ MUST_BE_GUARDED = [
     # gh reaching GitHub, including the raw API path
     "gh api repos/o/r/pulls/1/merge -X PUT",
     "gh api repos/o/r/releases -f tag_name=v1",
-    "gh pr merge 588 --squash", "gh release create v9.9.0",
+    "gh pr merge 588 --squash",
+    # Publishing a release escapes to GitHub irreversibly. The read-only verbs
+    # are exempt (see MUST_NOT_BE_GUARDED) -- the gate pins both directions so
+    # the split cannot silently collapse back to a blanket rule or a hole.
+    "gh release create v9.9.0", "gh release create v9.9.0 -R owner/repo",
+    "gh release edit v9.9.0 --draft=false",
+    "gh release delete v9.9.0 --yes",
+    "gh release delete-asset v9.9.0 addon.zip",
+    "gh release upload v9.9.0 addon.zip",
     "gh secret set FOO", "gh workflow run ci.yml", "gh repo edit --visibility private",
     # Unrecoverable gh mutations. `gh repo delete` was unguarded while the far
     # milder `gh repo edit` asked -- it escapes to GitHub and git cannot undo
@@ -345,18 +381,56 @@ MUST_NOT_BE_GUARDED = [
     "git -C .claude/worktrees/x diff -- file.py",
     "git -C .claude/worktrees/x apply",
     "git status", "git diff", "git log --oneline",
-    # Read-only stash inspection, which CLAUDE.md and rules.md both promise
+    # Pushing. Enforcement moved to GitHub rulesets (see the REQUIRED comment
+    # above), so these must run UNATTENDED -- implement-issue Step 9 and every
+    # PR-refresh push. Pinned in this direction on purpose: the failure mode
+    # being guarded against is someone re-adding a `Bash(git push*)` ask
+    # because it "looks unguarded", which would silently restore the stall the
+    # rulesets were created to remove. If you believe a guard is missing, read
+    # the rulesets before touching this list.
+    #
+    # These entries assert only that the commands are LOCALLY unguarded. Which
+    # of them GitHub also refuses is a separate question, and the answer is not
+    # "all of them" -- do not read this list as a protection matrix:
+    #
+    #   main --force, +beta-release-*, v9.9.0 (tag)  -> refused by a ruleset
+    #   +release-X.Y (rewrite)                       -> refused by a ruleset
+    #   --delete release-X.Y                         -> ALLOWED, deliberately
+    #
+    # That last line is a deliberate asymmetry, not a residual and not an
+    # oversight to "fix" by putting the prompt back. `release-X.Y` is the
+    # short-lived hotfix branch created by the release skill (steps 2-6);
+    # rewriting it is refused by the `release-*` ruleset, while deleting it
+    # once the release is out is ordinary cleanup. The protected TAG pins the
+    # released commit, so a spent branch costs nothing to lose.
+    "git push", "git push -u origin main",
+    "git push origin main --force",
+    "git push origin +beta-release-9.9",
+    "git push origin --delete release-9.9",
+    "git push origin v9.9.0",
+    "git -C .claude/worktrees/x push origin main",
+    "git -c push.default=current push beta main",
+    # Read-only stash inspection, which local-agent-environment.md and
+    # rules.md both promise
     # keeps working. A blanket `git -* stash *` DENY caught these, and deny has
     # no override -- so the cross-checkout recipe was hard-blocked, not merely
     # prompted. That is why the stash twins name a verb.
     "git stash list", "git stash show",
     "git -C sub stash list",
     "git -C .claude/worktrees/x stash show",
-    # implement-issue Step 4 prunes worktrees in a loop; CLAUDE.md argues that
+    # implement-issue Step 4 prunes worktrees in a loop;
+    # local-agent-environment.md argues that
     # must stay unattended. A `git -* prune*` twin caught `worktree prune` and
     # `remote prune` through the same greedy glob, so the twin was dropped.
     "git -C /main worktree prune", "git worktree prune",
     "git -C sub remote prune origin",
+    # Reading releases changes nothing on GitHub, and the release/beta flows
+    # check the published version constantly ("always check the current
+    # published version before tagging"). A blanket `gh release*` ask made
+    # every one of those a prompt, which is why these verbs are named.
+    "gh release list -L 5 -R johanzander/bess-manager-beta",
+    "gh release list", "gh release view v9.9.0",
+    "gh release view --json tagName",
 ]
 
 
@@ -400,6 +474,131 @@ print(f"✅ Permission surface intact ({total} command shapes checked, "
 PY
 then
     ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
+echo "📋 Checking bot workflow publish contract..."
+echo "-------------------------------------------"
+
+# Stage 2 (issue-analyze.yml) spent three days exiting `success` while posting
+# nothing -- five of nine non-skipped runs produced no comment and no label,
+# burning $0.33-1.58 each (#646). Every layer reported healthy: the run was
+# green, is_error false, permission_denials_count 0.
+#
+# Two independent things have to hold, and this gate checks BOTH because either
+# one alone leaves the failure silent:
+#
+#   1. The prompt must tell the agent to RUN a command to publish. Stage 2 said
+#      "Post ONE comment on the issue with this structure:" followed by a
+#      markdown template -- a description of a document, not an instruction to
+#      execute anything. These workflows run in AGENT mode (use_sticky_comment
+#      false, track_progress false), so the action posts nothing on the agent's
+#      behalf: an agent that renders the template as its final assistant message
+#      has, by its own lights, finished. It then never reaches the labelling
+#      step, which is why the label was untouched too.
+#
+#      The contrast is what makes this more than a story. On the SAME action
+#      version (459ad358 / CLI 2.1.234), Stage 4's review -- whose prompt names
+#      `gh pr review` explicitly -- landed an APPROVED verdict, while Stage 2
+#      went silent three times in three seconds. Stage 2 was the only bot
+#      workflow whose publish step was prose, and the only one that failed to
+#      publish.
+#
+#   2. The workflow must VERIFY it afterwards. The prompt fix is a behavioural
+#      argument about what a model will infer, so it cannot be trusted on its
+#      own -- the next upstream version may infer differently, exactly as this
+#      one did. Only a post-condition on the job makes that loud instead of
+#      green.
+#
+# Deliberately NOT checked for, and deliberately not built: a step that posts
+# the comment on the agent's behalf when it didn't. That is a second publishing
+# path whose only job is to route around the first one failing, and it would
+# mask the regression rather than surface it (docs/agents/rules.md, Debugging
+# Protocol step 8). The guard asserts; it does not repair.
+if ! python3 - <<'PY'
+import pathlib, re, sys
+
+WORKFLOWS = pathlib.Path(".github/workflows")
+
+# Workflows whose whole product is a comment on the issue. Stage 3 is excluded
+# on purpose: its product is a PR, which is observable without this check.
+PUBLISHERS = {
+    "issue-triage.yml": "gh issue comment",
+    "issue-analyze.yml": "gh issue comment",
+}
+
+bad = []
+
+for name, command in PUBLISHERS.items():
+    path = WORKFLOWS / name
+    if not path.is_file():
+        print(f"❌ {name} is missing -- the publish contract cannot be checked")
+        bad.append(name)
+        continue
+    if command not in path.read_text():
+        print(
+            f"❌ {name} never names `{command}`. Its publish step is prose, so "
+            "the agent can render it as a final message and exit success "
+            "having written nothing to GitHub (#646)."
+        )
+        bad.append(name)
+
+# The post-agent guard: a run that published nothing must fail the job. Checked
+# by the shape that actually does the work -- a step keyed on `if: always()`
+# that re-reads the issue -- rather than by step name, which renames freely.
+analyze = WORKFLOWS / "issue-analyze.yml"
+if analyze.is_file():
+    text = analyze.read_text()
+    has_always = re.search(r"^\s*if:\s*always\(\)\s*$", text, re.MULTILINE)
+    has_readback = "--json comments" in text and "--json labels" in text
+    if not (has_always and has_readback):
+        print(
+            "❌ issue-analyze.yml has no post-agent verification step. A run "
+            "that posts no comment and applies no label must FAIL the job, "
+            "not exit success (#646 acceptance criterion)."
+        )
+        bad.append("issue-analyze.yml:guard")
+
+if bad:
+    sys.exit(1)
+print(f"✅ Bot workflow publish contract intact ({len(PUBLISHERS)} publishers "
+      "name their command, Stage 2 verifies it posted)")
+PY
+then
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
+echo "📋 Checking agent context budget..."
+echo "-------------------------------------------"
+
+# Every bot stage loads CLAUDE.md before it does anything, on the main agent
+# and again on its sub-agent, and re-sends it on every turn. It is the largest
+# single item in the fixed context floor, so its size is a per-run cost on
+# Stages 1-5 and on every local session.
+#
+# It reached 45,488 B once, of which 33,743 B (74%) was one section describing
+# this machine -- the macOS sandbox, podman, worktrees, Playwright, the
+# permission rules. None of it can apply on a fresh ubuntu runner under
+# `--permission-mode bypassPermissions`, and it was billed on every turn of
+# every stage anyway (#650).
+#
+# The fix was to RELOCATE that content, not delete it: it lives in
+# docs/agents/local-agent-environment.md and is reached through the Agent
+# Documentation Index like every other doc. This gate keeps it from creeping
+# back inline. If you need to raise the cap, move content into docs/agents/
+# and link it instead -- that is the mechanism CLAUDE.md already uses.
+CLAUDE_MD_MAX_BYTES=16000
+CLAUDE_MD_BYTES=$(wc -c < CLAUDE.md | tr -d ' ')
+
+if [ "$CLAUDE_MD_BYTES" -gt "$CLAUDE_MD_MAX_BYTES" ]; then
+    echo "❌ CLAUDE.md is ${CLAUDE_MD_BYTES} B, over the ${CLAUDE_MD_MAX_BYTES} B budget"
+    echo "   Every bot stage loads this file on every turn, on two agents."
+    echo "   Move the new material into docs/agents/ and link it from the"
+    echo "   Agent Documentation Index rather than raising the cap (#650)."
+    ERRORS=$((ERRORS + 1))
+else
+    echo "✅ CLAUDE.md within context budget (${CLAUDE_MD_BYTES} B / ${CLAUDE_MD_MAX_BYTES} B)"
 fi
 
 echo ""

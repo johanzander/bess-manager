@@ -75,9 +75,9 @@ when any of these hold:
 | Detached or locked | Almost always another agent's live session. |
 
 Read ownership with `claude agents --json` run **unscoped** (from `~`) —
-per `CLAUDE.md`'s Worktree Conventions, sibling worktrees never appear in
-the project-scoped view, and missing one is exactly the collision this gate
-exists to prevent.
+per `docs/agents/local-agent-environment.md`'s Worktree Conventions, sibling
+worktrees never appear in the project-scoped view, and missing one is exactly
+the collision this gate exists to prevent.
 
 ### 2. Classify
 
@@ -159,7 +159,8 @@ nothing is indistinguishable from a broken one.
 ## Hard constraints
 
 - Never push without `./scripts/quality-check.sh` green.
-- Never `git stash` — denied repo-wide, one shared stack (`CLAUDE.md`).
+- Never `git stash` — denied repo-wide, one shared stack
+  (`docs/agents/local-agent-environment.md`).
 - Never `--force` / `--force-with-lease` on someone else's branch.
 - Never merge a PR, take it out of draft, or close it.
 - One commit per PR per sweep: `chore: merge main into <branch>`.

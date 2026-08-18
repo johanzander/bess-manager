@@ -129,7 +129,7 @@ status (Needs input / Working / Completed) instead of juggling editor windows.
 Agent View is a dashboard, not an IDE — each session's worktree is a real folder
 you open in VS Code or `cd` into to run tests/scripts. **Sibling and native
 worktrees are both first-class** (siblings only drop out of the *project-scoped*
-view); see [Worktree Conventions](../../CLAUDE.md).
+view); see [Worktree Conventions](local-agent-environment.md).
 
 ## Where to go next
 

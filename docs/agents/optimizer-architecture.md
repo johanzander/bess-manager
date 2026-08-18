@@ -200,10 +200,32 @@ including where the intra-period gate is deliberately closed. No rounding
 both delivers the plan and never exceeds it, because the lattice is coarser
 than the deficit.
 
-**Still open: 4c (charge).** The six `rate_throughput` sites still charge at
-nominal power and never read `charging_power_rate`, so the charge path keeps
-its structural R≠P divergence. Candidates are commands on the discharge side
-only.
+**As built, Phase 4c (charge half, narrow).** The charge command now rounds
+**up** through the same `command_index` the discharge side uses (renamed from
+`discharge_command_index`, since both paths share it). The justification is
+the mirror of the discharge one but rests on different physics: a discharge
+ceiling is safe to round up because actual house load binds below it, while a
+charge command is bounded from above only by the battery's own remaining
+room — the inverter stops when full — so a rate above the plan still delivers
+exactly the plan. Measured: 4 of 493 charging periods were short (worst
+−0.0288 kWh); now none. Plan-neutral, +0.00000 SEK, no golden churn.
+
+Where `import_cap_kwh` limited the plan (#429) that argument fails — nothing
+physical binds above the command and rounding up would exceed the house fuse
+— so there the DP floors the plan onto the lattice instead
+(`execution_model.lattice_grid_charge`). Under-drawing never violates a fuse,
+so the safe direction differs per binding constraint; do not unify them.
+
+**Still open on the charge side.** `charging_power_rate` was never the
+problem — it does not reach the inverter as a plan-limiting rate (see the
+plan's correction of 2026-08-16). What remains is real but unmeasured in
+money: `_period_flows` derives charge throughput from `max_charge_power_kw`
+rather than from the commanded rate, and the DP and the inverter simulator
+share that record under P4 — so the simulator reproduces the plan by
+construction and **cannot disagree with it about charge**. Any charge-side
+R==P result is therefore weaker evidence than the discharge-side equivalent.
+Candidates are commands on the discharge side; on the charge side only the
+written rate is.
 
 **Two questions, not one — do not collapse them.** "Is the rate register a
 ceiling" (`discharge_rate_is_load_following`, what the intra-period gate
@@ -281,6 +303,19 @@ rider): a re-solved window is accepted only if its replayed cost is no
 worse than the grid segment it replaces. Until that gate exists, any NEW
 reliance on PWL exactness is forbidden; the existing splice path is
 grandfathered, gate pending.
+
+**Window size is the caller's problem, not the solver's (#624).**
+`detect_tie_windows` merges adjacent flagged periods with no cap, while the
+solver's breakpoint set compounds per backward step — so the merged length
+is an unbounded function of the price curve while the exactly-solvable
+horizon is ~8 periods, and no budget raise extends it. Step 2b closes that
+gap by bisecting a window that raises `PWLWindowUnderRefinedError` and
+re-solving each half, terminating at horizon 1 (four breakpoints from the
+pinned terminal row, three orders of magnitude under budget). This does not
+relax P6 and is not the cost-gate: every spliced half carries the same
+certification a whole window would have. It is the one exception that may be
+caught, and only to re-size the work — catching it to keep the grid DP's
+result, or to splice the uncertified table, remains forbidden.
 
 ### P7. Point forecasts stay; risk handling is structural, not stochastic
 

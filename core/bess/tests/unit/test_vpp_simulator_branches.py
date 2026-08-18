@@ -222,6 +222,95 @@ class TestReleasedControl:
         )
 
 
+class TestIdleAtReserveFloor:
+    """#592: at the floor, IDLE releases control instead of holding
+    battery_first, so the inverter is handed back and its BMS can sleep.
+
+    These pin *why that is safe*: the released command produces the same
+    battery power as today's hold in every case reachable at the floor, so
+    no energy flow moves. That is what lets this change ship without
+    re-pinning the v10.0.2 VPP baseline.
+    """
+
+    def test_release_matches_the_hold_when_solar_is_in_surplus(self):
+        """Both absorb the surplus: the hold via `0.0` -> `_state_transition`'s
+        IDLE branch, the released command via its own `deficit <= 0` return.
+
+        This is the case that rules out the reporter's other suggestion in
+        #592 -- `power=0` with remote control *enabled* is grid_first, which
+        holds against charging and would export this surplus instead, losing
+        the passive absorption IDLE's own DP cost model credits.
+        """
+        s = _settings()
+        at_floor = s.min_soe_kwh
+        hold = vpp_command_to_power(
+            VppCommand(1, True), solar=3.0, home=1.0, soe=at_floor, settings=s, dt=DT
+        )
+        released = vpp_command_to_power(
+            VppCommand(0, False), solar=3.0, home=1.0, soe=at_floor, settings=s, dt=DT
+        )
+        assert hold == released == 0.0
+
+        grid_first = vpp_command_to_power(
+            VppCommand(0, True), solar=3.0, home=1.0, soe=at_floor, settings=s, dt=DT
+        )
+        assert grid_first is None, (
+            "grid_first is NOT flow-neutral here -- it bypasses the surplus to "
+            "the grid, which is why #592 releases control instead"
+        )
+
+    def test_release_matches_the_hold_when_load_exceeds_solar(self):
+        """No headroom at the floor, so the released command cannot discharge:
+        `available == 0` makes `delivered` 0 and the branch returns None (a
+        hold), exactly like battery_first. This is what makes releasing safe
+        against #466 -- there is no energy left for load_first to drain.
+
+        Note what this does and does not prove. `available` is measured
+        against BESS's own `min_soe_kwh`, so this pins the *model*, which
+        assumes the inverter's discharge_stop_soc agrees with the configured
+        min_soc. In VPP mode BESS never writes that register (#309), so on
+        real hardware a lower inverter floor would let released self-use draw
+        the gap. Same assumption the model already makes for LOAD_SUPPORT and
+        SOLAR_STORAGE; see _intent_to_vpp's #592 note."""
+        s = _settings()
+        at_floor = s.min_soe_kwh
+        hold = vpp_command_to_power(
+            VppCommand(1, True), solar=0.0, home=2.0, soe=at_floor, settings=s, dt=DT
+        )
+        released = vpp_command_to_power(
+            VppCommand(0, False), solar=0.0, home=2.0, soe=at_floor, settings=s, dt=DT
+        )
+        assert hold == 0.0
+        assert released is None
+        for power in (hold, released):
+            assert _state_transition(
+                at_floor,
+                power or 0.0,
+                s,
+                DT,
+                solar_production=0.0,
+                home_consumption=2.0,
+            ) == pytest.approx(at_floor), "neither command may move SoE at the floor"
+
+    def test_release_would_discharge_above_the_floor(self):
+        """The guard rail on the test above: releasing control is only
+        flow-neutral *at* the floor. One kWh above it the released command
+        drains the battery to cover load -- which is exactly #466's defect,
+        and why the release is gated on being at the floor rather than
+        applied to IDLE generally."""
+        s = _settings()
+        above_floor = s.min_soe_kwh + 1.0
+        released = vpp_command_to_power(
+            VppCommand(0, False),
+            solar=0.0,
+            home=2.0,
+            soe=above_floor,
+            settings=s,
+            dt=DT,
+        )
+        assert released is not None and released < 0
+
+
 class TestPlanShape:
     def test_mismatched_plan_lengths_raise(self):
         """`derive_vpp_commands` iterates `actions_kw` and indexes `intents`,
@@ -230,7 +319,16 @@ class TestPlanShape:
         reads as a plan change rather than as a harness bug, so it is rejected
         at the input instead."""
         s = _settings()
+        soe = [5.0, 5.0, 5.0]
         with pytest.raises(ValueError, match="inconsistent"):
-            derive_vpp_commands(["IDLE", "IDLE"], [0.0], s)
+            derive_vpp_commands(["IDLE", "IDLE"], [0.0], s, soe)
         with pytest.raises(ValueError, match="inconsistent"):
-            derive_vpp_commands(["IDLE"], [0.0, 0.0], s)
+            derive_vpp_commands(["IDLE"], [0.0, 0.0], s, soe)
+
+    def test_short_soe_trajectory_raises(self):
+        """Same reasoning for the SoE trajectory #592 added: one entry short
+        and the last periods would be derived against the wrong floor state,
+        silently, rather than failing at the input."""
+        s = _settings()
+        with pytest.raises(ValueError, match="inconsistent"):
+            derive_vpp_commands(["IDLE", "IDLE"], [0.0, 0.0], s, [5.0])

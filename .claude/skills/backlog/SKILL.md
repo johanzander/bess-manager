@@ -9,57 +9,58 @@ description: Use when acting as the bess-manager Product Owner — reviewing the
 
 You own the product backlog. You face the reporter, drive issues to a
 Definition of Ready, order the work, and dispatch implementation — but you
-never implement, and you never assign. Implementers pull the top of
-*Ready for Dev*.
-
-**The board's columns, exactly** — compared as strings, so casing matters:
-
-    Backlog | Analysis | Ready for Dev | In Progress | In Review | Done
-
-Note *Ready for Dev* is the column; the *Definition of Ready* below is the
-criteria an item must meet to enter it. Two different things.
-
-**You manage the first five. `Done` is not yours.** The digest reads only
-*open* issues, so a closed one vanishes from your evidence entirely — you
-cannot derive `Done` and must never try to. It is filled by the board's own
-built-in "item closed" workflow and ages out via auto-archive. A card in
-`Done` is invisible to you by construction, which is the intended behaviour,
-not a gap.
+never implement, and you never assign. Implementers pull the top of Ready.
 
 Every pass starts from one command. Do not read issues one by one to build a
 picture:
 
-    ./scripts/backlog-digest.sh
+    ./scripts/backlog-rhythm.sh      # what is DUE now — start here
+    ./scripts/backlog-digest.sh      # the full evidence, when you need detail
 
 Open an individual issue only when you are deciding about that issue.
 
 ## Prerequisites
 
-Board reads need `PROJECT_NUMBER` set and the board created (deferred —
-`scripts/backlog-board-init.sh`). Board writes need `BESS_PO_TOKEN` with
-`project` scope (also deferred). Until both exist, a pass fails loudly at the
-first board access in `backlog-digest.sh` — that failure is expected, not a
-bug to route around.
+The board exists: **Project #1, "BESS Manager Backlog"**. `PROJECT_NUMBER=1`
+and `BESS_PO_TOKEN` live in the repo's `.env`, and `backlog-digest.sh` sources
+it itself — **run it plainly, with no `set -a` preamble**. The file is
+gitignored and so exists only in the main checkout; the script resolves it via
+`git rev-parse --git-common-dir`, which points there from inside a worktree
+too.
 
-**Board writes go through GraphQL, not `gh project`.** The CLI's
-`--owner johanzander` resolution needs `read:org`, which the PO token
-deliberately does not have, so `gh project ... --owner johanzander` fails with
-`unknown owner type` no matter what project access is granted. Address the
-board by node ID instead — verified working for both read and write as the PO:
+An earlier version required the caller to export those first, which is why an
+unattended `/loop /backlog` pass died on its first line every time: the thing
+invoking the script is a skill, not a shell someone typed into. If the digest
+now exits complaining about `PROJECT_NUMBER`, the variable is genuinely absent
+from `.env` — do not work around it by exporting one.
 
-    scripts/gh-agent.sh --as po api graphql -f query='...'
-    project id  PVT_kwHOACEigM4Bgiwa
-    Priority    PVTSSF_lAHOACEigM4Bgiwazhfh7NQ  (P0 da61340b, P1 131c5c2f, P2 107b9947)
+Board writes need `BESS_PO_TOKEN` with `project` scope.
 
-Read-only queries the maintainer runs — `backlog-digest.sh` — use the plain
-`gh project` CLI, which works because that token does have the scope.
+The custom-field JSON shape is **confirmed against the live board**, not
+assumed: `gh project item-list --format json` puts each single-select value at
+the item's top level, so `.priority` and `.awaiting` read directly. Re-verify
+with the command itself rather than trusting this paragraph — the tests fabricate
+that shape, so they cannot prove it:
 
-**Board shape, confirmed.** `gh project item-list --format json` returns each
-custom single-select field as a top-level key on the item — `priority: "P1"` —
-alongside `status` (the built-in column) and `content.number` (the join key).
-Verified against the real board on 2026-08-16 with issue #611 set to P1, read
-back correctly by the digest. The board is project **1** under `johanzander`;
-export `PROJECT_NUMBER=1`.
+    gh project item-list 1 --owner johanzander --format json \
+      | jq '[.items[] | {n: .content.number, p: .priority, a: .awaiting}] | .[0:3]'
+
+That returned populated `P1`–`P3` values and 17 items with `Awaiting` set. It
+matters because a wrong path fails silently — `.priority?` / `.awaiting?` resolve
+to `null` for every item with no error, which reads exactly like an ungroomed
+board.
+
+Field options, as they actually exist — do not invent values outside these sets:
+
+| Field | Options |
+|---|---|
+| `Status` | `Backlog`, `Analysis`, `Ready for Dev`, `In Progress`, `In Review`, `Done` |
+| `Priority` | `P1`, `P2`, `P3`, `P4` — **there is no `P0`** |
+| `Awaiting` | `reporter`, `discussion`, `upstream`, `analysis` |
+| `Source` | `issue`, `TODO` |
+
+The digest's `column` values match `Status` exactly, so reconciling a card is a
+string comparison, not a translation.
 
 ## When to Use
 
@@ -80,6 +81,36 @@ Post as the PO identity: `scripts/gh-agent.sh --as po issue comment ...`.
 If a board write fails for missing scope, stop and report
 `gh auth refresh -s project`. Never fall back to a file.
 
+## What the digest tells you, and why each field exists
+
+Four fields carry the grooming signal. Each was added because its absence
+caused a real misclassification:
+
+| Field | Meaning |
+|---|---|
+| `awaiting` | The blocking wait. **Outranks `analyzed`** — an item whose scope is unsettled is in *Analysis* no matter how far it got. Comes from the board field when set, else from a blocking label. |
+| `awaiting_source` | `board` or `label`. A `label` source with no board value is a triage action: set the field. |
+| `awaiting_suggested` | What the labels imply, so an unset field can be reconciled without guessing. |
+| `last_comment` | `{author, days, is_reporter, is_bot}`. **The reporter-replied signal.** A comment count and a last-activity date cannot tell "the reporter answered us" from "we posted a nudge", which is why the follow-up chase never fired. |
+| `stale_worktree` | The worktree's own branch has already merged, so it is rot, not progress. Hand it to `sweep-prs`. |
+| `blocked` | `blocked` label, or a `Blocked by #N` whose blocker is **still open**. Fails Ready outright. |
+| `blocked_by` / `blocked_by_open` | Every parsed reference, and the subset still open. Only the latter blocks — a `Blocked by #N` line is never edited out once N lands, so treating the raw scan as unresolved pins an item out of Ready forever. |
+
+**A wait outranks a live worktree, deliberately.** An item with a recorded wait
+reports *Analysis* even when a worktree is checked out for it, because unsettled
+scope must not read as progress. The worktree is still reported on the item
+(`worktree`, `worktree_branch`), so active undelivered code stays visible — the
+wait changes the column, not the evidence. Check those fields before assuming an
+*Analysis* item has no code behind it.
+
+**A human comment is not a wait.** `awaiting: discussion` used to be returned
+for any human comment, which pushed items to *Analysis* for ordinary traffic —
+thanks, a "me too", a follow-up question. Only a recorded wait or a blocking
+label does that now; `last_comment` is what you read to judge the rest.
+
+**`Ready for Dev` requires a `Priority`.** An analysed item with no priority is
+un-ranked, so it cannot be "next" — it stays in *Analysis* as a triage action.
+
 ## Definition of Ready
 
 Nothing is dispatched that has not crossed this line. A bug is Ready when:
@@ -89,6 +120,16 @@ Nothing is dispatched that has not crossed this line. A bug is Ready when:
 3. Expected versus actual behaviour is stated explicitly, in system terms
 4. An approach is agreed (Stage 2 analysis, or the maintainer's say-so)
 5. No unresolved blocker
+
+**Criterion 4 is the one that gets skipped, and the `analyzed` label is not
+proof of it.** Stage 2 can diagnose a request correctly and still leave its
+design open — #96 was labelled `analyzed`, prioritised `P2`, carried no blocking
+label, and was still not implementable, because *how* to build it was undecided.
+It reported *Ready*, an implementation session was dispatched at it, and that
+session deadlocked on three design questions nobody was there to answer. When
+an approach is genuinely undecided, record it: set `Awaiting` and post the open
+questions on the issue, so a later attempt can rehydrate them rather than
+rediscover them.
 
 An enhancement is Ready when 3–5 hold and the user-visible outcome is stated.
 An item failing any criterion stays in Backlog or Analysis and becomes your
@@ -112,14 +153,23 @@ For each item the digest puts in Backlog or Analysis:
 ## Verb: board
 
 Reconcile every card against the digest's derived `column`. **The digest
-always wins** — never trust a card's current position. Act on each mismatch:
+always wins** — never trust a card's current position.
+
+The comparison is in the digest: every item carries `board_status` (where the
+card sits now) alongside `column` (where the evidence says it belongs), using
+the same six Status strings, so a mismatch is `board_status != column` and
+nothing needs a second `gh project item-list` call. Act on each mismatch:
 
 | Mismatch | Action |
 |---|---|
+| `board_status: null` | the issue has **no card at all**. It carries no Priority, and *Ready for Dev* requires one — so it can never become dispatchable however well it is analysed, while reading as an ordinary Backlog item. Add the card, then triage it normally. Also listed under `orphans` as `issue_no_card` |
 | card *In Progress*, no worktree, no PR | abandoned — move to *Ready for Dev*, report it |
-| worktree present, no session, no PR | the session died mid-issue. Report it and offer to relaunch; the branch's commits survive. **Never silently relaunch** — a session that died twice is telling you something |
+| `stale_worktree: true` | the branch already merged; the worktree is rot, not work. Hand to `sweep-prs`, and do not read it as progress |
+| worktree present, no session, no PR | the session died mid-issue. The branch's commits survive — resuming is `/implement-issue <n>`, whose Step 0 detects the prior work and re-enters at the right step. **Never silently relaunch**: a session that died twice is telling you something, and a background dispatch that reports `working` may have written nothing at all — verify by work product (`git -C <wt> log`, file mtimes), never by session state |
+| `last_comment.is_reporter` and `awaiting: reporter` | the reporter answered. Re-check the Definition of Ready — this wait may be satisfied, and it is the transition nothing used to notice |
 | PR `CONFLICTING` | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
+| issue closed, card not *Done* | move the card |
 | *Analysis*/`reporter` quiet 14 days | nudge once; park to *Backlog* at 28 |
 | *Analysis*/`discussion` quiet 14 days | summarise the thread, put the open question to the maintainer |
 | open issue, comment activity, no labels | file into *Analysis*, assign a sub-state, apply labels |
@@ -127,13 +177,110 @@ always wins** — never trust a card's current position. Act on each mismatch:
 Never auto-park an active conversation, and never chase a reporter for
 something an upstream vendor owns.
 
-Also review the digest's `orphans` list (worktrees with no matching open
-issue, PRs with no `fixes/closes/resolves` reference) and hand any worktree
-or PR rot found there to `sweep-prs`.
+Also review the digest's `orphans` list — worktrees with no matching open
+issue, PRs with no `fixes/closes/resolves` reference, and open issues with no
+board card (`issue_no_card`). Hand worktree or PR rot to `sweep-prs`; a missing
+card is yours to add.
+
+## Verb: rhythm — the unattended pass
+
+The one that carries work from incoming to a **ready PR**. Start here on every
+`/loop /backlog` tick:
+
+    scripts/backlog-rhythm.sh
+
+It answers "what is due right now" deterministically — every rule is a
+comparison over the digest, so a quiet backlog costs one process instead of a
+model pass, and `RHYTHM: nothing due.` is a legitimate noop tick. **Do not
+re-derive these by reading issues; act on what it lists.**
+
+Why it exists: every follow-up rule in this skill had been written down and
+**none had ever fired.** They each needed a model to notice them and nothing
+scheduled one, so the 14-day chase, the 28-day park and the reporter-replied
+re-check were decoration.
+
+Actions, and who does what:
+
+| Action | Do |
+|---|---|
+| `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
+| `mark_ready` | `gh pr ready <n>`, then report it. APPROVED, green, still a draft — the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure rather than a priority |
+| `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line |
+| `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>`. **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
+| `rework_review` | out of draft with changes requested: `/implement-issue <n>` to address them, then a fresh review |
+| `resolve_conflict` | hand to `sweep-prs` |
+| `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
+| `nudge_reporter` | one nudge, as the PO identity |
+| `park` | move to *Backlog* — the chase went unanswered |
+| `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
+| `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
+| `dispatchable` | propose for dispatch — needs the maintainer's go-ahead |
+
+**This pass does not drive the review loop, and must not learn to.**
+`implement-issue` owns a PR from its first commit to `gh pr ready`; Step 11
+already requests the review, acts on the verdict and flips the PR. So an
+unfinished draft resolves to one action — hand it back — and a second copy of
+that loop is never built here. It is the same argument that put resume in Step 0
+instead of a separate skill: two copies of one loop means one of them goes stale.
+
+**The one carve-out is `mark_ready`, and it earned it.** An APPROVED, green,
+still-draft PR used to hand back like any other, and that is exactly why #629
+sat finished-but-draft: the remedy on offer was a whole `implement-issue`
+session, and nobody spends one of those to run a single command. `gh pr ready`
+is a terminal action, not a loop, so naming it here duplicates nothing.
+
+## Deferring a PR — how a decision gets recorded once
+
+**PRs go on the board too, and carry the same `Priority` and `Awaiting` fields
+issues do.** Before that, a judgement about a PR had nowhere to live: "#167 and
+#354 are blocked", "#437 and #490 are lower priority, later" were real
+decisions, and every pass re-reported all four as due because nothing recorded
+them. The same conversation happened every 30 minutes.
+
+| Decision | Set on the PR card | Effect |
+|---|---|---|
+| blocked / parked on a call | `Awaiting: discussion` (or `upstream`) | suppressed from actions |
+| later, not never | `Priority: P4` | suppressed from actions |
+| actively being driven | no `Awaiting`, `P1`–`P3` | reported every tick |
+
+Suppressed PRs are **counted and listed**, never dropped — the pass ends with
+`deferred: 4 (#490 priority P4; #167 awaiting discussion; …)` so the item stays
+findable and the reason travels with it. Losing the item would trade one
+failure for another.
+
+`mark_ready` ignores all of this, per the carve-out above. `awaiting_maintainer`
+does not: an approved PR waiting on a merge is not broken, it is the
+maintainer's call when to take it, and `P4` is how they say "later".
+
+**Restarting a stalled issue is always a resume, never a fresh start.** Step 0
+re-enters at the earliest incomplete step. A restart runs Step 4, which branches
+from `origin/main` and deletes commits that exist nowhere else — an audit found 8
+abandoned branches carrying real work, one with 32 commits.
+
+**A session reporting `working` may have written nothing.** Three background
+dispatches in one day produced zero tracked-file writes while reporting healthy
+state, and `claude logs` returns only spinner frames. Read `claude agents --json`
+**unsandboxed** (`~/.claude/jobs` is sandbox-denied, so a sandboxed listing
+silently truncates — it returned 1 session where the truth was 17), and confirm
+progress by work product: commits, `MERGE_HEAD`, file mtimes.
+
+**Ordering matters.** Work `resume_implementation` first — it is the only action
+that ends in something approvable. `recheck_ready` outranks the chases, because
+nudging someone who has already replied is the worst output this pass can
+produce.
+
+**Quiet time is measured from the last comment, not `updatedAt`** — a label
+change or a board move bumps `updatedAt`, so an issue nobody has spoken on for a
+month would otherwise look active and never age into a chase.
+
+**A `dispatchable` item is a proposal, not a launch.** Dispatch spends real
+money and needs the go-ahead. And verify the item truly meets criterion 4 first:
+`Ready for Dev` is derived, and a design-heavy item will stop and ask a question
+no unattended session can answer.
 
 ## Verb: next
 
-Rank *Backlog* and *Ready for Dev* items in this order:
+Rank Backlog and Ready items in this order:
 
 1. **User-facing breakage** — `bug` opened by someone other than the
    maintainer. A wrong number on a real dashboard outranks everything.
@@ -161,7 +308,7 @@ fresh `origin/main`.
 Serialise, do not stack:
 
 - An item with an unmet `blocked_by` stays put. When the blocker's PR merges,
-  drop `blocked`, move it to *Ready for Dev*, and dispatch fresh.
+  drop `blocked`, move it to *Ready*, and dispatch fresh.
 - Two items likely to touch the same file are queued, not run concurrently —
   the second would eat a merge conflict it did nothing to earn. Predict the
   touch-set from the Stage 2 analysis or the issue text. Warn and queue; this
@@ -177,7 +324,7 @@ prior `@claude-bot analyze` comment already on the issue**. Check this by
 reading the issue's comments from the digest (or `gh issue view` if the
 digest's comment count needs confirming) — never a local file. This is a
 check against the item itself, not a ranking pass: an item entering Analysis
-is never a member of the Backlog/Ready-for-Dev list that `next` ranks, so it cannot
+is never a member of the Backlog/Ready list that `next` ranks, so it cannot
 "rank" into a tier. The no-prior-analyze condition exists because the digest
 is a stateless snapshot with no notion of "entering" — without it, an item
 that Stage 2 already failed to reach a conclusion on (`needs-human-review`)

@@ -15,7 +15,11 @@
     "filesystem": {
       "allowWrite": [
         ".",
-        "~/GitHub/bess-manager"
+        "~/GitHub/bess-manager",
+        "~/.claude/jobs",
+        "~/Library/Caches/ms-playwright",
+        "~/.cache/ms-playwright",
+        "~/.npm"
       ]
     }
   },
@@ -86,13 +90,14 @@
       "Bash(git -* stash store*)"
     ],
     "ask": [
-      "Bash(git push)",
-      "Bash(git push *)",
-      "Bash(git -* push*)",
       "Bash(gh api)",
       "Bash(gh api *)",
       "Bash(gh pr merge*)",
-      "Bash(gh release*)",
+      "Bash(gh release create*)",
+      "Bash(gh release edit*)",
+      "Bash(gh release delete*)",
+      "Bash(gh release delete-asset*)",
+      "Bash(gh release upload*)",
       "Bash(gh repo edit*)",
       "Bash(gh repo delete*)",
       "Bash(gh pr close*)",

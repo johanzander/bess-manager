@@ -108,7 +108,7 @@ fi
 # allow-within-deny primitive, so allowWrite cannot re-open them. A "created"
 # here would mean the sandbox is looser than this repo's docs assume.
 check "git worktree add is blocked (use EnterWorktree)" blocked "$wt" \
-  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
+  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read docs/agents/local-agent-environment.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
 
 # NOTE ON `rm -rf`, which is the reason settings.json leaves rm unattended.
 # There is deliberately no probe for it, because a safe one cannot be written.
@@ -136,9 +136,9 @@ else
   cl=skipped
 fi
 check "Bash writing .claude/settings.json is blocked (use Edit/Write)" blocked "$cl" \
-  "the sandbox allowed a write to the settings file that governs it. Either the deny list changed or the sandbox is not applied -- re-derive before trusting CLAUDE.md's Permissions section."
+  "the sandbox allowed a write to the settings file that governs it. Either the deny list changed or the sandbox is not applied -- re-derive before trusting docs/agents/local-agent-environment.md's Permissions section."
 
-# 4b. The paths CLAUDE.md is unsure about. These are reported, not asserted:
+# 4b. The paths docs/agents/local-agent-environment.md is unsure about. These are reported, not asserted:
 #     the earlier claim that they were denied came from misreading the binary's
 #     GitHub Actions config as the local one, so measure rather than restate.
 touch scripts/.sandbox-probe 2>/dev/null && sc=allowed || sc=blocked
@@ -177,6 +177,80 @@ else
   check "writing through the node_modules symlink is allowed" allowed "$nm" \
     "add the main checkout to sandbox.filesystem.allowWrite -- nested worktrees and every symlink target are then covered by one entry. Without it vitest and vite build fail EPERM in every worktree. NOTE: a SIBLING checkout (../bess-manager-feature) is NOT under that path and needs its own entry."
 fi
+
+# 4d. THE TWO USER-LEVEL CACHES scripts/worktree-setup.sh WRITES. Both sit well
+#     outside the repo, so neither the "." nor the "~/GitHub/bess-manager"
+#     entry reaches them, and the built-in allowOnly list covers only
+#     ~/.npm/_logs -- not the package cache next to it. Setup does BOTH: it
+#     runs `npm install` when a lockfile has diverged from the main checkout,
+#     and then `npx playwright install chromium`.
+#
+#     What makes this worth a check rather than a comment is that NEITHER
+#     failure names the sandbox. npm reports EPERM on ~/.npm/_cacache as
+#     "Your cache folder contains root-owned files ... please run: sudo chown
+#     -R", sending you to `sudo` -- which is on the ask list and is entirely
+#     the wrong fix. And worktree-setup.sh's Playwright step is bounded by a
+#     timeout whose message blames a slow download, so a blocked cache reads
+#     as the unrelated extraction hang described in worktree-setup.sh (which
+#     is a real, separate failure -- do not conflate the two). Both the npm and
+#     the Playwright blocks were observed here in one session, and the
+#     Playwright one cost a whole worktree's setup.
+#
+# 4d-i. The Playwright browser cache. Browsers are deliberately NOT
+#       per-worktree -- one shared user-level cache serves every checkout, so
+#       redirecting PLAYWRIGHT_BROWSERS_PATH into the repo is not the fix.
+#       mkdir rather than touch, and create the cache dir first: it may not
+#       exist yet on a fresh machine, and creating it is the first thing a
+#       real install does.
+#       `PLAYWRIGHT_BROWSERS_PATH=0` is Playwright's documented sentinel for
+#       "no shared cache, keep browsers inside node_modules" -- NOT a path.
+#       Treating it as one makes the probe `mkdir -p 0` in the repo, which
+#       succeeds and reports a PASS that measured nothing.
+pw_sentinel=no
+if [ "${PLAYWRIGHT_BROWSERS_PATH:-}" = "0" ]; then
+  pw_sentinel=yes
+elif [ -n "${PLAYWRIGHT_BROWSERS_PATH:-}" ]; then
+  pw_cache="$PLAYWRIGHT_BROWSERS_PATH"
+elif [ "$(uname -s)" = "Darwin" ]; then
+  pw_cache="$HOME/Library/Caches/ms-playwright"
+else
+  pw_cache="$HOME/.cache/ms-playwright"
+fi
+
+if [ "$pw_sentinel" = yes ]; then
+  printf 'SKIP  PLAYWRIGHT_BROWSERS_PATH=0 -- browsers live in node_modules, no shared cache to probe\n'
+else
+  # A cache directory that cannot even be CREATED is the blocked case, not an
+  # inapplicable one. Reporting SKIP here (and counting no failure) is how a
+  # fresh sandboxed machine exits 0 saying the config is safe while both npm
+  # and Playwright are about to fail -- the exact condition this check exists
+  # to catch. Fold it into the same `check`, so it FAILS.
+  mkdir -p "$pw_cache" 2>/dev/null
+  if [ -d "$pw_cache" ]; then
+    mkdir "$pw_cache/.sandbox-probe" 2>/dev/null && pw=allowed || pw=blocked
+    rmdir "$pw_cache/.sandbox-probe" 2>/dev/null
+  else
+    pw=blocked
+  fi
+  check "writing the Playwright browser cache is allowed" allowed "$pw" \
+    "add the browser cache to sandbox.filesystem.allowWrite (~/Library/Caches/ms-playwright on macOS, ~/.cache/ms-playwright on Linux). Without it scripts/worktree-setup.sh cannot install browsers, and its timeout reports that as a stalled download -- indistinguishable from the separate extraction hang that timeout was written for. Do NOT point PLAYWRIGHT_BROWSERS_PATH into the repo to dodge this: one shared cache across every worktree is the design."
+fi
+
+# 4d-ii. The npm package cache. ~/.npm/_logs is writable by default and
+#        ~/.npm/_cacache is not, so npm looks fine right up until it has to
+#        fetch something -- `npm install` in worktree-setup.sh (diverged
+#        lockfile), `npm ci` in e2e/run-e2e.sh (missing frontend/dist), or any
+#        npx that misses the local node_modules.
+#        Same rule as above: "could not be created" IS blocked. Never SKIP it.
+mkdir -p "$HOME/.npm/_cacache" 2>/dev/null
+if [ -d "$HOME/.npm/_cacache" ]; then
+  mkdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null && npmc=allowed || npmc=blocked
+  rmdir "$HOME/.npm/_cacache/.sandbox-probe" 2>/dev/null
+else
+  npmc=blocked
+fi
+check "writing the npm package cache is allowed" allowed "$npmc" \
+    "add ~/.npm to sandbox.filesystem.allowWrite. The built-in allow list covers ~/.npm/_logs only, so npm can write its log and not its cache. IGNORE the error npm prints -- it claims the cache 'contains root-owned files' and tells you to run 'sudo chown -R 502:20 ~/.npm'. That is npm guessing at EPERM; the files are not root-owned and sudo is not the fix."
 
 # 5. gh. `gh pr create` is the closing step of implement-issue, and gh is a Go
 #    binary: under the macOS sandbox it cannot reach trustd to verify TLS,

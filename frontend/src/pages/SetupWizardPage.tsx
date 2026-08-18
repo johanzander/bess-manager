@@ -79,6 +79,12 @@ const SetupWizardPage: React.FC = () => {
     deviceId: '',
     controlMode: 'tou',
   });
+  // handleScan has an empty dep list, so it cannot read inverterForm directly
+  // without capturing the initial render's value -- see the Re-scan comment in
+  // handleScan (#621). Mirror the selected platform into a ref so a re-scan
+  // that detects nothing falls back to what the user actually picked.
+  const selectedPlatformRef = useRef<string>(inverterForm.inverterPlatform);
+  selectedPlatformRef.current = inverterForm.inverterPlatform;
 
   const [homeForm, setHomeForm] = useState<HomeForm>({
     consumption: 3.5,
@@ -188,7 +194,17 @@ const SetupWizardPage: React.FC = () => {
 
       // Build per-platform sensor structure from discovery results.
       // platformSensors has per-platform dicts; shared sensors come from d.sensors.
-      const platform = detectedPlatform ?? inverterForm.inverterPlatform ?? '';
+      //
+      // Read the selected platform through a ref, not the closure: handleScan
+      // has an empty dep list, so `inverterForm` here is the initial render's
+      // value. On a Re-scan that silently rewrote sensors.platform back to the
+      // default while inverterForm.inverterPlatform kept the user's choice —
+      // and the two are read by different things (allRequiredFilled resolves
+      // sensors via sensors.platform, the required-key list follows the
+      // selected tab), so once they diverged the sensor step could never be
+      // completed no matter what was typed. Hits exactly the user whose
+      // platform was never detected, who is the one most likely to Re-scan (#621).
+      const platform = detectedPlatform ?? selectedPlatformRef.current ?? '';
       const newSensors: PerPlatformSensors = emptyPerPlatformSensors(platform);
       const existing = existingSensorsRef.current;
 

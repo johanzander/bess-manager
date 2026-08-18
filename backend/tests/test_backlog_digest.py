@@ -34,8 +34,18 @@ def _run(bin_dir: Path, **extra_env: str) -> dict:
         **extra_env,
     )
     proc = subprocess.run(
-        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env, check=True
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env
     )
+    # `check=True` raised a CalledProcessError whose message carries only the
+    # exit status, so a jq failure inside the digest surfaced as a bare
+    # "returned non-zero exit status 5" with the actual error swallowed. The
+    # digest writes its diagnostics to stderr; a test harness that hides them
+    # makes every failure a guessing game.
+    if proc.returncode != 0:
+        raise AssertionError(
+            f"backlog-digest.sh exited {proc.returncode}\n"
+            f"--- stderr ---\n{proc.stderr}\n--- stdout ---\n{proc.stdout[:2000]}"
+        )
     # Typed intermediate: json.loads returns Any, and warn_return_any is on.
     digest: dict = json.loads(proc.stdout)
     return digest
@@ -49,24 +59,44 @@ def _run_expect_failure(bin_dir: Path, **extra_env: str) -> subprocess.Completed
     )
 
 
-def _porcelain(*worktrees: tuple[str, str | None]) -> str:
+def _porcelain(*worktrees: tuple[str, str | None], locked: tuple[str, ...] = ()) -> str:
     """Build `git worktree list --porcelain` output for a main checkout
-    followed by the given (path, branch) pairs. branch=None means detached."""
+    followed by the given (path, branch) pairs. branch=None means detached.
+
+    Paths named in `locked` get a `locked` record in the real shape Claude Code
+    writes it -- `locked claude session <name> (pid N start ...)`, a reason
+    string rather than the bare keyword, which a `== "locked"` match would miss.
+    """
     records = [
         "worktree /repo\nHEAD 0000000000000000000000000000000000000\nbranch refs/heads/main"
     ]
     for path, branch in worktrees:
         lines = [f"worktree {path}", "HEAD 1111111111111111111111111111111111111"]
         lines.append(f"branch refs/heads/{branch}" if branch else "detached")
+        if path in locked:
+            lines.append(
+                "locked claude session wt (pid 97626 start Mon Aug 17 15:50:14 2026)"
+            )
         records.append("\n".join(lines))
     return "\n\n".join(records) + "\n"
 
 
-def _git_shim(porcelain: str) -> str:
+def _git_shim(porcelain: str, common_dir: str = "/nonexistent/repo/.git") -> str:
+    """A `git` answering the two calls the digest makes.
+
+    `rev-parse --git-common-dir` is how the digest locates the repo's `.env`,
+    and answering it from the shim is what keeps that lookup deterministic: a
+    test that let the real git through would resolve to the maintainer's
+    actual checkout and read their real `.env`, so the outcome would depend on
+    a gitignored file that CI does not have. The default points at a directory
+    holding no `.env`, which is the "nothing to source" case every pre-existing
+    test wants.
+    """
     escaped = porcelain.replace("'", "'\\''")
     return f"""
 case "$1 $2 $3" in
   "worktree list --porcelain") printf '%s' '{escaped}' ;;
+  "rev-parse --path-format=absolute --git-common-dir") printf '%s\\n' '{common_dir}' ;;
   *) echo "unexpected git call: $*" >&2; exit 1 ;;
 esac
 """
@@ -81,19 +111,35 @@ def bin_dir(tmp_path: Path) -> Path:
     return d
 
 
-def _gh_shim(issues: list, prs: list, project_items: list) -> str:
-    """A `gh` that answers the three subcommands the digest calls."""
+def _gh_shim(
+    issues: list,
+    prs: list,
+    project_items: list,
+    merged_prs: list | None = None,
+) -> str:
+    """A `gh` that answers the four subcommands the digest calls.
+
+    `pr list` is called twice with different `--state` values, so this shim
+    branches on the whole argument string rather than just `$1 $2`. Matching
+    only the subcommand returned the OPEN list for both calls, which made every
+    open PR look merged and reported every issue as having landed.
+    """
     return f"""
-case "$1 $2" in
-  "issue list") cat <<'EOF'
+merged=$(cat <<'EOF'
+{json.dumps(merged_prs or [])}
+EOF
+)
+case "$*" in
+  *"issue list"*) cat <<'EOF'
 {json.dumps(issues)}
 EOF
     ;;
-  "pr list") cat <<'EOF'
+  *"pr list"*"--state merged"*) printf '%s\\n' "$merged" ;;
+  *"pr list"*) cat <<'EOF'
 {json.dumps(prs)}
 EOF
     ;;
-  "project item-list") cat <<'EOF'
+  *"project item-list"*) cat <<'EOF'
 {json.dumps({"items": project_items})}
 EOF
     ;;
@@ -122,104 +168,305 @@ def test_untouched_issue_lands_in_backlog(bin_dir: Path) -> None:
     assert digest["items"][0]["awaiting"] is None
 
 
-def test_unlabeled_issue_with_discussion_lands_in_analysis(bin_dir: Path) -> None:
-    """#592 and #593 are real examples: open, actively discussed, no labels.
-    A label-only rule files them under Backlog while a live conversation runs."""
-    issue = {
-        "number": 592,
-        "title": "VPP idle mode",
+def _issue(number: int, **over: object) -> dict:
+    """An issue as `gh issue list --json ...` really returns it.
+
+    Every field the digest reads is present, `createdAt` on comments included —
+    real gh always sends it, and fixtures that omitted it made `days_since`
+    fail with "strptime/1 requires string inputs" rather than exercising
+    anything.
+    """
+    issue: dict = {
+        "number": number,
+        "title": f"issue {number}",
         "labels": [],
         "author": {"login": "reporter"},
         "createdAt": "2026-08-01T00:00:00Z",
         "updatedAt": "2026-08-14T00:00:00Z",
-        "comments": [
-            {"body": "what do you mean by idle?", "author": {"login": "areader"}}
-        ],
+        "comments": [],
         "body": "",
     }
+    issue.update(over)
+    return issue
+
+
+def _comment(login: str, body: str = "...", at: str = "2026-08-10T00:00:00Z") -> dict:
+    return {"body": body, "author": {"login": login}, "createdAt": at}
+
+
+def test_human_comment_alone_does_not_move_the_column(bin_dir: Path) -> None:
+    """A human comment is NOT a blocker, and used to be treated as one.
+
+    `awaiting: discussion` was returned whenever any human comment existed,
+    which pushed an item to Analysis for ordinary traffic — reporter thanks, a
+    follow-up question, a "me too". Only a genuine wait belongs in Analysis;
+    who spoke last is reported separately so the PO can judge.
+    """
+    issue = _issue(592, labels=[], comments=[_comment("areader", "what is idle?")])
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
 
     digest = _run(bin_dir)
+    item = digest["items"][0]
 
-    assert digest["items"][0]["column"] == "Analysis"
-    assert digest["items"][0]["awaiting"] == "discussion"
+    assert item["column"] == "Backlog"
+    assert item["awaiting"] is None
+    # ...but the comment is still visible, which is the point.
+    assert item["last_comment"]["author"] == "areader"
+    assert item["last_comment"]["is_bot"] is False
 
 
-def test_bot_only_comment_does_not_trigger_discussion(bin_dir: Path) -> None:
-    """Stage 1 triage (issue-triage.yml) posts a comment on every issue it
-    processes. A bot comment alone must not read as human discussion, or the
-    heuristic degenerates to 'everything is a discussion' once triage runs
-    on every issue."""
-    issue = {
-        "number": 612,
-        "title": "Only ever touched by triage",
-        "labels": [],
-        "author": {"login": "reporter"},
-        "createdAt": "2026-08-01T00:00:00Z",
-        "updatedAt": "2026-08-14T00:00:00Z",
-        "comments": [
-            {
-                "body": "Triaged as bug, needs-debug-log.",
-                "author": {"login": "bess-manager-claude-bot"},
-            }
-        ],
-        "body": "",
-    }
+def test_bot_comment_is_marked_as_bot(bin_dir: Path) -> None:
+    """Stage 1 triage comments on every issue it processes, so a bot comment
+    must never read as a human signal."""
+    issue = _issue(612, comments=[_comment("bess-manager-claude-bot", "Triaged.")])
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
 
     digest = _run(bin_dir)
+    item = digest["items"][0]
 
-    assert digest["items"][0]["column"] == "Backlog"
-    assert digest["items"][0]["awaiting"] is None
+    assert item["column"] == "Backlog"
+    assert item["awaiting"] is None
+    assert item["last_comment"]["is_bot"] is True
+    assert item["last_comment"]["is_reporter"] is False
 
 
-def test_human_comment_still_triggers_discussion(bin_dir: Path) -> None:
-    issue = {
-        "number": 613,
-        "title": "A real human weighed in",
-        "labels": [],
-        "author": {"login": "reporter"},
-        "createdAt": "2026-08-01T00:00:00Z",
-        "updatedAt": "2026-08-14T00:00:00Z",
-        "comments": [
-            {
-                "body": "I think this is actually two bugs.",
-                "author": {"login": "areader"},
-            }
+def test_reporter_reply_is_identifiable(bin_dir: Path) -> None:
+    """The transition the digest could not previously represent.
+
+    #621 crossed the Definition of Ready line when its reporter attached a
+    debug bundle. A comment COUNT and a last-activity DATE cannot distinguish
+    that from a nudge we posted ourselves, so the follow-up chase had nothing
+    to select on.
+    """
+    issue = _issue(
+        621,
+        author={"login": "valexi7"},
+        labels=[{"name": "bug"}],
+        comments=[
+            _comment(
+                "bess-product-owner", "please attach a bundle", "2026-08-09T00:00:00Z"
+            ),
+            _comment("valexi7", "here is the export", "2026-08-12T00:00:00Z"),
         ],
-        "body": "",
-    }
+    )
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
 
     digest = _run(bin_dir)
+    last = digest["items"][0]["last_comment"]
 
-    assert digest["items"][0]["column"] == "Analysis"
-    assert digest["items"][0]["awaiting"] == "discussion"
+    assert last["author"] == "valexi7"
+    assert last["is_reporter"] is True
+    assert last["is_bot"] is False
 
 
-def test_bot_and_human_comment_still_triggers_discussion(bin_dir: Path) -> None:
-    issue = {
-        "number": 614,
-        "title": "Triaged, then a human replied",
-        "labels": [],
-        "author": {"login": "reporter"},
-        "createdAt": "2026-08-01T00:00:00Z",
-        "updatedAt": "2026-08-14T00:00:00Z",
-        "comments": [
-            {"body": "Triaged as bug.", "author": {"login": "bess-manager-claude-bot"}},
-            {
-                "body": "Actually I can't reproduce this.",
-                "author": {"login": "areader"},
-            },
-        ],
-        "body": "",
-    }
-    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+def test_board_awaiting_overrides_analyzed(bin_dir: Path) -> None:
+    """#96, exactly: labelled `analyzed`, prioritised, no blocking label — and
+    still not implementable, because its approach was undecided. It reported
+    Ready, an implementation session was dispatched at it, and that session
+    deadlocked on three design questions it had no way to answer.
+
+    A wait recorded on the board must outrank `analyzed`.
+    """
+    issue = _issue(96, labels=[{"name": "analyzed"}])
+    board = [{"content": {"number": 96}, "priority": "P2", "awaiting": "discussion"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
 
     digest = _run(bin_dir)
+    item = digest["items"][0]
 
-    assert digest["items"][0]["column"] == "Analysis"
-    assert digest["items"][0]["awaiting"] == "discussion"
+    assert item["column"] == "Analysis"
+    assert item["awaiting"] == "discussion"
+    assert item["awaiting_source"] == "board"
+
+
+def test_analyzed_with_priority_is_ready_for_dev(bin_dir: Path) -> None:
+    issue = _issue(700, labels=[{"name": "analyzed"}])
+    board = [{"content": {"number": 700}, "priority": "P1"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
+
+    assert _run(bin_dir)["items"][0]["column"] == "Ready for Dev"
+
+
+def test_analyzed_without_priority_is_not_ready(bin_dir: Path) -> None:
+    """The design always required a Priority for Ready. The condition was left
+    out because no board existed, and never added once one did."""
+    issue = _issue(701, labels=[{"name": "analyzed"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    assert _run(bin_dir)["items"][0]["column"] == "Analysis"
+
+
+def test_blocked_label_is_never_ready(bin_dir: Path) -> None:
+    """Definition of Ready criterion 5. #571 reported `Ready for Dev` while
+    carrying the `blocked` label."""
+    issue = _issue(571, labels=[{"name": "analyzed"}, {"name": "blocked"}])
+    board = [{"content": {"number": 571}, "priority": "P2"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
+
+    item = _run(bin_dir)["items"][0]
+    assert item["column"] == "Analysis"
+    assert item["blocked"] is True
+
+
+def test_open_blocked_by_reference_is_never_ready(bin_dir: Path) -> None:
+    """The blocker (#500) is itself open, so the wait is real."""
+    issue = _issue(702, labels=[{"name": "analyzed"}], body="Blocked by #500\n")
+    blocker = _issue(500)
+    board = [{"content": {"number": 702}, "priority": "P1"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue, blocker], [], board))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 702)
+    assert item["column"] == "Analysis"
+    assert item["blocked_by"] == [500]
+    assert item["blocked_by_open"] == [500]
+    assert item["blocked"] is True
+
+
+def test_a_bulleted_blocked_by_line_still_counts(bin_dir: Path) -> None:
+    """Anchoring to the line start must still allow the markdown form people
+    actually write."""
+    issue = _issue(705, labels=[{"name": "analyzed"}], body="- Blocked by #500\n")
+    board = [{"content": {"number": 705}, "priority": "P1"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], board))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 705)
+    assert item["blocked_by"] == [500]
+    assert item["blocked"] is True
+
+
+def test_a_negated_blocked_by_is_not_a_blocker(bin_dir: Path) -> None:
+    """ "not blocked by #500 anymore" and "no longer blocked by #500" are the
+    natural way to update an issue once its blocker resolves — so a free
+    substring scan fires exactly when the blocker is GONE.
+
+    Matched per line and anchored to the line start, which rejects these without
+    a negation blacklist that would only cover the phrasings someone thought of.
+    This was inert on main (`blocked_by` was extracted and never used); gating
+    `column()` on it is what gave the bad parse teeth.
+    """
+    for body in (
+        "This is not blocked by #500 anymore.\n",
+        "We are no longer blocked by #500.\n",
+        "Was blocked by #500 but that shipped.\n",
+    ):
+        issue = _issue(706, labels=[{"name": "analyzed"}], body=body)
+        board = [{"content": {"number": 706}, "priority": "P1"}]
+        _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], board))
+
+        item = next(i for i in _run(bin_dir)["items"] if i["number"] == 706)
+        assert item["blocked_by"] == [], body
+        assert item["blocked"] is False, body
+        assert item["column"] == "Ready for Dev", body
+
+
+def test_an_incidental_mid_sentence_mention_does_not_reclassify(bin_dir: Path) -> None:
+    """`$blocked` is tested before the analyzed/priority branch, so an untriaged
+    issue that merely mentions a blocker in prose would move Backlog -> Analysis
+    with no human triage behind it."""
+    issue = _issue(707, labels=[], body="Might be blocked by #500, not sure yet.\n")
+    _write_shim(bin_dir, "gh", _gh_shim([issue, _issue(500)], [], []))
+
+    item = next(i for i in _run(bin_dir)["items"] if i["number"] == 707)
+    assert item["blocked"] is False
+    assert item["column"] == "Backlog"
+
+
+def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
+    """A `Blocked by #N` line is never edited out once N lands, so a pure text
+    scan pins the item out of Ready for Dev forever.
+
+    That is the same failure this script exists to fix, pointing the other way:
+    an item reading wrong relative to its real state. Only blockers still on the
+    open-issue list count. The reference stays visible in `blocked_by`.
+    """
+    issue = _issue(703, labels=[{"name": "analyzed"}], body="Blocked by #499\n")
+    board = [{"content": {"number": 703}, "priority": "P1"}]
+    # #499 is absent from the open-issue list, i.e. closed.
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
+
+    item = _run(bin_dir)["items"][0]
+    assert item["blocked_by"] == [499]
+    assert item["blocked_by_open"] == []
+    assert item["blocked"] is False
+    assert item["column"] == "Ready for Dev"
+
+
+def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
+    bin_dir: Path,
+) -> None:
+    """Confirming intent, per review of #623.
+
+    A recorded wait beats a live worktree in `column`, because an item whose
+    scope is unsettled must not read as progressing — that is the whole point of
+    the precedence fix. The risk is hiding active undelivered code, so the
+    worktree is still reported on the item; only the column defers to the wait.
+    """
+    issue = _issue(704, labels=[{"name": "needs-debug-log"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
+    _write_shim(
+        bin_dir, "git", _git_shim(_porcelain(("/repo/wt/704", "fix/issue-704-live")))
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["column"] == "Analysis"
+    assert item["awaiting"] == "reporter"
+    # The code is still visible — the wait changes the column, not the evidence.
+    assert item["worktree"] == "/repo/wt/704"
+    assert item["worktree_branch"] == "fix/issue-704-live"
+    assert item["stale_worktree"] is False
+
+
+def test_worktree_whose_branch_merged_is_not_in_progress(bin_dir: Path) -> None:
+    """#593, #571, #542 and #466 all reported In Progress while their PRs had
+    already merged, because an un-pruned worktree was treated as live work."""
+    issue = _issue(593, labels=[{"name": "bug"}])
+    merged = [
+        {"number": 618, "headRefName": "fix/issue-593-vpp-write-order", "body": ""}
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/wt/593", "fix/issue-593-vpp-write-order"))),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["stale_worktree"] is True
+    assert item["column"] != "In Progress"
+    assert item["column"] == "Backlog"
+
+
+def test_worktree_on_an_unmerged_branch_is_in_progress(bin_dir: Path) -> None:
+    """The other half: a live worktree must still read as In Progress, or the
+    stale-detection fix would hide real work."""
+    issue = _issue(594, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
+    _write_shim(
+        bin_dir, "git", _git_shim(_porcelain(("/repo/wt/594", "fix/issue-594-live")))
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["stale_worktree"] is False
+    assert item["column"] == "In Progress"
+
+
+def test_merged_pr_does_not_close_an_open_issue(bin_dir: Path) -> None:
+    """A merged PR that closes an issue must NOT be read as Done while the
+    issue is open. This project's beta PRs deliberately omit `Closes #N` until
+    the fix graduates, so an open issue with a merged fix is the normal state —
+    treating it as finished reclassified 7 live issues, #118 and #403 included.
+    """
+    issue = _issue(118, labels=[{"name": "bug"}])
+    merged = [{"number": 504, "headRefName": "fix/whatever", "body": "fixes #118"}]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] == 504
+    assert item["column"] != "Done"
 
 
 def test_needs_debug_log_is_awaiting_reporter(bin_dir: Path) -> None:
@@ -230,7 +477,7 @@ def test_needs_debug_log_is_awaiting_reporter(bin_dir: Path) -> None:
         "author": {"login": "reporter"},
         "createdAt": "2026-08-01T00:00:00Z",
         "updatedAt": "2026-08-02T00:00:00Z",
-        "comments": [{"body": "please attach a debug bundle"}],
+        "comments": [_comment("owner", "please attach a debug bundle")],
         "body": "",
     }
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
@@ -557,3 +804,205 @@ def test_missing_project_number_fails_loudly(bin_dir: Path) -> None:
 
     assert result.returncode != 0
     assert "PROJECT_NUMBER" in result.stderr
+
+
+def _dotenv(bin_dir: Path, tmp_path: Path, contents: str) -> None:
+    """Point the git shim at a repo root holding the given `.env`."""
+    repo_root = tmp_path / "checkout"
+    repo_root.mkdir(exist_ok=True)
+    (repo_root / ".env").write_text(contents)
+    _write_shim(
+        bin_dir, "git", _git_shim(_porcelain(), common_dir=str(repo_root / ".git"))
+    )
+
+
+def test_project_number_is_read_from_dotenv(bin_dir: Path, tmp_path: Path) -> None:
+    """The whole point: an unattended pass exports nothing, so the digest has
+    to find PROJECT_NUMBER itself or it never runs at all. `.env` is
+    gitignored, so no caller inherits it."""
+    _write_shim(bin_dir, "gh", _gh_shim([], [], []))
+    _dotenv(bin_dir, tmp_path, "PROJECT_NUMBER=1\nBESS_PO_TOKEN=tok\n")
+
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
+    env.pop("PROJECT_NUMBER", None)
+    proc = subprocess.run(
+        ["bash", str(SCRIPT)], capture_output=True, text=True, env=env
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout)["counts"]["issues"] == 0
+
+
+def test_environment_wins_over_dotenv(bin_dir: Path, tmp_path: Path) -> None:
+    """An explicit PROJECT_NUMBER must not be overwritten by the file, or the
+    variable becomes un-overridable and a pinned value silently reads the
+    maintainer's real board."""
+    _dotenv(bin_dir, tmp_path, "PROJECT_NUMBER=1\n")
+    # A `gh` that refuses any project but 7. The assertion is that the digest
+    # asked for 7, which is observable nowhere except in the call itself.
+    _write_shim(
+        bin_dir,
+        "gh",
+        'case "$*" in\n'
+        '  *"project item-list 7"*) echo \'{"items": []}\' ;;\n'
+        '  *"project item-list"*) echo "wrong project: $*" >&2; exit 1 ;;\n'
+        '  *"issue list"*|*"pr list"*) echo \'[]\' ;;\n'
+        '  *) echo "unexpected gh call: $*" >&2; exit 1 ;;\n'
+        "esac\n",
+    )
+
+    digest = _run(bin_dir, PROJECT_NUMBER="7")
+
+    assert digest["counts"]["issues"] == 0
+
+
+def test_a_dotenv_without_the_variable_still_fails_loudly(
+    bin_dir: Path, tmp_path: Path
+) -> None:
+    """A `.env` that exists but carries no PROJECT_NUMBER must not be mistaken
+    for a configured one."""
+    _write_shim(bin_dir, "gh", _gh_shim([], [], []))
+    _dotenv(bin_dir, tmp_path, "BESS_PO_TOKEN=tok\n")
+
+    result = _run_expect_failure(bin_dir)
+
+    assert result.returncode != 0
+    assert "PROJECT_NUMBER" in result.stderr
+
+
+def test_board_status_reports_the_cards_current_column(bin_dir: Path) -> None:
+    """`column` is where the evidence says the card belongs; `board_status` is
+    where it actually sits. The board verb reconciles the two, so the digest
+    has to carry both — otherwise reconciling means a second API call by
+    hand, which is the one thing this script exists to prevent."""
+    issue = _issue(602, labels=[{"name": "bug"}])
+    card = {"content": {"number": 602}, "status": "Ready for Dev", "priority": "P1"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["board_status"] == "Ready for Dev"
+    assert item["column"] == "Backlog"
+
+
+def test_issue_with_no_card_reports_null_status_and_is_an_orphan(
+    bin_dir: Path,
+) -> None:
+    """An off-board issue carries no Priority, and `Ready for Dev` requires
+    one — so it can never become dispatchable however well it is analysed. It
+    has to be surfaced, not read as a quiet Backlog item."""
+    issue = _issue(624, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert digest["items"][0]["board_status"] is None
+    orphans = [o for o in digest["orphans"] if o["kind"] == "issue_no_card"]
+    assert [o["ref"] for o in orphans] == ["624"]
+
+
+def test_pr_cards_are_emitted_separately_from_issue_cards(bin_dir: Path) -> None:
+    """`content.type` is the load-bearing bit, and it is confirmed against a
+    real card rather than assumed: an added PR reports "PullRequest" with
+    number/title/url/repository alongside it.
+
+    Board membership for PRs is what gives a decision about a PR somewhere to
+    live -- without it "#437 is lower priority" had nowhere to be recorded, so
+    every rhythm pass re-reported it as due.
+    """
+    issue = _issue(601)
+    cards = [
+        {
+            "content": {"number": 601, "type": "Issue"},
+            "status": "Backlog",
+            "priority": "P2",
+        },
+        {
+            "content": {"number": 437, "type": "PullRequest"},
+            "status": "In Review",
+            "priority": "P4",
+        },
+        {
+            "content": {"number": 167, "type": "PullRequest"},
+            "status": "Backlog",
+            "awaiting": "discussion",
+        },
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], cards))
+
+    digest = _run(bin_dir)
+
+    assert digest["pr_board"] == [
+        {
+            "number": 437,
+            "board_status": "In Review",
+            "priority": "P4",
+            "awaiting": None,
+        },
+        {
+            "number": 167,
+            "board_status": "Backlog",
+            "priority": None,
+            "awaiting": "discussion",
+        },
+    ]
+    # The issue card is untouched by the split and still drives the item.
+    assert digest["items"][0]["priority"] == "P2"
+
+
+def test_pr_board_is_empty_when_no_prs_are_carded(bin_dir: Path) -> None:
+    issue = _issue(601)
+    card = {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    assert _run(bin_dir)["pr_board"] == []
+
+
+def test_a_locked_worktree_is_reported_as_locked(bin_dir: Path) -> None:
+    """The lock is the liveness signal `claude agents` cannot provide: it lists
+    background agents only, so a foreground `/implement-issue` is invisible and
+    its worktree reads as abandoned."""
+    issue = _issue(624)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-624", "fix/issue-624-pwl"),
+                locked=("/repo/worktrees/issue-624",),
+            )
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-624"
+    assert item["worktree_locked"] is True
+    # ...and the name-matched session is still null, which is the whole point.
+    assert item["session"] is None
+
+
+def test_an_unlocked_worktree_is_reported_as_unlocked(bin_dir: Path) -> None:
+    issue = _issue(625)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/worktrees/issue-625", "fix/issue-625"))),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-625"
+    assert item["worktree_locked"] is False
+
+
+def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:
+    issue = _issue(602)
+    card = {"content": {"number": 602}, "status": "Backlog", "priority": "P1"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    digest = _run(bin_dir)
+
+    assert [o for o in digest["orphans"] if o["kind"] == "issue_no_card"] == []

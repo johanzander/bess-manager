@@ -494,12 +494,21 @@ On first startup with no sensors configured, or when the user triggers discovery
 
 The HA WebSocket API (`config/entity_registry/list`) returns every registered entity with its `platform` field.
 
+Matching is by exact platform name, so a supported inverter reached through a
+different integration is not detected — Huawei LUNA2000/EMMA via
+`huawei_emma_management` rather than the stock `huawei_solar`, for example.
+Detection therefore narrows the wizard's **defaults**, never its **choices**:
+every platform stays selectable so such a user can pick theirs and map the
+sensors by hand (#621).
+
 Detected integrations:
 
 | Category  |   HA Platform       | Detected As |
 |-----------|---------------------|-------------|
 | Inverter  | `growatt_server`    | Growatt     |
 | Inverter  | `solax_modbus`      | SolaX       |
+| Inverter  | `solis_modbus`      | Solis       |
+| Inverter  | `huawei_solar`      | Huawei      |
 | Price     | `nordpool`          | Nordpool    |
 | Price     | `octopus_energy`    | Octopus Energy |
 | Forecast  | `solcast_solar`     | Solcast solar forecast |
@@ -597,7 +606,7 @@ The setup wizard is a 6-step flow for first-time configuration. It is triggered 
 #### Wizard Steps (Frontend: `SetupWizardPage.tsx`)
 
 1. **Scan** — Calls `/api/setup/discover` to auto-detect integrations and sensors
-2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform. Blocked while a required sensor is unmapped, or while a required sensor's only entity is disabled in HA (the entities to enable are listed by name)
+2. **Review Sensors** — Displays discovered sensor mappings, allows manual correction, selects inverter platform. Every platform is selectable regardless of what was detected; the per-platform status dot reports detection, and the auto-detected platform is merely preselected. Blocked while a required sensor is unmapped, or while a required sensor's only entity is disabled in HA (the entities to enable are listed by name)
 3. **Electricity Pricing** — Configure price area, provider (Nordpool/Octopus), markup, VAT (pre-filled from discovery hints). Blocked until the selected provider's required configuration is filled in, mirroring the server-side check on `/api/setup/complete`
 4. **Battery** — Set capacity, SOC limits, power rating, cycle cost
 5. **Home** — Set consumption, fuse current, voltage, phase count (pre-filled from detected phase count)

@@ -129,6 +129,40 @@ class TestIntentToVpp:
         assert power_pct == 1
         assert enabled is True
 
+    def test_idle_at_reserve_floor_releases_remote_control(self, controller):
+        """#592: at the reserve floor the battery-first hold has nothing left
+        to protect, but keeping remote control enabled re-asserts a command
+        every period so the inverter (and its BMS) never sleeps.
+
+        Releasing to the inverter's own load_first self-use is flow-neutral
+        here -- there is no headroom to discharge (the hardware's own
+        discharge_stop_soc register is the floor) and passive solar
+        absorption is preserved, which grid_first (power=0, enabled) would
+        lose. See test_idle_at_floor_is_flow_neutral in
+        test_vpp_simulator_branches.py for the outcome-level proof."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="IDLE",
+            at_reserve_floor=True,
+        )
+        assert power_pct == 0
+        assert enabled is False
+
+    def test_idle_above_reserve_floor_still_holds_battery_first(self, controller):
+        """#592 must not weaken #466: above the floor there IS energy being
+        held back for a later peak, so the battery-first hold stays."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=False,
+            strategic_intent="IDLE",
+            at_reserve_floor=False,
+        )
+        assert power_pct == 1
+        assert enabled is True
+
     def test_solar_export_keeps_remote_control_enabled(self, controller):
         """SOLAR_EXPORT (block_passive_charging=True) -> grid-first hold,
         not self-use -- see #355. Remote control stays enabled with

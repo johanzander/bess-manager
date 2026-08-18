@@ -274,6 +274,26 @@ semantics" below):
 - `SOLAR_EXPORT` (rate=0, `block_passive_charging=True`) → `vpp_power=0`,
   remote control **enabled** (`grid_first` hold)
 
+**Register write ordering (issue [#593](https://github.com/johanzander/bess-manager/issues/593)):**
+Growatt VPP has no separate trigger entity — writing `vpp_remote_control`
+(30407) *is* the commit, so the inverter immediately executes whatever
+30409/30408 already hold. The write order is therefore load-bearing, not
+stylistic:
+
+- **Activating** a period: `vpp_power` (30409) → `vpp_time` (30408) →
+  `vpp_remote_control=Enabled` (30407) **last**. Arming first would execute
+  the previous active period's power value until the new one lands — up to
+  ±100%, i.e. a full-rated charge or export spike on every mode switch.
+- **Releasing** to `load_first`: `vpp_remote_control=Disabled` **first**, then
+  `vpp_power=0`. The zero clears the latch so the *next* activation can't
+  inherit a stale value; it must come after the disable, because a 0 written
+  while remote control is still enabled selects the `grid_first` hold (see
+  "SOLAR_EXPORT semantics" below) rather than being inert.
+
+A consequence worth knowing when reading logs: a failed power or timer write
+now leaves remote control untouched, so the period degrades to `load_first`
+self-use instead of executing a stale command.
+
 **LOAD_SUPPORT semantics (fixed — issue [#413](https://github.com/johanzander/bess-manager/issues/413)):**
 Unlike TOU mode (where `LOAD_SUPPORT` maps to `load_first`, letting the
 inverter's own control loop follow actual house load), VPP mode previously
@@ -354,6 +374,47 @@ real-hardware-validated**: ships experimental pending confirmation that this
 doesn't cause any grid-charge creep overnight (`vpp_power>0` is the same
 mechanism `GRID_CHARGING` uses at `+100%` to force-charge from grid, just at
 a 1% target).
+
+**IDLE at the reserve floor (issue [#592](https://github.com/johanzander/bess-manager/issues/592)):**
+The `battery_first` hold above exists to protect *stored* energy from
+self-consumption. At the configured minimum SoC there is none left to
+protect, so the hold buys nothing — and because it keeps remote control
+enabled, `_apply_period_vpp` rewrites the command every period to refresh
+the fallback timer, so the inverter is never handed back and its BMS never
+idles down. Reported on real hardware as a long overnight idle where the
+battery and BMS stayed awake.
+
+`IDLE` with the battery at (or below) `min_soc` therefore maps to
+`vpp_power=0`, remote control **disabled** — released to the inverter's own
+`load_first` self-use. Above the floor the `battery_first` hold is
+unchanged, so #466 is preserved.
+
+Releasing is chosen over the alternative of writing `vpp_power=0` with
+remote control still *enabled* (`grid_first`) because only the released form
+is flow-neutral: `load_first` still absorbs passive solar surplus exactly as
+the `battery_first` hold does, whereas `grid_first` holds against charging
+and would bypass that surplus to the grid — a real change, since IDLE's DP
+cost model does credit passive absorption. Verified across the fixture
+corpus: the v10.0.2 VPP regression baseline's **commands** move at every
+IDLE-at-floor period — 499 periods across 50 entries, `[1, true]` →
+`[0, false]` — while **realized cost and the SoE trajectory are bit-identical**
+(0.000000000000 on both halves of the pin). Commands changing with no energy
+moving is precisely what flow-neutral means here; an unchanged baseline would
+have meant the branch was never exercised, which is what an earlier revision
+of this fix wrongly reported.
+
+**Caveat — the floor that actually binds is the inverter's own.** How far
+the battery can fall under released self-use is governed by the inverter's
+`discharge_stop_soc` register, not by BESS's `min_soc`, and **in VPP mode
+BESS never writes that register** (`initialize_hardware` returns before
+`sync_soc_limits` — see issue #309). If the inverter's own floor sits below
+the configured `min_soc`, released self-use can draw the gap between them.
+This is not new to #592: `LOAD_SUPPORT` (#413) and `SOLAR_STORAGE` already
+release control the same way at any SoC. `vpp_simulator` models the release
+as a hold at `min_soe_kwh`, i.e. it assumes the two floors agree. **Not yet
+real-hardware-validated**; ships experimental pending confirmation that the
+BMS does sleep and that the battery does not discharge below the configured
+minimum.
 
 **Enable sequence** (real-hardware-tested, see issue #118 comments): write
 `vpp_status=Enabled` + `vpp_allow_ac_charging=Enabled`, wait ~1s, then write

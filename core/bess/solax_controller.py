@@ -164,6 +164,7 @@ class SolaxController(InverterController):
         discharge_rate: int,
         block_passive_charging: bool = False,
         strategic_intent: str = "",
+        at_reserve_floor: bool = False,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
         for display, mirroring _write_period_to_hardware()'s three branches
@@ -172,10 +173,12 @@ class SolaxController(InverterController):
         actual hardware write logic doesn't use them either (see the
         TODO.md gap note: SolaX never received the #355/#413 Growatt VPP
         fixes, so its real behavior for SOLAR_EXPORT/LOAD_SUPPORT differs).
-        The two extra parameters exist only so the base class's
+        The extra parameters exist only so the base class's
         _mode_display_fields() can call _vpp_display_state() with a single
         unified signature across all vpp_power controllers -- they do not
-        change SolaxController's own behavior.
+        change SolaxController's own behavior. at_reserve_floor (#592) is in
+        that same category: native SolaX never received the Growatt VPP IDLE
+        hold (#466) that #592 releases, so there is nothing here to release.
 
         Returns:
             (power_pct, remote_control_enabled) -- power_pct expressed as a

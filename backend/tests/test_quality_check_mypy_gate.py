@@ -19,11 +19,21 @@ import os
 import re
 import stat
 import subprocess
+import sys
 from pathlib import Path
+
+import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = REPO_ROOT / "scripts" / "quality-check.sh"
-REAL_MYPY = REPO_ROOT / ".venv" / "bin" / "mypy"
+
+# Reach mypy through the interpreter running the tests, not through a fixed
+# `.venv/bin/mypy` path. CI installs dependencies without that venv layout, so
+# the fixed path exec'd a binary that did not exist -- mypy then "failed" in
+# every run alike, the delta assertions collapsed to zero, and the suite went
+# red on CI while passing locally. If mypy is not importable at all, skip
+# rather than assert against a gate that cannot run.
+pytest.importorskip("mypy")
 
 # Only the merge-base arm differs between these two, so any difference in a
 # run is attributable to that arm alone. `ls-files --others` names the fixture
@@ -90,7 +100,7 @@ def _run(
         _write_shim(bin_dir, tool, "exit 0\n")
     # Real mypy, reached through a passthrough: the gate resolves tools from
     # PATH when the cwd has no .venv, and the temp project never will.
-    _write_shim(bin_dir, "mypy", f'exec "{REAL_MYPY}" "$@"\n')
+    _write_shim(bin_dir, "mypy", f'exec "{sys.executable}" -m mypy "$@"\n')
 
     env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}")
     return subprocess.run(

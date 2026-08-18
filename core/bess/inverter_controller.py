@@ -693,13 +693,33 @@ class InverterController(ABC):
         question, or the UI shows a hold for periods production releases and
         `_mode_display_fields` breaks its own no-fabrication contract.
 
+        **Index p-1, not p.** `state_of_energy` is `combined_soe`, whose only
+        writer stores `period_data.energy.battery_soe_end` (see
+        `BatterySystemManager._create_updated_schedule`) -- `battery_soe_end`
+        and `battery_soe_start` are distinct fields on `EnergyData`. So
+        `state_of_energy[p]` is the SoE *leaving* period p, and the SoE
+        *entering* it is index p-1. Reading index p directly would answer for
+        the wrong period: at the boundary where the plan first reaches the
+        floor it would report "at floor" one period early, and one period late
+        on the way back up -- exactly the display/write disagreement this
+        method exists to prevent.
+
+        Period 0 has no predecessor in the array. `combined_soe[0]` is that
+        period's own *entering* SoE in the one case where period 0 is a
+        prediction rather than history (period 0 being the optimization
+        period, written as `current_soe`), so index 0 is the correct read
+        there rather than a fallback.
+
         False when there is no plan to read: with no trajectory there is no
         prediction to display, and the hold is the unchanged-behaviour answer.
         """
-        soe = getattr(self.current_schedule, "state_of_energy", None)
-        if not soe or period >= len(soe):
+        if self.current_schedule is None:
             return False
-        return soe[period] <= self.battery_settings.min_soe_kwh
+        soe = self.current_schedule.state_of_energy
+        if period >= len(soe):
+            return False
+        entering_soe = soe[period - 1] if period > 0 else soe[0]
+        return entering_soe <= self.battery_settings.min_soe_kwh
 
     def _mode_display_fields(
         self,

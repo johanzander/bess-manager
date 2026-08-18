@@ -161,6 +161,26 @@ def _vpp_controller_with_plan(soe: float) -> SolaxModbusGrowattController:
     return controller
 
 
+CROSSING = 20  # the period during which the plan discharges onto the floor
+
+
+def _vpp_controller_with_plan_crossing_the_floor() -> SolaxModbusGrowattController:
+    """A plan that is above the floor until it discharges onto it during
+    `CROSSING`, so index p and index p-1 give different answers there."""
+    settings = BatterySettings(total_capacity=50.0, min_soc=10.0, max_soc=95.0)
+    controller = SolaxModbusGrowattController(settings, control_mode="vpp")
+    controller.strategic_intents = ["IDLE"] * 96
+    # state_of_energy[p] == SoE LEAVING period p. Leaving CROSSING is the
+    # floor, so entering CROSSING (index CROSSING - 1) is still above it.
+    controller.current_schedule = DPSchedule(
+        actions=[0.0] * 96,
+        state_of_energy=[8.0 if p < CROSSING else 5.0 for p in range(97)],
+        prices=[0.1] * 96,
+        original_dp_results={"strategic_intent": ["IDLE"] * 96},
+    )
+    return controller
+
+
 class TestDisplayAgreesWithWhatIsWritten:
     """`get_period_settings()` feeds the API/UI, and `_mode_display_fields`'s
     contract is that it "never fabricates a label the hardware doesn't back".
@@ -182,3 +202,24 @@ class TestDisplayAgreesWithWhatIsWritten:
         fields = controller.get_period_settings(PERIOD)
         assert fields["vpp_power_pct"] == 1
         assert fields["vpp_remote_control"] is True
+
+    def test_the_crossing_period_still_displays_the_hold(self):
+        """The uniform-trajectory fixtures above cannot see an off-by-one:
+        with every index equal, `soe[period]` and `soe[period - 1]` agree.
+
+        This one varies across the boundary. `state_of_energy[p]` is the SoE
+        *leaving* period p, so a plan that discharges to the floor during
+        CROSSING is still above the floor *entering* it -- the write path,
+        reading live SoC, would hold there. Reading index `period` instead of
+        `period - 1` reports the release one period early, which is precisely
+        the display/write disagreement this class exists to catch.
+        """
+        controller = _vpp_controller_with_plan_crossing_the_floor()
+
+        entering_above = controller.get_period_settings(CROSSING)
+        assert entering_above["vpp_power_pct"] == 1
+        assert entering_above["vpp_remote_control"] is True
+
+        entering_at_floor = controller.get_period_settings(CROSSING + 1)
+        assert entering_at_floor["vpp_power_pct"] == 0
+        assert entering_at_floor["vpp_remote_control"] is False

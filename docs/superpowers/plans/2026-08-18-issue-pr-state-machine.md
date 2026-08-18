@@ -123,24 +123,45 @@ git commit -m "feat: add In Verification and Awaiting:maintainer, which the stat
 Add to `backend/tests/test_backlog_digest.py`:
 
 ```python
-def test_an_issue_with_several_prs_reports_all_of_them(tmp_path: Path) -> None:
+def _pr(number: int, **over: object) -> dict:
+    """A PR as `gh pr list --json ...` returns it to the digest."""
+    pr: dict = {
+        "number": number,
+        "title": f"pr {number}",
+        "body": "",
+        "headRefName": f"fix/pr-{number}",
+        "isDraft": True,
+        "mergeable": "MERGEABLE",
+    }
+    pr.update(over)
+    return pr
+
+
+def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
     """The no-auto-close rule means a beta PR and a graduation PR both point at
     one issue. Returning only the first made the second invisible to every
-    board pass, and derived the column from an arbitrary one of the two."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_shim(bin_dir, "gh", _gh_shim(
-        issues=[_issue(500, labels=["bug"])],
-        prs=[
-            _pr(501, body="Refs #500", head="fix/issue-500-a", mergeable="MERGEABLE"),
-            _pr(502, body="Closes #500", head="fix/issue-500-b", mergeable="CONFLICTING"),
-        ],
-    ))
-    _write_shim(bin_dir, "git", _git_shim(_porcelain()))
-    _write_shim(bin_dir, "claude", "echo '[]'")
+    board pass, and derived the column from an arbitrary one of the two.
+
+    Branch names here deliberately carry NO issue number, so the association is
+    proved by the body reference alone -- including the new `Refs` verb, which
+    is the only spelling an intermediate PR is allowed."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(500, labels=[{"name": "bug"}])],
+            [
+                _pr(501, body="Refs #500", headRefName="fix/beta-work"),
+                _pr(502, body="Closes #500", headRefName="fix/graduation",
+                    mergeable="CONFLICTING"),
+            ],
+            [],
+        ),
+    )
 
     item = _run(bin_dir)["items"][0]
     assert [p["number"] for p in item["prs"]] == [501, 502]
+    assert item["prs"][1]["mergeable"] == "CONFLICTING"
     assert "pr" not in item
 ```
 
@@ -172,6 +193,24 @@ In `scripts/backlog-digest.sh`, replace `pr_matches_issue` and `pr_for`:
     [ $prs[] | select(pr_matches_issue(.; $n))
              | {number: .number, mergeable: .mergeable, isDraft: .isDraft} ]
     | sort_by(.number);
+```
+
+- [ ] **Step 3b: Teach the MERGED-PR scan the same verb**
+
+`scripts/backlog-digest.sh:80` computes `refs` for merged PRs with a **second,
+separate regex**, and `merged_pr_for` reads it. Leaving it alone means an
+intermediate `Refs #N` PR is never associated once merged — which is exactly
+the case `In Verification` exists for, since only the graduation PR may use a
+closing verb. Change:
+
+```jq
+      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves) #([0-9]+)") | .[0] | tonumber ]
+```
+
+to:
+
+```jq
+      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs) #([0-9]+)") | .[0] | tonumber ]
 ```
 
 - [ ] **Step 4: Emit `prs` and drop `pr` / `pr_state`**
@@ -356,22 +395,31 @@ The marker is an HTML comment, invisible in rendered GitHub markdown, so the han
 - [ ] **Step 1: Write the failing test**
 
 ```python
-def test_resume_handoffs_are_counted(tmp_path: Path) -> None:
+def test_resume_handoffs_are_counted(bin_dir: Path) -> None:
     """A session that died twice is telling you something -- but nothing
     counted, so nothing could act on it. The marker is an HTML comment so the
     handoff still reads as prose on GitHub."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_shim(bin_dir, "gh", _gh_shim(issues=[_issue(520, labels=["bug"], comments=[
-        {"author": {"login": "bess-developer"}, "createdAt": "2026-08-01T00:00:00Z",
-         "body": "Resuming implementation.\n<!-- resume-handoff -->"},
-        {"author": {"login": "johanzander"}, "createdAt": "2026-08-02T00:00:00Z",
-         "body": "thanks"},
-        {"author": {"login": "bess-developer"}, "createdAt": "2026-08-03T00:00:00Z",
-         "body": "Resuming implementation.\n<!-- resume-handoff -->"},
-    ])]))
-    _write_shim(bin_dir, "git", _git_shim(_porcelain()))
-    _write_shim(bin_dir, "claude", "echo '[]'")
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [
+                _issue(
+                    520,
+                    labels=[{"name": "bug"}],
+                    comments=[
+                        _comment("bess-developer",
+                                 "Resuming implementation.\n<!-- resume-handoff -->"),
+                        _comment("johanzander", "thanks"),
+                        _comment("bess-developer",
+                                 "Resuming implementation.\n<!-- resume-handoff -->"),
+                    ],
+                )
+            ],
+            [],
+            [],
+        ),
+    )
 
     assert _run(bin_dir)["items"][0]["resume_count"] == 2
 ```
@@ -436,21 +484,22 @@ Half the collision gate is exact and needs no prediction: what open PRs and live
 - [ ] **Step 1: Write the failing test**
 
 ```python
-def test_in_flight_files_map_paths_to_the_prs_touching_them(tmp_path: Path) -> None:
+def test_in_flight_files_map_paths_to_the_prs_touching_them(bin_dir: Path) -> None:
     """The collision gate needs to know what is already being edited. Half of
     that is exact -- the changed-file set of every open PR -- and only the
     candidate's own touch-set has to be predicted."""
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    _write_shim(bin_dir, "gh", _gh_shim(
-        issues=[_issue(530, labels=["bug"])],
-        prs=[_pr(531, body="Refs #530", head="fix/issue-530"),
-             _pr(532, body="Refs #530", head="fix/issue-530-b")],
-        pr_files={531: ["CLAUDE.md", "scripts/backlog-rhythm.sh"],
-                  532: ["CLAUDE.md"]},
-    ))
-    _write_shim(bin_dir, "git", _git_shim(_porcelain()))
-    _write_shim(bin_dir, "claude", "echo '[]'")
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(530, labels=[{"name": "bug"}])],
+            [_pr(531, body="Refs #530", headRefName="fix/a-530"),
+             _pr(532, body="Refs #530", headRefName="fix/b-530")],
+            [],
+            pr_files={531: ["CLAUDE.md", "scripts/backlog-rhythm.sh"],
+                      532: ["CLAUDE.md"]},
+        ),
+    )
 
     in_flight = _run(bin_dir)["in_flight_files"]
     assert in_flight["CLAUDE.md"] == [531, 532]
@@ -536,7 +585,7 @@ def test_awaiting_maintainer_escalates_instead_of_suppressing(tmp_path: Path) ->
 def test_three_changes_requested_rounds_escalate(tmp_path: Path) -> None:
     """Three rounds of disagreement is a design argument, not a bug -- the
     implement-issue cap already says so. Another round will not settle it."""
-    pr = _pr_fixture(701, is_draft=True, reviews=[
+    pr = _pr(701, isDraft=True, reviews=[
         {"state": "CHANGES_REQUESTED"}, {"state": "CHANGES_REQUESTED"},
         {"state": "CHANGES_REQUESTED"},
     ])
@@ -557,7 +606,7 @@ def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:
     assert "resume_implementation" in actions
 ```
 
-Add `"resume_count": 0` to the `_item` default dict, and a `_pr_fixture` helper mirroring the `gh pr list` JSON shape (`number, title, isDraft, mergeable, reviewDecision, reviews, author, statusCheckRollup`).
+Add `"resume_count": 0` to the `_item` default dict. **Use the existing `_pr(number, **over)` helper at `backend/tests/test_backlog_rhythm.py:391` — do not add a second one.**
 
 - [ ] **Step 2: Run them to verify they fail**
 
@@ -692,7 +741,6 @@ Before the `{due: …}` object:
   # pass with "start new work".
   | map(. + {rank:
       (if .action == "escalated" then 0
-       elif .action == "graduate" then 1
        elif .action == "mark_ready" or .action == "awaiting_maintainer"
             or .action == "request_review" or .action == "rework_review"
             or .action == "resolve_conflict" then 2
@@ -709,21 +757,12 @@ and replace the sort:
       actions: sort_by(.rank, .action, (.issue // .pr)),
 ```
 
-- [ ] **Step 4: Order the human-readable output the same way**
+- [ ] **Step 4: Leave `by_action` alone (no-op step)**
 
-The `by_action` summary is a `group_by`, which sorts by key. Replace it so the summary reads in rank order too:
-
-```jq
-  (.actions | group_by(.rank) | map(.[0].rank) ) as $ranks
-```
-
-is not needed — instead render the action list directly, which is already sorted:
-
-```jq
-  (.actions[] | "  \(if .pr then "PR #\(.pr)" else "##\(.issue)" end) \(.action)\n      why: \(.why)\n      do : \(.detail)")
-```
-
-leave `by_action` as it is; it is a count summary, not an ordering.
+`by_action` is a count summary, not an ordering — `group_by` sorting it by key
+is correct and stays. Only `actions` is re-sorted. Nothing to change here; the
+step exists so the next reviewer does not read the untouched summary block as
+an oversight.
 
 - [ ] **Step 5: Run the suite**
 
@@ -928,7 +967,6 @@ Replace the `dispatchable` rule:
            detail: "name the files from the Stage 2 analysis; no touch-set, no dispatch"}
      else
        ([ .predicted_files[] | select($in_flight[.] != null) ]) as $clash
-       | ($in_flight | [ .[] ] | flatten | unique) as $_
        | ([ $items[] | select(.number != $i.number
                               and .column == "Ready for Dev"
                               and ((.predicted_files // []) | any(. as $f | ($i.predicted_files | index($f))))) ]

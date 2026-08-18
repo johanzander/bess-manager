@@ -394,10 +394,28 @@ actions=$(printf '%s' "$digest" | jq \
          end)
     ]
 
+  # FLOW POLICY RULE 1: EMPTY THE BOARD FROM THE RIGHT. Finish started work
+  # before starting new work, so actions rank by the column of the item they
+  # serve, rightmost first. Escalations sit above all of it -- see Task 6.
+  #
+  # This replaces a plain alphabetical sort, which ranked dispatchable above
+  # resume_implementation for no reason beyond d < m < r, and so led every
+  # pass with start new work.
+  | map(. + {rank:
+      (if .action == "escalated" then 0
+       elif .action == "mark_ready" or .action == "awaiting_maintainer"
+            or .action == "request_review" or .action == "rework_review"
+            or .action == "resolve_conflict" then 2
+       elif .action == "resume_implementation" or .action == "prune_worktree" then 3
+       elif .action == "dispatchable" then 4
+       elif .action == "recheck_ready" or .action == "surface_discussion"
+            or .action == "nudge_reporter" or .action == "park" then 5
+       else 6 end)})
+
   | {
       due: length,
       by_action: (group_by(.action) | map({key: .[0].action, value: length}) | from_entries),
-      actions: sort_by((if .action == "escalated" then 0 else 1 end), .action, (.issue // .pr)),
+      actions: sort_by(.rank, .action, (.issue // .pr)),
       # The PRs suppressed by a board decision, reported as a COUNT AND A LIST
       # rather than dropped. Silently vanishing would trade one failure for
       # another: the point is to stop re-asking about a settled decision, not

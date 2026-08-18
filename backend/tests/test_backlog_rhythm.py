@@ -796,3 +796,31 @@ def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:
     actions = _actions_for(_run(tmp_path, [item]), 703)
     assert "escalated" not in actions
     assert "resume_implementation" in actions
+
+
+def test_finishing_outranks_starting(tmp_path: Path) -> None:
+    """Empty the board from the right. The alphabetical sort put dispatchable
+    first and resume_implementation last purely because d < m < r."""
+    ready = _item(
+        800,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+    )
+    stalled = _item(
+        801,
+        column="In Progress",
+        board_status="In Progress",
+        worktree="/wt",
+        worktree_branch="fix/issue-801",
+    )
+    order = [a["action"] for a in _run(tmp_path, [ready, stalled])["actions"]]
+    assert order.index("resume_implementation") < order.index("dispatchable")
+
+
+def test_an_escalation_outranks_every_column(tmp_path: Path) -> None:
+    escalated = _item(802, awaiting="maintainer", awaiting_source="board")
+    verifying = _item(803, column="In Verification", board_status="In Verification")
+    first = _run(tmp_path, [escalated, verifying])["actions"][0]
+    assert first["action"] == "escalated"

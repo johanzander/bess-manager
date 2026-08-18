@@ -71,10 +71,16 @@ port to find real entity IDs/attributes to restore.
 ## Gotchas
 
 - `${BESS_SETTINGS:-./e2e/ci-bess-settings.json}` is mounted **read-write**
-  (no `:ro`). Running the app against it can silently write settings back
-  into the fixture (schema migrations, demo_mode defaults, etc). After
-  tearing down: `git diff -- e2e/` and `git checkout -- e2e/` if the only
-  changes are ones you didn't intend.
+  (no `:ro`), and it has to be — that mount *is* how the app persists
+  settings, so `:ro` would break the wizard rather than protect the file.
+  Running the app against it therefore writes settings back into the fixture
+  (schema migrations, demo_mode defaults, etc). After tearing down:
+  `git diff -- e2e/` and `git checkout -- e2e/` if the only changes are ones
+  you didn't intend.
+  `e2e/ci-wizard-settings.json` is the exception and needs no such reset: it
+  is gitignored, because every consumer truncates it to `{}` before mounting
+  it and nothing reads its content. The `ci-bess-settings*.json` files are
+  real fixtures whose content matters, so those still dirty the tree.
 - Many scenarios (e.g. `ci-wizard-entsoe.json`) pin `mock_time` to a fixed
   past date (`ci-normal-day.json` → `2025-01-15`), not "today" — the real
   container clock is today's date, so date-anchored service calls (Nordpool

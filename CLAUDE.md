@@ -239,8 +239,10 @@ frontend/node_modules` first) rather than installing through it. Re-running
 already contains.** Prompts are the cost, not the safety: a stalled autonomous
 run is a guaranteed loss, while anything the sandbox bounds is recoverable.
 `rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
-remove` all run unattended. **Every `git push` asks**, `--force-with-lease`
-included — see below for why that one is not carved out.
+remove` all run unattended. **`git push` also runs unattended, in every
+spelling including `--force`** — not because pushing is safe, but because the
+refs worth protecting are protected on GitHub itself. See "Pushing is guarded
+server-side" below.
 
 What still asks is one closed list, and every entry is there because the
 **sandbox cannot contain it** — it bounds the filesystem, not the network, and
@@ -248,23 +250,23 @@ not `.git`'s own recovery data:
 
 | Category | Rules |
 |---|---|
-| Escapes to GitHub | **every `git push`**, **every `gh api`**, `gh pr merge`, `gh release create` / `edit` / `delete` / `delete-asset` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Escapes to GitHub | **every `gh api`**, `gh pr merge`, `gh release create` / `edit` / `delete` / `delete-asset` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
 | Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
 | Leaves the user boundary | `sudo` |
 
 Each of those also has a `git -* <verb>` twin covering the global-option
-spelling (`git -C <path> gc`, `git --no-pager push`). The twins name a **verb**
+spelling (`git -C <path> gc`, `git -C sub tag -d`). The twins name a **verb**
 on purpose: a blanket `Bash(git -*)` was tried and put read-only inspection —
 `git -C sub status`, `git -C <wt> diff`, the verify step of the cross-checkout
 patch recipe — behind a prompt, and it shadowed the `git commit` allow via
 `git -c user.email=… commit`.
 
 **`*` compiles to a greedy `.*` that spans spaces**, which bounds how precise
-any of this can be. `git -* push*` therefore also matches a `git -c … commit`
-whose *message* contains " push". That is an extra prompt, not a gap, and it is
-accepted — the alternative is dropping the global-option guard on push, which
-is a real bypass. When the choice is between a false prompt and a hole, take
-the prompt. The one case where that trade flips is `deny`, which has no
+any of this can be. `git -* tag -d*` therefore also matches a `git -c … commit`
+whose *message* contains " tag -d". That is an extra prompt, not a gap, and it
+is accepted — the alternative is dropping the global-option guard on tag
+deletion, which is a real bypass. When the choice is between a false prompt and
+a hole, take the prompt. The one case where that trade flips is `deny`, which has no
 override: an over-broad deny **blocks** documented work rather than prompting
 for it, which is why `git prune` has no twin (it caught `git worktree prune`,
 and Step 4 prunes in a loop) and why the stash twins are per-verb.
@@ -280,8 +282,8 @@ The standard for adding an entry: **the effect escapes the repo and git cannot
 undo it.** Not "the command looks dangerous". Both halves have to hold, which
 is why **`gh pr ready` is deliberately unattended** even though it plainly
 escapes to GitHub: `gh pr ready --undo` puts the PR straight back, it changes
-no content (the diff was already public — the `git push` that created it
-prompted), and it is the codified endpoint of `implement-issue` Step 11's
+no content (the diff was already public, pushed by Step 9), and it is the
+codified endpoint of `implement-issue` Step 11's
 review loop. Prompting there would stall the one flow whose entire point is to
 reach that state without you. Contrast `gh pr merge` one row up, which is the
 same category and *is* gated: nothing undoes a merge to `main`.
@@ -301,32 +303,113 @@ because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.
 
-**`git push` and `gh api` are guarded bluntly, and that is deliberate.** Both
-were enumerated by shape first, and both leaked, twice:
+**`gh api` is guarded bluntly, and that is deliberate.** It was enumerated by
+shape first, and it leaked:
 
 ```
-git push origin main --force          # --force not adjacent to `push`
-git push origin +beta-release-9.9     # force via refspec
-git push origin --delete release-X.Y  # destroys a shared ref
-git push origin v9.9.0                # publishes a release tag
 gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
 gh api <path> -f key=val              # any -f/-F makes it a POST
 ```
 
 The marker sits at an arbitrary argument position, and **prefix globbing cannot
-reach it.** Narrowing these two back to specific forms re-opens every line
-above, so `quality-check.sh` requires the blanket spelling rather than merely
-"some push rule exists". The cost is one prompt at Step 9 per issue, and a
-prompt during release work — which the release skill requires explicit approval
-for anyway.
+reach it.** Narrowing it back to specific forms re-opens both lines, so
+`quality-check.sh` requires the blanket spelling rather than merely "some `gh
+api` rule exists".
+
+### Pushing is guarded server-side, not by a prompt
+
+`git push` used to be in that same paragraph, blanket-guarded against four
+spellings that a prefix glob could not reach:
+
+```
+git push origin main --force          # --force not adjacent to `push`
+git push origin +beta-release-9.9     # force via refspec
+git push origin --delete release-X.Y  # destroys a shared ref
+git push origin v9.9.0                # moves a published release tag
+```
+
+The glob was never what made those safe — it was a blunt instrument
+compensating for having no guard at the only layer that can see a *ref update*
+rather than a command string. That layer now exists. Four **GitHub rulesets**,
+all `enforcement=active` with an **empty `bypass_actors` list**, refuse three
+of the four lines above — see the gap called out immediately after the table:
+
+| Repo | Ruleset | Applies to | Rules |
+|---|---|---|---|
+| `bess-manager` | Protect Main Branch | `~DEFAULT_BRANCH` | deletion, non_fast_forward, pull_request |
+| `bess-manager` | Protect beta release branches | `beta-release-*` | deletion, non_fast_forward |
+| `bess-manager` | Protect release tags | `~ALL` tags | deletion, non_fast_forward |
+| `bess-manager-beta` | Protect beta main (fast-forward only) | `~DEFAULT_BRANCH` | deletion, non_fast_forward |
+
+⚠️ **`release-X.Y` is not in that table, and `--delete release-X.Y` is
+therefore unguarded at BOTH layers.** That is the one line of the four above
+which nothing currently refuses. It is the short-lived stable hotfix branch the
+`release` skill creates (steps 2–6), and it *is* pushed and tagged, so it is a
+shared ref by the standard used everywhere else here. The protected tag
+preserves the released commit, which makes the branch recoverable after
+tagging but not before.
+
+Left open knowingly rather than by oversight — closing it means adding a
+`release-*` ruleset (`non_fast_forward`, and deliberately **not** `deletion`,
+since the branch is meant to be cleaned up after the release). Do **not** close
+it by restoring a `Bash(git push*)` ask: that guards every push to fix one
+branch pattern, and `quality-check.sh` fails on it.
+
+The empty bypass list is the load-bearing part: **local pushes authenticate as
+the repo owner**, not as `bess-agent` (the credential helper is osxkeychain and
+`gh auth status` reports `johanzander`). A ruleset that exempted admins would
+therefore exempt every push this machine makes and protect nothing.
+
+Read the current state before trusting this table — it is a snapshot of remote
+config, not of anything in this repo:
+
+```bash
+gh api repos/johanzander/bess-manager/rulesets
+gh api repos/johanzander/bess-manager-beta/rulesets
+```
+
+**Two consequences to know about.**
+
+*Tag creation is still allowed*, only deletion and force-update are blocked —
+otherwise `release` could not tag at all. The flip side: removing a tag pushed
+by mistake now requires editing the ruleset, deliberately, as the owner. That
+is the intended trade.
+
+*The pending beta GHCR migration force-pushes `main` to `beta/main`*, which
+`Protect beta main` now refuses. That is a one-time deliberate operation:
+set that ruleset to `enforcement: "disabled"`, push, set it back to `"active"`.
+Do not add a bypass actor for it — a standing exemption for the identity that
+does every push is the same hole as having no rule.
+
+**What this deliberately leaves open:** force-pushing or deleting a *feature*
+branch (`fix/**`, `feat/**`) on origin, so ordinary work needs no prompt.
+
+**Do not describe that residual as "bounded to your own unmerged branch."** It
+was written that way first and the reasoning does not survive this repo's own
+conventions: ~20 worktrees run in parallel, each with its own pushed branch and
+open PR, and every one of them authenticates as the same owner. An unattended
+`--force` or `--delete` aimed at the wrong ref destroys *another agent's*
+pushed commits and closes its PR, and the local reflog that would recover it
+lives in a different worktree. The bound is "one feature branch", not "one
+agent's own work".
+
+Accepted anyway, because the alternative — a `fix/**` + `feat/**`
+`non_fast_forward` ruleset — also blocks the legitimate rebase-and-force-push
+on your own branch, and this project's merge-based flow means a force push
+appearing at all is the finding (see below). Know which trade is being made.
+
+**Do not re-add a `Bash(git push*)` ask because pushing "looks unguarded".**
+`quality-check.sh` pins the new direction: the push spellings live in
+`MUST_NOT_BE_GUARDED`, so restoring the prompt fails the gate. Check the
+rulesets first.
 
 **Patterns match the command as written — prefix globbing, no normalisation.**
 This is the single biggest source of rules that look right and match nothing,
 and it produced a bug here in four consecutive review rounds.
 
 **Nothing normalises `git`'s global options**, so `git -C <path> stash pop`,
-`git --git-dir=… push`, `git -c k=v push` and `git --no-pager gc` sidestep every
-rule anchored on `git stash` / `git push` / `git gc`. The deleted hook
+`git --git-dir=… tag -d v1` and `git --no-pager gc` sidestep every
+rule anchored on `git stash` / `git tag -d` / `git gc`. The deleted hook
 normalised for exactly this — and CLAUDE.md itself teaches `git -C
 .claude/worktrees/<name>` as the cross-checkout idiom, so it is the spelling an
 agent reaches for first. `Bash(git -*)` covers the whole class in one rule,
@@ -342,17 +425,19 @@ semantics the harness applies:
 - `MUST_BE_DENIED` — checked against `deny` **only**, so a matching `ask` cannot
   certify a command that policy says is unapprovable.
 - `MUST_BE_GUARDED` — checked against `deny` + `ask`; a prompt is acceptable.
-- `MUST_NOT_BE_GUARDED` — read-only git that must stay unattended. This is what
-  catches a rule that is too *broad*, the failure the blanket `Bash(git -*)`
-  introduced.
+- `MUST_NOT_BE_GUARDED` — commands that must stay unattended: read-only git,
+  and every `git push` spelling now that enforcement is server-side. This is
+  what catches a rule that is too *broad*, the failure the blanket
+  `Bash(git -*)` introduced — and, for push, a rule reinstated out of caution
+  after the ruleset made it redundant.
 
 When a new bypass spelling turns up, add the string to the right list first —
 then fix the rule until the gate goes green.
 
 **A rule that fails to match does not fall through to the `auto` classifier.**
-It falls through to whatever `allow` rule covers the command — here
-`Bash(git push *)` in project settings and `Bash(git *)` in user settings — and
-runs unattended. Precedence is `deny > ask > allow` **by category**, not by
+It falls through to whatever `allow` rule covers the command — here `Bash(git
+*)` in user settings — and runs unattended. That is exactly what `git push`
+does now, by design. Precedence is `deny > ask > allow` **by category**, not by
 specificity, so a broad `allow` is only ever overridden by an `ask` that
 actually matches. That is why a too-narrow `ask` is worse than no rule: it
 reads as covered while changing nothing.
@@ -433,8 +518,20 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   upstream writes `.git/config` — and it fails *after* creating the branch, so
   the branch exists while the command reports an error and leaves you on the
   old one. Use `git checkout -b <branch> --no-track origin/<branch>`, or just
-  re-run `git checkout <branch>`. Set upstream at push time with
-  `git push -u`. *(measured)*
+  re-run `git checkout <branch>`. *(measured)*
+- **`git push -u` does not set the upstream either**, and for the same reason —
+  `.git/config` is denied. This bullet used to recommend `-u` as the way around
+  the previous one; it is not. What it does is **push the ref successfully and
+  then report an error**:
+
+  ```
+  error: unable to write upstream branch configuration
+  ```
+
+  The branch IS on origin at that point. Verify with `git ls-remote origin
+  <branch>` rather than re-pushing, and don't read the message as a failed
+  push. Use a plain `git push origin <branch>`; nothing in this repo's flow
+  needs the upstream recorded. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,
@@ -503,6 +600,56 @@ redundant:
   one from outside. `verify-sandbox.sh` skips its symlink check outside a
   linked worktree rather than reporting a PASS that proves nothing.
 
+- **`filesystem.allowWrite`: the two user-level caches `worktree-setup.sh`
+  writes** — `~/Library/Caches/ms-playwright` (plus its Linux spelling
+  `~/.cache/ms-playwright`) and `~/.npm`. Setup runs `npm install` when a
+  lockfile has diverged and then `npx playwright install chromium`; both write
+  outside every repo path above, and the built-in allow list covers only
+  `~/.npm/_logs`, not the package cache beside it.
+
+  **Neither failure names the sandbox, which is the whole reason these are
+  documented.** npm reports `EPERM` on `~/.npm/_cacache` as *"Your cache folder
+  contains root-owned files … please run: sudo chown -R 502:20 ~/.npm"* — a
+  guess, not a diagnosis: nothing is root-owned, and `sudo` is on the `ask`
+  list and is the wrong fix. Playwright's step is bounded by
+  `worktree-setup.sh`'s own timeout, whose message blames a slow download, so a
+  blocked cache is indistinguishable from the genuine Playwright hang that
+  timeout exists for (see below — a separate bug, and the two must not be
+  conflated). One session lost a whole worktree setup to that before the cause
+  was probed directly.
+
+  Do **not** dodge the Playwright half by pointing `PLAYWRIGHT_BROWSERS_PATH`
+  into the repo. Browsers are ~170MB and deliberately shared by every worktree;
+  a per-worktree cache re-downloads them ~20 times over. `verify-sandbox.sh`
+  probes both caches with `mkdir`, creating the directory first so a fresh
+  machine reports a real result rather than skipping.
+
+### The Playwright install hang is a version bug, not a slow download
+
+Distinct from the sandbox problem above, and repeatedly misread as one. There
+is **no issue tracking it** — `worktree-setup.sh` cites #556 only because that
+is the work it was first seen during, and #556 (dependency caching) is closed.
+
+Measured 2026-08-17, unsandboxed, on this machine:
+
+| Playwright | Browser build | Result |
+|---|---|---|
+| 1.59.1 (the pin in `e2e/package.json`) | `chromium-1217` | stalls at **exactly** 84 files / 448K, twice |
+| 1.62.1 (current latest) | `chromium-1234` | completes, minutes later, same network |
+
+**It is not the download.** In both stalled runs the full 173MB zip had already
+landed in `$TMPDIR/playwright-download-*`, and `sample`ing the process showed
+`oopDownloadBrowserMain.js` idle at 0% CPU with every libuv worker parked in
+`__psynch_cvwait`. The failure is in *extraction*, after a complete fetch —
+which is why waiting it out never works and why the timeout's "no progress"
+wording sends readers to the network.
+
+So `worktree-setup.sh` cannot install browsers on the pinned version, and the
+likely fix is bumping `@playwright/test` past 1.59.1. Not done yet: it moves
+the E2E runner under 14 CI wizard scenarios and needs its own PR. Until then a
+worktree needing browsers is blocked, and the workaround is to drive an
+already-installed Chrome rather than to keep retrying the install.
+
 `sandbox.excludedCommands` is **not** used and is not needed. It was tried in
 both project and user settings while the four knobs above were missing, appeared
 to do nothing, and is now moot.
@@ -555,22 +702,23 @@ and won't remove a worktree holding uncommitted or untracked files). A second
 prompt there buys nothing and costs a stall on every run — `implement-issue`
 Step 4's prune loop alone would have hit ~24 of them.
 
-`git push --force-with-lease` **used to** be excluded on the same reasoning, and
-is not any more. It is a push, and the push guard has to be blanket (above): the
-only spellings that would exempt it — `Bash(git push --force-with-lease*)` — are
-prefix-anchored, so they cannot exempt `git push origin main
---force-with-lease`, while any pattern loose enough to catch that also catches
-plain `--force`. Exempting it means re-opening the hole. It asks.
+**GitHub now refuses the dangerous pushes, which is the same reasoning one
+layer out.** `--force`, `--force-with-lease` and `+refspec` all used to ask,
+because a prefix glob could not tell them apart from a plain push. None of them
+ask now: against a protected ref GitHub rejects the push outright, and against
+an unprotected feature branch it was never the case that git could not undo it.
+That removed a prompt from `implement-issue` Step 9 without removing a guard —
+see "Pushing is guarded server-side" above for the ruleset table and the one
+residual it accepts.
 
-**That prompt costs nothing here, which is why the hole stays closed rather
-than the rule loosened.** Neither `implement-issue` nor `release` mentions
-`rebase`, `--force` or `--force-with-lease` anywhere, and this project merges
-the target branch before a PR instead of rebasing — a merge-based flow never
-needs a force push. So the rule should lie dormant. **If it ever fires, treat
-that as the finding**: an agent has gone off-script into a rebase or an amend
-of already-pushed commits. Answer the prompt on its merits; do not "fix" it by
-narrowing the push rule — that is how the gaps PR #596 had to close were
-introduced in #588.
+**A force push should still be treated as a finding when it appears.** Neither
+`implement-issue` nor `release` mentions `rebase`, `--force` or
+`--force-with-lease` anywhere, and this project merges the target branch before
+a PR instead of rebasing — a merge-based flow never needs one. So if a
+transcript shows a force push, an agent has gone off-script into a rebase or an
+amend of already-pushed commits. That is now caught by reading what happened
+rather than by a prompt, which is the trade: no stall on the common path, and
+the destructive path is refused by the server instead of by you.
 
 **What the unattended set actually risks is uncommitted work**, since the
 sandbox contains writes to the repo but cannot distinguish a wanted write from

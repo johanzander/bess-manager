@@ -15,7 +15,10 @@
     "filesystem": {
       "allowWrite": [
         ".",
-        "~/GitHub/bess-manager"
+        "~/GitHub/bess-manager",
+        "~/Library/Caches/ms-playwright",
+        "~/.cache/ms-playwright",
+        "~/.npm"
       ]
     }
   },
@@ -86,9 +89,6 @@
       "Bash(git -* stash store*)"
     ],
     "ask": [
-      "Bash(git push)",
-      "Bash(git push *)",
-      "Bash(git -* push*)",
       "Bash(gh api)",
       "Bash(gh api *)",
       "Bash(gh pr merge*)",

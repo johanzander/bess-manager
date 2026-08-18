@@ -326,6 +326,35 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
 - **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
   the harness is not sandboxed; the Bash form writes `.git/config` and
   `.git/worktrees`, both denied. *(measured)*
+- **`git worktree remove` is denied too, and unlike `add` it fails
+  DESTRUCTIVELY.** Removal deletes the working tree *first*, then unlinks
+  `.git/worktrees/<name>` — and that unlink is the denied one:
+
+  ```
+  error: failed to delete '.../.claude/worktrees/backlogger': Operation not permitted
+  error: failed to delete '.git/worktrees/backlogger': Operation not permitted
+  ```
+
+  By then it has already deleted several hundred tracked files. It does not
+  roll back. What is left is a **carcass**: a registered worktree whose
+  `git status` is a few hundred ` D` lines and nothing else. That reads as
+  "uncommitted changes" to every later prune, so the worktree is now
+  permanently unprunable *by the failure itself* — re-running the removal
+  hits the no-`--force` refusal instead, and `--force` re-hits the denial.
+
+  Because the filename set is identical in every worktree, so is APFS's
+  readdir order, so every carcass loses the **same** ~393 paths (`core/`,
+  `frontend/`, `bess_manager/`, `pyproject.toml`, `Dockerfile`, …). Identical
+  damage across many worktrees is the signature — do not read it as a
+  coincidence or as real edits. *(measured — 13 carcasses accumulated over
+  three sweeps before anyone noticed)*
+
+  `git worktree prune` performs the same `.git/worktrees/<name>` unlink and is
+  denied for the same reason, so it cannot clear the wreckage either. **There
+  is no in-sandbox path to removing a worktree.** It has to run unsandboxed —
+  the maintainer pastes it with a `!` prefix, or the harness does it via
+  `ExitWorktree` (which only ever covers the session's own `EnterWorktree`
+  worktree, not a pre-existing one).
 - **`git checkout -b <branch> origin/<branch>` fails**, because recording the
   upstream writes `.git/config` — and it fails *after* creating the branch, so
   the branch exists while the command reports an error and leaves you on the

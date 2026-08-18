@@ -250,18 +250,35 @@ git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
   b=$(git -C "$wt" branch --show-current 2>/dev/null)
   [ -n "$b" ] || continue                                   # detached: leave alone
   echo "$merged" | grep -qx "$b" || continue                # not merged: leave alone
-  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then # tracked edits: never auto-delete
-    echo "KEEP (uncommitted changes): $wt"; continue
+  dirty=$(git -C "$wt" status --porcelain -uno)
+  if [ -n "$dirty" ]; then                                  # tracked edits: never auto-delete
+    if [ -z "$(printf '%s\n' "$dirty" | grep -v '^ D ')" ]; then
+      echo "CARCASS (failed prune, deletions only): $wt"    # see below -- not real edits
+    else
+      echo "KEEP (uncommitted changes): $wt"
+    fi
+    continue
   fi
-  git worktree remove "$wt" && git branch -D "$b"
+  echo "PRUNE: $wt  ($b)"                                   # report; do NOT remove here
 done
 git fetch origin --prune
 ```
 
-Two guards that matter: never remove a worktree with **uncommitted tracked
+**Report the `PRUNE` list; do not act on it from here.** `git worktree remove`
+is sandbox-denied — it deletes the working tree *first* and then fails on the
+`.git/worktrees/<name>` unlink, destroying ~393 tracked files and leaving a
+carcass that no later prune can clear (`git worktree prune` is denied too).
+Emit one `!`-prefixed command covering every `PRUNE` and `CARCASS` for the
+maintainer to paste, exactly as `sweep-prs` Step 3 does. See
+`docs/agents/local-agent-environment.md`, "git worktree remove is denied too".
+
+Three guards that matter: never remove a worktree with **uncommitted tracked
 changes** — report it and let a human decide (one such worktree held a
-375-line module that existed nowhere else) — and never touch a **detached or
-locked** worktree, which is usually another agent's live session.
+375-line module that existed nowhere else); never touch a **detached or
+locked** worktree, which is usually another agent's live session; and never
+mistake a **carcass** for either. A dirty set that is *entirely* ` D` lines is
+this bug's own wreckage, not someone's work — 13 of them accumulated before
+anyone read the diff.
 
 Then `git fetch origin main` — `using-git-worktrees`' git fallback branches
 from the current local `HEAD`, not `origin/main`, so a stale local checkout
@@ -780,8 +797,11 @@ net is upstream, not this section.
    something's wrong.
 
 2. Remove the worktree — via `ExitWorktree action=remove discard_changes=true`
-   if the session is still in it, or `git worktree remove <path>` from the
-   main repo root for a `.worktrees/`-created one.
+   if the session is still in it. That is the harness doing it, so it is not
+   sandboxed and it works. If the session has already left, **hand the
+   `git worktree remove --force <path>` to the maintainer to paste with `!`**
+   rather than running it: from a sandboxed Bash it half-deletes the worktree
+   and then fails (see Step 4).
 
 3. Force-delete the local branch and prune stale remote refs:
 

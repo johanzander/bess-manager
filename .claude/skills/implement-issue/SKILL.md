@@ -247,6 +247,9 @@ next person to do issue work cleans up the last one's mess automatically.
 # looks unmerged forever. PR state is the only authoritative signal.
 merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRefName')
 git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
+  # Directory gone = PHANTOM (`prunable`), not detached. `git -C` would fail
+  # and the detached guard below would silently swallow it.
+  [ -d "$wt" ] || { echo "PHANTOM (needs unsandboxed prune): $wt"; continue; }
   b=$(git -C "$wt" branch --show-current 2>/dev/null)
   [ -n "$b" ] || continue                                   # detached: leave alone
   echo "$merged" | grep -qx "$b" || continue                # not merged: leave alone

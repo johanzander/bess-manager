@@ -349,12 +349,31 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   coincidence or as real edits. *(measured — 13 carcasses accumulated over
   three sweeps before anyone noticed)*
 
-  `git worktree prune` performs the same `.git/worktrees/<name>` unlink and is
-  denied for the same reason, so it cannot clear the wreckage either. **There
-  is no in-sandbox path to removing a worktree.** It has to run unsandboxed —
-  the maintainer pastes it with a `!` prefix, or the harness does it via
-  `ExitWorktree` (which only ever covers the session's own `EnterWorktree`
-  worktree, not a pre-existing one).
+  The denial is precisely on the `.git/worktrees/<name>` unlink, **not** on the
+  working tree: `rm -rf .claude/worktrees/<name>` from Bash succeeds. So an
+  agent can always destroy the files and never the registration. Do not
+  half-do it — that converts a carcass into a `prunable` phantom, which still
+  needs the same unsandboxed fix. *(measured)*
+
+- **`git worktree prune` is denied by the same unlink, and it EXITS 0 while
+  failing.** *(measured)* This is the nastier of the two:
+
+  ```
+  $ git worktree prune -v; echo "exit=$?"
+  Removing worktrees/backlogger: gitdir file points to non-existent location
+  error: failed to delete '.../.git/worktrees/backlogger': Operation not permitted
+  exit=0
+  ```
+
+  The entry survives and `git worktree list` keeps showing it, now tagged
+  `prunable`. `remove` at least exits 255; `prune` reports success, so
+  `git worktree prune && echo done` prints `done` having done nothing. Never
+  infer from its exit status — re-check `git worktree list`.
+
+  **So there is no in-sandbox path to removing a worktree**, by either verb.
+  It has to run unsandboxed — the maintainer pastes it with a `!` prefix, or
+  the harness does it via `ExitWorktree` (which only ever covers the session's
+  own `EnterWorktree` worktree, not a pre-existing one).
 - **`git checkout -b <branch> origin/<branch>` fails**, because recording the
   upstream writes `.git/config` — and it fails *after* creating the branch, so
   the branch exists while the command reports an error and leaves you on the

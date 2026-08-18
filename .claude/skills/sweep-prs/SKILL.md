@@ -91,6 +91,10 @@ merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRe
 owned=$(cd ~ && claude agents --json 2>/dev/null | jq -r '.[].cwd')
 
 git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
+  # A registration whose directory is gone is a PHANTOM, not a detached HEAD:
+  # `git -C` fails, so $b comes back empty and the detached branch below would
+  # swallow it. `git worktree list` tags these `prunable`.
+  [ -d "$wt" ] || { echo "PHANTOM (prunable, needs unsandboxed prune): $wt"; continue; }
   b=$(git -C "$wt" branch --show-current 2>/dev/null)
   [ -n "$b" ] || { echo "SKIP (detached): $wt"; continue; }
   if echo "$owned" | grep -qF "$wt"; then
@@ -138,22 +142,28 @@ done
 The sandbox denies the `.git/worktrees/<name>` unlink that removal ends with,
 and removal deletes the working tree *before* it gets there, so a run from
 here does not fail cleanly — it destroys ~393 tracked files and leaves a
-carcass that can never be pruned again. `git worktree prune` is denied for the
-same reason, so there is no in-sandbox recovery either. This is not a
-hypothetical: three sweeps did exactly that to 13 worktrees before it was
-diagnosed. See `docs/agents/local-agent-environment.md`, "git worktree remove
-is denied too".
+carcass that can never be pruned again. `git worktree prune` is denied by the
+same unlink **and exits 0 while failing**, so there is no in-sandbox recovery
+either — and no exit status you can trust. This is not a hypothetical: three
+sweeps did exactly that to 13 worktrees before it was diagnosed. See
+`docs/agents/local-agent-environment.md`, "git worktree remove is denied too".
 
-Collect every `PRUNE` and `CARCASS` branch instead, and emit **one** command
-for the maintainer to paste with a `!` prefix, which runs unsandboxed:
+Collect every `PRUNE`, `CARCASS` and `PHANTOM` instead, and emit **one**
+command for the maintainer to paste with a `!` prefix, which runs unsandboxed:
 
 ```bash
-# Emit this; do not execute it.
+# Emit this; do not execute it. It must run from a NON-worktree-isolated
+# session -- an isolated one refuses the `cd` to the shared checkout.
 cd /Users/johanzander/GitHub/bess-manager && for wt in <names>; do
   b=$(git -C ".claude/worktrees/$wt" symbolic-ref --short HEAD 2>/dev/null)
-  git worktree remove --force ".claude/worktrees/$wt" && git branch -D "$b"
-done; git worktree list | wc -l
+  git worktree remove --force ".claude/worktrees/$wt"
+  [ -n "$b" ] && git branch -D "$b"
+done; git worktree prune; git worktree list | wc -l
 ```
+
+The trailing `git worktree prune` is what clears any `PHANTOM`, whose
+directory is already gone so `remove` has nothing to work with. `[ -n "$b" ]`
+rather than `&&` because a phantom yields no branch name.
 
 `--force` is required for a `CARCASS` (its own damage reads as uncommitted
 changes) and harmless for a clean `PRUNE`. Force-deleting the *branch* is

@@ -349,15 +349,38 @@ under `re.fullmatch` and spans spaces, so `Bash(git push *--force*)` matches
 greedy globs said so all along; the two contradicted each other for four review
 rounds.
 
-So push is now guarded per *shape* — force in any position, refspec `+`, ref
-deletion, `--mirror`/`--prune`/`--tags`/`--all`/`--branches`, release tags, and
-anything naming `main`, `master` or `beta` in the `origin main`, `HEAD:main` or
-bare `refs/heads/main` spelling.
+**The protected-ref half of that enumeration is now GONE, and branch protection
+replaces it.** `enforce_admins` is `true` on `origin/main` and `beta/main`, so
+GitHub refuses a push to `main` server-side — including from the owner token
+every agent uses. That is a *provable* guarantee; an enumeration of command
+spellings is only ever a list of the ones somebody thought of, and that list
+leaked three times, the last two spellings (`git push origin refs/heads/main`,
+`git push --all`) found by the review of the PR meant to fix it. A fourth round
+was the expected outcome of keeping it.
+
+So `git push origin main`, `HEAD:main`, `refs/heads/main`, `-u origin main`
+and the `master` equivalents now run unattended and are rejected by GitHub
+instead of by a prompt.
+
+**`enforce_admins: true` is therefore LOAD-BEARING.** Turn it off and this repo
+has no guard on pushing to `main` at all. `quality-check.sh` asserts it on both
+remotes for exactly that reason — a false answer is an error naming the fix, an
+unreadable one is a warning, because a CI token cannot read branch protection
+and "I could not check" is not "it is off". If it ever fires, either re-enable
+the setting or restore the protected-ref patterns; do not silence the check.
+
+What stays guarded is what branch protection does **not** cover — and each of
+these is a real gap, not belt-and-braces:
+
+- **force in any position**, `--force-with-lease` included, and refspec `+`
+- **ref deletion**, `--mirror`, `--prune`, `--tags`, `--all`, `--branches`
+- **tags**: `refs/tags/` on either side, and `* v*`. A tag is not a branch, so
+  no protected-branch setting will ever cover publishing a release tag
+- **the `beta` remote**, and `beta-release-*` branches on origin. Only `main`
+  is protected, so these are still ours
+
 A push naming a feature branch runs unattended, which is what
-`implement-issue` Step 9 and `sweep-prs` actually do; branch protection already
-refuses the case the prompt was standing in for. The protected-ref rules anchor
-on the end of the token (`* main`, not `* main*`) so a branch legitimately
-containing "main" — `maintenance-cleanup` — does not prompt.
+`implement-issue` Step 9 and `sweep-prs` actually do.
 
 `gh api` keeps its blanket rule because it is **not** separable this way: any
 `-f`, `-F` or `-X` turns a read into a mutation, so there is no lexical marker

@@ -265,7 +265,6 @@ MUST_BE_GUARDED = [
     # git's global options may precede the subcommand -- the hook this
     # replaced normalised for exactly this, and CLAUDE.md teaches `git -C` as
     # the cross-checkout idiom, so it is the spelling most likely to be used.
-    "git -C .claude/worktrees/x push origin main",
     "git -c push.default=current push beta main",
     "git --no-pager gc --prune=now",
     "git -C sub tag -d v9.9.0",
@@ -279,33 +278,18 @@ MUST_BE_GUARDED = [
     "git push -f origin main",
     "git push origin +beta-release-9.9",
     "git push origin --delete release-9.9",
-    "git push origin :main",
     "git push origin v9.9.0",
     "git push origin --tags",
     "git push --mirror origin",
-    "git push -u origin main",
     "git push",
-    # Protected refs by every spelling, including the colon-refspec forms that
-    # `* main` cannot see. `git push origin HEAD:main` was a live hole in the
-    # first draft of this rule set.
-    "git push origin master",
-    "git push origin HEAD:main",
-    "git push origin HEAD:refs/heads/main",
+    # Refs that branch protection does NOT cover, and so are still ours to
+    # guard: the beta REMOTE, and beta-release branches on origin. Only
+    # `main` is protected, on either remote.
     "git push beta main",
     "git push origin HEAD:beta",
     "git push origin beta-release-v10.1.0b10-tmp",
     "git -C x push origin main --force",
-    # A BARE source-side refspec. `refs/heads/main` is an ordinary one-sided
-    # refspec that pushes local main to remote main, and the character before
-    # `main` is `/` -- not the space `* main` needs, nor the colon the
-    # `*:refs/heads/main*` forms need. Verified against a real repo: it reports
-    # `main -> main`. The guards are now spelled `*refs/heads/main*`, without
-    # the colon, which subsumes the destination-side form rather than sitting
-    # beside it.
-    "git push origin refs/heads/main",
-    "git push origin refs/heads/master",
     "git push origin refs/heads/beta",
-    "git -C x push origin refs/heads/main",
     # `--all` pushes EVERY local branch, main included, and was missing while
     # its neighbours --mirror/--prune/--tags were all covered. `--branches` is
     # a synonym for it (git 2.50 `git push --help`: "--all, --branches"), so
@@ -464,6 +448,51 @@ PY
 then
     ERRORS=$((ERRORS + 1))
 fi
+
+echo ""
+echo "📋 Checking branch protection..."
+echo "-------------------------------------------"
+
+# THE PREMISE THE PUSH RULES NOW REST ON.
+#
+# The protected-ref half of the push enumeration was deleted deliberately: with
+# `enforce_admins` true, GitHub refuses a push to `main` server-side, including
+# from the owner token every agent uses. That is a provable guarantee where an
+# enumeration of command spellings is only ever a list of the ones somebody
+# thought of -- and that list leaked three times, the last two spellings found
+# by the review of the PR meant to fix it.
+#
+# But `enforce_admins` is a GitHub setting, not repo state: untracked, and
+# flippable in two clicks by anyone with admin. The moment it goes false, this
+# repo has NO guard on pushing to main at all, and nothing would say so. That
+# is what this check exists to prevent -- it turns a load-bearing assumption
+# into a checked invariant, so the protection cannot evaporate silently.
+#
+# If it fires: either turn enforce_admins back on, or restore the protected-ref
+# patterns in .claude/settings.json (see CLAUDE.md, Permissions).
+#
+# Reading branch protection needs admin rights, which a CI token does not have,
+# so an unreadable answer is a WARNING and a false one is an ERROR. Those are
+# genuinely different outcomes -- "I could not check" is not "it is off" -- and
+# collapsing them either way would make the gate lie in one direction or the
+# other.
+protection_checked=0
+for remote_repo in "johanzander/bess-manager" "johanzander/bess-manager-beta"; do
+    enforced=$(gh api "repos/${remote_repo}/branches/main/protection" \
+        --jq '.enforce_admins.enabled' 2>/dev/null) || enforced=""
+    if [ -z "$enforced" ]; then
+        echo "⚠️  Could not read branch protection for ${remote_repo} (needs admin rights)"
+        WARNINGS=$((WARNINGS + 1))
+    elif [ "$enforced" != "true" ]; then
+        echo "❌ ${remote_repo}: enforce_admins is FALSE on main."
+        echo "   The push rules assume GitHub rejects pushes to main server-side."
+        echo "   Re-enable it, or restore the protected-ref patterns in .claude/settings.json."
+        ERRORS=$((ERRORS + 1))
+    else
+        echo "✅ ${remote_repo}: enforce_admins on main"
+        protection_checked=$((protection_checked + 1))
+    fi
+done
 
 echo ""
 echo "📋 Checking scenario discovery coverage..."

@@ -43,7 +43,7 @@ pr_filter="${1:-}"
 # `reviewDecision` is deliberately not used: it does not distinguish a verdict
 # that has been acted on from one that has not, which is the distinction that
 # decides whose turn it is. Compute it from reviews vs commits instead.
-fields='number,title,isDraft,mergeable,mergeStateStatus,headRefName,reviews,commits,statusCheckRollup,updatedAt'
+fields='number,title,isDraft,mergeable,mergeStateStatus,headRefName,reviews,commits,statusCheckRollup,updatedAt,comments'
 
 # `commits` is what bounds this, and the bound is GitHub's, not a preference.
 # `--json commits` expands each commit's authors connection, so gh's cost
@@ -102,6 +102,12 @@ read -r -d '' classify <<'JQ' || true
     [.reviews[] | select(.state == "APPROVED" or .state == "CHANGES_REQUESTED")]
     | sort_by(.submittedAt) | last;
   def pushed: [.commits[].committedDate] | sort | last;
+  # The Stage 4 bot only ever acts when triggered by this comment, so its
+  # absence is the difference between "waiting on the reviewer" and "nobody
+  # has asked the reviewer".
+  def requested:
+    [.comments[]? | select(.body | test("@claude-bot review")) | .createdAt]
+    | sort | last;
   def failing:
     [.statusCheckRollup[]? | select(.conclusion == "FAILURE") | .name];
   def pending:
@@ -116,6 +122,7 @@ read -r -d '' classify <<'JQ' || true
   # UNKNOWN survived the retries above. It is NOT "not conflicted" -- it is "we
   # never found out", and it must never render as a clean PR.
   | (.mergeable == "UNKNOWN") as $mergeUnknown
+  | (requested) as $req
   | ($v != null and $v.submittedAt > $push) as $unconsumed
 
   # Order matters, and it is ordered by WHAT THE DIFF STILL OWES rather than by
@@ -142,10 +149,14 @@ read -r -d '' classify <<'JQ' || true
      elif $unconsumed
        then ["awaiting-ready", "maintainer",
              "approved (\($v.submittedAt)) and still a draft"]
-     elif $v == null
-       then ["awaiting-review", "reviewer", "green, no verdict yet"]
+     elif ($req == null or $req < $push)
+       then ["needs-review-request", "dispatcher",
+             (if $req == null
+                then "green, but a review has NEVER been requested"
+                else "pushed \($push) after the last request (\($req)); round owed"
+              end)]
      else ["awaiting-review", "reviewer",
-           "pushed \($push) after the last verdict; next round owed"] end)
+           "requested \($req); the bot has not returned a verdict yet"] end)
     as [$state, $owner, $why]
 
   | "#\($p.number) \(if $p.isDraft then "draft" else "ready" end)  \($state)  [\($owner)]"
@@ -158,6 +169,7 @@ echo "$raw" | jq -r "$classify"
 
 cat <<'EOF'
 Liveness (is an agent working RIGHT NOW) is not a GitHub fact and is not
-guessed here. `needs-fix` / `needs-refresh` are actionable regardless: they
-name a change the diff still owes, which no amount of waiting produces.
+guessed here. `needs-fix`, `needs-refresh` and `needs-review-request` are
+actionable regardless: each names an action the pipeline still owes, which no
+amount of waiting produces.
 EOF

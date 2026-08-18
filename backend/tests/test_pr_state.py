@@ -25,11 +25,17 @@ SCRIPT = REPO_ROOT / "scripts" / "pr-state.sh"
 GREEN = [{"name": "Fast tests", "status": "COMPLETED", "conclusion": "SUCCESS"}]
 
 
+def _requested(at: str) -> dict:
+    """The Stage 4 trigger comment, which is the only thing that starts a review."""
+    return {"body": "@claude-bot review", "createdAt": at}
+
+
 def _pr(
     number: int = 1,
     *,
     reviews: list | None = None,
     commits: list | None = None,
+    comments: list | None = None,
     checks: list | None = None,
     mergeable: str = "MERGEABLE",
     merge_state: str = "CLEAN",
@@ -45,6 +51,11 @@ def _pr(
         "updatedAt": "2026-08-01T00:00:00Z",
         "reviews": reviews or [],
         "commits": commits or [{"committedDate": "2026-08-02T00:00:00Z"}],
+        # Default: a request AFTER the default push, so tests that are not about
+        # the request feed land on the reviewer rather than the dispatcher.
+        "comments": (
+            comments if comments is not None else [_requested("2026-08-03T00:00:00Z")]
+        ),
         "statusCheckRollup": GREEN if checks is None else checks,
     }
 
@@ -122,15 +133,16 @@ def test_619_shape_reports_the_findings_not_just_the_conflict(run) -> None:
     assert "+conflicted" in out
 
 
-def test_a_push_after_the_verdict_is_awaiting_review_not_needs_fix(run) -> None:
+def test_a_push_after_the_verdict_is_not_needs_fix(run) -> None:
     """The same verdict means the opposite thing once HEAD moves past it: the
-    findings were acted on, so the ball is back with the reviewer."""
+    findings were acted on, so it is no longer the executor's turn."""
     out = run(
         [
             _pr(
                 1,
                 reviews=[_review("CHANGES_REQUESTED", "2026-08-01T00:00:00Z")],
                 commits=[{"committedDate": "2026-08-02T00:00:00Z"}],
+                comments=[_requested("2026-08-03T00:00:00Z")],
             )
         ]
     )
@@ -138,6 +150,63 @@ def test_a_push_after_the_verdict_is_awaiting_review_not_needs_fix(run) -> None:
     assert "awaiting-review" in out
     assert "[reviewer]" in out
     assert "needs-fix" not in _rows(out)
+
+
+def test_a_review_never_requested_is_the_dispatchers_turn_not_the_reviewers(
+    run,
+) -> None:
+    """The Stage 4 bot only acts when triggered by an `@claude-bot review`
+    comment, so "green with no verdict" has two completely different meanings
+    and only one of them is the reviewer's.
+
+    Measured on the live fleet: #637 and #635 had NEVER been asked, and #620,
+    #619, #614 and #490 had all been pushed to after their last request. All six
+    were being reported as `awaiting-review [reviewer]` — parked on someone who
+    had not been asked and was never going to act. Six of eleven open PRs.
+    """
+    out = run([_pr(637, comments=[])])
+
+    assert "needs-review-request" in out
+    assert "[dispatcher]" in out
+    assert "NEVER been requested" in out
+    assert "[reviewer]" not in _rows(out)
+
+
+def test_a_push_after_the_last_request_owes_a_new_round(run) -> None:
+    """The subtler half of the same bug. A request exists, so the feed is not
+    empty — but it predates the code, so the bot already returned its verdict on
+    a diff that no longer exists. #620 requested at 17:40 and pushed at 18:33."""
+    out = run(
+        [
+            _pr(
+                620,
+                commits=[{"committedDate": "2026-08-17T18:33:05Z"}],
+                comments=[_requested("2026-08-17T17:40:53Z")],
+            )
+        ]
+    )
+
+    assert "needs-review-request" in out
+    assert "[dispatcher]" in out
+    assert "round owed" in out
+
+
+def test_a_request_newer_than_the_push_really_is_the_reviewers_turn(run) -> None:
+    """The gate must not label everything the dispatcher's job: once the request
+    postdates the code, waiting on the bot is genuinely the correct state."""
+    out = run(
+        [
+            _pr(
+                3,
+                commits=[{"committedDate": "2026-08-02T00:00:00Z"}],
+                comments=[_requested("2026-08-04T00:00:00Z")],
+            )
+        ]
+    )
+
+    assert "awaiting-review" in out
+    assert "[reviewer]" in out
+    assert "needs-review-request" not in _rows(out)
 
 
 def test_approved_and_still_draft_is_the_maintainers_turn(run) -> None:
@@ -171,7 +240,7 @@ def test_a_commented_placeholder_is_not_a_verdict(run) -> None:
         ]
     )
 
-    assert "no verdict yet" in out
+    assert "not returned a verdict yet" in out
     assert "UNCONSUMED" not in out
 
 

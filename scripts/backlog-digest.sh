@@ -56,7 +56,7 @@ issues=$(gh issue list --repo "$repo" --state open --limit 200 \
   --json number,title,labels,author,createdAt,updatedAt,comments,body)
 
 prs=$(gh pr list --repo "$repo" --state open --limit 100 \
-  --json number,title,headRefName,mergeable,body)
+  --json number,title,headRefName,mergeable,body,isDraft)
 
 # Merged PRs are needed to tell a LIVE worktree from a DEAD one. Without this,
 # any worktree left on disk pins its issue to In Progress forever: #602, #593

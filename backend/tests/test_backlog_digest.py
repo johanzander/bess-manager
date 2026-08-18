@@ -240,6 +240,44 @@ def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
     assert "pr" not in item
 
 
+def test_open_pr_list_actually_requests_isdraft(bin_dir: Path) -> None:
+    """`prs_for` emits `isDraft` on every PR object, but jq can only surface a
+    field the `gh pr list --json ...` call actually requested -- a fixture
+    that hands `isDraft` over regardless of the requested field list (like
+    `_gh_shim` does) cannot catch a `--json` selection that omits it. This
+    shim inspects the real invocation instead of trusting the fixture: it
+    fails loudly, naming the missing field, if the open-PR `gh pr list` call
+    does not ask for `isDraft` -- and only then hands back a PR whose
+    `isDraft` is `False`, so the assertion below also proves the value flows
+    through end to end rather than resolving to a silent null."""
+    issue = _issue(650, labels=[{"name": "bug"}])
+    pr = _pr(651, body="Fixes #650", isDraft=False)
+    shim = f"""
+case "$*" in
+  *"issue list"*) cat <<'EOF'
+{json.dumps([issue])}
+EOF
+    ;;
+  *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*)
+    case "$*" in
+      *isDraft*) : ;;
+      *) echo "gh pr list --json is missing isDraft: $*" >&2; exit 1 ;;
+    esac
+    cat <<'EOF'
+{json.dumps([pr])}
+EOF
+    ;;
+  *"project item-list"*) printf '%s\\n' '{{"items": []}}' ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+    _write_shim(bin_dir, "gh", shim)
+
+    item = _run(bin_dir)["items"][0]
+    assert item["prs"][0]["isDraft"] is False
+
+
 def test_human_comment_alone_does_not_move_the_column(bin_dir: Path) -> None:
     """A human comment is NOT a blocker, and used to be treated as one.
 

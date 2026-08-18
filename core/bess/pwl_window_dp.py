@@ -17,6 +17,7 @@ from core.bess.action_selector import (
     PeriodInputs,
     _discharge_is_unexecutable,
     _residual_cover_p,
+    _solar_export_bypass_is_unexecutable,
     select_action,
 )
 from core.bess.dp_battery_algorithm import (
@@ -258,6 +259,17 @@ def _pwl_candidate_values_at(
     # delta -> battery_charged=0, so grid_exported reflects the full
     # surplus). With the AC cap set, this candidate is also what defers
     # charging to preserve headroom for above-cap solar.
+    #
+    # Withheld where the classifier would call the period IDLE rather than
+    # SOLAR_EXPORT (#630): nothing commands the hold there, so it is not an
+    # action this pass may value. Plain IDLE (power=0, already in the main
+    # grid above) is what the hardware does instead, which is why dropping
+    # the column cannot leave a row without a finite action.
+    if _solar_export_bypass_is_unexecutable(
+        solar_production[t], home_consumption[t], battery_settings, dt
+    ):
+        return value.max(axis=1)
+
     zeros_col = np.zeros_like(soe_col)
     reward_bypass, grid_imported_bypass = _compute_reward_grid(
         zeros_col,

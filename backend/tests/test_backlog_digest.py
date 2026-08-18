@@ -901,6 +901,63 @@ def test_issue_with_no_card_reports_null_status_and_is_an_orphan(
     assert [o["ref"] for o in orphans] == ["624"]
 
 
+def test_pr_cards_are_emitted_separately_from_issue_cards(bin_dir: Path) -> None:
+    """`content.type` is the load-bearing bit, and it is confirmed against a
+    real card rather than assumed: an added PR reports "PullRequest" with
+    number/title/url/repository alongside it.
+
+    Board membership for PRs is what gives a decision about a PR somewhere to
+    live -- without it "#437 is lower priority" had nowhere to be recorded, so
+    every rhythm pass re-reported it as due.
+    """
+    issue = _issue(601)
+    cards = [
+        {
+            "content": {"number": 601, "type": "Issue"},
+            "status": "Backlog",
+            "priority": "P2",
+        },
+        {
+            "content": {"number": 437, "type": "PullRequest"},
+            "status": "In Review",
+            "priority": "P4",
+        },
+        {
+            "content": {"number": 167, "type": "PullRequest"},
+            "status": "Backlog",
+            "awaiting": "discussion",
+        },
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], cards))
+
+    digest = _run(bin_dir)
+
+    assert digest["pr_board"] == [
+        {
+            "number": 437,
+            "board_status": "In Review",
+            "priority": "P4",
+            "awaiting": None,
+        },
+        {
+            "number": 167,
+            "board_status": "Backlog",
+            "priority": None,
+            "awaiting": "discussion",
+        },
+    ]
+    # The issue card is untouched by the split and still drives the item.
+    assert digest["items"][0]["priority"] == "P2"
+
+
+def test_pr_board_is_empty_when_no_prs_are_carded(bin_dir: Path) -> None:
+    issue = _issue(601)
+    card = {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    assert _run(bin_dir)["pr_board"] == []
+
+
 def test_a_locked_worktree_is_reported_as_locked(bin_dir: Path) -> None:
     """The lock is the liveness signal `claude agents` cannot provide: it lists
     background agents only, so a foreground `/implement-issue` is invisible and

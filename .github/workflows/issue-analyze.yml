@@ -56,7 +56,11 @@ jobs:
             ──────────────────────────────────────────────────────────────────
             1. docs/agents/rules.md           — hard constraints
             2. docs/agents/architecture.md    — codebase layout & data flow
-            3. .claude/agents/bess-analyst.md — domain expertise checklist
+
+            Do NOT read `.claude/agents/bess-analyst.md`. It is the
+            `bess-analyst` sub-agent's own system prompt — it already has it in
+            full, and you never run the procedure it describes. Reading it costs
+            25 KB of your context on every turn and tells you nothing you act on.
 
             ──────────────────────────────────────────────────────────────────
             PROCESS
@@ -120,6 +124,32 @@ jobs:
                reading the file:line locations it cited. Do not just trust
                the summary — quote the actual code.
 
+               The report does NOT pass verification if:
+                 - it claims a CODE bug but cites no `file:line` — there is
+                   nothing to check. A diagnosis that the real problem is an
+                   unavailable sensor, the wrong inverter type, an HA
+                   integration mismatch or a stale add-on version is a
+                   legitimate root cause and needs no code citation;
+                 - a cited location does not say what the report claims it says;
+                 - actual behavior diverged from the plan (unplanned import,
+                   floor breach, spike) and the report gives ONE blended verdict
+                   instead of a separate verdict for each of:
+                     - **P-optimality** — was the allocation optimal against the
+                       inputs the DP actually had at the decision point, judged
+                       WITHOUT hindsight?
+                     - **Forecast error (P≠R)** — the Plan was optimal for its
+                       own forecast, but that forecast differed from what was
+                       Realized.
+                     - **Control/execution noise** — the plan's commanded rate
+                       was never actually achieved by the inverter.
+                   Blending these has repeatedly produced wrong conclusions in
+                   this repo.
+
+               A report that fails verification is an inconclusive result, not a
+               diagnosis. Publish what you found and what is still missing via
+               the IF YOU CAN'T REACH A CONCLUSION path below — do not dress it
+               up as a root cause.
+
             5. **Publish the analysis by RUNNING these two commands.** Writing
                the diagnosis as your reply does NOT publish it — you are running
                headless, nothing is watching your output, and a final message
@@ -169,7 +199,7 @@ jobs:
                  ANALYSIS_EOF
 
                  gh issue comment ${{ github.event.issue.number }} --body-file /tmp/analysis.md
-                 gh issue edit ${{ github.event.issue.number }} --add-label needs-human-review
+                 gh issue edit ${{ github.event.issue.number }} --add-label needs-human-review --remove-label ready-for-analysis
 
             Be honest — "I couldn't find the bug in the current code" is a
             valid outcome. Do not invent a root cause to fill the template.

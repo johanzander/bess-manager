@@ -516,6 +516,68 @@ then
 fi
 
 echo ""
+echo "📋 Checking bot workflow context contract..."
+echo "-------------------------------------------"
+
+# A workflow prompt must not tell its MAIN agent to read a `.claude/agents/*.md`
+# file. Those files are sub-agent system prompts: the sub-agent already has one
+# in full, so naming it as the main agent's REQUIRED READING loads a second copy
+# into a different context window, on every turn, for an agent that never runs
+# the procedure it describes.
+#
+# Stage 2 did exactly that with bess-analyst.md (25,681 B) and nothing consumed
+# it (#654). Its six steps are: get context, identify the current problem,
+# delegate, verify the cited file:line, publish, label -- no step applies a
+# "domain expertise checklist". Worse, the section of that file which could
+# plausibly serve as a judging standard (Separate Evidence from Claims) was
+# already restated inline in the sub-agent task the same prompt passes, so the
+# content was loaded three times over.
+#
+# The paired assertion matters as much as the removal: Stage 2 must still
+# DELEGATE. Dropping the read is the saving; dropping the delegation would gut
+# the stage, and the same "trim the prompt" instinct reaches for both.
+if ! python3 - <<'PY_CTX'
+import re, sys, pathlib
+
+WF = pathlib.Path(".github/workflows")
+bad = []
+
+for f in sorted(set(WF.glob("*.yml")) | set(WF.glob("*.yaml"))):
+    text = f.read_text()
+    for i, line in enumerate(text.splitlines(), 1):
+        # Match the shape the regression actually takes: a NUMBERED entry in a
+        # reading list, e.g. "3. .claude/agents/bess-analyst.md — checklist".
+        # Deliberately narrow. A prose line that merely names the path is not
+        # flagged, because the prompt now carries an explicit "Do NOT read
+        # .claude/agents/bess-analyst.md" note and a gate that fought its own
+        # documentation would be worse than one with a known edge. An
+        # unnumbered "read <path>" instruction would slip through; that is an
+        # accepted narrowness, not a claim of completeness.
+        if re.match(r"^\s*\d+\.\s+\.claude/agents/", line):
+            bad.append(f"{f}:{i}: main agent told to read a sub-agent definition: {line.strip()}")
+
+analyze = (WF / "issue-analyze.yml").read_text()
+_, _, prompt_block = analyze.partition("prompt: |")
+if not re.search(r"subagent_type[\s:`'\"]*bess-analyst", prompt_block):
+    bad.append("issue-analyze.yml: Stage 2 no longer delegates to the bess-analyst "
+               "sub-agent -- that delegation IS the stage")
+
+if bad:
+    for b in bad:
+        print(f"   {b}")
+    sys.exit(1)
+
+print("✅ Bot workflow context contract intact (no sub-agent definition read by a "
+      "main agent, Stage 2 still delegates)")
+PY_CTX
+then
+    echo "❌ Bot workflow context contract violated"
+    echo "   A sub-agent's definition is its own system prompt. Do not also list"
+    echo "   it as the main agent's REQUIRED READING (#654)."
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Checking agent context budget..."
 echo "-------------------------------------------"
 

@@ -35,6 +35,13 @@ jobs:
           app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
 
+      # Marks the point the agent started, so the verification step below can
+      # tell a comment IT posted from the `@claude-bot analyze` trigger comment
+      # that started this run (which is always already present).
+      - name: Mark analysis start
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
@@ -109,40 +116,65 @@ jobs:
                    the reporter's), file:line references, and whether the
                    debug bundle reveals a different root cause than claimed."
 
-            3. After the sub-agent reports back, **independently verify** by
+            4. After the sub-agent reports back, **independently verify** by
                reading the file:line locations it cited. Do not just trust
                the summary — quote the actual code.
 
-            4. Post ONE comment on the issue with this structure:
+            5. **Publish the analysis by RUNNING these two commands.** Writing
+               the diagnosis as your reply does NOT publish it — you are running
+               headless, nothing is watching your output, and a final message
+               reaches nobody. The issue only changes if `gh` changes it.
 
-                  ## Root cause
-                  <one-paragraph plain-English explanation>
+               Write the body to a file first, then post it. Use a file rather
+               than `-b` because the body contains backticks, quotes and
+               newlines that do not survive shell quoting:
 
-                  ## Evidence
-                  - `path/to/file.py:LINE` — <quoted code excerpt>
-                  - <additional file:line refs as needed>
+                 cat > /tmp/analysis.md <<'ANALYSIS_EOF'
+                 ## Root cause
+                 <one-paragraph plain-English explanation>
 
-                  ## Proposed fix
-                  <high-level approach in 2-4 sentences — NO code yet>
+                 ## Evidence
+                 - `path/to/file.py:LINE` — <quoted code excerpt>
+                 - <additional file:line refs as needed>
 
-                  ## Risks / open questions
-                  <anything you couldn't determine, edge cases, or test gaps>
+                 ## Proposed fix
+                 <high-level approach in 2-4 sentences — NO code yet>
 
-                  ---
-                  Reply `@claude-bot fix` to implement and open a draft PR.
+                 ## Risks / open questions
+                 <anything you couldn't determine, edge cases, or test gaps>
 
-            5. Update labels:
+                 ---
+                 Reply `@claude-bot fix` to implement and open a draft PR.
+                 ANALYSIS_EOF
+
+                 gh issue comment ${{ github.event.issue.number }} --body-file /tmp/analysis.md
+
+               Check that the command succeeded. If it failed, fix the problem
+               and run it again — do not proceed to step 6 with the comment
+               unposted, and do not end the run having only described it.
+
+            6. Update labels:
                  gh issue edit ${{ github.event.issue.number }} --add-label analyzed --remove-label ready-for-analysis
 
             ──────────────────────────────────────────────────────────────────
             IF YOU CAN'T REACH A CONCLUSION
             ──────────────────────────────────────────────────────────────────
-            Post what you found, what you read, and what specific information
-            is still missing. Then:
+            Publish what you found, what you read, and what specific
+            information is still missing — again by RUNNING the commands, not
+            by describing the outcome:
+
+                 cat > /tmp/analysis.md <<'ANALYSIS_EOF'
+                 ## Inconclusive
+                 <what you read, what you ruled out, what is still missing>
+                 ANALYSIS_EOF
+
+                 gh issue comment ${{ github.event.issue.number }} --body-file /tmp/analysis.md
                  gh issue edit ${{ github.event.issue.number }} --add-label needs-human-review
 
             Be honest — "I couldn't find the bug in the current code" is a
             valid outcome. Do not invent a root cause to fill the template.
+            An inconclusive comment that is actually posted is worth far more
+            than a confident one that is not.
 
             ──────────────────────────────────────────────────────────────────
             HARD CONSTRAINTS
@@ -151,4 +183,69 @@ jobs:
             - DO NOT open a PR.
             - DO NOT skip the bess-analyst delegation step — it's the whole
               point of this stage.
+            - DO NOT end the run without having RUN `gh issue comment`. A
+              diagnosis you only wrote out is a diagnosis nobody receives,
+              and the job will fail the verification step below.
             - Quote real code. Don't paraphrase.
+
+      # The acceptance criterion of #646: a Stage 2 run must not be able to
+      # exit `success` having written nothing to the issue.
+      #
+      # Five of nine non-skipped runs did exactly that over three days, at
+      # $0.33-1.58 each, and every signal said they were healthy -- green run,
+      # is_error false, permission_denials_count 0. The `ready-for-analysis`
+      # label staying put is indistinguishable from "nobody has run analyze
+      # yet", so the backlog pass could not see it either. On #593 the
+      # maintainer eventually wrote the diagnosis by hand: the stage was paid
+      # for and the work was done twice.
+      #
+      # `if: always()` is load-bearing -- the whole point is to catch the run
+      # that the agent step already reported as successful.
+      #
+      # This step ASSERTS; it deliberately does not repair. Posting the comment
+      # on the agent's behalf would be a second publishing path whose only job
+      # is to route around the first one failing, which masks the regression
+      # instead of surfacing it (docs/agents/rules.md, Debugging Protocol
+      # step 8). A loud red run is the product here.
+      - name: Verify the analysis reached the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          SINCE: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+
+          posted=$(gh issue view "$ISSUE" --json comments \
+            --jq "[.comments[] | select(.createdAt > \"$SINCE\")] | length")
+          labels=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+
+          echo "Comments posted since ${SINCE}: ${posted}"
+          echo "Labels now: ${labels:-<none>}"
+
+          failed=0
+
+          if [ "$posted" -eq 0 ]; then
+            echo "::error::Stage 2 posted NO comment on issue #${ISSUE}. The run"
+            echo "::error::billed for an analysis that reached nobody. Do not re-fire"
+            echo "::error::blindly -- check whether the agent described the comment"
+            echo "::error::instead of running 'gh issue comment' (see #646)."
+            failed=1
+          fi
+
+          case ",$labels," in
+            *,analyzed,*|*,needs-human-review,*) ;;
+            *)
+              echo "::error::Stage 2 applied neither 'analyzed' nor"
+              echo "::error::'needs-human-review' to issue #${ISSUE}. Without one of"
+              echo "::error::them the issue is indistinguishable from one that was"
+              echo "::error::never analysed, and the backlog pass will skip it."
+              failed=1
+              ;;
+          esac
+
+          if [ "$failed" -eq 1 ]; then
+            exit 1
+          fi
+
+          echo "✅ Analysis published: ${posted} new comment(s), labels: ${labels}"

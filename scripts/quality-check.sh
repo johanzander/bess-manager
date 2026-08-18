@@ -421,6 +421,98 @@ then
 fi
 
 echo ""
+echo "📋 Checking bot workflow publish contract..."
+echo "-------------------------------------------"
+
+# Stage 2 (issue-analyze.yml) spent three days exiting `success` while posting
+# nothing -- five of nine non-skipped runs produced no comment and no label,
+# burning $0.33-1.58 each (#646). Every layer reported healthy: the run was
+# green, is_error false, permission_denials_count 0.
+#
+# Two independent things have to hold, and this gate checks BOTH because either
+# one alone leaves the failure silent:
+#
+#   1. The prompt must tell the agent to RUN a command to publish. Stage 2 said
+#      "Post ONE comment on the issue with this structure:" followed by a
+#      markdown template -- a description of a document, not an instruction to
+#      execute anything. These workflows run in AGENT mode (use_sticky_comment
+#      false, track_progress false), so the action posts nothing on the agent's
+#      behalf: an agent that renders the template as its final assistant message
+#      has, by its own lights, finished. It then never reaches the labelling
+#      step, which is why the label was untouched too.
+#
+#      The contrast is what makes this more than a story. On the SAME action
+#      version (459ad358 / CLI 2.1.234), Stage 4's review -- whose prompt names
+#      `gh pr review` explicitly -- landed an APPROVED verdict, while Stage 2
+#      went silent three times in three seconds. Stage 2 was the only bot
+#      workflow whose publish step was prose, and the only one that failed to
+#      publish.
+#
+#   2. The workflow must VERIFY it afterwards. The prompt fix is a behavioural
+#      argument about what a model will infer, so it cannot be trusted on its
+#      own -- the next upstream version may infer differently, exactly as this
+#      one did. Only a post-condition on the job makes that loud instead of
+#      green.
+#
+# Deliberately NOT checked for, and deliberately not built: a step that posts
+# the comment on the agent's behalf when it didn't. That is a second publishing
+# path whose only job is to route around the first one failing, and it would
+# mask the regression rather than surface it (docs/agents/rules.md, Debugging
+# Protocol step 8). The guard asserts; it does not repair.
+if ! python3 - <<'PY'
+import pathlib, re, sys
+
+WORKFLOWS = pathlib.Path(".github/workflows")
+
+# Workflows whose whole product is a comment on the issue. Stage 3 is excluded
+# on purpose: its product is a PR, which is observable without this check.
+PUBLISHERS = {
+    "issue-triage.yml": "gh issue comment",
+    "issue-analyze.yml": "gh issue comment",
+}
+
+bad = []
+
+for name, command in PUBLISHERS.items():
+    path = WORKFLOWS / name
+    if not path.is_file():
+        print(f"❌ {name} is missing -- the publish contract cannot be checked")
+        bad.append(name)
+        continue
+    if command not in path.read_text():
+        print(
+            f"❌ {name} never names `{command}`. Its publish step is prose, so "
+            "the agent can render it as a final message and exit success "
+            "having written nothing to GitHub (#646)."
+        )
+        bad.append(name)
+
+# The post-agent guard: a run that published nothing must fail the job. Checked
+# by the shape that actually does the work -- a step keyed on `if: always()`
+# that re-reads the issue -- rather than by step name, which renames freely.
+analyze = WORKFLOWS / "issue-analyze.yml"
+if analyze.is_file():
+    text = analyze.read_text()
+    has_always = re.search(r"^\s*if:\s*always\(\)\s*$", text, re.MULTILINE)
+    has_readback = "--json comments" in text and "--json labels" in text
+    if not (has_always and has_readback):
+        print(
+            "❌ issue-analyze.yml has no post-agent verification step. A run "
+            "that posts no comment and applies no label must FAIL the job, "
+            "not exit success (#646 acceptance criterion)."
+        )
+        bad.append("issue-analyze.yml:guard")
+
+if bad:
+    sys.exit(1)
+print(f"✅ Bot workflow publish contract intact ({len(PUBLISHERS)} publishers "
+      "name their command, Stage 2 verifies it posted)")
+PY
+then
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Checking scenario discovery coverage..."
 echo "-------------------------------------------"
 

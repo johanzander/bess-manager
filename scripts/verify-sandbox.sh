@@ -108,7 +108,7 @@ fi
 # allow-within-deny primitive, so allowWrite cannot re-open them. A "created"
 # here would mean the sandbox is looser than this repo's docs assume.
 check "git worktree add is blocked (use EnterWorktree)" blocked "$wt" \
-  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read CLAUDE.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
+  "the sandbox allowed a .git/config + .git/worktrees write. Either the write policy changed or the sandbox is not applied; re-read docs/agents/local-agent-environment.md Permissions before trusting anything here. (No error to quote -- this check fails precisely when the command SUCCEEDED.)"
 
 # NOTE ON `rm -rf`, which is the reason settings.json leaves rm unattended.
 # There is deliberately no probe for it, because a safe one cannot be written.
@@ -136,9 +136,9 @@ else
   cl=skipped
 fi
 check "Bash writing .claude/settings.json is blocked (use Edit/Write)" blocked "$cl" \
-  "the sandbox allowed a write to the settings file that governs it. Either the deny list changed or the sandbox is not applied -- re-derive before trusting CLAUDE.md's Permissions section."
+  "the sandbox allowed a write to the settings file that governs it. Either the deny list changed or the sandbox is not applied -- re-derive before trusting docs/agents/local-agent-environment.md's Permissions section."
 
-# 4b. The paths CLAUDE.md is unsure about. These are reported, not asserted:
+# 4b. The paths docs/agents/local-agent-environment.md is unsure about. These are reported, not asserted:
 #     the earlier claim that they were denied came from misreading the binary's
 #     GitHub Actions config as the local one, so measure rather than restate.
 touch scripts/.sandbox-probe 2>/dev/null && sc=allowed || sc=blocked

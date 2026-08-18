@@ -258,7 +258,8 @@ while kill -0 "$install_pid" 2>/dev/null; do
         echo "" >&2
         echo "     mkdir \"$BROWSER_CACHE/.probe\"   # 'Operation not permitted' = sandbox" >&2
         echo "" >&2
-        echo "   See CLAUDE.md 'Why each non-default knob is there', and confirm" >&2
+        echo "   See docs/agents/local-agent-environment.md 'Why each non-default" >&2
+        echo "   knob is there', and confirm" >&2
         echo "   with scripts/verify-sandbox.sh in a FRESH session." >&2
         echo "" >&2
         echo "   Dependency sharing above completed — only the browsers are missing." >&2

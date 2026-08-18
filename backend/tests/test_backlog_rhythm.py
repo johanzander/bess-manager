@@ -158,6 +158,39 @@ def test_nudge_at_threshold_then_park(tmp_path: Path) -> None:
     assert "park" in parked and "nudge_reporter" not in parked
 
 
+def test_an_open_pr_suppresses_the_chase_and_the_park(tmp_path: Path) -> None:
+    """Parking an item that has an open PR OSCILLATES: `park` says move the
+    card to Backlog, the column derivation says an item with a PR is In Review,
+    so the next pass reports `move_card` to put it back and the pass after that
+    parks it again. #162 did exactly that — parked at 55 quiet days, reported
+    as a mis-placed card, restored, parked again.
+
+    The rule is also right on its own terms: an issue with a PR in flight is
+    not a reporter chase whatever its Awaiting says, and the wait that matters
+    is the review, which the PR half already reports.
+    """
+    for days, unwanted in ((28, "park"), (14, "nudge_reporter")):
+        item = _item(
+            162,
+            labels=["b"],
+            awaiting="reporter",
+            pr=167,
+            column="In Review",
+            board_status="In Review",
+            last_comment=_comment(days),
+        )
+        actions = _actions_for(_run(tmp_path, [item]), 162)
+        assert unwanted not in actions, days
+        # ...and no move_card either, so there is nothing to oscillate against.
+        assert "move_card" not in actions, days
+
+
+def test_the_chase_still_fires_without_a_pr(tmp_path: Path) -> None:
+    """The suppression must not swallow the case the rule exists for."""
+    item = _item(163, labels=["b"], awaiting="reporter", last_comment=_comment(28))
+    assert "park" in _actions_for(_run(tmp_path, [item]), 163)
+
+
 def test_below_threshold_does_not_chase(tmp_path: Path) -> None:
     item = _item(4, labels=["b"], awaiting="reporter", last_comment=_comment(13))
     assert _actions_for(_run(tmp_path, [item]), 4) == set()

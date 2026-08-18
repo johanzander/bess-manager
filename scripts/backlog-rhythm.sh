@@ -93,7 +93,21 @@ actions=$(printf '%s' "$digest" | jq \
 
     # Chase once, then park. `is_reporter` false means the last word was ours,
     # so the ball is still with them.
-    (if .awaiting == "reporter"
+    #
+    # AN OPEN PR SUPPRESSES BOTH, and that is not a nicety -- parking one
+    # OSCILLATES. `park` says move the card to Backlog; the column derivation
+    # says an item with an open PR is In Review; so the next pass reports
+    # `move_card` to put it back, and the pass after that parks it again,
+    # forever. #162 did exactly this: parked at 55 quiet days, immediately
+    # reported as a mis-placed card, restored, parked again.
+    #
+    # The rule is right underneath the loop, too. An issue with a PR in flight
+    # is not a reporter chase whatever its `Awaiting` says: the work exists,
+    # and the wait that matters is the PR review, which the PR half of this
+    # pass already reports. Nudging the reporter of a 46-day-stale conflicted
+    # PR asks the wrong person about the wrong thing.
+    (if .pr != null then empty
+     elif .awaiting == "reporter"
         and ((.last_comment.is_reporter // false) | not)
         and quiet_days >= $park
      then {issue: .number, action: "park",

@@ -392,6 +392,29 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   <branch>` rather than re-pushing, and don't read the message as a failed
   push. Use a plain `git push origin <branch>`; nothing in this repo's flow
   needs the upstream recorded. *(measured)*
+- **`git branch -D` prints a `.git/config` error and deletes the branch
+  anyway**, exiting 0 with the noise on stderr:
+
+  ```
+  $ git branch -D worktree-backlogger; echo "exit=$?"
+  error: could not lock config file .../.git/config
+  warning: update of config-file failed
+  Deleted branch worktree-backlogger (was 6c70a77d).
+  exit=0
+  ```
+
+  Delete completed the part that matters: refs are not denied (next bullet),
+  so the ref is gone. The config write it wanted was to drop the branch's
+  `[branch "<name>"]` stanza — and **nothing was left behind**, verified by
+  grepping `.git/config` afterwards, because the branch never had a stanza to
+  drop. That is the general case under this sandbox rather than luck: writing
+  one requires `git push -u` or `checkout -b --track`, both of which are
+  denied by the two bullets above, so branches created here have no stanza.
+  A branch predating the sandbox could still have one; whether `-D` then
+  strands it is untested.
+
+  Either way, do not re-run the delete on seeing the error and do not report
+  the branch as still present — check `git branch --list <name>`. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,

@@ -876,3 +876,58 @@ def test_grooming_actions_rank_together_after_dispatchable(tmp_path: Path) -> No
     assert len(grooming_ranks) == 1, rank_by_action
     (grooming_rank,) = grooming_ranks
     assert grooming_rank > rank_by_action["dispatchable"]
+
+
+# --- the WIP limit --------------------------------------------------------
+
+
+def test_over_the_wip_limit_suppresses_dispatch(tmp_path: Path) -> None:
+    """Unbounded WIP is the state that produced 8 open drafts, 6 of them
+    conflicting. Above the limit, nothing new starts."""
+    in_flight = [
+        _item(
+            900 + i,
+            column="In Review",
+            board_status="In Review",
+            prs=[{"number": 950 + i, "mergeable": "MERGEABLE", "isDraft": True}],
+        )
+        for i in range(3)
+    ]
+    ready = _item(
+        910,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+    )
+    result = _run(tmp_path, [*in_flight, ready])
+    assert result["wip"] == {"count": 3, "limit": 3, "over": True}
+    assert "dispatchable" not in _actions_for(result, 910)
+
+
+def test_under_the_limit_dispatch_is_allowed(tmp_path: Path) -> None:
+    ready = _item(
+        911,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+    )
+    result = _run(tmp_path, [ready])
+    assert result["wip"]["over"] is False
+    assert "dispatchable" in _actions_for(result, 911)
+
+
+def test_a_branch_and_its_pr_count_as_one(tmp_path: Path) -> None:
+    """In Progress and In Review are the same piece of work at two stages;
+    counting them separately would double the effective limit."""
+    items = [
+        _item(920, column="In Progress", board_status="In Progress"),
+        _item(
+            921,
+            column="In Review",
+            board_status="In Review",
+            prs=[{"number": 960, "mergeable": "MERGEABLE", "isDraft": True}],
+        ),
+    ]
+    assert _run(tmp_path, items)["wip"]["count"] == 2

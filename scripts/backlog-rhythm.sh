@@ -39,6 +39,11 @@ here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 NUDGE_DAYS="${RHYTHM_NUDGE_DAYS:-14}"
 PARK_DAYS="${RHYTHM_PARK_DAYS:-28}"
 
+# FLOW POLICY: the WIP limit. 3 is deliberately aggressive -- with 7 in flight
+# it keeps dispatch shut until the fleet drains to 2, which is the point. A
+# variable so the tests can drive the boundary.
+WIP_LIMIT="${RHYTHM_WIP_LIMIT:-3}"
+
 # `RHYTHM_DIGEST_FILE` and `RHYTHM_PRS_FILE` are test seams, the same shape as
 # `BESS_ENV_FILE` in gh-agent.sh: they let the rules be exercised against
 # fixtures without a network round-trip or a live board. Unset in normal use.
@@ -65,11 +70,18 @@ fi
 actions=$(printf '%s' "$digest" | jq \
     --argjson nudge "$NUDGE_DAYS" \
     --argjson park "$PARK_DAYS" \
+    --argjson wip_limit "$WIP_LIMIT" \
     --argjson prs "$prs" '
   # Board cards for PRs, keyed by number. Absent on an older digest, so this
   # defaults to empty rather than failing -- a rhythm run against a stale
   # digest then simply defers nothing, which is the pre-existing behaviour.
   (.pr_board // []) as $pr_board
+  |
+
+  # In Progress and In Review are ONE piece of work at two stages -- a branch
+  # and its PR. Counting them separately would silently double the limit.
+  ([ .items[] | select(.column == "In Progress" or .column == "In Review") ] | length) as $wip
+  | ($wip >= $wip_limit) as $over_wip
   |
 
   # Quiet time is measured from the LAST COMMENT, not from updatedAt. A label
@@ -226,7 +238,7 @@ actions=$(printf '%s' "$digest" | jq \
      else empty end),
 
     # The positive case: actually dispatchable.
-    (if .column == "Ready for Dev"
+    (if .column == "Ready for Dev" and ($over_wip | not)
      then {issue: .number, action: "dispatchable",
            why: "Ready for Dev, priority \(.priority)",
            detail: "meets Definition of Ready; propose for dispatch"}
@@ -423,6 +435,7 @@ actions=$(printf '%s' "$digest" | jq \
 
   | {
       due: length,
+      wip: {count: $wip, limit: $wip_limit, over: $over_wip},
       by_action: (group_by(.action) | map({key: .[0].action, value: length}) | from_entries),
       actions: sort_by(.rank, .action, (.issue // .pr)),
       # The PRs suppressed by a board decision, reported as a COUNT AND A LIST
@@ -469,14 +482,24 @@ deferred_line=$(printf '%s' "$actions" | jq -r '.deferred
          + (map("#" + (.pr | tostring) + " " + .why) | join("; ")) + ")"
     end')
 
+# Reported on every path, including "nothing due" -- a suppressed dispatch
+# queue is exactly the moment the operator needs to know why the pass looks
+# empty.
+wip_line=$(printf '%s' "$actions" | jq -r '.wip
+  | if .over then "  WIP " + (.count|tostring) + "/" + (.limit|tostring)
+                  + " -- finish before starting; dispatch suppressed"
+    else "  WIP " + (.count|tostring) + "/" + (.limit|tostring) end')
+
 due=$(printf '%s' "$actions" | jq -r '.due')
 if [ "$due" -eq 0 ]; then
     echo "RHYTHM: nothing due."
+    printf '%s\n' "$wip_line"
     [ -n "$deferred_line" ] && printf '%s\n' "$deferred_line"
     exit 0
 fi
 
 echo "RHYTHM: $due action(s) due"
+printf '%s\n' "$wip_line"
 printf '%s' "$actions" | jq -r '
   "",
   (.by_action | to_entries | map("  \(.key): \(.value)") | join("\n")),

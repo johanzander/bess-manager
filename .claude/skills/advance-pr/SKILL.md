@@ -160,21 +160,40 @@ this skill is where they get written. Both end the same way: **stop, write
 
 Since PR cards do not exist on the board — `Priority` and `Awaiting` live on
 the issue, so they cannot be ambiguous between two cards for one piece of
-work — resolve the PR's issue first (`Refs #N` / `Closes #N` in the PR body)
-and write the field there:
+work — resolve the PR's issue first. **If the PR body carries no `Refs #N`
+or `Closes #N` at all, stop here and report it rather than let the lookup
+degrade into an empty `$item`** — spec §4 calls an orphan PR a reported
+defect, not a normal shape this skill should paper over.
+
+`gh project item-edit`'s ID-based form needs **three** GraphQL node IDs, not
+two — `--id` (the item), `--field-id`, and `--single-select-option-id` all
+need a `--project-id` alongside them or it fails outright with
+`project-id must be provided`. Nothing else in this repo's scripts resolves
+`PROJECT_NUMBER` to that id, so do it explicitly:
 
 ```bash
-item=$(gh project item-list "$PROJECT_NUMBER" --owner johanzander --format json \
+project_id=$(gh project view "$PROJECT_NUMBER" --owner johanzander --format json --jq .id)
+
+# --limit 200: item-list defaults to 30 and TRUNCATES SILENTLY past it — no
+# error, just a shorter list, exactly the failure mode CLAUDE.md calls out
+# ("a short list looks like a correct answer"). backlog-digest.sh:178 passes
+# the same --limit 200 for the same reason. At 57 items today, the default
+# would already have missed roughly half the board.
+item=$(gh project item-list "$PROJECT_NUMBER" --owner johanzander --format json --limit 200 \
   | jq -r --argjson n <issue-number> '.items[] | select(.content.number == $n) | .id')
-gh project item-edit --id "$item" --field-id <awaiting-field-id> \
-  --single-select-option-id <maintainer-option-id>
+
+gh project item-edit --id "$item" --project-id "$project_id" \
+  --field-id <awaiting-field-id> --single-select-option-id <maintainer-option-id>
 scripts/gh-agent.sh --as dev pr comment <n> --body "..."
 ```
 
 Resolve `<awaiting-field-id>` and `<maintainer-option-id>` once via
 `gh project field-list "$PROJECT_NUMBER" --owner johanzander --format json` —
 don't hardcode them, the board is the source of truth for its own field
-shape.
+shape. (As of this writing the `maintainer` option itself does not exist yet
+on the live board — adding it is the Task 1 board migration, held for the
+maintainer to run by hand per this plan's own review Ruling 6. This skill's
+job is to write to it correctly once it exists, not to create it.)
 
 - **Semantic conflict.** `git merge origin/main` produced conflicts that are
   not textual — the two sides disagree about *behaviour*, not just about

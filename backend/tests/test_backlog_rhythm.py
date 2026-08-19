@@ -824,3 +824,55 @@ def test_an_escalation_outranks_every_column(tmp_path: Path) -> None:
     verifying = _item(803, column="In Verification", board_status="In Verification")
     first = _run(tmp_path, [escalated, verifying])["actions"][0]
     assert first["action"] == "escalated"
+
+
+def test_grooming_actions_rank_together_after_dispatchable(tmp_path: Path) -> None:
+    """set_awaiting, add_card, set_priority, move_card and triage_labels are
+    board-hygiene, not column-driven flow work, so they all land at the same
+    rank and strictly after dispatchable. There is no way to make the script
+    emit an action name with no rank branch without editing the script
+    itself, so this pins the five named branches directly rather than
+    fabricating an unreachable case."""
+    awaiting_item = _item(
+        900,
+        labels=["needs-debug-log"],
+        awaiting="reporter",
+        awaiting_source="label",
+        awaiting_suggested="reporter",
+        last_comment=_comment(1),
+    )
+    no_card_item = _item(901, board_status=None, priority=None)
+    no_priority_item = _item(902, priority=None)
+    mismatched_column_item = _item(
+        903, board_status="Ready for Dev", column="In Progress"
+    )
+    unlabeled_item = _item(904, labels=[])
+    dispatchable_item = _item(905, column="Ready for Dev", board_status="Ready for Dev")
+
+    result = _run(
+        tmp_path,
+        [
+            awaiting_item,
+            no_card_item,
+            no_priority_item,
+            mismatched_column_item,
+            unlabeled_item,
+            dispatchable_item,
+        ],
+    )
+
+    rank_by_action = {a["action"]: a["rank"] for a in result["actions"]}
+    grooming_actions = [
+        "set_awaiting",
+        "add_card",
+        "set_priority",
+        "move_card",
+        "triage_labels",
+    ]
+    for action in grooming_actions:
+        assert action in rank_by_action, action
+
+    grooming_ranks = {rank_by_action[a] for a in grooming_actions}
+    assert len(grooming_ranks) == 1, rank_by_action
+    (grooming_rank,) = grooming_ranks
+    assert grooming_rank > rank_by_action["dispatchable"]

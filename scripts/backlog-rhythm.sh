@@ -410,7 +410,16 @@ actions=$(printf '%s' "$digest" | jq \
        elif .action == "dispatchable" then 4
        elif .action == "recheck_ready" or .action == "surface_discussion"
             or .action == "nudge_reporter" or .action == "park" then 5
-       else 6 end)})
+       elif .action == "set_awaiting" or .action == "add_card"
+            or .action == "set_priority" or .action == "move_card"
+            or .action == "triage_labels" then 6
+       # Rank 9 is not a column. It is the catch-all for an action name
+       # this function does not know about -- its rank branch is missing,
+       # most likely because a later task added an action and forgot to
+       # name it here. It sorts after every named rank, including the
+       # rank 6 grooming actions, so a gap like that is conspicuous in the
+       # output instead of quietly blending into last place.
+       else 9 end)})
 
   | {
       due: length,

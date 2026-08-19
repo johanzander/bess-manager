@@ -60,8 +60,16 @@
 #
 # Exit codes:
 #   0  a verdict landed; verdict on stdout
-#   2  timed out waiting (recent PR Review runs dumped for diagnosis)
 #   1  usage/precondition error
+#   2  timed out waiting (recent PR Review runs dumped for diagnosis)
+#
+# A timeout used to mean "the bot found nothing and said nothing" as often as
+# it meant a real failure, because the reviewer only spoke up when it had
+# findings. pr-review.yml now requires a summary review on every run, including
+# a clean one, so a timeout is once again a genuine signal worth investigating.
+# That matters beyond diagnosis: GitHub blocks a merge on the LAST explicit
+# verdict, so a silent clean run could never clear a prior REQUEST_CHANGES —
+# the review had to be dismissed by hand.
 set -euo pipefail
 
 pr="${1:?usage: request-pr-review.sh <pr-number> [timeout-seconds]}"

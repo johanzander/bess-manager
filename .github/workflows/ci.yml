@@ -443,7 +443,11 @@ jobs:
     name: Code quality
     runs-on: ubuntu-latest
     steps:
+      # Full history: the mypy step below needs a real merge-base against
+      # main, which a shallow clone cannot produce.
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -451,13 +455,38 @@ jobs:
           cache: pip
 
       - name: Install tools
-        run: pip install black ruff
+        run: pip install black ruff mypy
 
       - name: Black formatting
         run: black --check . --exclude="/(build|\.venv|node_modules)/"
 
       - name: Ruff linting
         run: ruff check . --exclude="build,.venv,node_modules"
+
+      # Scoped exactly like scripts/quality-check.sh: code you touch must
+      # type-check, and the legacy backlog burns down as files get edited.
+      # Repo-wide is not an option (2914 errors across 191 files).
+      #
+      # This job aggregates into the Merge gate, which is the single required
+      # status check on main. Enforcing mypy only in quality-check.sh would
+      # leave it unenforced on exactly the path that gates merges — a
+      # violation could still reach main through any ordinary PR, which is
+      # the gap this whole change exists to close.
+      - name: mypy on changed files
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin main
+          base=$(git merge-base FETCH_HEAD HEAD)
+          # --diff-filter=d drops deletions: a file removed on this branch is
+          # still named by the diff and mypy cannot check what is not there.
+          mapfile -t changed < <(git diff --name-only --diff-filter=d "$base" HEAD -- '*.py')
+          if [ ${#changed[@]} -eq 0 ]; then
+            echo "No changed Python files — nothing to type-check."
+            exit 0
+          fi
+          printf 'Checking %s file(s):\n' "${#changed[@]}"
+          printf '  %s\n' "${changed[@]}"
+          mypy --explicit-package-bases --ignore-missing-imports "${changed[@]}"
 
   # ── Docker build & boot: verify production image starts ──────────
   docker-build-test:

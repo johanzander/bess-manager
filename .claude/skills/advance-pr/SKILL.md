@@ -56,7 +56,8 @@ matches, do that and only that.
 | CONFLICTING, semantic conflicts | abort → escalate | script |
 | draft, no review, checks green | `request-pr-review.sh` | script |
 | draft, review in flight | nothing | free |
-| draft, CHANGES_REQUESTED, < 3 rounds | **rework** | **model** |
+| draft, CHANGES_REQUESTED, < 3 rounds, caller holds the Step 2/3 context | **rework in place** | **model** |
+| draft, CHANGES_REQUESTED, < 3 rounds, caller does not hold that context | collect findings, hand back to `/implement-issue <n>` | script |
 | draft, CHANGES_REQUESTED, ≥ 3 rounds | escalate | script |
 | draft, APPROVED, green | `gh pr ready` | script |
 | draft, APPROVED, checks red | fix; escalate on the second failure | model / script |
@@ -64,10 +65,13 @@ matches, do that and only that.
 | out of draft, APPROVED | report, stop | free |
 | merged | if it was the issue's **last** open PR, move the issue to `In Verification` | script |
 
-Exactly one row needs a model — reworking a `CHANGES_REQUESTED` PR. Every
-other row is mechanical, which is the whole point: against the real fleet at
-design time, 8 open PRs cost 2 model steps and 6 script steps, not 5 full
-`implement-issue` sessions.
+Exactly one row needs a model — reworking a `CHANGES_REQUESTED` PR **in
+place**, and only when the caller invoking you already holds the Step 2
+diagnosis and the Step 3 scope assessment (see the dedicated bullet below —
+this is not optional and not a formality). Every other row, including the
+same PR fact when that context is missing, is mechanical: against the real
+fleet at design time, 8 open PRs cost 2 model steps and 6 script steps, not 5
+full `implement-issue` sessions.
 
 If none of the rows match — e.g. `mergeable: UNKNOWN`, which GitHub computes
 lazily on a cold PR — re-read once (`gh pr view` again after a few seconds).
@@ -149,6 +153,27 @@ reopens the failure it fixed.
   rounds of disagreement means the reviewer and the diff disagree about the
   design, not about a bug, and a fourth round will not settle it — that's
   the escalate row, not another rework.
+- **Rework in place only if you already hold the Step 2 diagnosis and the
+  Step 3 scope assessment — otherwise collect the findings and hand back to
+  `/implement-issue <n>` instead of touching the diff.** That context is not
+  background colour, it is the one thing that lets a reviewer's finding be
+  told apart from a decision Step 3 already made and rejected on purpose.
+  `superpowers:receiving-code-review` exists precisely to make that call
+  case by case — "is this a real gap, or does it contradict something we
+  decided deliberately" — and it cannot make that call from a bare diff and
+  a review comment; it needs the reasoning behind the diff. `implement-issue`
+  Step 11 holds that reasoning because it's the same session that produced
+  it, so when Step 11 calls you, rework in place exactly as this row always
+  has. A bare `/advance-pr <n>` typed by the maintainer, or a dispatch from
+  `backlog-rhythm.sh`, holds none of it — it is reading the PR cold — so
+  attempting the rework there is not a cheaper version of the same step,
+  it's a blind one: a finding that Step 3 already considered and rejected
+  reads as unaddressed and gets "fixed" anyway, silently re-opening a closed
+  decision. Handing back costs one more `implement-issue` session on the
+  small fraction of PRs that need real rework, which is exactly the
+  trade the transition table is built on — cheap script steps for every
+  mechanical fact, and the one fact that actually needs judgement routed to
+  the session that has the judgement to spend.
 
 ## The two escalations this skill owns
 

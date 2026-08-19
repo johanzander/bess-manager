@@ -49,6 +49,18 @@ esac
 exit 0
 """
 
+# Same as GIT_RESOLVES but names a path with a space in it — the case a
+# space-joined file list silently splits into two arguments.
+GIT_RESOLVES_SPACED_PATH = """
+case "$1 $2" in
+  "merge-base origin/main") echo deadbeef ;;
+  "diff --name-only") ;;
+  "ls-files --others") echo "mod with space.py" ;;
+  *) ;;
+esac
+exit 0
+"""
+
 GIT_CANNOT_RESOLVE = """
 case "$1 $2" in
   "merge-base origin/main") exit 128 ;;
@@ -92,6 +104,7 @@ def _run(
     # block is skipped unless a .py file exists.
     (project / "CLAUDE.md").write_text("# stub\n")
     (project / "mod.py").write_text(module_source)
+    (project / "mod with space.py").write_text(module_source)
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -154,3 +167,18 @@ def test_unresolvable_origin_main_fails_the_gate(tmp_path: Path) -> None:
     assert _error_count(unresolvable) == _error_count(resolvable) + 1
     assert unresolvable.returncode != 0
     assert "Cannot resolve origin/main" in unresolvable.stdout
+
+
+def test_a_changed_path_with_a_space_is_still_checked(tmp_path: Path) -> None:
+    """The file list is an array, so a spaced path stays one argument.
+
+    Space-joined, this path splits into `mod`, `with` and `space.py` — mypy
+    is handed three names that do not exist, which is a mypy failure and so
+    looks like a caught type error whatever the file contains. Asserting the
+    error lands only for the ill-typed run is what separates the two.
+    """
+    clean = _run(tmp_path / "clean", GIT_RESOLVES_SPACED_PATH, WELL_TYPED)
+    dirty = _run(tmp_path / "dirty", GIT_RESOLVES_SPACED_PATH, ILL_TYPED)
+
+    assert "✅ mypy OK (changed files)" in clean.stdout
+    assert _error_count(dirty) == _error_count(clean) + 1

@@ -128,17 +128,22 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
             # sort -u is load-bearing: a file changed on the branch AND dirty
             # in the working tree appears in both diffs, and mypy fails with
             # "Duplicate module named ..." when handed the same path twice.
-            changed=""
+            #
+            # An array, not a space-joined string: a path containing a space
+            # or a glob character would otherwise be split into two arguments
+            # or expanded against the working tree.
+            changed=()
             while IFS= read -r f; do
-                case "$f" in *.py) [ -e "$f" ] && changed="$changed $f" ;; esac
+                case "$f" in *.py) [ -e "$f" ] && changed+=("$f") ;; esac
             done <<EOF
 $( { git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
 EOF
-            if [ -z "$changed" ]; then
+            if [ ${#changed[@]} -eq 0 ]; then
                 echo "✅ mypy OK (no changed Python files)"
-            elif ! "$MYPY" --explicit-package-bases --ignore-missing-imports $changed >/dev/null 2>&1; then
+            elif ! "$MYPY" --explicit-package-bases --ignore-missing-imports "${changed[@]}" >/dev/null 2>&1; then
                 echo "❌ mypy errors in changed files. Run:"
-                echo "   $MYPY --explicit-package-bases --ignore-missing-imports$changed"
+                printf '   %s --explicit-package-bases --ignore-missing-imports %s\n' \
+                    "$MYPY" "${changed[*]}"
                 ERRORS=$((ERRORS + 1))
             else
                 echo "✅ mypy OK (changed files)"

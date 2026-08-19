@@ -52,7 +52,22 @@
       "Bash(gh pr diff *)",
       "Bash(gh pr list *)",
       "Bash(gh pr review *)",
-      "Bash(gh pr create *)"
+      "Bash(gh pr create *)",
+      "Bash(git *)",
+      "Bash(gh pr checks *)",
+      "Bash(gh pr ready *)",
+      "Bash(gh pr comment *)",
+      "Bash(gh run list *)",
+      "Bash(gh run view *)",
+      "Bash(gh run watch *)",
+      "Bash(gh api *)",
+      "Bash(scripts/request-pr-review.sh *)",
+      "Bash(scripts/gh-agent.sh *)",
+      "Bash(./scripts/worktree-setup.sh*)",
+      "Bash(./scripts/quality-check.sh*)",
+      "Bash(.venv/bin/python scripts/*)",
+      "Bash(npm run build*)",
+      "Bash(npx *)"
     ],
     "deny": [
       "Bash(podman machine rm *)",
@@ -87,11 +102,13 @@
       "Bash(git -* stash clear*)",
       "Bash(git -* stash branch*)",
       "Bash(git -* stash create*)",
-      "Bash(git -* stash store*)"
+      "Bash(git -* stash store*)",
+      "Bash(git reset --hard*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(gh auth token*)"
     ],
     "ask": [
-      "Bash(gh api)",
-      "Bash(gh api *)",
       "Bash(gh pr merge*)",
       "Bash(gh release create*)",
       "Bash(gh release edit*)",
@@ -124,7 +141,18 @@
       "Bash(git -* tag -d*)",
       "Bash(git -* tag --delete*)",
       "Bash(git -* tag -f*)",
-      "Bash(sudo *)"
+      "Bash(sudo *)",
+      "Bash(gh api -X *)",
+      "Bash(gh api * -X *)",
+      "Bash(gh api --method *)",
+      "Bash(gh api * --method *)",
+      "Bash(gh api -f *)",
+      "Bash(gh api * -f *)",
+      "Bash(gh api -F *)",
+      "Bash(gh api * -F *)",
+      "Bash(gh api --input*)",
+      "Bash(gh api * --input*)",
+      "Bash(gh issue close*)"
     ]
   },
   "enabledPlugins": {

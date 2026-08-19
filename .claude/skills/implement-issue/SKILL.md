@@ -129,8 +129,12 @@ assume it:**
 | a terminal review verdict on the PR | Step 11, mid-loop |
 
 Re-enter at the **earliest incomplete** step and run forward normally. A PR
-carrying `CHANGES_REQUESTED` re-enters at Step 11's `CHANGES_REQUESTED` branch;
-one carrying `APPROVED` needs only `gh pr ready`.
+carrying `CHANGES_REQUESTED` or `APPROVED` re-enters at Step 11, which invokes
+`advance-pr` — never run `gh pr ready` directly here. The mergeability
+re-check and the push-after-approval rule now live only in `advance-pr`, and
+skipping straight to `gh pr ready` on a resumed `APPROVED` PR is exactly the
+#609 failure: the approval can be stale or the PR newly conflicting by the
+time a resumed session looks at it.
 
 When resuming, post the handoff marker so the count is a fact rather than a
 feeling — two handoffs on one issue is an escalation:
@@ -599,8 +603,9 @@ Then, on this PR only:
   `git merge origin/main`, resolve, `quality-check.sh`, push.
 - **Green and mergeable:** continue to Step 11's review loop — a green PR is
   the precondition for asking the bot to review it, not the finish line. It
-  stays a draft *here*, because nothing has reviewed it yet; Step 11 is what
-  marks it ready, and never merge — Step 12 still holds.
+  stays a draft *here*, because nothing has reviewed it yet; `advance-pr`,
+  invoked from Step 11, is what marks it ready, and never merge — Step 12
+  still holds.
 
 **Scope: this issue's PR, nothing else.** If the sweep in Step 4 or your own
 `gh pr list` shows other PRs red or conflicted, that is not this session's
@@ -634,10 +639,11 @@ verbatim.
 
 - **Never merge, ever** — not after a green CI run, not after an `APPROVED`
   review, not when the diff is trivial. The merge is the maintainer's final
-  judgement and it is the one thing this skill never takes. Marking the PR
-  ready once Step 11 approves it (and only then) is not merging, and is
-  required rather than forbidden.
-- Open the PR as a draft and leave it that way until Step 11's approval.
+  judgement and it is the one thing this skill never takes. `advance-pr`
+  marking the PR ready once Step 11 invokes it and gets an approval (and only
+  then) is not merging, and is required rather than forbidden.
+- Open the PR as a draft and leave it that way until `advance-pr`, invoked
+  from Step 11, marks it ready on approval.
 - Never push directly to `main`.
 - Do NOT modify the version in `bess_manager/config.yaml` — bumping it is a
   release-time step, not a per-PR one. DO add a `CHANGELOG.md` entry under
@@ -761,8 +767,9 @@ net is upstream, not this section.
 - About to stop at "draft PR opened" without watching CI settle (Step 10).
 - About to stop at "CI is green" without running the Step 11 review loop.
   Your own Step 6 review is not the independent one.
-- About to hand over an `APPROVED`, green PR still marked draft — Step 11
-  flips it with `gh pr ready`; the maintainer should only have to merge.
+- About to hand over an `APPROVED`, green PR still marked draft — invoke
+  `advance-pr` from Step 11, which flips it with `gh pr ready`; the
+  maintainer should only have to merge.
 - About to report `mergeable` from Step 10's check after Step 11's review
   round. That reading is minutes old and other PRs merge in minutes — re-run
   `gh pr view --json mergeable,mergeStateStatus` before flipping or reporting.

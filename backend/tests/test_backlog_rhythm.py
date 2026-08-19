@@ -422,17 +422,20 @@ def _pr(number: int, **over: object) -> dict:
     return pr
 
 
-def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
-    """This pass does NOT drive the review loop; `implement-issue` owns a PR
-    through to `gh pr ready`, and its Step 11 already requests the review, acts
-    on the verdict and flips the PR.
+def test_every_unfinished_draft_resolves_to_resume_implementation(
+    tmp_path: Path,
+) -> None:
+    """This pass does NOT drive the review loop; `advance-pr` owns the
+    one-step mechanical moves, and `implement-issue` owns the one step that
+    needs the Step 2/3 context.
 
-    So a draft needing a FIRST review and a draft needing REWORK both resolve
-    to the same action: hand it back to the skill that owns it. Step 0 re-enters
-    at the right step. Re-implementing any of that here would be a second copy
-    of one loop, which is how one of them goes stale.
+    So a draft needing a FIRST review and a draft needing REWORK both still
+    report the same action name, `resume_implementation` — but they now route
+    to different commands (see the two tests below), which is the fix for the
+    fleet that used to hand every draft PR to a whole `implement-issue`
+    session at $1-4 a shot.
 
-    THE APPROVED-BUT-DRAFT CASE IS NOW CARVED OUT, deliberately — see
+    THE APPROVED-BUT-DRAFT CASE IS STILL CARVED OUT — see
     `test_an_approved_draft_is_never_deferred`. It used to route here too, and
     that is precisely why #629 sat approved, green and draft: the remedy on
     offer was a whole `implement-issue` session, and nobody spends one of those
@@ -447,6 +450,58 @@ def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
     for pr in (never_reviewed, changes_requested):
         actions = _actions_for(_run(tmp_path, [], [pr]), pr["number"])
         assert actions == {"resume_implementation"}, pr["number"]
+
+
+def test_draft_pr_with_no_review_routes_to_advance_pr(tmp_path: Path) -> None:
+    """A draft with no review yet needs only a mechanical next step —
+    request the review, resolve a conflict, or flip it ready — none of which
+    needs the Step 2/3 context that only `implement-issue` holds. Handing this
+    to a whole session was the gap between the design and its own headline
+    promise: advancing a PR costs a step, not a session.
+    """
+    pr = _pr(619, reviews=[])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 619)
+
+    assert action["action"] == "resume_implementation"
+    assert "/advance-pr 619" in action["detail"]
+    assert "/implement-issue" not in action["detail"]
+
+
+def test_draft_pr_with_changes_requested_stays_on_implement_issue(
+    tmp_path: Path,
+) -> None:
+    """A draft carrying CHANGES_REQUESTED is the one shape that stays on
+    `implement-issue`: only that session holds the Step 2 diagnosis and the
+    Step 3 scope assessment needed to tell a real review finding apart from a
+    decision Step 3 already made and rejected on purpose. Routing this to
+    `advance-pr` cold would be a blind rework.
+    """
+    pr = _pr(614, reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 614)
+
+    assert action["action"] == "resume_implementation"
+    assert "/implement-issue 614" in action["detail"]
+    assert "/advance-pr" not in action["detail"]
+
+
+def test_draft_changes_requested_verdict_trusts_review_decision_over_reviews(
+    tmp_path: Path,
+) -> None:
+    """The CHANGES_REQUESTED check trusts `reviewDecision` when GitHub sets
+    it, and only falls back to the last non-COMMENTED review when it does
+    not — the same seam the out-of-draft branch already uses, never a second
+    way of reading a verdict. Here `reviewDecision` says CHANGES_REQUESTED
+    while the raw `reviews` list would read APPROVED taken alone, so this
+    pins that `reviewDecision` wins.
+    """
+    pr = _pr(
+        614,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "APPROVED"}],
+    )
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 614)
+
+    assert "/implement-issue 614" in action["detail"]
 
 
 def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
@@ -475,18 +530,32 @@ def test_a_draft_with_no_linked_issue_resumes_by_pr(tmp_path: Path) -> None:
 
     Reporting "no issue, finish it by hand" left every self-directed PR with no
     owner in the loop — which is how #620, #622 and #623 all ended up driven by
-    hand.
+    hand. Uses a CHANGES_REQUESTED PR so it still exercises the
+    `implement-issue` branch — a no-review draft with no linked issue routes
+    to `advance-pr` instead, which needs no issue at all.
 
     No flag distinguishes the two: GitHub numbers issues and PRs from one
     sequence per repo, so a bare number is unambiguous and Step 0 resolves
     whichever it is.
     """
-    pr = _pr(700, reviews=[])
+    pr = _pr(700, reviews=[{"state": "CHANGES_REQUESTED"}])
     action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
 
     assert action["issue"] is None
     assert "/implement-issue 700" in action["detail"]
     assert "--pr" not in action["detail"]
+
+
+def test_a_mechanical_draft_with_no_linked_issue_needs_no_issue(
+    tmp_path: Path,
+) -> None:
+    """`advance-pr` operates on the PR number alone, so a mechanical draft
+    with no linked issue is not a gap the way an `implement-issue` handoff
+    would be — there is nothing here that needs an issue number at all."""
+    pr = _pr(700, reviews=[])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
+
+    assert "/advance-pr 700" in action["detail"]
 
 
 def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:

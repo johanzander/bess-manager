@@ -433,23 +433,57 @@ actions=$(printf '%s' "$digest" | jq \
                        why: "out of draft but never reviewed — Stage 4 has not run",
                        detail: "scripts/request-pr-review.sh \(.number) — do NOT merge on the draft flag alone"}
                  end)
-         else {pr: .number, issue: $issue_no, action: "resume_implementation",
-               why: "draft PR, review loop unfinished",
-               # `implement-issue` is used for TODO.md items and refactors too,
-               # not only for issues, so a PR with no linked issue is normal
-               # rather than a defect -- reporting "no issue, finish it by hand"
-               # left every self-directed PR with no owner in the loop.
-               #
-               # No flag distinguishes the two: GitHub numbers issues and PRs
-               # from ONE sequence per repo, so a bare number is already
-               # unambiguous and Step 0 resolves whichever it is. Where an issue
-               # is linked it is named, because it carries the diagnosis; where
-               # none is, the PR number is the handle, and it is a strong one --
-               # it holds the branch, the diff, the scope assessment and the
-               # review verdict, which is everything Step 0 reads.
-               detail: (if $issue_no != null
-                        then "/implement-issue \($issue_no) — Step 0 re-enters at the review loop and drives it to gh pr ready"
-                        else "/implement-issue \(.number) — the PR number; no linked issue (TODO item or refactor)" end)}
+         # EVERY REMAINING DRAFT SHAPE ROUTES BY VERDICT, not to one blanket
+         # handoff. That blanket handoff used to be the whole content of this
+         # branch, and it was the gap between this design and its own headline
+         # promise: advancing a PR costs a step, not a session. Splitting it
+         # is what closes that gap.
+         #
+         # The verdict check reuses the EXACT seam the out-of-draft branch
+         # above already uses, never a second way of reading one: trust
+         # `reviewDecision` when set, else fall back to the LAST non-COMMENTED
+         # review, never to any review, because GitHub never rewrites a stale
+         # `APPROVED`.
+         else ([ .reviews[]? | select(.state != "COMMENTED") ] | last | .state?) as $draft_verdict
+              | ((.reviewDecision == "CHANGES_REQUESTED")
+                 or (.reviewDecision == "" and $draft_verdict == "CHANGES_REQUESTED")
+                 or (.reviewDecision == null and $draft_verdict == "CHANGES_REQUESTED")) as $draft_changes_requested
+              | (if $draft_changes_requested
+                 then {pr: .number, issue: $issue_no, action: "resume_implementation",
+                       why: "draft PR carrying CHANGES_REQUESTED",
+                       # DRAFT, CHANGES_REQUESTED STAYS ON implement-issue. Only that
+                       # session holds the Step 2 diagnosis and the Step 3 scope
+                       # assessment -- the one thing that tells a real review finding
+                       # apart from a decision Step 3 already made and rejected on
+                       # purpose (see advance-pr, "Rework in place only if"). Attempting
+                       # that rework cold, from this pass, is a blind rework: exactly
+                       # the failure advance-pr is built to route around, not repeat.
+                       #
+                       # `implement-issue` is used for TODO.md items and refactors too,
+                       # not only for issues, so a PR with no linked issue is normal
+                       # rather than a defect -- reporting "no issue, finish it by hand"
+                       # left every self-directed PR with no owner in the loop.
+                       #
+                       # No flag distinguishes the two: GitHub numbers issues and PRs
+                       # from ONE sequence per repo, so a bare number is already
+                       # unambiguous and Step 0 resolves whichever it is. Where an issue
+                       # is linked it is named, because it carries the diagnosis; where
+                       # none is, the PR number is the handle, and it is a strong one --
+                       # it holds the branch, the diff, the scope assessment and the
+                       # review verdict, which is everything Step 0 reads.
+                       detail: (if $issue_no != null
+                                then "/implement-issue \($issue_no) — Step 0 re-enters at Step 11, which holds the Step 2/3 context and reworks via advance-pr"
+                                else "/implement-issue \(.number) — the PR number; no linked issue (TODO item or refactor)" end)}
+                 # EVERY OTHER DRAFT SHAPE IS MECHANICAL: no review yet, a review
+                 # still in flight, or an approved draft whose checks are not green
+                 # yet. None of that needs the Step 2/3 context CHANGES_REQUESTED
+                 # does, so it goes straight to the one-copy loop instead of a whole
+                 # session: request the review, resolve a conflict, or flip it ready,
+                 # then exit.
+                 else {pr: .number, action: "resume_implementation",
+                       why: "draft PR, next step is mechanical",
+                       detail: "/advance-pr \(.number) — requests the review, resolves a conflict, or flips it ready in one cheap step"}
+                 end)
          end)
     ]
 

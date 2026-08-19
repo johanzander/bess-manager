@@ -363,6 +363,43 @@ def test_this_prs_own_failed_run_is_still_reported(
     assert "FAILED without submitting a verdict" in proc.stderr
 
 
+def test_an_in_flight_review_is_not_re_triggered(bin_dir: Path, tmp_path: Path) -> None:
+    """C2: three callers can now invoke this script for the same PR sharing
+    no state. If a run is already in flight, this invocation must NOT post a
+    second '@claude-bot review' -- it must wait on the run already going.
+
+    Proven by using an EMPTY BESS_AGENT_TOKEN env file: posting the trigger
+    comment goes through gh-agent.sh, which fails loudly ("... is not set")
+    before ever reaching `gh` when the token is missing. If the script still
+    reaches a VERDICT with no token configured, it never attempted to post --
+    the only way that succeeds is the in-flight gate skipping the trigger.
+    """
+    empty_env = tmp_path / "empty.env"
+    empty_env.write_text("")
+    _gh(bin_dir, [_review("APPROVED")], "running")
+
+    proc = _run(bin_dir, empty_env)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "VERDICT APPROVED" in proc.stdout
+    assert "BESS_AGENT_TOKEN is not set" not in proc.stderr
+    assert "already in flight" in proc.stderr
+
+
+def test_no_in_flight_run_still_triggers_normally(
+    bin_dir: Path, env_file: Path
+) -> None:
+    """The other half of the same gate: with nothing running, the script
+    must still post -- the fix must not turn into "never trigger a review"."""
+    _gh(bin_dir, [], "none")
+
+    proc = _run(bin_dir, env_file, timeout=2)
+
+    assert proc.returncode == 2
+    assert "already in flight" not in proc.stderr
+    assert "No PR Review run started at all" in proc.stderr
+
+
 def test_a_transient_api_failure_does_not_kill_the_poll(
     bin_dir: Path, env_file: Path
 ) -> None:

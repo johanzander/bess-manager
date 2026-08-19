@@ -103,17 +103,35 @@ interval="${REVIEW_POLL_INTERVAL:-60}"
 # the discriminator. The title is fetched once, before the loop, and matched
 # through `--arg` rather than string-interpolated -- a title containing a quote
 # would otherwise break the filter.
+# $1 optionally overrides the createdAt cutoff; defaults to the global
+# $since. Parameterised (not a second query) so the pre-post in-flight check
+# below can reuse this exact detector with a wide-open cutoff, instead of
+# inventing a second way to decide whether the reviewer is working.
 review_run_state() {
+    local cutoff="${1:-$since}"
     gh run list --workflow "PR Review" --limit 20 \
         --json status,conclusion,createdAt,displayTitle 2>/dev/null \
-      | jq -r --arg since "$since" --arg title "$pr_title" '
+      | jq -r --arg since "$cutoff" --arg title "$pr_title" '
             [ .[]
-              | select(.createdAt > $since)
+              | select(.createdAt >= $since)
               | select(.displayTitle == $title) ] | first
             | if . == null then "none"
               elif .status != "completed" then "running"
               elif .conclusion == "success" then "finished"
               else "failed" end' 2>/dev/null || echo "unknown"
+}
+
+# The createdAt of the run review_run_state just reported "running", used
+# only to back-date $since so the rest of this script keeps recognising that
+# run as live instead of as older-than-the-window. This reads the exact same
+# `gh run list` shape as review_run_state -- it answers "since when", not a
+# second opinion on "is it running".
+running_run_created_at() {
+    gh run list --workflow "PR Review" --limit 20 \
+        --json status,conclusion,createdAt,displayTitle 2>/dev/null \
+      | jq -r --arg title "$pr_title" '
+            [ .[] | select(.displayTitle == $title) | select(.status != "completed") ]
+            | sort_by(.createdAt) | last | .createdAt // empty' 2>/dev/null || echo ""
 }
 
 repo_root=$(git rev-parse --show-toplevel)
@@ -129,11 +147,35 @@ if [ -z "$pr_title" ]; then
     exit 2
 fi
 
-# Reviews strictly newer than this are the ones this run triggered.
-since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
-echo "Requesting review on PR #${pr} (since ${since})"
-scripts/gh-agent.sh pr comment "$pr" --body "@claude-bot review" >/dev/null
+# GATE ON THE EXISTING DETECTOR, BEFORE POSTING. Three callers can trigger a
+# review now (implement-issue Step 11, advance-pr, backlog-rhythm.sh's
+# handoff), sharing no state between them. Without this check, a caller whose
+# 15-minute timeout (exit 2) landed while the bot was still thinking got a
+# NEXT tick that re-posted "@claude-bot review" on a run already in flight --
+# a second paid review round (~$0.5-1) on a diff the first review had not
+# finished looking at. This happened once already; see the exit-2 diagnostic
+# below.
+#
+# `since` becomes the in-flight run's own createdAt rather than "now", so the
+# rest of this script (which all reads relative to $since) still recognises
+# that run as live instead of as older-than-the-window. Posting is skipped
+# entirely in that case -- this invocation waits on the review already
+# running rather than triggering a second one. A cutoff of the epoch means
+# "any not-completed run for this title, whenever it started"; review_run_state
+# treating the query failing as "unknown" (not "running") means a broken `gh
+# run list` here fails OPEN to the pre-existing behaviour -- it posts, same
+# as before this gate existed, rather than silently refusing to request a
+# review it cannot prove is unnecessary.
+if [ "$(review_run_state "1970-01-01T00:00:00Z")" = "running" ]; then
+    since=$(running_run_created_at)
+    [ -n "$since" ] || since="1970-01-01T00:00:00Z"
+    echo "A PR Review run is already in flight for PR #${pr} (started ${since}) -- not re-triggering, waiting for its verdict instead." >&2
+else
+    # Reviews strictly newer than this are the ones this run triggered.
+    since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    echo "Requesting review on PR #${pr} (since ${since})"
+    scripts/gh-agent.sh pr comment "$pr" --body "@claude-bot review" >/dev/null
+fi
 
 deadline=$(( $(date +%s) + timeout ))
 while [ "$(date +%s)" -lt "$deadline" ]; do

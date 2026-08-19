@@ -680,6 +680,30 @@ def test_conflicting_pr_is_flagged_over_its_review_state(tmp_path: Path) -> None
     assert "resolve_conflict" in _actions_for(_run(tmp_path, [], [pr]), 437)
 
 
+def test_a_conflicting_draft_routes_to_advance_pr(tmp_path: Path) -> None:
+    """C1: a CONFLICTING draft used to hand to sweep-prs, which writes nothing
+    -- only advance-pr performs the board write that records a semantic
+    conflict escalation, so the old detail re-emitted forever. Only
+    advance-pr's rows 1/2 actually resolve a CONFLICTING draft."""
+    pr = _pr(437, isDraft=True, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 437)
+    assert action["action"] == "resolve_conflict"
+    assert action["detail"] == "/advance-pr 437"
+
+
+def test_a_conflicting_non_draft_still_goes_to_sweep_prs(tmp_path: Path) -> None:
+    """A conflicted PR that already left the review loop is not advance-pr's
+    concern -- that carve-out stays sweep-prs."""
+    pr = _pr(438, isDraft=False, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 438)
+    assert action["action"] == "resolve_conflict"
+    assert "sweep-prs" in action["detail"]
+
+
 def _card(number: int, **over: object) -> dict:
     card: dict = {
         "number": number,
@@ -735,6 +759,21 @@ def test_an_approved_draft_is_never_deferred(tmp_path: Path) -> None:
     assert result["deferred"] == []
 
 
+def test_mark_ready_routes_through_advance_pr(tmp_path: Path) -> None:
+    """I7: a bare `gh pr ready` in the detail string is the exact #609
+    failure re-opened at the one call site an unattended pass actually reads
+    -- it skips advance-pr's mandatory mergeability re-check and the
+    push-after-approval rule. The detail must name the skill, not the
+    command."""
+    pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 629)
+    assert action["action"] == "mark_ready"
+    assert action["detail"].startswith("/advance-pr 629")
+    assert "gh pr ready" not in action["detail"]
+
+
 def test_approved_draft_is_reported_even_with_no_card(tmp_path: Path) -> None:
     pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
     assert "mark_ready" in _actions_for(_run(tmp_path, [], [pr]), 629)
@@ -763,6 +802,75 @@ def test_a_conflicting_approved_draft_is_not_mark_ready(tmp_path: Path) -> None:
     actions = _actions_for(_run(tmp_path, [], [pr]), 701)
     assert "mark_ready" not in actions
     assert "resolve_conflict" in actions
+
+
+def test_a_deferral_recorded_on_the_issue_card_suppresses_the_pr(
+    tmp_path: Path,
+) -> None:
+    """I11: backlog SKILL.md documents "One card per unit of work, on the
+    issue -- PR cards go away", but only pr_board suppression was ever
+    implemented. A PO following the shipped doc records `Awaiting` on the
+    issue, where nothing read it."""
+    item = _item(
+        592,
+        prs=[{"number": 619, "mergeable": "CONFLICTING", "isDraft": True}],
+        awaiting="discussion",
+    )
+    pr = _pr(619, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr])
+
+    assert _actions_for(result, 619) == set()
+    assert [d["pr"] for d in result["deferred"]] == [619]
+    assert result["deferred"][0]["why"] == "issue awaiting discussion"
+
+
+def test_an_issue_side_p4_also_suppresses_the_pr(tmp_path: Path) -> None:
+    item = _item(
+        593,
+        prs=[{"number": 620, "mergeable": "CONFLICTING", "isDraft": True}],
+        priority="P4",
+    )
+    pr = _pr(620, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr])
+
+    assert _actions_for(result, 620) == set()
+    assert result["deferred"][0]["why"] == "issue priority P4"
+
+
+def test_pr_board_deferral_still_wins_when_both_are_set(tmp_path: Path) -> None:
+    """The pr_board reason is reported first when both a card and the issue
+    carry a deferral -- either is sufficient to suppress, but the message
+    should not silently prefer one over the other for no stated reason: it
+    prefers the pr_board card because that is the older, still-supported
+    mechanism."""
+    item = _item(
+        594,
+        prs=[{"number": 621, "mergeable": "CONFLICTING", "isDraft": True}],
+        awaiting="discussion",
+    )
+    pr = _pr(621, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr], pr_board=[_card(621, priority="P4")])
+
+    assert _actions_for(result, 621) == set()
+    assert result["deferred"][0]["why"] == "priority P4"
+
+
+def test_removing_pr_cards_does_not_un_park_an_issue_side_deferral(
+    tmp_path: Path,
+) -> None:
+    """The safety property I11 is actually for: with only pr_board
+    suppression, deleting PR cards entirely would silently un-defer every PR
+    parked on its issue. An empty pr_board must not do that."""
+    item = _item(
+        595,
+        prs=[{"number": 622, "mergeable": "CONFLICTING", "isDraft": True}],
+        priority="P4",
+    )
+    pr = _pr(622, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr], pr_board=[])
+
+    assert _actions_for(result, 622) == set()
+    assert [d["pr"] for d in result["deferred"]] == [622]
 
 
 def test_a_pr_with_no_card_is_reported_as_before(tmp_path: Path) -> None:

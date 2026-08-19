@@ -323,6 +323,16 @@ actions=$(printf '%s' "$digest" | jq \
       # fails with "unexpected EOF while looking for matching )" pointing at the
       # top of the block rather than at the comment.
       | ([ $pr_board[] | select(.number == $p.number) ] | first) as $card
+      # The issue card belonging to this PR, if the PR resolves to one. This
+      # is the current, documented home for a deferral decision (backlog
+      # SKILL.md "One card per unit of work, on the issue -- PR cards go
+      # away"): `Awaiting`/`Priority` live on the issue, not on a separate PR
+      # card, so a PO following that doc records a deferral where $card above
+      # never looks. Support BOTH -- an issue-side deferral and a pr_board
+      # one -- rather than picking one, so a later removal of PR cards is a
+      # safe no-op instead of an ordering trap: with only $card suppression,
+      # deleting PR cards would silently un-park every deferred PR.
+      | ([ $items[] | select(.number == $issue_no) ] | first) as $issue_item
       # DEFERRED: a decision the maintainer already made, so stop asking.
       # An `Awaiting` means it is parked on someone (#167/#354 blocked, #620
       # parked pending a direction call); P4 means "later, not never" (#437,
@@ -333,7 +343,9 @@ actions=$(printf '%s' "$digest" | jq \
       # was nowhere to write those three judgements down, so every pass
       # reported them as due and the same conversation happened every 30
       # minutes.
-      | (($card.awaiting // null) != null or ($card.priority // null) == "P4") as $deferred
+      | (($card.awaiting // null) != null or ($card.priority // null) == "P4"
+         or ($issue_item.awaiting // null) != null
+         or ($issue_item.priority // null) == "P4") as $deferred
       # Three CHANGES_REQUESTED rounds without an intervening approval is a
       # design disagreement, not something a fourth round will settle -- the
       # same cap `implement-issue` already enforces. Computed here, ahead of
@@ -371,7 +383,13 @@ actions=$(printf '%s' "$digest" | jq \
          elif $approved_draft
          then {pr: .number, action: "mark_ready",
                why: "APPROVED and green, still a draft — Step 11 never ran gh pr ready",
-               detail: "gh pr ready \(.number) — then it is the maintainers to merge"}
+               # Route through advance-pr, not a bare `gh pr ready`: this is
+               # the one call site an unattended pass actually reads, and a
+               # raw command here skips advance-prs mandatory mergeability
+               # re-check and the push-after-approval rule -- the #609
+               # failure, re-opened right here if this string ever names the
+               # command instead of the skill.
+               detail: "/advance-pr \(.number) — then it is the maintainers to merge"}
          # `mark_ready` above is the ONLY thing deferral cannot suppress, and
          # the distinction is deliberate. It is a pipeline failure -- the loop
          # stopped one command short of finishing -- so no priority the
@@ -385,7 +403,17 @@ actions=$(printf '%s' "$digest" | jq \
          elif .mergeable == "CONFLICTING"
          then {pr: .number, action: "resolve_conflict",
                why: "CONFLICTING — note a conflicted PR produces no CI run at all",
-               detail: "hand to sweep-prs, or resolve if the diff is ours"}
+               # A CONFLICTING draft is advance-prs own row 1/2 (textual ->
+               # merge+resolve, semantic -> abort+escalate) and only
+               # advance-pr performs the board write that records a semantic
+               # conflict escalation -- sweep-prs reports into a chat
+               # transcript and writes nothing, so handing a draft to
+               # sweep-prs re-emitted this same action forever. A conflicted
+               # NON-draft PR is not advance-prs concern (it already left the
+               # review loop), so that one still routes to sweep-prs.
+               detail: (if .isDraft
+                        then "/advance-pr \(.number)"
+                        else "hand to sweep-prs, or resolve if the diff is ours" end)}
          # OUT OF DRAFT IS NOT THE SAME AS REVIEWED, and treating it as such
          # told the maintainer to merge an unreviewed PR. The old rule was
          # `isDraft == false -> nothing left but your merge`, resting on the
@@ -455,9 +483,11 @@ actions=$(printf '%s' "$digest" | jq \
                        # session holds the Step 2 diagnosis and the Step 3 scope
                        # assessment -- the one thing that tells a real review finding
                        # apart from a decision Step 3 already made and rejected on
-                       # purpose (see advance-pr, "Rework in place only if"). Attempting
-                       # that rework cold, from this pass, is a blind rework: exactly
-                       # the failure advance-pr is built to route around, not repeat.
+                       # purpose (see advance-pr, "this skill never touches the diff").
+                       # advance-pr itself now always hands a CHANGES_REQUESTED draft
+                       # back to implement-issue too, whatever caller invoked it --
+                       # dispatching straight to implement-issue here from the rhythm
+                       # pass just skips the redundant round trip through advance-pr.
                        #
                        # `implement-issue` is used for TODO.md items and refactors too,
                        # not only for issues, so a PR with no linked issue is normal
@@ -534,7 +564,13 @@ actions=$(printf '%s' "$digest" | jq \
         $prs[]
         | . as $p
         | ([ $pr_board[] | select(.number == $p.number) ] | first) as $c
-        | select(($c.awaiting // null) != null or ($c.priority // null) == "P4")
+        # Same issue-side lookup as the actions block above: a deferral
+        # recorded on the issue card (per backlog SKILL.md, the documented
+        # home) must show up here too, not only a pr_board deferral.
+        | ([ $items[] | select(.prs | map(.number) | index($p.number)) ] | first) as $issue_item
+        | select(($c.awaiting // null) != null or ($c.priority // null) == "P4"
+                 or ($issue_item.awaiting // null) != null
+                 or ($issue_item.priority // null) == "P4")
         # Mirrors the mark_ready carve-out above: a deferred PR that is APPROVED
         # and still a draft is NOT deferred, it is reported, so it must not be
         # counted here as well.
@@ -550,7 +586,11 @@ actions=$(printf '%s' "$digest" | jq \
         | {pr: .number,
            why: (if ($c.awaiting // null) != null
                  then "awaiting \($c.awaiting)"
-                 else "priority P4" end)}
+                 elif ($c.priority // null) == "P4"
+                 then "priority P4"
+                 elif ($issue_item.awaiting // null) != null
+                 then "issue awaiting \($issue_item.awaiting)"
+                 else "issue priority P4" end)}
       ]
     }
 ')

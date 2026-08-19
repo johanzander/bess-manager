@@ -625,15 +625,32 @@ invoking it until it reports a terminal state:
 
     /advance-pr <pr-number>
 
-Each invocation performs one transition and exits. You still hold the Step 2
-diagnosis and the Step 3 scope assessment, which is what lets you tell a real
-review finding from one that contradicts a decision made deliberately — so act
-on a `CHANGES_REQUESTED` verdict **here**, in this session, then invoke
-`advance-pr` again for the next round.
+Each invocation performs one transition and exits, and it never edits code —
+on a `CHANGES_REQUESTED` verdict it collects the findings and hands them back
+to you rather than reworking in place, because you are the session that still
+holds the Step 2 diagnosis and the Step 3 scope assessment, which is what
+lets you tell a real review finding from one that contradicts a decision made
+deliberately. Act on it **here**, in this session, then invoke `advance-pr`
+again for the next round.
 
-**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, `advance-pr` escalates
-by setting `Awaiting: maintainer`, and you stop and hand over the findings
-verbatim.
+**Fetch the findings yourself — `advance-pr`'s `reviews`/`comments` read does
+not carry them.** The bot posts its findings as INLINE review comments, which
+show up in neither `gh pr view --json reviews` nor `--json comments`. Read
+them directly, scoped to comments newer than the previous round's verdict so
+a re-run doesn't re-litigate findings already addressed (on the first round,
+omit the `select` — there is no prior verdict to filter against):
+
+```bash
+gh api repos/johanzander/bess-manager/pulls/<n>/comments \
+  --jq '.[] | select(.created_at > "<submittedAt from the round before>") | "\(.path):\(.line) \(.body)"'
+```
+
+**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, stop reworking — a
+fourth round will not settle a design disagreement. The escalation itself is
+a derived GitHub fact, not something this skill or `advance-pr` writes:
+`backlog-rhythm.sh` already reports it as `escalated` every tick, computed
+from the review-round count alone. Hand over the findings verbatim; that
+report — and whoever acts on it — is what sets `Awaiting: maintainer`.
 
 ### 12. Hard constraints
 

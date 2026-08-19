@@ -50,6 +50,10 @@ def _item(number: int, **over: object) -> dict:
         "blocked_by_open": [],
         "blocked": False,
         "resume_count": 0,
+        # The candidate half of the collision gate -- files this item would
+        # touch if dispatched, supplied by the Stage 2 analysis or the PO.
+        # Empty by default: a candidate with no prediction is not dispatchable.
+        "predicted_files": [],
     }
     item.update(over)
     return item
@@ -69,6 +73,8 @@ def _run(
     items: list,
     prs: list | None = None,
     pr_board: list | None = None,
+    in_flight_files: dict | None = None,
+    undiffable_prs: list | None = None,
     **env: str,
 ) -> dict:
     digest = tmp_path / "digest.json"
@@ -82,6 +88,12 @@ def _run(
                 # older digest produces -- the script tolerates its absence, so
                 # every pre-existing test exercises the no-deferral path.
                 "pr_board": pr_board or [],
+                # The exact half of the collision gate: {path: [pr numbers]},
+                # always an object, {} when there are no open PRs.
+                "in_flight_files": in_flight_files or {},
+                # PRs whose diff could not be read this pass. Non-empty means
+                # collision cannot be evaluated, so dispatch is held entirely.
+                "undiffable_prs": undiffable_prs or [],
             }
         )
     )
@@ -380,7 +392,11 @@ def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> Non
 
 def test_ready_for_dev_is_reported_as_dispatchable(tmp_path: Path) -> None:
     item = _item(
-        10, labels=["analyzed"], column="Ready for Dev", last_comment=_comment(1)
+        10,
+        labels=["analyzed"],
+        column="Ready for Dev",
+        last_comment=_comment(1),
+        predicted_files=["core/bess/x.py"],
     )
     assert "dispatchable" in _actions_for(_run(tmp_path, [item]), 10)
 
@@ -807,6 +823,7 @@ def test_finishing_outranks_starting(tmp_path: Path) -> None:
         board_status="Ready for Dev",
         labels=["bug", "analyzed"],
         priority="P2",
+        predicted_files=["core/bess/x.py"],
     )
     stalled = _item(
         801,
@@ -847,7 +864,12 @@ def test_grooming_actions_rank_together_after_dispatchable(tmp_path: Path) -> No
         903, board_status="Ready for Dev", column="In Progress"
     )
     unlabeled_item = _item(904, labels=[])
-    dispatchable_item = _item(905, column="Ready for Dev", board_status="Ready for Dev")
+    dispatchable_item = _item(
+        905,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        predicted_files=["core/bess/x.py"],
+    )
 
     result = _run(
         tmp_path,
@@ -912,6 +934,7 @@ def test_under_the_limit_dispatch_is_allowed(tmp_path: Path) -> None:
         board_status="Ready for Dev",
         labels=["bug", "analyzed"],
         priority="P2",
+        predicted_files=["core/bess/x.py"],
     )
     result = _run(tmp_path, [ready])
     assert result["wip"]["over"] is False
@@ -949,7 +972,119 @@ def test_in_verification_does_not_count_as_wip(tmp_path: Path) -> None:
         board_status="Ready for Dev",
         labels=["bug", "analyzed"],
         priority="P2",
+        predicted_files=["core/bess/x.py"],
     )
     result = _run(tmp_path, [*verifying, ready])
     assert result["wip"] == {"count": 0, "limit": 3, "over": False}
     assert "dispatchable" in _actions_for(result, 940)
+
+
+# --- the collision gate ----------------------------------------------------
+
+
+def test_a_candidate_touching_an_in_flight_file_is_queued(tmp_path: Path) -> None:
+    """Five PRs raced to rewrite the same three files. The gate belongs before
+    dispatch -- detecting the clash at merge time is detecting a fire."""
+    ready = _item(
+        1000,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["CLAUDE.md"],
+    )
+    result = _run(tmp_path, [ready], in_flight_files={"CLAUDE.md": [614]})
+    actions = _actions_for(result, 1000)
+    assert "queued_behind" in actions
+    assert "dispatchable" not in actions
+
+
+def test_a_candidate_with_no_predicted_files_is_not_dispatchable(
+    tmp_path: Path,
+) -> None:
+    """No touch-set, no dispatch. A proposal that cannot be checked against the
+    in-flight set is a proposal to find out by colliding."""
+    ready = _item(
+        1001,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=[],
+    )
+    actions = _actions_for(_run(tmp_path, [ready]), 1001)
+    assert "dispatchable" not in actions
+    assert "needs_touch_set" in actions
+
+
+def test_two_ready_items_that_overlap_are_clustered(tmp_path: Path) -> None:
+    """Two issues that will fight over one file cost less as one unit of work
+    than as two PRs plus a conflict resolution."""
+    a = _item(
+        1002,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    b = _item(
+        1003,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [a, b])
+    assert "cluster" in _actions_for(result, 1002)
+
+
+# --- undiffable PRs suppress the whole collision gate -----------------------
+
+
+def test_an_undiffable_pr_suppresses_dispatchable_entirely(tmp_path: Path) -> None:
+    """One PR whose diff could not be read means the in-flight file set is
+    incomplete, so collision cannot be safely evaluated for ANY candidate --
+    not just the ones that would clash with the missing PR's files. Dispatch
+    is held fleet-wide, the same way over-WIP holds it."""
+    ready = _item(
+        1010,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [ready], undiffable_prs=[614])
+    actions = _actions_for(result, 1010)
+    assert "dispatchable" not in actions
+
+
+def test_an_undiffable_pr_emits_one_action_per_pr(tmp_path: Path) -> None:
+    result = _run(tmp_path, [], undiffable_prs=[614, 620])
+    prs_reported = {
+        a["pr"] for a in result["actions"] if a["action"] == "undiffable_pr"
+    }
+    assert prs_reported == {614, 620}
+
+
+def test_undiffable_pr_ranks_with_pr_side_actions(tmp_path: Path) -> None:
+    """Named rank 2, alongside the other PR-side actions, so it sorts with
+    work in flight rather than falling to the unranked catch-all rank."""
+    result = _run(tmp_path, [], undiffable_prs=[614])
+    action = next(a for a in result["actions"] if a["action"] == "undiffable_pr")
+    assert action["rank"] == 2
+
+
+def test_no_undiffable_prs_does_not_suppress_dispatch(tmp_path: Path) -> None:
+    ready = _item(
+        1011,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [ready], undiffable_prs=[])
+    assert "dispatchable" in _actions_for(result, 1011)

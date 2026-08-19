@@ -84,6 +84,17 @@ actions=$(printf '%s' "$digest" | jq \
   | ($wip >= $wip_limit) as $over_wip
   |
 
+  # The collision gate. $in_flight is the EXACT half -- every open PRs
+  # changed-file set, always an object, {} when there are no open PRs (Task
+  # 5). $undiffable is non-empty when gh pr diff failed for at least one open
+  # PR (backlog-digest.sh); when it is, the in-flight set is known to be
+  # INCOMPLETE, so collision cannot be safely evaluated for anything, and
+  # dispatch is held fleet-wide the same way over-WIP holds it.
+  (.in_flight_files // {}) as $in_flight
+  | (.undiffable_prs // []) as $undiffable
+  | (($undiffable | length) > 0) as $collision_unknown
+  |
+
   # Quiet time is measured from the LAST COMMENT, not from updatedAt. A label
   # change, a board move or a bot touch all bump updatedAt, so an issue nobody
   # has spoken on for a month can look active and never age into a chase.
@@ -91,6 +102,7 @@ actions=$(printf '%s' "$digest" | jq \
 
   (.items) as $items
   | [ $items[]
+    | . as $i
 
     # ESCALATION IS SIGNED AWAITING, POINTED THE OTHER WAY. Every other value
     # means someone else owes us and correctly goes quiet; `maintainer` means
@@ -237,13 +249,48 @@ actions=$(printf '%s' "$digest" | jq \
            detail: "/implement-issue \(.number) — Step 0 resumes it; never restart, the branch commits are the only copy"}
      else empty end),
 
-    # The positive case: actually dispatchable.
-    (if .column == "Ready for Dev" and ($over_wip | not)
-     then {issue: .number, action: "dispatchable",
-           why: "Ready for Dev, priority \(.priority)",
-           detail: "meets Definition of Ready; propose for dispatch"}
-     else empty end)
+    # FLOW POLICY RULE 3: NOTHING STARTS THAT COLLIDES. The in-flight half is
+    # exact (every open PR changed-file set); only the candidate half is
+    # predicted, and a candidate with no prediction is not dispatchable -- a
+    # proposal that cannot be checked is a proposal to find out by colliding.
+    # $collision_unknown holds dispatch shut fleet-wide, same as $over_wip --
+    # one undiffable PR means the in-flight set may be missing entries, so no
+    # candidate can be safely cleared against it.
+    (if .column != "Ready for Dev" or $over_wip or $collision_unknown then empty
+     elif (.predicted_files | length) == 0
+     then {issue: .number, action: "needs_touch_set",
+           why: "Ready for Dev but no predicted touch-set",
+           detail: "name the files from the Stage 2 analysis; no touch-set, no dispatch"}
+     else
+       ([ .predicted_files[] | select($in_flight[.] != null) ]) as $clash
+       | ([ $items[] | select(.number != $i.number
+                              and .column == "Ready for Dev"
+                              and ((.predicted_files // []) | any(. as $f | ($i.predicted_files | index($f))))) ]
+          | map(.number)) as $peers
+       | if ($clash | length) > 0
+         then {issue: .number, action: "queued_behind",
+               why: "touches \($clash | join(", ")) which is already in flight",
+               detail: "wait for the in-flight PR to land, or fold this into it"}
+         elif ($peers | length) > 0
+         then {issue: .number, action: "cluster",
+               why: "overlaps Ready item(s) \($peers | map("#" + (. | tostring)) | join(", "))",
+               detail: "dispatch them as ONE unit of work -- one branch, one PR"}
+         else {issue: .number, action: "dispatchable",
+               why: "Ready for Dev, priority \(.priority), no file collision",
+               detail: "meets Definition of Ready; propose for dispatch"}
+         end
+     end)
   ]
+
+  # $undiffable turns into one fleet-level action per PR, mirroring how the
+  # WIP limit is reported as a count rather than folded silently into the
+  # per-item rules. Named alongside the PR-side actions below so it ranks
+  # with work in flight (rank 2), not the unranked catch-all.
+  + [ $undiffable[]
+      | {pr: ., action: "undiffable_pr",
+         why: "gh pr diff failed for this PR; the in-flight file set is incomplete",
+         detail: "dispatch is held for every Ready for Dev item until this PR diffs cleanly -- rerun the digest"}
+    ]
 
   # --- the PR half -------------------------------------------------------
   #
@@ -417,9 +464,10 @@ actions=$(printf '%s' "$digest" | jq \
       (if .action == "escalated" then 0
        elif .action == "mark_ready" or .action == "awaiting_maintainer"
             or .action == "request_review" or .action == "rework_review"
-            or .action == "resolve_conflict" then 2
+            or .action == "resolve_conflict" or .action == "undiffable_pr" then 2
        elif .action == "resume_implementation" or .action == "prune_worktree" then 3
-       elif .action == "dispatchable" then 4
+       elif .action == "dispatchable" or .action == "queued_behind"
+            or .action == "cluster" or .action == "needs_touch_set" then 4
        elif .action == "recheck_ready" or .action == "surface_discussion"
             or .action == "nudge_reporter" or .action == "park" then 5
        elif .action == "set_awaiting" or .action == "add_card"
@@ -436,6 +484,11 @@ actions=$(printf '%s' "$digest" | jq \
   | {
       due: length,
       wip: {count: $wip, limit: $wip_limit, over: $over_wip},
+      # PRs whose diff could not be read this pass -- see $collision_unknown
+      # above. Reported the same way $wip is: a count and the list, on every
+      # path, because a suppressed dispatch queue that does not say why is
+      # the failure this exists to prevent.
+      undiffable: $undiffable,
       by_action: (group_by(.action) | map({key: .[0].action, value: length}) | from_entries),
       actions: sort_by(.rank, .action, (.issue // .pr)),
       # The PRs suppressed by a board decision, reported as a COUNT AND A LIST
@@ -490,16 +543,27 @@ wip_line=$(printf '%s' "$actions" | jq -r '.wip
                   + " -- finish before starting; dispatch suppressed"
     else "  WIP " + (.count|tostring) + "/" + (.limit|tostring) end')
 
+# Also reported on every path, same reasoning as $wip_line: a non-empty
+# undiffable set silently holds every dispatchable action shut, and that is
+# exactly the moment the operator needs to be told why.
+undiffable_line=$(printf '%s' "$actions" | jq -r '.undiffable
+  | if length == 0 then ""
+    else "  undiffable PRs: " + (map("#" + (. | tostring)) | join(", "))
+         + " -- collision cannot be evaluated; dispatch suppressed"
+    end')
+
 due=$(printf '%s' "$actions" | jq -r '.due')
 if [ "$due" -eq 0 ]; then
     echo "RHYTHM: nothing due."
     printf '%s\n' "$wip_line"
+    [ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
     [ -n "$deferred_line" ] && printf '%s\n' "$deferred_line"
     exit 0
 fi
 
 echo "RHYTHM: $due action(s) due"
 printf '%s\n' "$wip_line"
+[ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
 printf '%s' "$actions" | jq -r '
   "",
   (.by_action | to_entries | map("  \(.key): \(.value)") | join("\n")),

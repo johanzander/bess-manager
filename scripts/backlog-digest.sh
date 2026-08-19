@@ -68,11 +68,23 @@ prs=$(gh pr list --repo "$repo" --state open --limit 100 \
 # same as a PR that touches no files. Swallowing the error would silently
 # report that PR as touching nothing, which the collision gate would read as
 # safe to dispatch against -- exactly the failure this key exists to prevent.
-# A gh failure here is left to fail the whole digest, same as every other gh
-# call above.
+#
+# It is ALSO not left to abort the whole digest any more. This script (and
+# backlog-rhythm.sh downstream of it) runs under `set -euo pipefail`, so one
+# undiffable PR -- a deleted fork head, a rate limit, a transient network
+# error -- used to take down the entire rhythm pass, blocking all issue
+# triage and dispatch over a single stale PR. Neither extreme is acceptable:
+# the failure is recorded as DATA in `undiffable_prs` instead, and the loop
+# continues over the remaining PRs. The collision gate (backlog-rhythm.sh)
+# reads a non-empty `undiffable_prs` and suppresses dispatch entirely, since
+# collision cannot be evaluated without a complete in-flight set.
 in_flight_files='{}'
+undiffable_prs='[]'
 for n in $(printf '%s' "$prs" | jq -r '.[].number'); do
-  files=$(gh pr diff "$n" --repo "$repo" --name-only)
+  if ! files=$(gh pr diff "$n" --repo "$repo" --name-only); then
+    undiffable_prs=$(printf '%s' "$undiffable_prs" | jq --argjson n "$n" '. + [$n]')
+    continue
+  fi
   in_flight_files=$(printf '%s' "$in_flight_files" | jq \
     --argjson n "$n" \
     --argjson f "$(printf '%s' "$files" | jq -R -s 'split("\n") | map(select(length > 0))')" \
@@ -174,6 +186,7 @@ jq -n \
   --argjson sessions "$sessions" \
   --argjson board "$board" \
   --argjson in_flight "$in_flight_files" \
+  --argjson undiffable_prs "$undiffable_prs" \
   --arg now "$(date -u +%s)" '
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
@@ -488,6 +501,9 @@ jq -n \
     # does not own the open-PR list — `backlog-rhythm.sh` fetches that with the
     # review fields it needs, and joins this in by number.
     in_flight_files: $in_flight,
+    # PRs whose diff could not be read this pass -- see the loop above.
+    # Reported as data, not swallowed and not fatal.
+    undiffable_prs: $undiffable_prs,
     pr_board: [
       $board.items[]?
       | select(.content.type? == "PullRequest")

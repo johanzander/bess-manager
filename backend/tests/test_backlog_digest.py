@@ -117,6 +117,7 @@ def _gh_shim(
     project_items: list,
     merged_prs: list | None = None,
     pr_files: dict[int, list[str]] | None = None,
+    fail_pr_diff: list[int] | None = None,
 ) -> str:
     """A `gh` that answers the subcommands the digest calls.
 
@@ -130,8 +131,14 @@ def _gh_shim(
     from the subcommand alone could not catch the digest asking for the full
     diff (or forgetting the flag entirely) and paying for -- or mis-parsing --
     the whole patch instead of a bare path list.
+
+    `fail_pr_diff` lists PR numbers whose `pr diff --name-only` call exits
+    non-zero, simulating a deleted fork head, a rate limit, or a transient
+    network error -- the case `undiffable_prs` exists to record rather than
+    crash on.
     """
     files_by_pr = {str(k): v for k, v in (pr_files or {}).items()}
+    fail_ns = {str(n) for n in (fail_pr_diff or [])}
     return f"""
 merged=$(cat <<'EOF'
 {json.dumps(merged_prs or [])}
@@ -141,6 +148,7 @@ pr_files_json=$(cat <<'EOF'
 {json.dumps(files_by_pr)}
 EOF
 )
+fail_ns='{" ".join(sorted(fail_ns))}'
 case "$*" in
   *"issue list"*) cat <<'EOF'
 {json.dumps(issues)}
@@ -148,6 +156,9 @@ EOF
     ;;
   *"pr diff "*"--name-only"*)
     n=$(printf '%s' "$*" | awk '{{for(i=1;i<=NF;i++) if($i=="diff"){{print $(i+1); exit}}}}')
+    for f in $fail_ns; do
+      if [ "$f" = "$n" ]; then echo "gh: unable to diff PR $n" >&2; exit 1; fi
+    done
     printf '%s' "$pr_files_json" | jq -r --arg n "$n" '(.[$n] // [])[]'
     ;;
   *"pr diff"*) echo "gh pr diff missing --name-only: $*" >&2; exit 1 ;;
@@ -1206,3 +1217,40 @@ def test_no_open_prs_gives_empty_in_flight_files(bin_dir: Path) -> None:
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
 
     assert _run(bin_dir)["in_flight_files"] == {}
+
+
+def test_undiffable_pr_is_recorded_not_a_crash(bin_dir: Path) -> None:
+    """A PR whose diff cannot be read (deleted fork head, rate limit,
+    transient network error) must not abort the whole digest -- that would
+    take down issue triage and dispatch for everyone over one stale PR. It
+    also must not be silently treated as touching no files, which the
+    collision gate would read as safe to dispatch against. It is recorded as
+    data instead."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(530, labels=[{"name": "bug"}])],
+            [
+                _pr(531, body="Refs #530", headRefName="fix/a-530"),
+                _pr(532, body="Refs #530", headRefName="fix/b-530"),
+            ],
+            [],
+            pr_files={532: ["CLAUDE.md"]},
+            fail_pr_diff=[531],
+        ),
+    )
+
+    digest = _run(bin_dir)
+
+    assert digest["undiffable_prs"] == [531]
+    # The readable PR is still processed -- one bad PR does not blank the
+    # whole in-flight set.
+    assert digest["in_flight_files"]["CLAUDE.md"] == [532]
+
+
+def test_no_undiffable_prs_gives_empty_list(bin_dir: Path) -> None:
+    issue = _issue(601, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    assert _run(bin_dir)["undiffable_prs"] == []

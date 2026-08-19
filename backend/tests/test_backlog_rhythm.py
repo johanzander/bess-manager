@@ -931,3 +931,25 @@ def test_a_branch_and_its_pr_count_as_one(tmp_path: Path) -> None:
         ),
     ]
     assert _run(tmp_path, items)["wip"]["count"] == 2
+
+
+def test_in_verification_does_not_count_as_wip(tmp_path: Path) -> None:
+    """In Verification is already merged to main and only waiting on a
+    release -- it occupies no implementation slot, so it must not count
+    toward the limit or suppress dispatch. Four such items alone exceed the
+    default limit of 3, so a filter that widened to include this column
+    would both inflate the count and suppress the ready item below."""
+    verifying = [
+        _item(930 + i, column="In Verification", board_status="In Verification")
+        for i in range(4)
+    ]
+    ready = _item(
+        940,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+    )
+    result = _run(tmp_path, [*verifying, ready])
+    assert result["wip"] == {"count": 0, "limit": 3, "over": False}
+    assert "dispatchable" in _actions_for(result, 940)

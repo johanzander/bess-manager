@@ -103,7 +103,7 @@
       "Bash(git -* stash branch*)",
       "Bash(git -* stash create*)",
       "Bash(git -* stash store*)",
-      "Bash(git reset*)",
+      "Bash(git reset --hard*)",
       "Bash(git push --force*)",
       "Bash(git push -f*)",
       "Bash(gh auth token*)"

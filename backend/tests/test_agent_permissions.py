@@ -131,6 +131,17 @@ FORBIDDEN = [
     "gh auth token",
 ]
 
+# `deny` has no override (rules.md:21-24), so a pattern that is broader than
+# the danger it targets removes a workflow outright rather than gating it.
+# `git reset --hard` discards committed work; the other forms do not, and
+# rules.md:36-40 prescribes `--soft` as the WIP-commit recovery pattern now
+# that `git stash` is denied repo-wide. An earlier revision of this profile
+# denied `git reset*` wholesale and took that recovery path with it.
+MUST_NOT_BE_DENIED = [
+    "git reset --soft HEAD~1",  # rules.md:36-40, picking a WIP commit back up
+    "git reset HEAD backend/app.py",  # unstaging; discards nothing
+]
+
 
 @pytest.mark.parametrize("command", RUNS_UNATTENDED)
 def test_implement_issue_runs_without_prompting(command, rules):
@@ -154,6 +165,16 @@ def test_maintainer_decisions_still_ask(command, rules):
 def test_prohibited_commands_are_denied(command, rules):
     verdict = decide(command, rules)
     assert verdict == "deny", f"{command!r} resolves to {verdict!r}, expected 'deny'."
+
+
+@pytest.mark.parametrize("command", MUST_NOT_BE_DENIED)
+def test_non_destructive_forms_keep_an_escape_hatch(command, rules):
+    verdict = decide(command, rules)
+    assert verdict != "deny", (
+        f"{command!r} is denied. `deny` never prompts, so this removes the "
+        f"workflow entirely rather than gating it -- narrow the pattern to the "
+        f"destructive form instead."
+    )
 
 
 def test_gh_api_writes_ask_in_either_flag_position(rules):

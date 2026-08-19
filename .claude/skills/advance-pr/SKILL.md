@@ -64,7 +64,10 @@ matches, do that and only that.
 | out of draft, APPROVED | report, stop | free |
 | merged | if it was the issue's **last** open PR, move the issue to `In Verification` | script |
 
-**This skill never edits code — every row is mechanical.** Even a
+**This skill never reworks a review verdict — it never edits code in
+response to review findings.** Merging main to resolve a textual conflict and
+fixing a red check on an approved PR are mechanical repairs, not reworks, and
+stay rows in this table. Even a
 `CHANGES_REQUESTED` PR is a script step here: collect the findings and hand
 them back to `/implement-issue <n>`, which is the session that holds the Step
 2 diagnosis and Step 3 scope assessment needed to tell a real review finding
@@ -157,7 +160,7 @@ reopens the failure it fixed.
   rounds of disagreement means the reviewer and the diff disagree about the
   design, not about a bug, and a fourth round will not settle it — that's
   the escalate row, not another rework.
-- **This skill never touches the diff — on EVERY `CHANGES_REQUESTED` verdict,
+- **This skill never reworks a review verdict — on EVERY `CHANGES_REQUESTED` verdict,
   collect the findings and hand back to `/implement-issue <n>`, whatever
   caller invoked you and however much context it holds.** This supersedes an
   earlier ruling that let a caller holding the Step 2 diagnosis and Step 3

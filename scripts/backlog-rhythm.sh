@@ -502,7 +502,7 @@ actions=$(printf '%s' "$digest" | jq \
                        # it holds the branch, the diff, the scope assessment and the
                        # review verdict, which is everything Step 0 reads.
                        detail: (if $issue_no != null
-                                then "/implement-issue \($issue_no) — Step 0 re-enters at Step 11, which holds the Step 2/3 context and reworks via advance-pr"
+                                then "/implement-issue \($issue_no) — Step 0 re-enters at Step 11, which holds the Step 2/3 context, reworks it in this session, then calls advance-pr for the next transition"
                                 else "/implement-issue \(.number) — the PR number; no linked issue (TODO item or refactor)" end)}
                  # EVERY OTHER DRAFT SHAPE IS MECHANICAL: no review yet, a review
                  # still in flight, or an approved draft whose checks are not green

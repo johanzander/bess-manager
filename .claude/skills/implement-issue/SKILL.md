@@ -625,8 +625,8 @@ invoking it until it reports a terminal state:
 
     /advance-pr <pr-number>
 
-Each invocation performs one transition and exits, and it never edits code —
-on a `CHANGES_REQUESTED` verdict it collects the findings and hands them back
+Each invocation performs one transition and exits, and it never reworks a
+review verdict — on a `CHANGES_REQUESTED` verdict it collects the findings and hands them back
 to you rather than reworking in place, because you are the session that still
 holds the Step 2 diagnosis and the Step 3 scope assessment, which is what
 lets you tell a real review finding from one that contradicts a decision made

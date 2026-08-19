@@ -36,10 +36,10 @@ the `bess-analyst` sub-agent.
   single-PR bug fixes and small enhancements.
 - **Also for picking an issue back up after a session died mid-flight.** Same
   invocation, `/implement-issue <n>`; Step 0 detects the prior work and
-  re-enters at the right step. This is not a separate skill because the loop
-  that acts on review feedback is Step 11 and lives here — a second skill
-  would duplicate it, and duplicating a review loop is how one of them goes
-  stale.
+  re-enters at the right step. This is not a separate skill because the
+  diagnosis and scope assessment a resumed session needs live here — the
+  review loop itself lives in `advance-pr`, its only copy, and Step 11
+  delegates to it rather than duplicating it.
 
 **Sessions die mid-issue routinely, and nothing used to pick them up.** A
 fleet audit found 34 worktrees whose sessions had exited: 8 with real
@@ -68,7 +68,7 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 8. Local run & observe | Structurally unavailable in CI — this is the documented reason the local flow exists. Skip, and say so in the PR body's test plan so the reviewer knows verification is still owed. |
 | 9. Commit + draft PR | Applies verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. Add the `## Scope assessment` section (Step 3 above). The workflow file owns CI-only mechanics: issue comment with the PR link, `has-fix-pr` label. |
 | 10. Watch this PR to green | Applies verbatim — `gh pr checks --watch` on the PR just opened, fix failures, never widen to other PRs. |
-| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. Since the loop never runs here, the PR also stays a draft: `gh pr ready` is Step 11's, and there is no approval in CI mode to earn it. |
+| 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. `advance-pr` is therefore not invoked in CI, and the PR stays a draft: `gh pr ready` belongs to that skill, and there is no approval in CI mode to earn it. |
 | 12. Hard constraints | Apply verbatim. |
 
 ## Process
@@ -106,6 +106,17 @@ git worktree list                       # a worktree already on this issue's bra
 git branch --list '*issue-<n>*'         # a branch even without a worktree?
 ```
 
+**If `<n>` is neither — a bare refactor or `TODO.md` item with no issue — open
+one first**, so the work has a card and can carry `Priority`, `Awaiting` and a
+phase like everything else:
+
+```bash
+gh issue create --title "<one line>" --body "<why, in two sentences>" --label refactor
+```
+
+One card per unit of work is the rule; a PR with no issue is a second card for
+the same work, which is what made `Priority` ambiguous between the two.
+
 **Completion is observable from outside the dead session — read state, never
 assume it:**
 
@@ -120,6 +131,15 @@ assume it:**
 Re-enter at the **earliest incomplete** step and run forward normally. A PR
 carrying `CHANGES_REQUESTED` re-enters at Step 11's `CHANGES_REQUESTED` branch;
 one carrying `APPROVED` needs only `gh pr ready`.
+
+When resuming, post the handoff marker so the count is a fact rather than a
+feeling — two handoffs on one issue is an escalation:
+
+```bash
+scripts/gh-agent.sh --as dev issue comment <n> \
+  --body "Resuming implementation from step <k>.
+<!-- resume-handoff -->"
+```
 
 **Rehydrate the diagnosis before touching code.** Step 2's analysis died with
 the session, and Step 11 depends on holding it. It is recoverable only because
@@ -520,8 +540,14 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - <expected_results on fixture X | intents/gate in the goldens | R == P via
   run_scenario_realized | none, because …>
 
-Closes #<n>
+Refs #<n>
 ```
+
+**Every PR body carries `Refs #<issue>`** — and only the graduation PR carries
+`Closes #<issue>`, per the no-auto-close rule. A beta or intermediate PR that
+used a closing verb would close the reporter's issue before the fix has shipped
+to them; one that referenced nothing at all would be invisible to the board,
+which associates PRs with issues by that line.
 
 **These two sections are the point of the PR, not paperwork.** A reviewer
 cannot tell a real guard from a vacuous one by reading it — three times in
@@ -589,150 +615,20 @@ say so and leave the PR — don't hold the session open indefinitely.
 
 ### 11. Independent review loop (never skip this)
 
-Step 6's `code-review` is your own review of your own diff, and it is not
-enough on its own — in practice this PR needs two to four rounds of the
-independent Stage 4 bot before only nits remain. That loop is mechanical, so
-run it here rather than leaving it to a second session.
+The loop lives in **`advance-pr`**, which is its only copy. Invoke it, and keep
+invoking it until it reports a terminal state:
 
-**Only enter this loop once Step 10 says the PR is green and mergeable.**
-Asking for a review of a red or `CONFLICTING` PR burns a paid review round on
-a diff that is about to change.
+    /advance-pr <pr-number>
 
-Each round:
+Each invocation performs one transition and exits. You still hold the Step 2
+diagnosis and the Step 3 scope assessment, which is what lets you tell a real
+review finding from one that contradicts a decision made deliberately — so act
+on a `CHANGES_REQUESTED` verdict **here**, in this session, then invoke
+`advance-pr` again for the next round.
 
-```bash
-scripts/request-pr-review.sh <n>     # run_in_background: true
-```
-
-The script posts `@claude-bot review` as `bess-agent` and blocks until a
-verdict lands, printing `VERDICT <APPROVED|CHANGES_REQUESTED|COMMENTED>
-<submittedAt> <author>` (exit 2 on a 15-minute timeout, after dumping recent
-`PR Review` runs).
-
-**`COMMENTED` is ambiguous, and the script resolves it for you — don't
-second-guess it.** `pr-review.yml` allows three final verdicts (`APPROVE`,
-`REQUEST_CHANGES`, `COMMENT`), so a real `COMMENT` verdict is possible and
-carries findings. But the bot has also submitted extra `COMMENTED` reviews
-ahead of its summary — inline notes, and a stray "test permission check" while
-probing what it could call — and those are identical to a verdict by state.
-Acting on one is how PR #615 sat `APPROVED` but still a draft overnight.
-
-The script disambiguates by asking whether the **workflow run is still
-going**, not by waiting a fixed time. A timer was tried first and was wrong:
-the gap that matters is placeholder-to-end-of-run, not placeholder-to-summary,
-and no constant covers both. So a `COMMENTED` that reaches you arrived after
-the run finished and **is** the verdict: treat it like `CHANGES_REQUESTED` —
-collect the findings, do not flip the PR ready. If the run state cannot be read
-at all, the script keeps waiting rather than guessing.
-
-Like Step 10's
-`--watch`, it blocks rather than polls — so **do not poll it and do not
-re-touch the diagnosis/TDD context while it runs.** You are notified once,
-when it exits. This is a hard session boundary, same as Step 6.
-
-On the verdict:
-
-- **`APPROVED`** — the review is done, but the PR's *state* is not yet
-  established. **Re-check mergeability before doing anything else:**
-
-  ```bash
-  git fetch origin
-  gh pr view <n> --json mergeable,mergeStateStatus
-  ```
-
-  Step 10's green/`CLEAN` verdict is stale by now — a review round takes
-  minutes (8 in the run that motivated this), and other PRs merge during it.
-  A `CONFLICTING` PR cannot be merged and gets no new workflow run, so
-  reporting Step 10's reading as if it still held hands the maintainer a
-  conflicted PR described as clean. That is what happened on #609, and the
-  reason this check exists here and not only in Step 10.
-
-  If it is `CONFLICTING` / `DIRTY`: `git merge origin/main`, resolve, re-run
-  `./scripts/quality-check.sh` (and the slow suite if the merge pulled in
-  optimizer changes), push, and re-watch CI per Step 10. Then apply the
-  push-after-approval rule below to the merge commit — a clean merge that
-  changed nothing under review does not need another round, one that touched
-  reviewed code does.
-
-  **Then mark the PR ready for review and report the link:**
-
-  ```bash
-  gh pr ready <n>
-  ```
-
-  This is the one status change the skill makes on its own, and the approval
-  is what earns it. A draft says "not finished"; once the bot has approved a
-  green PR, that is no longer true, and leaving it draft means the maintainer
-  has to notice it, judge whether it is actually done, and flip it by hand
-  before merging — three steps to re-derive something the loop already
-  established. Ready says "reviewed, green, and waiting on your judgement",
-  which is exactly the state it is in.
-
-  Two things this does *not* license, both still hard constraints (Step 12):
-  never merge it, and never flip it early — an unreviewed or red PR stays a
-  draft, no matter how confident you are in the diff.
-
-  **If you push anything after the approval, the approval covers a diff that
-  no longer exists, and what you do next depends on what you pushed.** Ask
-  whether the new commits touched code the reviewer actually reviewed:
-
-  - **They didn't** (parking a nit in `TODO.md`, a `CHANGELOG.md` line, a
-    clean `git merge origin/main` that changed nothing under review):
-    re-check `gh pr checks` and `mergeable`/`mergeStateStatus`, then flip.
-    Name those commits in your report and say why they fall outside the
-    reviewed diff, so the maintainer can check that call rather than take
-    it on trust.
-  - **They did:** do NOT flip. Go back and run another review round — the
-    approval you are holding was for different code, and `gh pr ready` on a
-    stale-approved diff is the one way this step can actively mislead. A
-    round costs minutes; a wrongly-ready PR spends the maintainer's trust in
-    the ready flag, which is the only thing that makes it worth setting.
-
-  The round cap counts this round like any other. If it lands you on the cap,
-  say so and hand over a draft PR with the outstanding state — an honest
-  draft beats a ready flag that means less than it claims.
-- **`CHANGES_REQUESTED` / `COMMENTED`** — both carry findings and neither earns
-  the ready flag. Collect them:
-
-  ```bash
-  gh api repos/johanzander/bess-manager/pulls/<n>/comments \
-    --jq '.[] | select(.created_at > "<submittedAt from the round before>") | "\(.path):\(.line) \(.body)"'
-  ```
-
-  Then invoke `superpowers:receiving-code-review`. This is the reason the loop
-  lives in the main session and not in a subagent: you still hold the Step 2
-  diagnosis and the Step 3 scope assessment, so you can tell a real finding
-  from one that contradicts a decision already made deliberately. Verify each
-  finding against the code before acting on it. Where the reviewer is wrong,
-  reply on the PR saying why — do not silently implement it, and do not
-  silently ignore it either.
-- **A review from the maintainer rather than the bot** (the `<author>` field):
-  treat it as authoritative and stop the loop — a human has taken over.
-- **A maintainer CONVERSATION comment, which is not a review at all**, is
-  equally authoritative and arrives on a feed the verdict never touches. Check
-  it each round, not only at Step 0 — a direction posted mid-loop is invisible
-  to `gh pr view --json reviews`, and to the bot, which will keep reviewing the
-  diff as if nothing had been said:
-
-  ```bash
-  gh pr view <n> --json comments \
-    --jq '.comments[] | select(.createdAt > "<submittedAt from the round before>") | "\(.author.login)\n\(.body)"'
-  ```
-
-  If one lands, stop the loop and act on it before the next round. A bot
-  APPROVED on a diff the maintainer has already asked you to redo is worth
-  nothing.
-
-Fix the blockers, park genuine nits in `TODO.md`, run
-`./scripts/quality-check.sh`, commit, and push. Step 9's frontend rule carries
-over unchanged: if the diff touches `frontend/**` or `*.tsx`/`*.jsx`/`*.css`,
-show the user the fixes and wait for go-ahead before pushing. Then start the
-next round.
-
-**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, or on any script
-timeout, stop and hand the outstanding findings to the user verbatim. Three
-rounds of disagreement means the reviewer and you disagree about the design,
-not about a bug, and another round will not settle it.
+**Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, `advance-pr` escalates
+by setting `Awaiting: maintainer`, and you stop and hand over the findings
+verbatim.
 
 ### 12. Hard constraints
 
@@ -895,4 +791,4 @@ net is upstream, not this section.
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
 | 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |
-| 11. Independent review loop | `scripts/request-pr-review.sh` (background) + `receiving-code-review`, max 3 rounds; `gh pr ready` on `APPROVED` | No |
+| 11. Independent review loop | `advance-pr`, invoked repeatedly to a terminal state, max 3 rounds | No |

@@ -10,6 +10,8 @@ import traceback
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, ClassVar
 
+import requests
+
 from . import time_utils
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .daily_view_store import DailyViewStore
@@ -3465,7 +3467,16 @@ class BatterySystemManager:
                 # preceding LOAD_SUPPORT or BATTERY_EXPORT period).
                 self.controller.set_charging_power_rate(int(charge_rate))
 
-        except (AttributeError, ValueError, KeyError) as e:
+        except (
+            AttributeError,
+            ValueError,
+            KeyError,
+            requests.RequestException,
+        ) as e:
+            # RequestException: grid_charge_enabled() reads through
+            # _api_request, which re-raises once its retries are exhausted.
+            # A transient HA failure skips this tick rather than escaping to
+            # APScheduler; the inverter keeps its current rate (issue #643).
             logger.error("Failed to adjust charging power: %s", str(e))
 
     def apply_discharge_inhibit(self) -> None:

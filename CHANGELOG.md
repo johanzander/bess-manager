@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **A transient Home Assistant outage no longer kills the 5-minute charging-power adjustment** — the tick now skips and keeps the inverter's current rate instead of crashing. ([#643](https://github.com/johanzander/bess-manager/issues/643))
 - **Growatt VPP now lets the inverter and BMS sleep through a long idle at minimum SoC** — an empty battery was still held under continuous remote control, which nothing was protecting. ([#592](https://github.com/johanzander/bess-manager/issues/592))
 - **A tiny solar surplus is no longer planned as an export the inverter will absorb** — below the export the plan can express, the battery charged anyway and ran fuller than planned, spilling the difference later. ([#630](https://github.com/johanzander/bess-manager/issues/630))
 - **The setup wizard no longer locks you out of an inverter platform it failed to auto-detect** — every platform stays selectable, and a re-scan keeps the one you picked. ([#621](https://github.com/johanzander/bess-manager/issues/621))

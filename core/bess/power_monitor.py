@@ -247,6 +247,16 @@ class HomePowerMonitor:
             target_power = self.calculate_available_charging_power()
 
         current_power = self.controller.get_charging_power_rate()
+        if current_power is None:
+            # The sensor read degraded (transient HA failure -- _get_raw_state
+            # returns None once _api_request's retries are exhausted). Without
+            # the current rate there is nothing to compare against, so leave
+            # the inverter on its existing rate rather than writing blind.
+            logger.warning(
+                "Charging power rate unreadable; leaving the inverter rate "
+                "unchanged for this adjustment"
+            )
+            return
 
         # Skip if no change needed (within 1% tolerance)
         if abs(target_power - current_power) < 1:

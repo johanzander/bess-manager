@@ -1,0 +1,2 @@
+- [Board field IDs](project_board_field_ids.md) — GraphQL node/field/option IDs for Status/Priority/Awaiting; Priority has NO P0 option, only P1-P4
+- [Digest column ≠ board presence](project_backlog_board_state_2026_08_16.md) — the digest derives a column whether or not a card exists; diff `item-list` against `issue list` before trusting sync

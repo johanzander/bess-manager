@@ -96,6 +96,64 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
         echo "   Install with: python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt"
         ERRORS=$((ERRORS + 1))
     fi
+    # mypy, scoped to files this branch actually changed.
+    #
+    # `docs/agents/rules.md` requires mypy to pass, but nothing ran it: not
+    # this gate, not CI, and it was not even in requirements-dev.txt. Turning
+    # it on repo-wide is not an option — a measured 2914 errors across 191
+    # files, 417 of them outside tests. So the rule is enforced going forward
+    # instead of retroactively: code you touch must type-check, and the legacy
+    # backlog burns down as files get edited.
+    #
+    # Three sources, because each misses something the others catch:
+    # committed-on-this-branch, uncommitted-but-tracked, and untracked. The
+    # last one matters most — a brand-new file is untracked until its first
+    # commit, and this gate is meant to run BEFORE that commit. Leaving it out
+    # let a probe file with a known error pass the gate silently.
+    #
+    # A file deleted on this branch still appears in the diff, hence the -e
+    # test. No changed Python files is a pass, not a skip-with-warning.
+    #
+    # An unresolvable origin/main is an ERROR, not a warning: warnings exit
+    # 0, so a run that type-checked nothing would print "Errors: 0" and
+    # report success for a check that never happened.
+    if MYPY=$(py_tool mypy); then
+        echo "🔸 Checking mypy on changed files..."
+        base=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
+        if [ -z "$base" ]; then
+            echo "❌ Cannot resolve origin/main — mypy checked nothing."
+            echo "   Run: git fetch origin main"
+            ERRORS=$((ERRORS + 1))
+        else
+            # sort -u is load-bearing: a file changed on the branch AND dirty
+            # in the working tree appears in both diffs, and mypy fails with
+            # "Duplicate module named ..." when handed the same path twice.
+            #
+            # An array, not a space-joined string: a path containing a space
+            # or a glob character would otherwise be split into two arguments
+            # or expanded against the working tree.
+            changed=()
+            while IFS= read -r f; do
+                case "$f" in *.py) [ -e "$f" ] && changed+=("$f") ;; esac
+            done <<EOF
+$( { git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
+EOF
+            if [ ${#changed[@]} -eq 0 ]; then
+                echo "✅ mypy OK (no changed Python files)"
+            elif ! "$MYPY" --explicit-package-bases --ignore-missing-imports "${changed[@]}" >/dev/null 2>&1; then
+                echo "❌ mypy errors in changed files. Run:"
+                printf '   %s --explicit-package-bases --ignore-missing-imports %s\n' \
+                    "$MYPY" "${changed[*]}"
+                ERRORS=$((ERRORS + 1))
+            else
+                echo "✅ mypy OK (changed files)"
+            fi
+        fi
+    else
+        echo "❌ mypy not found in .venv/bin or on PATH — cannot verify types."
+        echo "   Install with: .venv/bin/pip install -r requirements-dev.txt"
+        ERRORS=$((ERRORS + 1))
+    fi
 else
     echo "ℹ️  No Python files found to check"
 fi
@@ -512,6 +570,68 @@ print(f"✅ Bot workflow publish contract intact ({len(PUBLISHERS)} publishers "
       "name their command, Stage 2 verifies it posted)")
 PY
 then
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
+echo "📋 Checking bot workflow context contract..."
+echo "-------------------------------------------"
+
+# A workflow prompt must not tell its MAIN agent to read a `.claude/agents/*.md`
+# file. Those files are sub-agent system prompts: the sub-agent already has one
+# in full, so naming it as the main agent's REQUIRED READING loads a second copy
+# into a different context window, on every turn, for an agent that never runs
+# the procedure it describes.
+#
+# Stage 2 did exactly that with bess-analyst.md (25,681 B) and nothing consumed
+# it (#654). Its six steps are: get context, identify the current problem,
+# delegate, verify the cited file:line, publish, label -- no step applies a
+# "domain expertise checklist". Worse, the section of that file which could
+# plausibly serve as a judging standard (Separate Evidence from Claims) was
+# already restated inline in the sub-agent task the same prompt passes, so the
+# content was loaded three times over.
+#
+# The paired assertion matters as much as the removal: Stage 2 must still
+# DELEGATE. Dropping the read is the saving; dropping the delegation would gut
+# the stage, and the same "trim the prompt" instinct reaches for both.
+if ! python3 - <<'PY_CTX'
+import re, sys, pathlib
+
+WF = pathlib.Path(".github/workflows")
+bad = []
+
+for f in sorted(set(WF.glob("*.yml")) | set(WF.glob("*.yaml"))):
+    text = f.read_text()
+    for i, line in enumerate(text.splitlines(), 1):
+        # Match the shape the regression actually takes: a NUMBERED entry in a
+        # reading list, e.g. "3. .claude/agents/bess-analyst.md — checklist".
+        # Deliberately narrow. A prose line that merely names the path is not
+        # flagged, because the prompt now carries an explicit "Do NOT read
+        # .claude/agents/bess-analyst.md" note and a gate that fought its own
+        # documentation would be worse than one with a known edge. An
+        # unnumbered "read <path>" instruction would slip through; that is an
+        # accepted narrowness, not a claim of completeness.
+        if re.match(r"^\s*\d+\.\s+\.claude/agents/", line):
+            bad.append(f"{f}:{i}: main agent told to read a sub-agent definition: {line.strip()}")
+
+analyze = (WF / "issue-analyze.yml").read_text()
+_, _, prompt_block = analyze.partition("prompt: |")
+if not re.search(r"subagent_type[\s:`'\"]*bess-analyst", prompt_block):
+    bad.append("issue-analyze.yml: Stage 2 no longer delegates to the bess-analyst "
+               "sub-agent -- that delegation IS the stage")
+
+if bad:
+    for b in bad:
+        print(f"   {b}")
+    sys.exit(1)
+
+print("✅ Bot workflow context contract intact (no sub-agent definition read by a "
+      "main agent, Stage 2 still delegates)")
+PY_CTX
+then
+    echo "❌ Bot workflow context contract violated"
+    echo "   A sub-agent's definition is its own system prompt. Do not also list"
+    echo "   it as the main agent's REQUIRED READING (#654)."
     ERRORS=$((ERRORS + 1))
 fi
 

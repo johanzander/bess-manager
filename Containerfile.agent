@@ -150,6 +150,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends podman \
 # write access without any chown of the host's files. The entrypoint still
 # STARTS as root -- it needs NET_ADMIN for the egress ruleset -- and drops here
 # with setpriv immediately afterwards.
+#
+# EXPECTED LOG LINE, NOT A DEFECT: every dispatch prints "Sandbox disabled:
+# ... bubblewrap (bwrap) not installed, socat not installed ... Commands will
+# run WITHOUT sandboxing." That is Claude Code's OWN in-process sandbox, which
+# this container deliberately does without -- the container IS the boundary,
+# and the agent runs bypassPermissions inside it on purpose. Installing bwrap
+# would add a second, narrower sandbox inside the first, with its own network
+# and filesystem restrictions to debug on top of the egress allowlist. Do that
+# only if there is a reason beyond quieting the warning.
 ARG AGENT_UID=1000
 RUN useradd --uid ${AGENT_UID} --create-home --shell /bin/bash agent
 

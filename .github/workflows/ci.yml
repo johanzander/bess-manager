@@ -454,8 +454,21 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # The same two files every other Python job installs, not a hand-picked
+      # subset: mypy resolves imports from the environment, and with
+      # --ignore-missing-imports anything absent silently becomes Any. That
+      # cuts both ways. Missing `pytest` makes every `@pytest.fixture` and
+      # `@pytest.mark.parametrize` untyped, so an annotated test reports
+      # `untyped-decorator` here while type-checking clean in the local .venv
+      # -- and no amount of annotating closes it. Missing `fastapi` does the
+      # same to `@router.get`. Missing `numpy` goes the other way and MASKS
+      # real errors: pwl_window_dp.py reports 7 errors with numpy installed
+      # and 3 without, so a genuine mistake would pass the merge gate and
+      # fail only on the maintainer's machine.
       - name: Install tools
-        run: pip install black ruff mypy
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Black formatting
         run: black --check . --exclude="/(build|\.venv|node_modules)/"
@@ -476,17 +489,11 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --no-tags origin main
-          base=$(git merge-base FETCH_HEAD HEAD)
-          # --diff-filter=d drops deletions: a file removed on this branch is
-          # still named by the diff and mypy cannot check what is not there.
-          mapfile -t changed < <(git diff --name-only --diff-filter=d "$base" HEAD -- '*.py')
-          if [ ${#changed[@]} -eq 0 ]; then
-            echo "No changed Python files — nothing to type-check."
-            exit 0
-          fi
-          printf 'Checking %s file(s):\n' "${#changed[@]}"
-          printf '  %s\n' "${changed[@]}"
-          mypy --explicit-package-bases --ignore-missing-imports "${changed[@]}"
+          # Same script quality-check.sh runs, so a green local gate and a
+          # green CI gate mean the same thing. Without --include-worktree:
+          # CI has only the commit, and an untracked-file scan here would
+          # pick up build artefacts rather than authored code.
+          scripts/mypy-changed.sh mypy
 
   # ── Docker build & boot: verify production image starts ──────────
   docker-build-test:

@@ -25,6 +25,7 @@ drift from what production writes -- the P1/P4 lesson from Phases 1 and 3,
 where hand-mirrored copies of the same logic were the whole bug class.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from core.bess.dp_battery_algorithm import (
@@ -387,7 +388,7 @@ def simulate_vpp_commands(
 
 
 def _simulate(
-    command_at,
+    command_at: Callable[[int, float], VppCommand],
     n_periods: int,
     solar_production: list[float],
     home_consumption: list[float],

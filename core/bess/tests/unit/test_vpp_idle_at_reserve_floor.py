@@ -24,6 +24,7 @@ proved separately in
 """
 
 from types import SimpleNamespace
+from typing import Any, cast
 
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_schedule import DPSchedule
@@ -51,17 +52,23 @@ def _make_vpp_bsm(
         },
     )
     intents = ["IDLE"] * 96
-    bsm._inverter_controller.strategic_intents = intents
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
+    inverter_controller = bsm._inverter_controller
+    assert inverter_controller is not None
+    inverter_controller.strategic_intents = intents
+    # A duck-typed stand-in: only `.actions` is read on this path.
+    inverter_controller.current_schedule = cast(
+        DPSchedule, SimpleNamespace(actions=[0.0] * 96)
+    )
     return bsm, controller
 
 
-def _last_vpp_command(controller: MockHomeAssistantController) -> dict:
-    return controller.calls["growatt_vpp_periods"][-1]
+def _last_vpp_command(controller: MockHomeAssistantController) -> dict[str, Any]:
+    command: dict[str, Any] = controller.calls["growatt_vpp_periods"][-1]
+    return command
 
 
 class TestIdleAtReserveFloorReleasesControl:
-    def test_idle_at_the_floor_releases_the_inverter(self):
+    def test_idle_at_the_floor_releases_the_inverter(self) -> None:
         """At min SoC the written command must release remote control, so the
         inverter reverts to its own self-use and stops being commanded."""
         bsm, controller = _make_vpp_bsm(soc=10.0)
@@ -75,7 +82,7 @@ class TestIdleAtReserveFloorReleasesControl:
         assert command["power_pct"] == 0
         assert command["remote_control_enabled"] is False
 
-    def test_idle_above_the_floor_still_holds_battery_first(self):
+    def test_idle_above_the_floor_still_holds_battery_first(self) -> None:
         """#466 must survive #592: with energy still banked for the morning
         peak, IDLE holds battery_first exactly as before."""
         bsm, controller = _make_vpp_bsm(soc=50.0)
@@ -86,7 +93,7 @@ class TestIdleAtReserveFloorReleasesControl:
         assert command["power_pct"] == 1
         assert command["remote_control_enabled"] is True
 
-    def test_released_control_stops_re_asserting_every_period(self):
+    def test_released_control_stops_re_asserting_every_period(self) -> None:
         """The actual mechanism behind "the BMS never sleeps": with remote
         control enabled `_apply_period_vpp` rewrites every period to refresh
         the inverter's fallback timer (#404). Once released there is nothing
@@ -101,7 +108,7 @@ class TestIdleAtReserveFloorReleasesControl:
             "period -- re-asserting is what kept the BMS awake"
         )
 
-    def test_unreadable_soc_holds_rather_than_releasing(self):
+    def test_unreadable_soc_holds_rather_than_releasing(self) -> None:
         """`get_battery_soc()` is typed `float | None`, so a transient
         unavailable/unknown HA sensor must not decide this.
 
@@ -122,7 +129,7 @@ class TestIdleAtReserveFloorReleasesControl:
         assert command["power_pct"] == 1
         assert command["remote_control_enabled"] is True
 
-    def test_out_of_range_soc_holds_rather_than_releasing(self):
+    def test_out_of_range_soc_holds_rather_than_releasing(self) -> None:
         """Same branch, the other invalid shape a sensor can report. Mirrors
         the existing `0 <= soc <= 100` validation in
         `_get_current_battery_soc()` rather than inventing a second rule."""
@@ -135,7 +142,7 @@ class TestIdleAtReserveFloorReleasesControl:
         assert command["power_pct"] == 1
         assert command["remote_control_enabled"] is True
 
-    def test_hold_still_re_asserts_every_period_above_the_floor(self):
+    def test_hold_still_re_asserts_every_period_above_the_floor(self) -> None:
         """Guard rail on the test above: the every-period refresh is correct
         and must be preserved wherever remote control is genuinely active,
         otherwise the fallback timer would lapse mid-hold (#404)."""
@@ -191,19 +198,19 @@ class TestDisplayAgreesWithWhatIsWritten:
     exactly the periods production releases.
     """
 
-    def test_predicted_idle_at_the_floor_displays_the_release(self):
+    def test_predicted_idle_at_the_floor_displays_the_release(self) -> None:
         controller = _vpp_controller_with_plan(soe=5.0)  # == min_soe_kwh
         fields = controller.get_period_settings(PERIOD)
         assert fields["vpp_power_pct"] == 0
         assert fields["vpp_remote_control"] is False
 
-    def test_predicted_idle_above_the_floor_displays_the_hold(self):
+    def test_predicted_idle_above_the_floor_displays_the_hold(self) -> None:
         controller = _vpp_controller_with_plan(soe=25.0)
         fields = controller.get_period_settings(PERIOD)
         assert fields["vpp_power_pct"] == 1
         assert fields["vpp_remote_control"] is True
 
-    def test_the_crossing_period_still_displays_the_hold(self):
+    def test_the_crossing_period_still_displays_the_hold(self) -> None:
         """The uniform-trajectory fixtures above cannot see an off-by-one:
         with every index equal, `soe[period]` and `soe[period - 1]` agree.
 

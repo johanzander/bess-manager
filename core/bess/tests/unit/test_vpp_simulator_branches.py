@@ -232,7 +232,7 @@ class TestIdleAtReserveFloor:
     re-pinning the v10.0.2 VPP baseline.
     """
 
-    def test_release_matches_the_hold_when_solar_is_in_surplus(self):
+    def test_release_matches_the_hold_when_solar_is_in_surplus(self) -> None:
         """Both absorb the surplus: the hold via `0.0` -> `_state_transition`'s
         IDLE branch, the released command via its own `deficit <= 0` return.
 
@@ -259,7 +259,7 @@ class TestIdleAtReserveFloor:
             "the grid, which is why #592 releases control instead"
         )
 
-    def test_release_matches_the_hold_when_load_exceeds_solar(self):
+    def test_release_matches_the_hold_when_load_exceeds_solar(self) -> None:
         """No headroom at the floor, so the released command cannot discharge:
         `available == 0` makes `delivered` 0 and the branch returns None (a
         hold), exactly like battery_first. This is what makes releasing safe
@@ -292,7 +292,7 @@ class TestIdleAtReserveFloor:
                 home_consumption=2.0,
             ) == pytest.approx(at_floor), "neither command may move SoE at the floor"
 
-    def test_release_would_discharge_above_the_floor(self):
+    def test_release_would_discharge_above_the_floor(self) -> None:
         """The guard rail on the test above: releasing control is only
         flow-neutral *at* the floor. One kWh above it the released command
         drains the battery to cover load -- which is exactly #466's defect,
@@ -325,7 +325,7 @@ class TestPlanShape:
         with pytest.raises(ValueError, match="inconsistent"):
             derive_vpp_commands(["IDLE"], [0.0, 0.0], s, soe)
 
-    def test_short_soe_trajectory_raises(self):
+    def test_short_soe_trajectory_raises(self) -> None:
         """Same reasoning for the SoE trajectory #592 added: one entry short
         and the last periods would be derived against the wrong floor state,
         silently, rather than failing at the input."""

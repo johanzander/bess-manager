@@ -454,8 +454,21 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # The same two files every other Python job installs, not a hand-picked
+      # subset: mypy resolves imports from the environment, and with
+      # --ignore-missing-imports anything absent silently becomes Any. That
+      # cuts both ways. Missing `pytest` makes every `@pytest.fixture` and
+      # `@pytest.mark.parametrize` untyped, so an annotated test reports
+      # `untyped-decorator` here while type-checking clean in the local .venv
+      # -- and no amount of annotating closes it. Missing `fastapi` does the
+      # same to `@router.get`. Missing `numpy` goes the other way and MASKS
+      # real errors: pwl_window_dp.py reports 7 errors with numpy installed
+      # and 3 without, so a genuine mistake would pass the merge gate and
+      # fail only on the maintainer's machine.
       - name: Install tools
-        run: pip install black ruff mypy
+        run: |
+          pip install -r backend/requirements.txt
+          pip install -r requirements-dev.txt
 
       - name: Black formatting
         run: black --check . --exclude="/(build|\.venv|node_modules)/"

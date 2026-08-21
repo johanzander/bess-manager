@@ -28,16 +28,43 @@
 
 set -euo pipefail
 
-WORKTREE_ROOT=$(git rev-parse --show-toplevel)
-GIT_DIR=$(cd "$(git rev-parse --git-dir)" && pwd -P)
-GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
+# --target-dir/--main-checkout exist for scripts/run-agent.sh, which sets up an
+# agent's private CLONE rather than a linked worktree. A clone is a fully
+# independent repository, so the derivation below cannot find the main checkout
+# from it -- there is no git-common-dir pointing back. Given explicitly, the
+# rest of this script is identical: it only ever needed "which tree am I
+# setting up" and "which tree do I share from".
+TARGET_DIR=""
+MAIN_CHECKOUT_ARG=""
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --target-dir)     TARGET_DIR="${2:?--target-dir requires a path}"; shift 2 ;;
+        --main-checkout)  MAIN_CHECKOUT_ARG="${2:?--main-checkout requires a path}"; shift 2 ;;
+        *) echo "❌ worktree-setup.sh: unknown argument '$1'" >&2; exit 2 ;;
+    esac
+done
 
-if [ "$GIT_DIR" = "$GIT_COMMON" ]; then
-    echo "❌ Not in a linked worktree — run this from a worktree, not the main checkout." >&2
-    exit 1
+if [ -n "$TARGET_DIR" ]; then
+    if [ -z "$MAIN_CHECKOUT_ARG" ]; then
+        echo "❌ --target-dir requires --main-checkout (an independent clone cannot derive it)." >&2
+        exit 2
+    fi
+    WORKTREE_ROOT=$(cd "$TARGET_DIR" && pwd -P)
+    MAIN_CHECKOUT=$(cd "$MAIN_CHECKOUT_ARG" && pwd -P)
+else
+    WORKTREE_ROOT=$(git rev-parse --show-toplevel)
+    GIT_DIR=$(cd "$(git rev-parse --git-dir)" && pwd -P)
+    GIT_COMMON=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
+
+    if [ "$GIT_DIR" = "$GIT_COMMON" ]; then
+        echo "❌ Not in a linked worktree — run this from a worktree, not the main checkout." >&2
+        echo "   (For an agent's private clone use --target-dir/--main-checkout.)" >&2
+        exit 1
+    fi
+
+    MAIN_CHECKOUT=$(dirname "$GIT_COMMON")
 fi
 
-MAIN_CHECKOUT=$(dirname "$GIT_COMMON")
 cd "$WORKTREE_ROOT"
 
 echo "🔗 Sharing dependencies from $MAIN_CHECKOUT"

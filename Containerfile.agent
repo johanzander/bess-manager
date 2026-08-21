@@ -64,7 +64,8 @@ ENV MAIN_CHECKOUT=${MAIN_CHECKOUT}
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
-    NODE_PATH=/usr/local/lib/node_modules
+    NODE_PATH=/usr/local/lib/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 # --- System layer ------------------------------------------------------------
 # git + gh: the agent's whole output is commits and PRs.
@@ -161,6 +162,15 @@ RUN apt-get update && apt-get install -y --no-install-recommends podman \
 # only if there is a reason beyond quieting the warning.
 ARG AGENT_UID=1000
 RUN useradd --uid ${AGENT_UID} --create-home --shell /bin/bash agent
+
+# The dependency trees above were baked in as root: MAIN_CHECKOUT/.venv and
+# frontend/node_modules, and the Playwright browsers under PLAYWRIGHT_BROWSERS_PATH.
+# The agent drops to uid 1000 and must be able to pip/npm install into its own
+# copy-on-write layer (--verify-isolation's measurement) and repair a browser
+# cache, so hand the trees over. The bind-mounted clone needs no chown -- podman's
+# virtiofs presents it as owned by the container's current uid (see above).
+RUN mkdir -p /opt/ms-playwright \
+    && chown -R ${AGENT_UID}:${AGENT_UID} "${MAIN_CHECKOUT}" /opt/ms-playwright
 
 # --- Agent configuration -----------------------------------------------------
 # The permissive mode the whole phase is for. This is the container's OWN

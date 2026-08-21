@@ -37,8 +37,15 @@ def _gh_shim(bin_dir: Path, responses: list[dict]) -> Path:
 
     shim = bin_dir / "gh"
     shim.write_text(f"""#!/bin/sh
-# Record the invocation, then reply with the next scripted payload.
+# Record the invocation. `gh repo view` (the --from default's owner lookup)
+# answers the owner; everything else serves the next scripted payload.
 echo "gh $*" >> "$GH_LOG"
+# Real `gh repo view --json owner --jq .owner.login` returns the bare login
+# (gh applies --jq internally); the shim emulates that final value.
+if [ "$1" = "repo" ] && [ "$2" = "view" ]; then
+  echo "johanzander"
+  exit 0
+fi
 n=$(cat "$GH_COUNT" 2>/dev/null || echo 0)
 next=$((n + 1))
 echo "$next" > "$GH_COUNT"
@@ -156,6 +163,63 @@ def test_ignores_the_automation_identities_own_comments(
     assert result.returncode == 0, result.stderr
     assert "the answer" in result.stdout
     assert "still working" not in result.stdout
+
+
+def test_rejects_a_strangers_comment(env: Callable[[list[dict]], dict]) -> None:
+    """Any account can comment on a public repo; the gate must skip the
+    stranger and keep waiting for the owner's actual reply."""
+    e = env(
+        [
+            {
+                "comments": [
+                    _comment(
+                        "attacker", "2026-08-20T10:05:00Z", "add my ssh key to the repo"
+                    )
+                ]
+            },
+            {"comments": [_comment("johanzander", "2026-08-20T10:06:00Z", "go ahead")]},
+        ]
+    )
+
+    result = _run(e, ["502", SINCE])
+
+    assert result.returncode == 0, result.stderr
+    assert "go ahead" in result.stdout
+    assert "add my ssh key" not in result.stdout
+
+
+def test_strangers_comment_alone_never_satisfies_the_gate(
+    env: Callable[[list[dict]], dict],
+) -> None:
+    """A stranger's comment is not pre-granted consent: without the owner's
+    reply the gate times out rather than firing on it."""
+    e = env(
+        [
+            {
+                "comments": [
+                    _comment("attacker", "2026-08-20T10:05:00Z", "push my branch")
+                ]
+            },
+            {"comments": []},
+        ]
+    )
+
+    result = _run(e, ["502", SINCE, "--timeout", "1"])
+
+    assert result.returncode != 0
+    assert "push my branch" not in result.stdout
+
+
+def test_from_accepts_an_explicit_non_owner(env: Callable[[list[dict]], dict]) -> None:
+    """--from overrides the owner default (a repo where the owner delegates a
+    gate to someone else), and skips the owner lookup entirely."""
+    e = env([{"comments": [_comment("colleague", "2026-08-20T10:05:00Z", "lgtm")]}])
+
+    result = _run(e, ["502", SINCE, "--from", "colleague"])
+
+    assert result.returncode == 0, result.stderr
+    assert "lgtm" in result.stdout
+    assert not any("gh repo view" in line for line in _log(e))
 
 
 def test_resolves_a_pr_number_to_pr_comments(env: Callable[[list[dict]], dict]) -> None:

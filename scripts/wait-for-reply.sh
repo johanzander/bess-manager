@@ -22,7 +22,12 @@
 #   --kind issue|pr     which thread to read (default: issue)
 #   --timeout <seconds> give up eventually (default: 24h). A gate nobody
 #                       answers must not hold a container open forever.
-#   --ignore <login>    repeatable; defaults cover the automation identities.
+#   --from <login>      repeatable; only comments from these authors satisfy
+#                       the gate (default: the repo owner). Any account can
+#                       comment on a public repo, so an unrecognised author is
+#                       skipped -- never accepted as the maintainer.
+#   --ignore <login>    repeatable; defaults cover the automation identities,
+#                       layered on top of --from.
 #
 # Exit 0 and print the new comment on success; non-zero on timeout.
 #
@@ -32,7 +37,7 @@ NUMBER="${1:-}"
 SINCE="${2:-}"
 if [ -z "$NUMBER" ] || [ -z "$SINCE" ]; then
   echo "usage: wait-for-reply.sh <issue-or-pr-number> <since-iso8601> [--kind issue|pr]" >&2
-  echo "                         [--timeout <seconds>] [--ignore <login>]" >&2
+  echo "                         [--timeout <seconds>] [--from <login>] [--ignore <login>]" >&2
   exit 2
 fi
 shift 2
@@ -43,13 +48,22 @@ INTERVAL="${BESS_POLL_INTERVAL_SECONDS:-90}"
 
 # The agent's own voice. Its status comments land in the very thread it is
 # waiting on, and treating one as the answer would make every gate resolve
-# itself instantly -- against its own question.
+# itself instantly -- against its own question. Layered on top of --from: a
+# login in the ignore set is skipped even if --from also names it.
 IGNORE="bess-agent bess-developer bess-product-owner bess-po bess-manager-claude-bot github-actions"
+
+# The gate is the maintainer's. --from is an allowlist (default: the repo
+# owner); --ignore only subtracts from it. Every other trigger surface in this
+# repo gates on the owner explicitly, and CLAUDE.md says so as a rule -- this
+# script is how a dispatched agent reaches a judgment gate, so it must not be
+# the one place a drive-by comment reads as the maintainer.
+FROM_LOGINS=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --kind)    KIND="${2:?--kind requires issue|pr}"; shift 2 ;;
     --timeout) TIMEOUT="${2:?--timeout requires seconds}"; shift 2 ;;
+    --from)    FROM_LOGINS="$FROM_LOGINS ${2:?--from requires a login}"; shift 2 ;;
     --ignore)  IGNORE="$IGNORE ${2:?--ignore requires a login}"; shift 2 ;;
     *) echo "wait-for-reply.sh: unknown argument '$1'" >&2; exit 2 ;;
   esac
@@ -59,6 +73,19 @@ case "$KIND" in
   issue|pr) ;;
   *) echo "wait-for-reply.sh: unknown --kind '$KIND' (expected issue or pr)" >&2; exit 2 ;;
 esac
+
+if [ -z "$FROM_LOGINS" ]; then
+  # Resolve the owner once, before polling. Same repo context `gh issue view`
+  # relies on below (the dispatch clone's origin), so if that resolves, this
+  # does. Explicit failure, not a fallback: a gate that cannot name its author
+  # must not accept any author.
+  owner=$(gh repo view --json owner --jq .owner.login 2>/dev/null || true)
+  if [ -z "$owner" ]; then
+    echo "wait-for-reply.sh: could not determine the repo owner -- pass --from <login>" >&2
+    exit 2
+  fi
+  FROM_LOGINS="$owner"
+fi
 
 # SECONDS is bash's own monotonic counter -- no date arithmetic, and immune to
 # a shim'd or slow `gh` skewing the accounting.
@@ -76,6 +103,7 @@ import json, sys
 
 since = sys.argv[1]
 ignore = {name.lower() for name in sys.argv[2].split()}
+allowed = {name.lower() for name in sys.argv[3].split()}
 
 try:
     comments = json.load(sys.stdin).get("comments") or []
@@ -87,13 +115,15 @@ for c in comments:
     created = c.get("createdAt") or c.get("created_at") or ""
     if author in ignore:
         continue
+    if author not in allowed:
+        continue
     # Lexicographic comparison is correct for RFC-3339 UTC timestamps, which
     # is what the GitHub API returns and what run-agent.sh stamps.
     if created > since:
         print(c.get("body") or "")
         sys.exit(0)
 sys.exit(1)
-' "$SINCE" "$IGNORE") && {
+' "$SINCE" "$IGNORE" "$FROM_LOGINS") && {
       printf '%s\n' "$reply"
       exit 0
     }

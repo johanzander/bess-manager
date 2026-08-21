@@ -111,7 +111,10 @@ shift || true
 case "$cmd" in
   register)
     clone_path="${1:?register requires <clone_path>}"
-    issue="${2:?register requires <issue_or_pr>}"
+    # Empty is allowed, same as branch below: the product-owner container is
+    # not dispatched at an issue at all, so `${2:?}` (which rejects empty as
+    # well as unset) would make run-po.sh unable to register itself.
+    issue="${2?register requires <issue_or_pr> (empty is allowed)}"
     # `${3?...}` and not `${3:?...}`: an EMPTY branch is the normal case at
     # dispatch (see set-branch below), and `:?` rejects empty as well as unset.
     branch="${3?register requires <branch> (empty is allowed)}"
@@ -139,6 +142,25 @@ case "$cmd" in
     fi
 
     started_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+    # A container id is derived from the issue number, so re-dispatching the
+    # same issue reuses the same id -- and re-dispatch is the NORMAL case, since
+    # implement-issue Step 0 treats it as a resume. A finished dispatch must
+    # therefore not block its own resume: reclaim a row whose work is 'done'
+    # (new clone path, new start time, back to working). A row that is NOT done
+    # still refuses, because that is a live agent being trampled.
+    existing_status=$(sql "SELECT status FROM dispatches WHERE container_id = $(q "$container_id");")
+    if [ "$existing_status" = "done" ]; then
+      sql "UPDATE dispatches
+             SET clone_path  = $(q "$clone_path"),
+                 issue_or_pr = $(q "$issue"),
+                 branch      = $(q "$branch"),
+                 role        = $(q "$role"),
+                 status      = 'working',
+                 started_at  = $(q "$started_at")
+           WHERE container_id = $(q "$container_id");"
+      exit 0
+    fi
 
     if ! sql "INSERT INTO dispatches
                 (container_id, clone_path, issue_or_pr, branch, role, status, started_at)

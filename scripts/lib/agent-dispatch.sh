@@ -144,10 +144,24 @@ dispatch_load_credentials() {
 # Step 8 (local run & observe) stands the real stack up. The container does
 # that by talking to the podman that started it, so the compose stack comes up
 # as SIBLING containers rather than nested ones.
+#
+# The path is reported by, and belongs to, the podman VM -- on macOS it does
+# not exist on this filesystem at all, so `[ -S "$sock" ]` here is not a
+# stricter check, it is a guaranteed false negative. Ask podman whether its own
+# socket exists instead; it is the only party that can see it.
 dispatch_podman_socket() {
-  DISPATCH_PODMAN_SOCK=$(podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null | sed 's|^unix://||')
-  if [ -z "$DISPATCH_PODMAN_SOCK" ] || [ ! -S "$DISPATCH_PODMAN_SOCK" ]; then
-    echo "no podman socket at '${DISPATCH_PODMAN_SOCK:-<none>}' -- is 'podman machine' running?" >&2
+  local info
+  info=$(podman info --format '{{.Host.RemoteSocket.Path}} {{.Host.RemoteSocket.Exists}}' 2>/dev/null) || {
+    echo "podman is not reachable -- is 'podman machine' running?" >&2
+    return 1
+  }
+
+  DISPATCH_PODMAN_SOCK=${info% *}
+  DISPATCH_PODMAN_SOCK=${DISPATCH_PODMAN_SOCK#unix://}
+
+  if [ -z "$DISPATCH_PODMAN_SOCK" ] || [ "${info##* }" != "true" ]; then
+    echo "podman reports no API socket at '${DISPATCH_PODMAN_SOCK:-<none>}'" >&2
+    echo "  -- is 'podman machine' running?" >&2
     return 1
   fi
 }

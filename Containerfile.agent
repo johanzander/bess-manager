@@ -137,17 +137,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends podman \
     && rm -rf /var/lib/apt/lists/* \
     && podman --version && podman-compose --version
 
+# --- The agent user ----------------------------------------------------------
+#
+# NOT root, and this is a hard requirement rather than hygiene: Claude Code
+# refuses outright with "--dangerously-skip-permissions cannot be used with
+# root/sudo privileges for security reasons". Since that flag is the entire
+# point of the phase, a root container cannot run an agent at all. Observed on
+# the first live dispatch, which started cleanly and then died on that line.
+#
+# uid 1000 and the bind mount: podman's virtiofs presents the mounted clone as
+# owned by whatever uid the process currently has, so the agent user has full
+# write access without any chown of the host's files. The entrypoint still
+# STARTS as root -- it needs NET_ADMIN for the egress ruleset -- and drops here
+# with setpriv immediately afterwards.
+ARG AGENT_UID=1000
+RUN useradd --uid ${AGENT_UID} --create-home --shell /bin/bash agent
+
 # --- Agent configuration -----------------------------------------------------
 # The permissive mode the whole phase is for. This is the container's OWN
 # ~/.claude/settings.json, not the repo's: the clone brings its own tracked
-# .claude/settings.json along at /workspace, and that one still carries the
-# host's macOS sandbox block, which is meaningless in here. Project settings
-# win over user settings in Claude Code, so run-agent.sh also passes
+# .claude/settings.json along, and that one still carries the host's macOS
+# sandbox block, which is meaningless in here. Project settings win over user
+# settings in Claude Code, so run-agent.sh also passes
 # --dangerously-skip-permissions; this file is the belt to that's braces, and
 # documents the intent where someone will actually look for it.
-RUN mkdir -p /root/.claude \
+RUN mkdir -p /home/agent/.claude \
     && printf '%s\n' '{"permissions": {"defaultMode": "bypassPermissions"}}' \
-        > /root/.claude/settings.json
+        > /home/agent/.claude/settings.json \
+    && chown -R agent:agent /home/agent
 
 COPY container/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
 RUN chmod +x /usr/local/bin/agent-entrypoint.sh

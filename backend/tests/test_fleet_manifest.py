@@ -153,6 +153,19 @@ def test_set_branch_on_an_unknown_container_fails(db: Path) -> None:
     assert _run(db, ["set-branch", "never-registered", "fix/x"]).returncode != 0
 
 
+def test_the_product_owner_registers_without_an_issue(db: Path) -> None:
+    """run-po.sh dispatches at the backlog, not at a number -- so an empty
+    issue is the normal case for that role, not a malformed call."""
+    result = _run(
+        db, ["register", "/clones/product-owner", "", "main", "bess-po", "po"]
+    )
+
+    assert result.returncode == 0, result.stderr
+    row = json.loads(_run(db, ["get", "bess-po"]).stdout)[0]
+    assert row["role"] == "po"
+    assert row["issue_or_pr"] in (None, "", 0)
+
+
 def test_unknown_status_is_refused(db: Path) -> None:
     _register(db, "agent-1")
     result = _run(db, ["update-status", "agent-1", "hibernating"])
@@ -173,6 +186,25 @@ def test_update_status_on_an_unknown_container_fails(db: Path) -> None:
     assert result.returncode != 0
 
 
-def test_registering_the_same_container_twice_fails(db: Path) -> None:
+def test_registering_over_a_live_container_fails(db: Path) -> None:
+    """That id belongs to an agent still working -- overwriting its row would
+    lose the only record of it."""
     assert _register(db, "agent-1", issue=1).returncode == 0
     assert _register(db, "agent-1", issue=2).returncode != 0
+
+
+def test_redispatching_a_finished_issue_reclaims_its_row(db: Path) -> None:
+    """The container id comes from the issue number, so re-dispatching #502
+    reuses it -- and re-dispatch is the normal case, since implement-issue
+    Step 0 treats it as a resume. A finished dispatch must not block its own."""
+    _register(db, "agent-1", issue=502)
+    first = json.loads(_run(db, ["get", "agent-1"]).stdout)[0]
+    _run(db, ["update-status", "agent-1", "done"])
+
+    assert _register(db, "agent-1", issue=502).returncode == 0
+
+    row = json.loads(_run(db, ["get", "agent-1"]).stdout)[0]
+    assert row["status"] == "working"
+    assert row["started_at"] >= first["started_at"]
+    # ...and still exactly one row, not a second one for the same container.
+    assert len(json.loads(_run(db, ["list"]).stdout)) == 1

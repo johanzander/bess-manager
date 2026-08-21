@@ -139,17 +139,40 @@ case "$EGRESS_MODE" in
     ;;
 esac
 
-# The clone is bind-mounted from the host, so its files carry the host user's
-# uid. Without this git refuses to operate on it as "dubious ownership", which
-# surfaces as every git command failing at once.
-git config --global --add safe.directory "$PWD" 2>/dev/null || true
-git config --global --add safe.directory '*' 2>/dev/null || true
+# --- Hand over to the agent user ---------------------------------------------
+#
+# Everything above needed root (NET_ADMIN for the ruleset). Everything below
+# must NOT have it: Claude Code refuses to run --dangerously-skip-permissions
+# as root, and that flag is the point of this container.
+AGENT_USER="${BESS_AGENT_USER:-agent}"
+AGENT_HOME="/home/$AGENT_USER"
+AGENT_UID=$(id -u "$AGENT_USER")
+AGENT_GID=$(id -g "$AGENT_USER")
 
-# gh reads GH_TOKEN directly; the role-scoped token is injected by
-# scripts/run-agent.sh and is never the maintainer's own credential.
-if [ -n "${GH_TOKEN:-}" ]; then
-  git config --global credential."https://github.com".helper \
-    '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f' 2>/dev/null || true
-fi
+# The config below belongs to the agent user, so write it into ITS home rather
+# than root's -- files under /root would simply not be read after the drop.
+#
+# safe.directory: the bind-mounted clone's files carry a uid that is not git's
+# idea of "mine", and without this every git command fails at once as "dubious
+# ownership".
+{
+  printf '[safe]\n\tdirectory = %s\n\tdirectory = *\n' "$PWD"
+  # gh reads GH_TOKEN directly; git needs telling. The role-scoped token is
+  # injected by scripts/run-agent.sh and is never the maintainer's own.
+  if [ -n "${GH_TOKEN:-}" ]; then
+    printf '[credential "https://github.com"]\n\thelper = !f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f\n'
+  fi
+} > "$AGENT_HOME/.gitconfig"
 
-exec "$@"
+# Workspace trust. Without it Claude Code ignores the project's own
+# .claude/settings.json entirely -- "Ignoring 42 permissions.allow entries from
+# .claude/settings.json: this workspace has not been trusted" -- and there is
+# nobody here to accept a dialog. The clone's path is per-dispatch, so this
+# cannot be baked into the image.
+printf '{"projects": {"%s": {"hasTrustDialogAccepted": true}}}\n' "$PWD" \
+  > "$AGENT_HOME/.claude.json"
+
+chown -R "$AGENT_UID:$AGENT_GID" "$AGENT_HOME"
+
+exec setpriv --reuid="$AGENT_UID" --regid="$AGENT_GID" --init-groups \
+  env "HOME=$AGENT_HOME" "USER=$AGENT_USER" "$@"

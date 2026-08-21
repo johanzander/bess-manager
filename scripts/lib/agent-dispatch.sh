@@ -141,9 +141,19 @@ dispatch_load_credentials() {
 
 # --- The podman socket -------------------------------------------------------
 #
-# Step 8 (local run & observe) stands the real stack up. The container does
-# that by talking to the podman that started it, so the compose stack comes up
-# as SIBLING containers rather than nested ones.
+# NOT MOUNTED BY DEFAULT. The socket is authority over the whole podman host:
+# whoever holds it can start sibling containers with arbitrary bind mounts,
+# which reaches whatever host paths are mounted in them -- including the main
+# checkout and the tokens in its .env (BESS_PO_TOKEN, BESS_AGENT_TOKEN, the
+# agent's Claude auth). Siblings started through it also get no nftables egress
+# allowlist, since that lives per network namespace. So the boundary is only as
+# strong as the socket stays out: only a `--with-compose` dispatch gets it
+# (`run-agent.sh --with-compose`), and only because Step 8 (local run &
+# observe) -- standing the real stack up from inside the container -- cannot
+# work any other way.
+#
+# Step 8 does that by talking to the podman that started it, so the compose
+# stack comes up as SIBLING containers rather than nested ones.
 #
 # The path is reported by, and belongs to, the podman VM -- on macOS it does
 # not exist on this filesystem at all, so `[ -S "$sock" ]` here is not a
@@ -182,7 +192,7 @@ dispatch_podman_socket() {
 # the shared-mutable-state hazard this phase removes everywhere else. The fleet
 # manifest is the source of truth for what is running.
 dispatch_run_args() {
-  local container="$1" clone_dir="$2" role="$3" egress="$4"
+  local container="$1" clone_dir="$2" role="$3" egress="$4" with_compose="${5:-false}"
 
   DISPATCH_RUN_ARGS=(
     --name "$container"
@@ -190,10 +200,7 @@ dispatch_run_args() {
     --cap-add=NET_ADMIN
     -v "$clone_dir:$clone_dir"
     -v "$FLEET_DIR:/fleet"
-    -v "$DISPATCH_PODMAN_SOCK:/run/podman/podman.sock"
     -w "$clone_dir"
-    -e "CONTAINER_HOST=unix:///run/podman/podman.sock"
-    -e "DOCKER_HOST=unix:///run/podman/podman.sock"
     -e "GH_TOKEN=$DISPATCH_TOKEN"
     -e "BESS_FLEET_DB=/fleet/manifest.db"
     -e "BESS_FLEET_CONTAINER=$container"
@@ -202,4 +209,28 @@ dispatch_run_args() {
     -e "BESS_HEADLESS_MODE=1"
     "${DISPATCH_AGENT_AUTH[@]}"
   )
+
+  if [ "$with_compose" = true ]; then
+    DISPATCH_RUN_ARGS+=(
+      -v "$DISPATCH_PODMAN_SOCK:/run/podman/podman.sock"
+      -e "CONTAINER_HOST=unix:///run/podman/podman.sock"
+      -e "DOCKER_HOST=unix:///run/podman/podman.sock"
+    )
+  fi
+}
+
+# --dry-run output is pasted into an issue on a public repo to show what a
+# dispatch would do. DISPATCH_RUN_ARGS carries the real credentials as
+# `-e "KEY=value"` pairs (GH_TOKEN, the agent's Claude auth), so print redacted.
+dispatch_print_run_args() {
+  local a
+  printf 'podman run'
+  for a in "${DISPATCH_RUN_ARGS[@]}" "$@"; do
+    case "$a" in
+      GH_TOKEN=*|ANTHROPIC_API_KEY=*|CLAUDE_CODE_OAUTH_TOKEN=*)
+        printf ' %q' "${a%%=*}=***" ;;
+      *) printf ' %q' "$a" ;;
+    esac
+  done
+  printf '\n'
 }

@@ -152,10 +152,11 @@ rules for that run.
      - Step 10 (watch to green) and Step 11 (`advance-pr` loop): apply
        verbatim, unchanged from interactive mode — these already don't
        ask, and headless execution doesn't change that.
-     - Step 8 (local run & observe): applies verbatim, unlike CI mode
-       which skips it — a Phase 1 container *can* run the app locally
-       (`docker compose -f docker-compose.ci.yml`), CI mode's reason for
-       skipping this step doesn't apply here.
+     - Step 8 (local run & observe): applies, unlike CI mode which skips
+       it — but only on a `--with-compose` dispatch, the only one that
+       mounts the podman socket (the socket is authority over the host,
+       so it is opt-in by design; see `scripts/lib/agent-dispatch.sh`). A
+       plain dispatch follows CI mode's skip-and-say-so rule.
 
 6.2. This is a documentation/process change, not code — but it's the
      piece that makes `run-agent.sh` actually correct rather than just
@@ -187,9 +188,11 @@ rules for that run.
 
 8.1. Pick one real, currently-open, genuinely small issue.
 
-8.2. `run-agent.sh <n>` and don't touch anything else — let it run to a
-     merged PR (or as far as a real confirm gate takes it, answered
-     through the normal GitHub-comment flow from Task 6).
+8.2. `run-agent.sh --with-compose <n>` and don't touch anything else —
+     the flag is what makes Step 8 runnable from inside the container, and
+     Step 8 is part of the flow being validated. Let it run to a merged PR
+     (or as far as a real confirm gate takes it, answered through the
+     normal GitHub-comment flow from Task 6).
 
 8.3. Confirm afterward: zero new lines added to `.claude/settings.json`'s
      `allow`/`deny`/`ask` lists for anything that happened during this run

@@ -38,6 +38,10 @@
 #                       failed in a way that might be the firewall)
 #   --dry-run           print the podman command instead of running it
 #   --verify-isolation  prove containers cannot corrupt each other's deps
+#   --with-compose      mount the podman socket so Step 8 (local run & observe)
+#                       can bring the real stack up as sibling containers. The
+#                       socket is authority over the host, so it is opt-in; a
+#                       plain dispatch cannot run Step 8.
 #
 set -euo pipefail
 
@@ -50,6 +54,7 @@ EGRESS="restricted"
 FORCE_BUILD=false
 DRY_RUN=false
 MODE="dispatch"
+WITH_COMPOSE=false
 NUMBER=""
 
 usage() {
@@ -64,6 +69,7 @@ while [ $# -gt 0 ]; do
     --open-network)     EGRESS="open"; shift ;;
     --dry-run)          DRY_RUN=true; shift ;;
     --verify-isolation) MODE="verify-isolation"; shift ;;
+    --with-compose)     WITH_COMPOSE=true; shift ;;
     -h|--help)          usage ;;
     -*)                 echo "run-agent.sh: unknown flag '$1'" >&2; usage ;;
     *)                  NUMBER="$1"; shift ;;
@@ -137,11 +143,13 @@ fi
 
 dispatch_ensure_clone "$CLONE_DIR"
 dispatch_load_credentials dev || exit 1
-dispatch_podman_socket || { echo "  Step 8 (local run & observe) needs it." >&2; exit 1; }
+if [ "$WITH_COMPOSE" = true ]; then
+  dispatch_podman_socket || { echo "  Step 8 (local run & observe) needs it." >&2; exit 1; }
+fi
 dispatch_ensure_image "$IMAGE" "$FORCE_BUILD"
 mkdir -p "$FLEET_DIR"
 
-dispatch_run_args "$CONTAINER" "$CLONE_DIR" dev "$EGRESS"
+dispatch_run_args "$CONTAINER" "$CLONE_DIR" dev "$EGRESS" "$WITH_COMPOSE"
 
 # `--dangerously-skip-permissions` is the phase's whole point -- see the header.
 agent_cmd=(
@@ -151,7 +159,7 @@ agent_cmd=(
 )
 
 if [ "$DRY_RUN" = true ]; then
-  printf 'podman run'; printf ' %q' "${DISPATCH_RUN_ARGS[@]}" "$IMAGE" "${agent_cmd[@]}"; printf '\n'
+  dispatch_print_run_args "$IMAGE" "${agent_cmd[@]}"
   exit 0
 fi
 

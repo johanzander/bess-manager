@@ -75,7 +75,9 @@ fi
 
 dispatch_ensure_clone "$CLONE_DIR"
 dispatch_load_credentials po || exit 1
-dispatch_podman_socket || exit 1
+# No podman socket: the product-owner only runs `/backlog` passes, never Step 8
+# (local run & observe), and the socket is authority over the host -- see
+# agent-dispatch.sh. It stays unmounted unless a dispatch explicitly opts in.
 dispatch_ensure_image "$IMAGE" "$FORCE_BUILD"
 mkdir -p "$FLEET_DIR"
 
@@ -86,7 +88,7 @@ if ! "$MANIFEST" register "$CLONE_DIR" "" "main" "$CONTAINER" po; then
   exit 1
 fi
 
-dispatch_run_args "$CONTAINER" "$CLONE_DIR" po "$EGRESS"
+dispatch_run_args "$CONTAINER" "$CLONE_DIR" po "$EGRESS" false
 # Restart on its own: this is meant to be started once (e.g. at login) and left
 # alone, so a crash should not quietly end the fleet's backlog work.
 DISPATCH_RUN_ARGS+=(--restart unless-stopped)
@@ -106,7 +108,7 @@ done
 '
 
 if [ "$DRY_RUN" = true ]; then
-  printf 'podman run'; printf ' %q' "${DISPATCH_RUN_ARGS[@]}" "$IMAGE" bash -lc "$po_loop"; printf '\n'
+  dispatch_print_run_args "$IMAGE" bash -lc "$po_loop"
   "$MANIFEST" update-status "$CONTAINER" done >/dev/null 2>&1 || true
   exit 0
 fi

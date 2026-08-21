@@ -114,40 +114,21 @@ if find . -name "*.py" -not -path "./build/*" -not -path "./.venv/*" -not -path 
     # A file deleted on this branch still appears in the diff, hence the -e
     # test. No changed Python files is a pass, not a skip-with-warning.
     #
-    # An unresolvable origin/main is an ERROR, not a warning: warnings exit
-    # 0, so a run that type-checked nothing would print "Errors: 0" and
-    # report success for a check that never happened.
     if MYPY=$(py_tool mypy); then
         echo "🔸 Checking mypy on changed files..."
-        base=$(git merge-base origin/main HEAD 2>/dev/null || echo "")
-        if [ -z "$base" ]; then
-            echo "❌ Cannot resolve origin/main — mypy checked nothing."
-            echo "   Run: git fetch origin main"
+        # Delegated so CI and this script run byte-identical logic. The
+        # script owns merge-base resolution, file collection and the
+        # baseline comparison -- see scripts/mypy-changed.sh for why it is a
+        # ratchet rather than a clean-files check. Exit 2 (setup failure,
+        # e.g. an unresolvable main) is an ERROR here for the same reason an
+        # unresolvable base always was: a run that type-checked nothing must
+        # not report success.
+        # Resolved against this script's own location, not the cwd: the
+        # gate is run from the repo root in practice but not in its tests,
+        # and a cwd-relative path silently turns "gate passed" into "gate
+        # never ran".
+        if ! "$(dirname "${BASH_SOURCE[0]}")/mypy-changed.sh" "$MYPY" --include-worktree; then
             ERRORS=$((ERRORS + 1))
-        else
-            # sort -u is load-bearing: a file changed on the branch AND dirty
-            # in the working tree appears in both diffs, and mypy fails with
-            # "Duplicate module named ..." when handed the same path twice.
-            #
-            # An array, not a space-joined string: a path containing a space
-            # or a glob character would otherwise be split into two arguments
-            # or expanded against the working tree.
-            changed=()
-            while IFS= read -r f; do
-                case "$f" in *.py) [ -e "$f" ] && changed+=("$f") ;; esac
-            done <<EOF
-$( { git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } | sort -u)
-EOF
-            if [ ${#changed[@]} -eq 0 ]; then
-                echo "✅ mypy OK (no changed Python files)"
-            elif ! "$MYPY" --explicit-package-bases --ignore-missing-imports "${changed[@]}" >/dev/null 2>&1; then
-                echo "❌ mypy errors in changed files. Run:"
-                printf '   %s --explicit-package-bases --ignore-missing-imports %s\n' \
-                    "$MYPY" "${changed[*]}"
-                ERRORS=$((ERRORS + 1))
-            else
-                echo "✅ mypy OK (changed files)"
-            fi
         fi
     else
         echo "❌ mypy not found in .venv/bin or on PATH — cannot verify types."

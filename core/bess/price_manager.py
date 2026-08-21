@@ -6,6 +6,7 @@ inversion.
 
 import logging
 from datetime import date, datetime, timedelta
+from typing import Any
 
 from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
@@ -134,7 +135,7 @@ class HomeAssistantSource(PriceSource):
 
     def __init__(
         self,
-        ha_controller,
+        ha_controller: Any,
         vat_multiplier: float,
         entity: str,
     ) -> None:
@@ -197,7 +198,7 @@ class HomeAssistantSource(PriceSource):
                 message=f"Failed to get price data for {target_date}: {e}",
             ) from e
 
-    def _fetch_sensor_attributes(self, entity_id: str):
+    def _fetch_sensor_attributes(self, entity_id: str) -> dict | None:
         """Fetch attributes from the specified Nordpool sensor entity.
 
         Args:
@@ -214,11 +215,14 @@ class HomeAssistantSource(PriceSource):
             if not response or "attributes" not in response:
                 return None
 
-            return response["attributes"]
+            attributes: dict = response["attributes"]
+            return attributes
         except Exception:
             return None
 
-    def _extract_prices_for_date(self, sensor_attributes, target_date, sensor_name):
+    def _extract_prices_for_date(
+        self, sensor_attributes: dict | None, target_date: date, sensor_name: str
+    ) -> list | None:
         """Extract prices for a specific date from sensor attributes."""
         if not sensor_attributes:
             return None
@@ -251,7 +255,9 @@ class HomeAssistantSource(PriceSource):
         except Exception:
             return None
 
-    def _parse_raw_data_for_date(self, raw_data, target_date):
+    def _parse_raw_data_for_date(
+        self, raw_data: list | None, target_date: date
+    ) -> list | None:
         """Parse raw data and return prices if it matches target_date."""
         if not raw_data or not isinstance(raw_data, list) or not raw_data:
             return None
@@ -290,7 +296,7 @@ class HomeAssistantSource(PriceSource):
         except Exception:
             return None
 
-    def _handle_dst_transitions(self, prices):
+    def _handle_dst_transitions(self, prices: list) -> list:
         """Handle DST transitions for quarterly resolution (92-100 periods).
 
         Nordpool provides quarterly prices (15-minute intervals):
@@ -312,7 +318,9 @@ class HomeAssistantSource(PriceSource):
                 message=f"Unexpected price count: {len(prices)} periods. Expected 92-100 for quarterly resolution with DST."
             )
 
-    def _get_sensor_diagnostic_info(self, sensor_data, sensor_name):
+    def _get_sensor_diagnostic_info(
+        self, sensor_data: dict | None, sensor_name: str
+    ) -> str:
         """Get simple diagnostic information about sensor data availability."""
         if not sensor_data:
             return "no data"
@@ -415,12 +423,12 @@ class PriceManager:
         self._logger = logging.getLogger(__name__)
 
         # Cache for today's prices
-        self._today_prices = None
-        self._today_date = None
+        self._today_prices: list[dict[str, Any]] | None = None
+        self._today_date: date | None = None
 
         # Cache for tomorrow's prices
-        self._tomorrow_prices = None
-        self._tomorrow_date = None
+        self._tomorrow_prices: list[dict[str, Any]] | None = None
+        self._tomorrow_date: date | None = None
 
     def clear_cache(self) -> None:
         """Clear cached price data.
@@ -474,8 +482,10 @@ class PriceManager:
             target_date = time_utils.today()
 
         # Use cached values for today if available
-        if self._today_date == target_date and self._today_prices is not None:
-            return self._today_prices
+        if target_date == time_utils.today():
+            cached_today = self._cached_today_prices()
+            if cached_today is not None:
+                return cached_today
 
         # Use cached values for tomorrow if available
         if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
@@ -698,6 +708,12 @@ class PriceManager:
         except Exception as e:
             self._logger.warning(f"Failed to log price information: {e}")
 
+    def _cached_today_prices(self) -> list | None:
+        """Return today's cached price entries, or None if the cache is cold."""
+        if self._today_date == time_utils.today() and self._today_prices is not None:
+            return self._today_prices
+        return None
+
     def check_health(self) -> list:
         """Check price management capabilities."""
 
@@ -709,6 +725,30 @@ class PriceManager:
             "checks": [],
             "last_run": datetime.now().isoformat(),
         }
+
+        # Today's prices already in hand answer the only question this check
+        # asks — can we optimize? Every source implements perform_health_check()
+        # as a live fetch of today, so probing again would re-request data that
+        # changes once a day, on a five-minute schedule. That is what turned a
+        # transient upstream failure into a daily error/recovery banner (#662).
+        # A cold cache (startup, date rollover, or clear_cache() after a
+        # settings or provider change) still probes for real, below.
+        cached_today = self._cached_today_prices()
+        if cached_today is not None:
+            price_check.update(
+                {
+                    "status": "OK",
+                    "checks": [
+                        {
+                            "name": "Electricity Prices",
+                            "status": "OK",
+                            "error": None,
+                            "value": f"{len(cached_today)} prices available for today",
+                        }
+                    ],
+                }
+            )
+            return [price_check]
 
         # Get health check from price source
         try:

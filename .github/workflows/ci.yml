@@ -454,8 +454,14 @@ jobs:
           python-version: "3.13"
           cache: pip
 
+      # The dev requirements, not a hand-picked subset: mypy resolves
+      # `pytest` from the environment, and without it every `@pytest.fixture`
+      # and `@pytest.mark.parametrize` is Any -- so an annotated test function
+      # reports `untyped-decorator` here while type-checking clean in the
+      # local .venv. That divergence is the opposite of what the mypy step
+      # below promises, and no amount of annotating closes it.
       - name: Install tools
-        run: pip install black ruff mypy
+        run: pip install -r requirements-dev.txt
 
       - name: Black formatting
         run: black --check . --exclude="/(build|\.venv|node_modules)/"

@@ -207,6 +207,31 @@ def test_gh_api_is_blanket_ask(rules: dict[str, list[str]]) -> None:
         f"gh api --method DELETE {endpoint}",
         f"gh api {endpoint} -f body=hi",
         f"gh api -f body=hi {endpoint}",
+        # Long forms. `gh api --help`: `-F, --field` and `-f, --raw-field`.
+        # Enumerating only the short spellings left these reaching `allow` via
+        # `Bash(gh api *)` -- a write that never prompts. This is the exact
+        # leak the enumeration keeps re-opening, so it is pinned by command
+        # string here rather than by asserting which rule happens to catch it.
+        f"gh api {endpoint} --field body=hi",
+        f"gh api --field body=hi {endpoint}",
+        f"gh api {endpoint} --raw-field body=hi",
+        f"gh api --raw-field body=hi {endpoint}",
+        # Attached-value spellings. cobra/pflag takes `--flag=value` and
+        # `-fvalue` as readily as `--flag value`; the space-separated globs
+        # above end in ` --field ` (with a space) and cannot reach them, so
+        # `--field=body=hi` resolved to `allow` -- a write that never prompts.
+        f"gh api {endpoint} --field=body=hi",
+        f"gh api --field=body=hi {endpoint}",
+        f"gh api {endpoint} --raw-field=body=hi",
+        f"gh api --raw-field=body=hi {endpoint}",
+        f"gh api {endpoint} --method=PUT",
+        f"gh api --method=PUT {endpoint}",
+        f"gh api {endpoint} -XPUT",
+        f"gh api -XPUT {endpoint}",
+        f"gh api {endpoint} -fbody=hi",
+        f"gh api -fbody=hi {endpoint}",
+        f"gh api {endpoint} -Fbody=hi",
+        f"gh api -Fbody=hi {endpoint}",
     ):
         assert decide(write, rules) == "ask", f"{write!r} must ask"
 

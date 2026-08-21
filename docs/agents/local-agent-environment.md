@@ -64,7 +64,7 @@ not `.git`'s own recovery data:
 
 | Category | Rules |
 |---|---|
-| Escapes to GitHub | **every `gh api`**, `gh pr merge`, `gh release create` / `edit` / `delete` / `delete-asset` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
+| Escapes to GitHub | **every `gh api` WRITE** (see below), `gh pr merge`, `gh release create` / `edit` / `delete` / `delete-asset` / `upload`, `gh repo edit`, `gh secret`, `gh workflow run` |
 | Destroys the recovery mechanism | `git gc`, `git prune`, `git repack`, `git maintenance`, `git reflog expire`, `git reflog delete`, `git update-ref`, `git tag -d` / `--delete` / `-f` |
 | Leaves the user boundary | `sudo` |
 
@@ -117,18 +117,36 @@ because leaving `rm` and `reset --hard` unattended is only defensible while the
 object database and reflog can recover them — a `gc --prune=now` that ran
 unprompted would remove the ground that argument stands on.
 
-**`gh api` is guarded bluntly, and that is deliberate.** It was enumerated by
-shape first, and it leaked:
+**`gh api` asks on WRITES only, and the write flags are enumerated.** Reads
+run unattended — `gh api <path>` and `gh api <path> --jq ...` are how a session
+reads inline review comments, which no `gh pr view` field returns.
+
+It was blanket-guarded first (`Bash(gh api)` / `Bash(gh api *)` in `ask`),
+because the marker that makes a call a write sits at an arbitrary argument
+position and **prefix globbing cannot reach it**:
 
 ```
 gh api repos/o/r/pulls/N/merge -X PUT # merges, bypassing `gh pr merge`
 gh api <path> -f key=val              # any -f/-F makes it a POST
 ```
 
-The marker sits at an arbitrary argument position, and **prefix globbing cannot
-reach it.** Narrowing it back to specific forms re-opens both lines, so
-`quality-check.sh` requires the blanket spelling rather than merely "some `gh
-api` rule exists".
+The blanket cost a prompt on every read, so #657 replaced it with one rule per
+write flag in each argument position. That trade is the standing one, and it
+has a standing risk: **a write flag nobody enumerated resolves to `allow`.**
+Not hypothetical — `-F, --field` and `-f, --raw-field` (`gh api --help`) had
+only their short forms listed, so `gh api <path> --field k=v` was a GitHub
+write that never prompted, until it was pinned.
+
+So `quality-check.sh` no longer asserts the *spelling*. It used to require the
+literal blanket rules, which made it fail on a clean `main` the moment #657
+respelled them, while the property it cared about still held. It now asserts
+the *property*, by command string, in `MUST_BE_GUARDED` — those pins survive a
+respelling.
+
+**When you add a `gh api` write flag, add its command string to
+`MUST_BE_GUARDED` too**, in both argument positions **and both the
+`--flag value` and `--flag=value` spellings**. That list is the guard; the
+rules in `settings.json` are just how it is currently satisfied.
 
 ### Pushing is guarded server-side, not by a prompt
 

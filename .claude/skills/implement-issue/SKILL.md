@@ -71,6 +71,54 @@ runners — only repo-level `.claude/skills/` and `.claude/agents/` exist there.
 | 11. Independent review loop | Skip — CI opens the PR as a draft and the owner triggers Stage 4 by hand after reading it. A CI run that requested its own review would be the fix bot grading itself on a PR nobody has looked at yet. `advance-pr` is therefore not invoked in CI, and the PR stays a draft: `gh pr ready` belongs to that skill, and there is no approval in CI mode to earn it. |
 | 12. Hard constraints | Apply verbatim. |
 
+## Headless local mode (dispatched container)
+
+`scripts/run-agent.sh <n>` runs this skill headless inside a Podman container,
+against a private clone bind-mounted at its own host path (Phase 1 of
+`docs/superpowers/specs/2026-08-20-agent-fleet-sandbox-router-design.md`).
+Headless is **not** CI, and the differences run the opposite way to CI mode's:
+the container is long-lived, it *can* run the app, and it answers its own
+gates instead of ending the run at them. The numbered Process applies verbatim
+except per this table.
+
+**You are in this mode when `BESS_HEADLESS_MODE=1` is set.** `run-agent.sh`
+sets it, along with `BESS_FLEET_CONTAINER` (this dispatch's id) and
+`BESS_FLEET_DB`.
+
+Three things that hold across every row:
+
+- **Never exit at a gate.** The whole point of a container that lives for the
+  issue's whole lifecycle is that Step 10's recovery of a PR gone
+  `CONFLICTING` under a merge, and Step 11's repeated `advance-pr` rounds,
+  keep running with nobody watching. A run that exited at Step 3 and waited to
+  be re-dispatched would turn that working loop back into a queue of manual
+  restarts. Post, block on `scripts/wait-for-reply.sh`, resume in place.
+- **Report status as it changes**, so the dispatch is legible without reading
+  logs: `scripts/fleet-manifest.sh update-status "$BESS_FLEET_CONTAINER" <status>`
+  — `needs_input` on entering a gate and `working` again on leaving one,
+  `in_review` for Step 11, `escalated` for a Step 12 bailout, `done` at a
+  terminal state.
+- **The plugin caveat is CI mode's, unchanged**: user-level plugins
+  (`superpowers:*`, `code-review`) are not in the image. Only repo-level
+  `.claude/skills/` and `.claude/agents/` exist, and those arrive inside the
+  clone.
+
+| Step | Headless local mode |
+|---|---|
+| 0. Resume check | Applies, with a different registry: this container has a private **clone**, not a worktree, so `git worktree list` on the host cannot see it and the host's worktrees are none of its business. `scripts/fleet-manifest.sh list` is the enumeration. The clone is reused across dispatches and is host-persistent, so prior commits in it are exactly the resumable work Step 0 exists to find — never discard them. |
+| 1. Fetch & scope | Verbatim. |
+| 2. Diagnose | Verbatim — **unlike CI mode**, self-diagnosis is correct here. The maintainer typing `run-agent.sh <n>` is the same explicit go-ahead as starting an interactive session; there is no analyze/fix split to protect, and no Stage 2 comment to require. |
+| 3. Confirm gate | Post the design + workaround check + scope assessment with `scripts/gh-agent.sh --as dev` (to the issue; to the PR once one exists), set status `needs_input`, then `scripts/wait-for-reply.sh <n> <now-iso8601>` and continue **in this process** on its reply — accepted only from the repo owner (`--from` defaults to it), so a stranger's drive-by comment cannot steer the dispatch. Not CI's behaviour of treating a trigger comment as pre-granted consent, and not a stop. The escalation path (dispatch a general-purpose `Agent` to critique) applies verbatim. |
+| 4. Worktree + branch | The clone *is* the isolation — `run-agent.sh` created it and ran `scripts/worktree-setup.sh --target-dir`, so create the branch directly and skip worktree creation. **Skip the merged-worktree prune too**: those worktrees belong to the host checkout, are not visible from in here, and are not this dispatch's to clean. Then report the branch: `scripts/fleet-manifest.sh set-branch "$BESS_FLEET_CONTAINER" <branch>` — the manifest could not know it at dispatch. |
+| 5. TDD | Substance verbatim (RED test first, required test shape); as in CI there is no `superpowers:test-driven-development` skill to invoke, so follow this section's own rules. |
+| 6. Quality gate + code review | Run `./scripts/quality-check.sh` inline, no background agent — one throwaway container, so the cost-discipline reason to background does not apply. The `code-review` plugin is unavailable; Step 11's independent review covers it. Checks 1–3 still apply. |
+| 7. Confirm gate 2 | Same mechanism as Step 3: `gh-agent.sh --as dev`, status `needs_input`, `wait-for-reply.sh`, resume in place. Not CI's "the draft PR is the gate" — there is a live process here that can act on the answer. |
+| 8. Local run & observe | **Applies only on a `--with-compose` dispatch — this is the row that most distinguishes headless from CI, and it is why the socket is opt-in.** CI skips it because a runner structurally cannot; a container *can*, but only when the dispatch was launched with `run-agent.sh --with-compose <n>`. The socket is authority over the podman host, so it is NOT mounted for a plain dispatch (see `scripts/lib/agent-dispatch.sh`); a plain dispatch cannot bring the stack up, so follow CI mode's rule for that step — say in the PR body that Step 8 was not run and why. On a `--with-compose` dispatch, `podman-compose -p <unique-name> -f docker-compose.ci.yml` brings up **sibling** containers, not nested ones (the image has `podman-compose`, not the `docker` CLI). This works because the clone is mounted at its own host path, so the compose file's relative volume paths mean the same directory inside and out. One difference from an interactive run: the siblings publish their ports on the podman host, not in this container's netns, so observe the stack via the allowlisted `host.containers.internal` host (e.g. `curl -s http://host.containers.internal:18180/api/system-health`) rather than `localhost`. Do not write "verification is still owed" in the PR body — do the verification. |
+| 9. Commit + draft PR | Verbatim, including the `CHANGELOG.md` `## [Unreleased]` entry and the documentation check. The PR is authored by the role-scoped `dev` token the container was given, never the maintainer's credential. |
+| 10. Watch this PR to green | Verbatim. `gh pr checks --watch` blocking for an hour is fine here; that is what a long-lived container is for. Never widen to other PRs. |
+| 11. Independent review loop | Verbatim — **unlike CI**, which skips it. Set status `in_review`, invoke `advance-pr`, and let it mark the PR ready on `APPROVED`. This is an interactive-equivalent run the maintainer dispatched deliberately, not a bot grading a PR nobody asked for; the 3-round `CHANGES_REQUESTED` cap is itself a gate, so treat hitting it as Step 3's mechanism (status `escalated`, ask, wait). |
+| 12. Hard constraints | Apply verbatim. On the 3-failed-quality-check bailout, set status `escalated` and post why with `gh-agent.sh --as dev` before waiting — a container that dies silently is indistinguishable from one still working. |
+
 ## Process
 
 ### 0. Resume check — is there prior work for this number?

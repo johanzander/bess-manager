@@ -50,17 +50,71 @@ matters because a wrong path fails silently — `.priority?` / `.awaiting?` reso
 to `null` for every item with no error, which reads exactly like an ungroomed
 board.
 
-Field options, as they actually exist — do not invent values outside these sets:
+Field options — do not invent values outside these sets:
 
 | Field | Options |
 |---|---|
-| `Status` | `Backlog`, `Analysis`, `Ready for Dev`, `In Progress`, `In Review`, `Done` |
+| `Status` | `Backlog`, `Analysis`, `Ready for Dev`, `In Progress`, `In Review`, `In Verification`, `Done` |
 | `Priority` | `P1`, `P2`, `P3`, `P4` — **there is no `P0`** |
-| `Awaiting` | `reporter`, `discussion`, `upstream`, `analysis` |
+| `Awaiting` | `reporter`, `discussion`, `upstream`, `analysis`, `maintainer` |
 | `Source` | `issue`, `TODO` |
+
+`In Verification` and `maintainer` are the two new values the state-machine
+migration adds. **They are not on the live board yet** — adding them is a
+manual field-option edit, deliberately held for the maintainer to run by hand
+rather than scripted (`gh project field-list 1 --owner johanzander --format
+json` still returns the six-value `Status` and four-value `Awaiting` sets).
+Until that edit lands, `column()` in `backlog-digest.sh` can compute `In
+Verification` and the digest can report it, but the board card itself cannot
+be moved there or set to `Awaiting: maintainer` — reconcile those two values
+by hand (a comment on the issue) until the field option exists.
 
 The digest's `column` values match `Status` exactly, so reconciling a card is a
 string comparison, not a translation.
+
+## States and transitions
+
+`Status` is the phase; `Awaiting` is the wait; the two are orthogonal. One
+column used to do both jobs — the digest derived it as "if a PR exists, `In
+Review`", first and outranking everything else, so a never-reviewed draft, a
+conflicted draft, an approved-and-waiting PR and a merged-but-unreleased fix
+all reported the same state. Splitting them is what makes each state carry
+exactly one next action.
+
+| Status | Means | Exit |
+|---|---|---|
+| `Backlog` | captured, not analysed | analysis lands |
+| `Analysis` | scope or approach unsettled | Definition of Ready met and priority set |
+| `Ready for Dev` | analysed, prioritised, unblocked | dispatch |
+| `In Progress` | branch exists, no open PR | a PR opens |
+| `In Review` | one or more open PRs, loop running | all its PRs merge |
+| `In Verification` | on main, not yet in a stable release | graduation PR closes the issue |
+| `Done` | shipped stable | — |
+
+`In Verification` sits after merge to main and before release — the
+fast-forward rule makes `beta/main` strictly downstream of `origin/main`, so a
+fix is on main first, reaches a beta build, is run for real, and only then
+graduates. Live work still outranks landed work: an issue whose graduation PR
+is still open is `In Review`, not `In Verification`, however many of its other
+PRs merged already — see `column()` in `backlog-digest.sh`.
+
+### `Awaiting` is signed
+
+Escalation and deferral are the same axis pointed in opposite directions.
+Four of the five values mean someone else owes us, and correctly go quiet; the
+fifth means the loop cannot advance without *you*, and it is inverted —
+loud, not quiet.
+
+| Value | Direction | Effect |
+|---|---|---|
+| `reporter`, `upstream`, `discussion` | they owe us | quiet — suppressed from actions, still counted and listed |
+| `maintainer` | we owe them nothing; you owe us a decision | **loud — ranked above every other action (rank 0), with the open question attached** |
+
+`analysis` is the fifth value and is not in the signed table above because it
+means the same thing the digest's `awaiting_source: label` marks — a triage
+gap, not a completed wait: set the field to what the item is actually waiting
+on. There is no `Escalated` column: an escalated item stays wherever its
+`Status` already put it, it just cannot move without you.
 
 ## When to Use
 
@@ -157,7 +211,7 @@ always wins** — never trust a card's current position.
 
 The comparison is in the digest: every item carries `board_status` (where the
 card sits now) alongside `column` (where the evidence says it belongs), using
-the same six Status strings, so a mismatch is `board_status != column` and
+the same `Status` strings, so a mismatch is `board_status != column` and
 nothing needs a second `gh project item-list` call. Act on each mismatch:
 
 | Mismatch | Action |
@@ -167,7 +221,8 @@ nothing needs a second `gh project item-list` call. Act on each mismatch:
 | `stale_worktree: true` | the branch already merged; the worktree is rot, not work. Hand to `sweep-prs`, and do not read it as progress |
 | worktree present, no session, no PR | the session died mid-issue. The branch's commits survive — resuming is `/implement-issue <n>`, whose Step 0 detects the prior work and re-enters at the right step. **Never silently relaunch**: a session that died twice is telling you something, and a background dispatch that reports `working` may have written nothing at all — verify by work product (`git -C <wt> log`, file mtimes), never by session state |
 | `last_comment.is_reporter` and `awaiting: reporter` | the reporter answered. Re-check the Definition of Ready — this wait may be satisfied, and it is the transition nothing used to notice |
-| PR `CONFLICTING` | hand to `sweep-prs` |
+| PR `CONFLICTING`, draft | hand to `/advance-pr <n>` — it owns the board write for a conflict escalation |
+| PR `CONFLICTING`, not a draft | hand to `sweep-prs` |
 | worktree whose PR merged | prune via `sweep-prs` |
 | issue closed, card not *Done* | move the card |
 | *Analysis*/`reporter` quiet 14 days | nudge once; park to *Backlog* at 28 |
@@ -199,58 +254,85 @@ Why it exists: every follow-up rule in this skill had been written down and
 scheduled one, so the 14-day chase, the 28-day park and the reporter-replied
 re-check were decoration.
 
-Actions, and who does what:
+Actions are ranked (rightmost-column-first — see **Verb: next** below) rather
+than sorted alphabetically, and printed in that order. Who does what:
 
 | Action | Do |
 |---|---|
-| `resume_implementation` | `/implement-issue <n>`. **The action that produces a ready PR** — Step 11 requests the review, acts on the verdict and runs `gh pr ready`. Covers a draft needing a first review, a rework, an approved PR that never got flipped, *and* a worktree whose session died |
-| `mark_ready` | `gh pr ready <n>`, then report it. APPROVED, green, still a draft — the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure rather than a priority |
-| `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line |
-| `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>`. **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
-| `rework_review` | out of draft with changes requested: `/implement-issue <n>` to address them, then a fresh review |
-| `resolve_conflict` | hand to `sweep-prs` |
+| `escalated` | **Read first, always** — rank 0, above every other action. Three sources, each meaning something different: `Awaiting: maintainer` on the board (read the open question, decide, or send it back to *Analysis* by clearing `Awaiting` and re-opening the scope); `resume_count >= 2` (two implementation sessions have already been handed back on this issue — it is not implementable as specified, so decide or re-scope it, don't dispatch a third); and, on a PR, 3 `CHANGES_REQUESTED` rounds with no intervening `APPROVED` (the reviewer and the diff disagree about the design, and a fourth round will not settle it) |
+| `mark_ready` | Route through `/advance-pr <n>` — its `draft, APPROVED, green` row runs exactly `gh pr ready <n>`, then report it. APPROVED, green, still a draft: the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure, not a priority call |
+| `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line — the maintainer's merge is all that is left |
+| `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>` (what `/advance-pr <n>` would also run). **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
+| `rework_review` | out of draft with changes requested: hand back to `/implement-issue <n>` — the issue that PR belongs to, resolved from its linked issue — to address them, then a fresh review |
+| `resolve_conflict` | `CONFLICTING`, which also means the PR produced **no CI run at all**. A conflicted **draft** routes to `/advance-pr <n>` — only it performs the board write that records a semantic-conflict escalation, where `sweep-prs` would only report into a chat transcript and write nothing. A conflicted **non-draft** PR has already left the review loop, so it still goes to `sweep-prs`, or resolve directly if the diff is ours |
+| `undiffable_pr` | `gh pr diff` failed for this PR, so the in-flight file set is incomplete. Dispatch is held **fleet-wide** until it clears — not just for this PR's own issue. Re-run the digest; if it recurs, the PR itself needs attention (deleted fork head, rate limit) |
+| `resume_implementation` | One action name, three shapes, routed to the cheapest tool that is actually safe. A **worktree with no PR** (a session died mid-issue) is `/implement-issue <n>` — a real session, because the implementation itself is unfinished, and Step 0 resumes the branch from the earliest incomplete step. A **draft PR whose next step is mechanical** — no review yet, a review still in flight, or an approved draft with checks not yet green — is `/advance-pr <n>` directly: request the review, resolve a conflict, or flip it ready, in one cheap step, no session. A **draft PR carrying `CHANGES_REQUESTED`** is `/implement-issue <n>` — the one PR shape that stays there, because only that session holds the Step 2 diagnosis and Step 3 scope assessment needed to tell a real review finding apart from a decision Step 3 already made and rejected on purpose; `advance-pr` itself always hands a `CHANGES_REQUESTED` draft straight back to `/implement-issue <n>` too, whatever caller invoked it, so dispatching there directly from here just skips the redundant round trip through `advance-pr`. Never restart any of the three, the branch commits are the only copy |
+| `prune_worktree` | the worktree's own branch already merged; it is rot, not progress. Hand to `sweep-prs` |
+| `dispatchable` | propose for dispatch — needs the maintainer's go-ahead, and only fires when `predicted_files` is set (see the touch-set gate under Dispatch) |
+| `queued_behind` | do nothing; it is correctly waiting on an in-flight PR that already touches one of its predicted files. Recheck once that PR lands |
+| `cluster` | dispatch the named items as **one** unit of work — one branch, one PR. Two Ready items that predict overlapping files cost less merged into one dispatch than as two PRs plus a conflict |
+| `needs_touch_set` | *Ready for Dev* but no predicted touch-set. **There is currently no board field or digest computation that carries `predicted_files`** — `backlog-digest.sh` never emits it, so this fires unconditionally for every `Ready for Dev` item today, and `dispatchable`/`queued_behind`/`cluster` cannot fire until that plumbing exists. Name the files from the Stage 2 analysis (or the issue text) in your dispatch proposal by hand rather than trusting this action to clear on its own |
 | `recheck_ready` | the reporter answered: re-check Definition of Ready, clear `Awaiting` if satisfied |
+| `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
 | `nudge_reporter` | one nudge, as the PO identity |
 | `park` | move to *Backlog* — the chase went unanswered |
-| `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
 | `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
-| `dispatchable` | propose for dispatch — needs the maintainer's go-ahead |
+| `add_card` | open issue, no card on the board at all — add it to Project #1 first, **then** set `Priority`; until both exist it is unrankable and invisible to every board pass |
+| `move_card` | the card sits somewhere the evidence does not support — always move it to match `column`, never re-derive `column` to match the card |
 
 **This pass does not drive the review loop, and must not learn to.**
-`implement-issue` owns a PR from its first commit to `gh pr ready`; Step 11
-already requests the review, acts on the verdict and flips the PR. So an
-unfinished draft resolves to one action — hand it back — and a second copy of
-that loop is never built here. It is the same argument that put resume in Step 0
-instead of a separate skill: two copies of one loop means one of them goes stale.
+`implement-issue` owns a PR from its first commit to `gh pr ready`, and now
+does so by invoking `advance-pr` — its only copy — from Step 11. Re-implementing
+any of that logic here is a second copy of one loop, which is how one of them
+goes stale — the same argument that put resume in Step 0 instead of a separate
+skill. `advance-pr` has three callers: `implement-issue`, this pass, and you
+directly (`/advance-pr <n>`) — reach for the direct form whenever a PR needs
+one step and you do not want to wait on a full `resume_implementation` hand-off.
 
 **The one carve-out is `mark_ready`, and it earned it.** An APPROVED, green,
 still-draft PR used to hand back like any other, and that is exactly why #629
 sat finished-but-draft: the remedy on offer was a whole `implement-issue`
 session, and nobody spends one of those to run a single command. `gh pr ready`
-is a terminal action, not a loop, so naming it here duplicates nothing.
+is a terminal action, not a loop — naming it here, routed through `advance-pr`
+rather than run by hand, duplicates nothing and keeps the one copy of the loop
+the one place that flips the flag.
 
-## Deferring a PR — how a decision gets recorded once
+## Deferring an issue — how a decision gets recorded once
 
-**PRs go on the board too, and carry the same `Priority` and `Awaiting` fields
-issues do.** Before that, a judgement about a PR had nowhere to live: "#167 and
-#354 are blocked", "#437 and #490 are lower priority, later" were real
-decisions, and every pass re-reported all four as due because nothing recorded
-them. The same conversation happened every 30 minutes.
+**One card per unit of work, on the issue — PR cards go away.** A PR never
+carries its own `Priority` or `Awaiting`; those live on the issue the PR
+belongs to, whatever `Status` that issue is currently in (including `In
+Review`, while its PRs are open). Before this, a judgement about a PR's board
+card had nowhere unambiguous to live: two cards for one piece of work meant a
+decision recorded on one was invisible from the other, and "#167 and #354 are
+blocked", "#437 and #490 are lower priority, later" were real decisions that
+every pass re-reported as due because nothing recorded them anywhere both
+sides would see. The same conversation happened every 30 minutes. Putting the
+fields on the issue instead removes the ambiguity: there is exactly one card,
+so a decision recorded once is visible from every angle — the issue's own
+grooming, and any PR raised against it.
 
-| Decision | Set on the PR card | Effect |
+| Decision | Set on the issue card | Effect |
 |---|---|---|
 | blocked / parked on a call | `Awaiting: discussion` (or `upstream`) | suppressed from actions |
 | later, not never | `Priority: P4` | suppressed from actions |
+| loop cannot advance without a decision | `Awaiting: maintainer` | **louder, not quieter** — ranked above every other action, rank 0 |
 | actively being driven | no `Awaiting`, `P1`–`P3` | reported every tick |
 
-Suppressed PRs are **counted and listed**, never dropped — the pass ends with
-`deferred: 4 (#490 priority P4; #167 awaiting discussion; …)` so the item stays
-findable and the reason travels with it. Losing the item would trade one
+**`Awaiting: maintainer` is the one value that inverts the usual effect.**
+Every other `Awaiting` value means someone else owes us and correctly goes
+quiet; this one means the loop cannot advance without *you*, so quieting it
+would be exactly backwards — see **States and transitions** above.
+
+Suppressed items are **counted and listed**, never dropped — the pass ends
+with `deferred: 4 (#490 priority P4; #167 awaiting discussion; …)` so the item
+stays findable and the reason travels with it. Losing the item would trade one
 failure for another.
 
-`mark_ready` ignores all of this, per the carve-out above. `awaiting_maintainer`
-does not: an approved PR waiting on a merge is not broken, it is the
-maintainer's call when to take it, and `P4` is how they say "later".
+`mark_ready` ignores all of this, per the carve-out above — it is a pipeline
+failure, not a priority call, so no deferral defers it. `awaiting_maintainer`
+does not ignore it either: an approved PR waiting on a merge is not broken, it
+is the maintainer's call when to take it, and `P4` is how they say "later".
 
 **Restarting a stalled issue is always a resume, never a fresh start.** Step 0
 re-enters at the earliest incomplete step. A restart runs Step 4, which branches
@@ -278,20 +360,81 @@ money and needs the go-ahead. And verify the item truly meets criterion 4 first:
 `Ready for Dev` is derived, and a design-heavy item will stop and ask a question
 no unattended session can answer.
 
+## Flow policy: empty the board from the right
+
+Replaces a plain alphabetical action sort, which put `dispatchable` ahead of
+`resume_implementation` for no reason beyond `d < m < r` and so led every pass
+with "start new work" instead of "finish started work" — the fleet on
+2026-08-18 was 8 open PRs, all drafts, 6 `CONFLICTING`, none ever approved,
+which is what that produces over time.
+
+### Rule 1 — Pull from the right
+
+Finish started work before starting new work. `backlog-rhythm.sh`'s `rank`
+field (see the action table above) implements exactly this, rightmost column
+first:
+
+```
+Awaiting: maintainer  ->  read first, always — the escalation valve
+In Verification       ->  graduate: cut the release, close the issue
+In Review              ->  advance-pr toward merge
+In Progress             ->  finish the branch into a PR
+Ready for Dev           ->  dispatch  (gated by Rules 2 and 3 below)
+Analysis                ->  groom
+Backlog                 ->  triage
+```
+
+Escalations sit above the column order — rank 0, ahead of everything. An
+escalation that ranks by column is an escalation that waits, which defeats the
+valve: see `escalated` in the action table.
+
+### Rule 2 — Bugs pre-empt, they do not add
+
+A `bug` opened by someone other than the maintainer jumps the queue **at
+analysis**, and enters at the front of `Ready for Dev`. But it **displaces** a
+feature from dispatch rather than being dispatched alongside one — this is
+what stops "prioritise bugs" from quietly becoming "unbounded WIP", which is
+the state the fleet above was in. `Verb: next` below applies this at ranking
+time; the WIP limit applies it at dispatch time.
+
+### Rule 3 — Nothing starts that collides
+
+The touch-set gate under **Dispatch**, applied before anything is proposed —
+not after a conflict shows up at merge time. Detecting a collision among open
+PRs is detecting a fire that already started; the requirement is to never
+strike the match.
+
+### The WIP limit: 3
+
+WIP counts `In Progress` + `In Review` **together** — a branch and its PR are
+one piece of work, not two, and counting them separately would silently double
+the limit. Above the limit, `dispatchable` is suppressed fleet-wide and the
+pass reports it on every path, same as the touch-set gate:
+
+    WIP 7/3 -- finish before starting; dispatch suppressed
+
+Three is deliberately aggressive. With 7 in flight, dispatch stays shut until
+the fleet drains to 2 — the point is that the current jam has to clear before
+anything new starts. A limit low enough to hold also makes same-file
+collisions rare on its own, without the touch-set gate having to catch every
+one of them.
+
 ## Verb: next
 
 Rank Backlog and Ready items in this order:
 
 1. **User-facing breakage** — `bug` opened by someone other than the
-   maintainer. A wrong number on a real dashboard outranks everything.
+   maintainer. A wrong number on a real dashboard outranks everything, and per
+   Rule 2 above it displaces a feature from dispatch rather than adding to it.
 2. **Roadmap direction** — advances a theme in
    `docs/agents/product-roadmap.md`, or moves an experimental platform toward
    stable.
 3. **Cheap wins and batching** — prefer small and low-risk; group items
-   touching the same subsystem.
+   touching the same subsystem, subject to the touch-set gate under Dispatch.
 
 Tiebreaker: release-blocking. Suppressed: `blocked`, anything awaiting a
-reporter, duplicates.
+reporter, duplicates, and — per the WIP limit above — everything once
+`In Progress` + `In Review` is already at 3.
 
 Propose the top 1–3 with reasoning. Then stop and wait — dispatch needs the
 maintainer's go-ahead.
@@ -305,14 +448,46 @@ Only after approval, and only for an item that meets the Definition of Ready:
 **Never create a worktree.** That session's Step 4 creates its own from a
 fresh `origin/main`.
 
+Gated three ways, and any one of them holds `dispatchable` shut:
+
+- **The WIP limit.** `In Progress` + `In Review` at or above 3 suppresses
+  every `dispatchable` action fleet-wide; the pass reports `WIP n/3` on every
+  path so the reason is never silent. Unblocks only by something finishing —
+  a branch landing a PR, a PR merging.
+- **The collision gate.** `backlog-digest.sh` computes the exact **in-flight**
+  file set — the union of `gh pr diff --name-only` over every open PR — and
+  `backlog-rhythm.sh` checks each Ready item's **predicted** touch-set against
+  it. A clash reports `queued_behind` instead of `dispatchable`; two Ready
+  items whose predictions overlap each other report `cluster` — dispatch them
+  as one branch, one PR, since that costs less than two PRs fighting over the
+  same file plus a conflict resolution. Unblocks when the in-flight PR lands,
+  or by clustering.
+- **Undiffable PRs.** If `gh pr diff` fails for even one open PR, the
+  in-flight set is known incomplete, so collision cannot be safely evaluated
+  for *anything* — dispatch is held fleet-wide, the same way over-WIP holds
+  it, and the pass reports `undiffable_pr`. Unblocks by re-running the digest
+  once the PR diffs cleanly again.
+
+**A `dispatchable` proposal must carry its predicted touch-set.** No
+touch-set, no dispatch — the pass reports `needs_touch_set` instead. This
+replaces the advisory "queue same-file work" paragraph that used to live here,
+which was prose with no gate and never fired: five of eight open PRs ended up
+editing the same three files. Name the files from the Stage 2 analysis, or the
+issue text when there is no analysis, before proposing the item.
+
+**As shipped, no board field or digest computation carries `predicted_files`
+into the pass** — `backlog-digest.sh` has nothing that writes it, so
+`needs_touch_set` fires for every `Ready for Dev` item and `dispatchable`
+cannot appear from the script alone. Until that plumbing exists, treat the
+touch-set as something *you* name and check against `in_flight_files` by hand
+(from the digest) before proposing an item under **Verb: next** — the gate's
+reasoning holds even though the automation that would clear it does not exist
+yet.
+
 Serialise, do not stack:
 
 - An item with an unmet `blocked_by` stays put. When the blocker's PR merges,
   drop `blocked`, move it to *Ready*, and dispatch fresh.
-- Two items likely to touch the same file are queued, not run concurrently —
-  the second would eat a merge conflict it did nothing to earn. Predict the
-  touch-set from the Stage 2 analysis or the issue text. Warn and queue; this
-  is not a hard block.
 
 ## Autonomous spend
 

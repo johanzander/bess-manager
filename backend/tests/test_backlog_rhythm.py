@@ -37,8 +37,7 @@ def _item(number: int, **over: object) -> dict:
         "awaiting_suggested": None,
         "last_comment": None,
         "priority": "P2",
-        "pr": None,
-        "pr_state": None,
+        "prs": [],
         "merged_pr": None,
         "worktree": None,
         "worktree_branch": None,
@@ -50,6 +49,11 @@ def _item(number: int, **over: object) -> dict:
         "blocked_by": [],
         "blocked_by_open": [],
         "blocked": False,
+        "resume_count": 0,
+        # The candidate half of the collision gate -- files this item would
+        # touch if dispatched, supplied by the Stage 2 analysis or the PO.
+        # Empty by default: a candidate with no prediction is not dispatchable.
+        "predicted_files": [],
     }
     item.update(over)
     return item
@@ -69,6 +73,8 @@ def _run(
     items: list,
     prs: list | None = None,
     pr_board: list | None = None,
+    in_flight_files: dict | None = None,
+    undiffable_prs: list | None = None,
     **env: str,
 ) -> dict:
     digest = tmp_path / "digest.json"
@@ -82,6 +88,12 @@ def _run(
                 # older digest produces -- the script tolerates its absence, so
                 # every pre-existing test exercises the no-deferral path.
                 "pr_board": pr_board or [],
+                # The exact half of the collision gate: {path: [pr numbers]},
+                # always an object, {} when there are no open PRs.
+                "in_flight_files": in_flight_files or {},
+                # PRs whose diff could not be read this pass. Non-empty means
+                # collision cannot be evaluated, so dispatch is held entirely.
+                "undiffable_prs": undiffable_prs or [],
             }
         )
     )
@@ -174,7 +186,7 @@ def test_an_open_pr_suppresses_the_chase_and_the_park(tmp_path: Path) -> None:
             162,
             labels=["b"],
             awaiting="reporter",
-            pr=167,
+            prs=[{"number": 167, "mergeable": "MERGEABLE", "isDraft": True}],
             column="In Review",
             board_status="In Review",
             last_comment=_comment(days),
@@ -363,7 +375,7 @@ def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> Non
     once a PR exists, so the issue rule stands down to avoid listing it twice."""
     item = _item(
         592,
-        pr=619,
+        prs=[{"number": 619, "mergeable": "MERGEABLE", "isDraft": True}],
         worktree="/repo/wt/592",
         worktree_branch="fix/issue-592",
         session=None,
@@ -380,7 +392,11 @@ def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> Non
 
 def test_ready_for_dev_is_reported_as_dispatchable(tmp_path: Path) -> None:
     item = _item(
-        10, labels=["analyzed"], column="Ready for Dev", last_comment=_comment(1)
+        10,
+        labels=["analyzed"],
+        column="Ready for Dev",
+        last_comment=_comment(1),
+        predicted_files=["core/bess/x.py"],
     )
     assert "dispatchable" in _actions_for(_run(tmp_path, [item]), 10)
 
@@ -406,17 +422,20 @@ def _pr(number: int, **over: object) -> dict:
     return pr
 
 
-def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
-    """This pass does NOT drive the review loop; `implement-issue` owns a PR
-    through to `gh pr ready`, and its Step 11 already requests the review, acts
-    on the verdict and flips the PR.
+def test_every_unfinished_draft_resolves_to_resume_implementation(
+    tmp_path: Path,
+) -> None:
+    """This pass does NOT drive the review loop; `advance-pr` owns the
+    one-step mechanical moves, and `implement-issue` owns the one step that
+    needs the Step 2/3 context.
 
-    So a draft needing a FIRST review and a draft needing REWORK both resolve
-    to the same action: hand it back to the skill that owns it. Step 0 re-enters
-    at the right step. Re-implementing any of that here would be a second copy
-    of one loop, which is how one of them goes stale.
+    So a draft needing a FIRST review and a draft needing REWORK both still
+    report the same action name, `resume_implementation` — but they now route
+    to different commands (see the two tests below), which is the fix for the
+    fleet that used to hand every draft PR to a whole `implement-issue`
+    session at $1-4 a shot.
 
-    THE APPROVED-BUT-DRAFT CASE IS NOW CARVED OUT, deliberately — see
+    THE APPROVED-BUT-DRAFT CASE IS STILL CARVED OUT — see
     `test_an_approved_draft_is_never_deferred`. It used to route here too, and
     that is precisely why #629 sat approved, green and draft: the remedy on
     offer was a whole `implement-issue` session, and nobody spends one of those
@@ -433,10 +452,67 @@ def test_every_unfinished_draft_resolves_to_one_handoff(tmp_path: Path) -> None:
         assert actions == {"resume_implementation"}, pr["number"]
 
 
+def test_draft_pr_with_no_review_routes_to_advance_pr(tmp_path: Path) -> None:
+    """A draft with no review yet needs only a mechanical next step —
+    request the review, resolve a conflict, or flip it ready — none of which
+    needs the Step 2/3 context that only `implement-issue` holds. Handing this
+    to a whole session was the gap between the design and its own headline
+    promise: advancing a PR costs a step, not a session.
+    """
+    pr = _pr(619, reviews=[])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 619)
+
+    assert action["action"] == "resume_implementation"
+    assert "/advance-pr 619" in action["detail"]
+    assert "/implement-issue" not in action["detail"]
+
+
+def test_draft_pr_with_changes_requested_stays_on_implement_issue(
+    tmp_path: Path,
+) -> None:
+    """A draft carrying CHANGES_REQUESTED is the one shape that stays on
+    `implement-issue`: only that session holds the Step 2 diagnosis and the
+    Step 3 scope assessment needed to tell a real review finding apart from a
+    decision Step 3 already made and rejected on purpose. Routing this to
+    `advance-pr` cold would be a blind rework.
+    """
+    pr = _pr(614, reviews=[{"state": "APPROVED"}, {"state": "CHANGES_REQUESTED"}])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 614)
+
+    assert action["action"] == "resume_implementation"
+    assert "/implement-issue 614" in action["detail"]
+    assert "/advance-pr" not in action["detail"]
+
+
+def test_draft_changes_requested_verdict_trusts_review_decision_over_reviews(
+    tmp_path: Path,
+) -> None:
+    """The CHANGES_REQUESTED check trusts `reviewDecision` when GitHub sets
+    it, and only falls back to the last non-COMMENTED review when it does
+    not — the same seam the out-of-draft branch already uses, never a second
+    way of reading a verdict. Here `reviewDecision` says CHANGES_REQUESTED
+    while the raw `reviews` list would read APPROVED taken alone, so this
+    pins that `reviewDecision` wins.
+    """
+    pr = _pr(
+        614,
+        reviewDecision="CHANGES_REQUESTED",
+        reviews=[{"state": "APPROVED"}],
+    )
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 614)
+
+    assert "/implement-issue 614" in action["detail"]
+
+
 def test_the_handoff_names_the_issue_to_resume(tmp_path: Path) -> None:
     """`/implement-issue <n>` takes an issue number, so the action has to carry
     one — otherwise the loop reports work nobody can pick up."""
-    item = _item(592, pr=615, column="In Review", last_comment=_comment(1))
+    item = _item(
+        592,
+        prs=[{"number": 615, "mergeable": "MERGEABLE", "isDraft": True}],
+        column="In Review",
+        last_comment=_comment(1),
+    )
     # Not an approved draft: that case is `mark_ready` now and carries no
     # issue, because `gh pr ready <n>` needs only the PR number.
     pr = _pr(615, reviews=[{"state": "CHANGES_REQUESTED"}])
@@ -454,18 +530,32 @@ def test_a_draft_with_no_linked_issue_resumes_by_pr(tmp_path: Path) -> None:
 
     Reporting "no issue, finish it by hand" left every self-directed PR with no
     owner in the loop — which is how #620, #622 and #623 all ended up driven by
-    hand.
+    hand. Uses a CHANGES_REQUESTED PR so it still exercises the
+    `implement-issue` branch — a no-review draft with no linked issue routes
+    to `advance-pr` instead, which needs no issue at all.
 
     No flag distinguishes the two: GitHub numbers issues and PRs from one
     sequence per repo, so a bare number is unambiguous and Step 0 resolves
     whichever it is.
     """
-    pr = _pr(700, reviews=[])
+    pr = _pr(700, reviews=[{"state": "CHANGES_REQUESTED"}])
     action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
 
     assert action["issue"] is None
     assert "/implement-issue 700" in action["detail"]
     assert "--pr" not in action["detail"]
+
+
+def test_a_mechanical_draft_with_no_linked_issue_needs_no_issue(
+    tmp_path: Path,
+) -> None:
+    """`advance-pr` operates on the PR number alone, so a mechanical draft
+    with no linked issue is not a gap the way an `implement-issue` handoff
+    would be — there is nothing here that needs an issue number at all."""
+    pr = _pr(700, reviews=[])
+    action = next(a for a in _run(tmp_path, [], [pr])["actions"] if a.get("pr") == 700)
+
+    assert "/advance-pr 700" in action["detail"]
 
 
 def test_approved_non_draft_is_the_maintainers(tmp_path: Path) -> None:
@@ -590,6 +680,30 @@ def test_conflicting_pr_is_flagged_over_its_review_state(tmp_path: Path) -> None
     assert "resolve_conflict" in _actions_for(_run(tmp_path, [], [pr]), 437)
 
 
+def test_a_conflicting_draft_routes_to_advance_pr(tmp_path: Path) -> None:
+    """C1: a CONFLICTING draft used to hand to sweep-prs, which writes nothing
+    -- only advance-pr performs the board write that records a semantic
+    conflict escalation, so the old detail re-emitted forever. Only
+    advance-pr's rows 1/2 actually resolve a CONFLICTING draft."""
+    pr = _pr(437, isDraft=True, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 437)
+    assert action["action"] == "resolve_conflict"
+    assert action["detail"] == "/advance-pr 437"
+
+
+def test_a_conflicting_non_draft_still_goes_to_sweep_prs(tmp_path: Path) -> None:
+    """A conflicted PR that already left the review loop is not advance-pr's
+    concern -- that carve-out stays sweep-prs."""
+    pr = _pr(438, isDraft=False, mergeable="CONFLICTING")
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 438)
+    assert action["action"] == "resolve_conflict"
+    assert "sweep-prs" in action["detail"]
+
+
 def _card(number: int, **over: object) -> dict:
     card: dict = {
         "number": number,
@@ -645,6 +759,21 @@ def test_an_approved_draft_is_never_deferred(tmp_path: Path) -> None:
     assert result["deferred"] == []
 
 
+def test_mark_ready_routes_through_advance_pr(tmp_path: Path) -> None:
+    """I7: a bare `gh pr ready` in the detail string is the exact #609
+    failure re-opened at the one call site an unattended pass actually reads
+    -- it skips advance-pr's mandatory mergeability re-check and the
+    push-after-approval rule. The detail must name the skill, not the
+    command."""
+    pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
+    result = _run(tmp_path, [], [pr])
+
+    action = next(a for a in result["actions"] if a.get("pr") == 629)
+    assert action["action"] == "mark_ready"
+    assert action["detail"].startswith("/advance-pr 629")
+    assert "gh pr ready" not in action["detail"]
+
+
 def test_approved_draft_is_reported_even_with_no_card(tmp_path: Path) -> None:
     pr = _pr(629, isDraft=True, reviews=[{"state": "APPROVED"}])
     assert "mark_ready" in _actions_for(_run(tmp_path, [], [pr]), 629)
@@ -673,6 +802,75 @@ def test_a_conflicting_approved_draft_is_not_mark_ready(tmp_path: Path) -> None:
     actions = _actions_for(_run(tmp_path, [], [pr]), 701)
     assert "mark_ready" not in actions
     assert "resolve_conflict" in actions
+
+
+def test_a_deferral_recorded_on_the_issue_card_suppresses_the_pr(
+    tmp_path: Path,
+) -> None:
+    """I11: backlog SKILL.md documents "One card per unit of work, on the
+    issue -- PR cards go away", but only pr_board suppression was ever
+    implemented. A PO following the shipped doc records `Awaiting` on the
+    issue, where nothing read it."""
+    item = _item(
+        592,
+        prs=[{"number": 619, "mergeable": "CONFLICTING", "isDraft": True}],
+        awaiting="discussion",
+    )
+    pr = _pr(619, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr])
+
+    assert _actions_for(result, 619) == set()
+    assert [d["pr"] for d in result["deferred"]] == [619]
+    assert result["deferred"][0]["why"] == "issue awaiting discussion"
+
+
+def test_an_issue_side_p4_also_suppresses_the_pr(tmp_path: Path) -> None:
+    item = _item(
+        593,
+        prs=[{"number": 620, "mergeable": "CONFLICTING", "isDraft": True}],
+        priority="P4",
+    )
+    pr = _pr(620, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr])
+
+    assert _actions_for(result, 620) == set()
+    assert result["deferred"][0]["why"] == "issue priority P4"
+
+
+def test_pr_board_deferral_still_wins_when_both_are_set(tmp_path: Path) -> None:
+    """The pr_board reason is reported first when both a card and the issue
+    carry a deferral -- either is sufficient to suppress, but the message
+    should not silently prefer one over the other for no stated reason: it
+    prefers the pr_board card because that is the older, still-supported
+    mechanism."""
+    item = _item(
+        594,
+        prs=[{"number": 621, "mergeable": "CONFLICTING", "isDraft": True}],
+        awaiting="discussion",
+    )
+    pr = _pr(621, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr], pr_board=[_card(621, priority="P4")])
+
+    assert _actions_for(result, 621) == set()
+    assert result["deferred"][0]["why"] == "priority P4"
+
+
+def test_removing_pr_cards_does_not_un_park_an_issue_side_deferral(
+    tmp_path: Path,
+) -> None:
+    """The safety property I11 is actually for: with only pr_board
+    suppression, deleting PR cards entirely would silently un-defer every PR
+    parked on its issue. An empty pr_board must not do that."""
+    item = _item(
+        595,
+        prs=[{"number": 622, "mergeable": "CONFLICTING", "isDraft": True}],
+        priority="P4",
+    )
+    pr = _pr(622, mergeable="CONFLICTING")
+    result = _run(tmp_path, [item], [pr], pr_board=[])
+
+    assert _actions_for(result, 622) == set()
+    assert [d["pr"] for d in result["deferred"]] == [622]
 
 
 def test_a_pr_with_no_card_is_reported_as_before(tmp_path: Path) -> None:
@@ -750,3 +948,320 @@ def test_a_pending_approved_draft_is_not_counted_as_deferred(
 
     assert _actions_for(result, 636) == set()
     assert [d["pr"] for d in result["deferred"]] == [636]
+
+
+def test_awaiting_maintainer_escalates_instead_of_suppressing(tmp_path: Path) -> None:
+    """Awaiting is signed. reporter/upstream/discussion mean they owe us, and
+    stay quiet; maintainer means YOU owe us, and must be loud. Today every
+    value suppresses, so an item blocked on the maintainer gets quieter."""
+    item = _item(700, awaiting="maintainer", awaiting_source="board")
+    result = _run(tmp_path, [item])
+    assert "escalated" in _actions_for(result, 700)
+    assert result["actions"][0]["issue"] == 700
+
+
+def test_three_changes_requested_rounds_escalate(tmp_path: Path) -> None:
+    """Three rounds of disagreement is a design argument, not a bug -- the
+    implement-issue cap already says so. Another round will not settle it."""
+    pr = _pr(
+        701,
+        isDraft=True,
+        reviews=[
+            {"state": "CHANGES_REQUESTED"},
+            {"state": "CHANGES_REQUESTED"},
+            {"state": "CHANGES_REQUESTED"},
+        ],
+    )
+    actions = _actions_for(_run(tmp_path, [], prs=[pr]), 701)
+    assert "escalated" in actions
+    assert "resume_implementation" not in actions
+
+
+def test_two_resume_handoffs_escalate(tmp_path: Path) -> None:
+    item = _item(702, resume_count=2, worktree="/wt", worktree_branch="fix/issue-702")
+    actions = _actions_for(_run(tmp_path, [item]), 702)
+    assert "escalated" in actions
+    assert "resume_implementation" not in actions
+
+
+def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:
+    item = _item(703, resume_count=1, worktree="/wt", worktree_branch="fix/issue-703")
+    actions = _actions_for(_run(tmp_path, [item]), 703)
+    assert "escalated" not in actions
+    assert "resume_implementation" in actions
+
+
+def test_finishing_outranks_starting(tmp_path: Path) -> None:
+    """Empty the board from the right. The alphabetical sort put dispatchable
+    first and resume_implementation last purely because d < m < r."""
+    ready = _item(
+        800,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    stalled = _item(
+        801,
+        column="In Progress",
+        board_status="In Progress",
+        worktree="/wt",
+        worktree_branch="fix/issue-801",
+    )
+    order = [a["action"] for a in _run(tmp_path, [ready, stalled])["actions"]]
+    assert order.index("resume_implementation") < order.index("dispatchable")
+
+
+def test_an_escalation_outranks_every_column(tmp_path: Path) -> None:
+    escalated = _item(802, awaiting="maintainer", awaiting_source="board")
+    verifying = _item(803, column="In Verification", board_status="In Verification")
+    first = _run(tmp_path, [escalated, verifying])["actions"][0]
+    assert first["action"] == "escalated"
+
+
+def test_grooming_actions_rank_together_after_dispatchable(tmp_path: Path) -> None:
+    """set_awaiting, add_card, set_priority, move_card and triage_labels are
+    board-hygiene, not column-driven flow work, so they all land at the same
+    rank and strictly after dispatchable. There is no way to make the script
+    emit an action name with no rank branch without editing the script
+    itself, so this pins the five named branches directly rather than
+    fabricating an unreachable case."""
+    awaiting_item = _item(
+        900,
+        labels=["needs-debug-log"],
+        awaiting="reporter",
+        awaiting_source="label",
+        awaiting_suggested="reporter",
+        last_comment=_comment(1),
+    )
+    no_card_item = _item(901, board_status=None, priority=None)
+    no_priority_item = _item(902, priority=None)
+    mismatched_column_item = _item(
+        903, board_status="Ready for Dev", column="In Progress"
+    )
+    unlabeled_item = _item(904, labels=[])
+    dispatchable_item = _item(
+        905,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        predicted_files=["core/bess/x.py"],
+    )
+
+    result = _run(
+        tmp_path,
+        [
+            awaiting_item,
+            no_card_item,
+            no_priority_item,
+            mismatched_column_item,
+            unlabeled_item,
+            dispatchable_item,
+        ],
+    )
+
+    rank_by_action = {a["action"]: a["rank"] for a in result["actions"]}
+    grooming_actions = [
+        "set_awaiting",
+        "add_card",
+        "set_priority",
+        "move_card",
+        "triage_labels",
+    ]
+    for action in grooming_actions:
+        assert action in rank_by_action, action
+
+    grooming_ranks = {rank_by_action[a] for a in grooming_actions}
+    assert len(grooming_ranks) == 1, rank_by_action
+    (grooming_rank,) = grooming_ranks
+    assert grooming_rank > rank_by_action["dispatchable"]
+
+
+# --- the WIP limit --------------------------------------------------------
+
+
+def test_over_the_wip_limit_suppresses_dispatch(tmp_path: Path) -> None:
+    """Unbounded WIP is the state that produced 8 open drafts, 6 of them
+    conflicting. Above the limit, nothing new starts."""
+    in_flight = [
+        _item(
+            900 + i,
+            column="In Review",
+            board_status="In Review",
+            prs=[{"number": 950 + i, "mergeable": "MERGEABLE", "isDraft": True}],
+        )
+        for i in range(3)
+    ]
+    ready = _item(
+        910,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+    )
+    result = _run(tmp_path, [*in_flight, ready])
+    assert result["wip"] == {"count": 3, "limit": 3, "over": True}
+    assert "dispatchable" not in _actions_for(result, 910)
+
+
+def test_under_the_limit_dispatch_is_allowed(tmp_path: Path) -> None:
+    ready = _item(
+        911,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [ready])
+    assert result["wip"]["over"] is False
+    assert "dispatchable" in _actions_for(result, 911)
+
+
+def test_a_branch_and_its_pr_count_as_one(tmp_path: Path) -> None:
+    """In Progress and In Review are the same piece of work at two stages;
+    counting them separately would double the effective limit."""
+    items = [
+        _item(920, column="In Progress", board_status="In Progress"),
+        _item(
+            921,
+            column="In Review",
+            board_status="In Review",
+            prs=[{"number": 960, "mergeable": "MERGEABLE", "isDraft": True}],
+        ),
+    ]
+    assert _run(tmp_path, items)["wip"]["count"] == 2
+
+
+def test_in_verification_does_not_count_as_wip(tmp_path: Path) -> None:
+    """In Verification is already merged to main and only waiting on a
+    release -- it occupies no implementation slot, so it must not count
+    toward the limit or suppress dispatch. Four such items alone exceed the
+    default limit of 3, so a filter that widened to include this column
+    would both inflate the count and suppress the ready item below."""
+    verifying = [
+        _item(930 + i, column="In Verification", board_status="In Verification")
+        for i in range(4)
+    ]
+    ready = _item(
+        940,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [*verifying, ready])
+    assert result["wip"] == {"count": 0, "limit": 3, "over": False}
+    assert "dispatchable" in _actions_for(result, 940)
+
+
+# --- the collision gate ----------------------------------------------------
+
+
+def test_a_candidate_touching_an_in_flight_file_is_queued(tmp_path: Path) -> None:
+    """Five PRs raced to rewrite the same three files. The gate belongs before
+    dispatch -- detecting the clash at merge time is detecting a fire."""
+    ready = _item(
+        1000,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["CLAUDE.md"],
+    )
+    result = _run(tmp_path, [ready], in_flight_files={"CLAUDE.md": [614]})
+    actions = _actions_for(result, 1000)
+    assert "queued_behind" in actions
+    assert "dispatchable" not in actions
+
+
+def test_a_candidate_with_no_predicted_files_is_not_dispatchable(
+    tmp_path: Path,
+) -> None:
+    """No touch-set, no dispatch. A proposal that cannot be checked against the
+    in-flight set is a proposal to find out by colliding."""
+    ready = _item(
+        1001,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=[],
+    )
+    actions = _actions_for(_run(tmp_path, [ready]), 1001)
+    assert "dispatchable" not in actions
+    assert "needs_touch_set" in actions
+
+
+def test_two_ready_items_that_overlap_are_clustered(tmp_path: Path) -> None:
+    """Two issues that will fight over one file cost less as one unit of work
+    than as two PRs plus a conflict resolution."""
+    a = _item(
+        1002,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    b = _item(
+        1003,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [a, b])
+    assert "cluster" in _actions_for(result, 1002)
+
+
+# --- undiffable PRs suppress the whole collision gate -----------------------
+
+
+def test_an_undiffable_pr_suppresses_dispatchable_entirely(tmp_path: Path) -> None:
+    """One PR whose diff could not be read means the in-flight file set is
+    incomplete, so collision cannot be safely evaluated for ANY candidate --
+    not just the ones that would clash with the missing PR's files. Dispatch
+    is held fleet-wide, the same way over-WIP holds it."""
+    ready = _item(
+        1010,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [ready], undiffable_prs=[614])
+    actions = _actions_for(result, 1010)
+    assert "dispatchable" not in actions
+
+
+def test_an_undiffable_pr_emits_one_action_per_pr(tmp_path: Path) -> None:
+    result = _run(tmp_path, [], undiffable_prs=[614, 620])
+    prs_reported = {
+        a["pr"] for a in result["actions"] if a["action"] == "undiffable_pr"
+    }
+    assert prs_reported == {614, 620}
+
+
+def test_undiffable_pr_ranks_with_pr_side_actions(tmp_path: Path) -> None:
+    """Named rank 2, alongside the other PR-side actions, so it sorts with
+    work in flight rather than falling to the unranked catch-all rank."""
+    result = _run(tmp_path, [], undiffable_prs=[614])
+    action = next(a for a in result["actions"] if a["action"] == "undiffable_pr")
+    assert action["rank"] == 2
+
+
+def test_no_undiffable_prs_does_not_suppress_dispatch(tmp_path: Path) -> None:
+    ready = _item(
+        1011,
+        column="Ready for Dev",
+        board_status="Ready for Dev",
+        labels=["bug", "analyzed"],
+        priority="P2",
+        predicted_files=["core/bess/x.py"],
+    )
+    result = _run(tmp_path, [ready], undiffable_prs=[])
+    assert "dispatchable" in _actions_for(result, 1011)

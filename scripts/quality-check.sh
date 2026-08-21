@@ -342,6 +342,22 @@ MUST_BE_GUARDED = [
     "gh api repos/o/r/releases --raw-field tag_name=v1",
     "gh api --field tag_name=v1 repos/o/r/releases",
     "gh api --raw-field tag_name=v1 repos/o/r/releases",
+    # Attached-value spellings. cobra/pflag takes `--flag=value`, `-fvalue`
+    # and `-f=value` as readily as `--flag value`, and a glob ending in
+    # ` --field ` (with a space) cannot reach them -- a write that resolves to
+    # `allow` by the same argument the long-form pins above were added for.
+    "gh api repos/o/r/releases --field=tag_name=v1",
+    "gh api repos/o/r/releases --raw-field=tag_name=v1",
+    "gh api --field=tag_name=v1 repos/o/r/releases",
+    "gh api --raw-field=tag_name=v1 repos/o/r/releases",
+    "gh api repos/o/r/pulls/1/merge --method=PUT",
+    "gh api --method=PUT repos/o/r/pulls/1/merge",
+    "gh api repos/o/r/pulls/1/merge -XPUT",
+    "gh api -XPUT repos/o/r/pulls/1/merge",
+    "gh api repos/o/r/releases -fbody=hi",
+    "gh api -fbody=hi repos/o/r/releases",
+    "gh api repos/o/r/releases -Fbody=hi",
+    "gh api -Fbody=hi repos/o/r/releases",
     "gh pr merge 588 --squash",
     # Publishing a release escapes to GitHub irreversibly. The read-only verbs
     # are exempt (see MUST_NOT_BE_GUARDED) -- the gate pins both directions so

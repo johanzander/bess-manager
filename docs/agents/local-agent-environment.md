@@ -144,8 +144,9 @@ the *property*, by command string, in `MUST_BE_GUARDED` — those pins survive a
 respelling.
 
 **When you add a `gh api` write flag, add its command string to
-`MUST_BE_GUARDED` too**, in both argument positions. That list is the guard;
-the rules in `settings.json` are just how it is currently satisfied.
+`MUST_BE_GUARDED` too**, in both argument positions **and both the
+`--flag value` and `--flag=value` spellings**. That list is the guard; the
+rules in `settings.json` are just how it is currently satisfied.
 
 ### Pushing is guarded server-side, not by a prompt
 

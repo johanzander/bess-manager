@@ -211,6 +211,22 @@ def test_gh_api_writes_ask_in_either_flag_position(rules: dict[str, list[str]]) 
         f"gh api --field body=hi {endpoint}",
         f"gh api {endpoint} --raw-field body=hi",
         f"gh api --raw-field body=hi {endpoint}",
+        # Attached-value spellings. cobra/pflag takes `--flag=value` and
+        # `-fvalue` as readily as `--flag value`; the space-separated globs
+        # above end in ` --field ` (with a space) and cannot reach them, so
+        # `--field=body=hi` resolved to `allow` -- a write that never prompts.
+        f"gh api {endpoint} --field=body=hi",
+        f"gh api --field=body=hi {endpoint}",
+        f"gh api {endpoint} --raw-field=body=hi",
+        f"gh api --raw-field=body=hi {endpoint}",
+        f"gh api {endpoint} --method=PUT",
+        f"gh api --method=PUT {endpoint}",
+        f"gh api {endpoint} -XPUT",
+        f"gh api -XPUT {endpoint}",
+        f"gh api {endpoint} -fbody=hi",
+        f"gh api -fbody=hi {endpoint}",
+        f"gh api {endpoint} -Fbody=hi",
+        f"gh api -Fbody=hi {endpoint}",
     ):
         assert decide(write, rules) == "ask", f"{write!r} must ask"
 

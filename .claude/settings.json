@@ -156,6 +156,18 @@
       "Bash(gh api * --field *)",
       "Bash(gh api --raw-field *)",
       "Bash(gh api * --raw-field *)",
+      "Bash(gh api --method=*)",
+      "Bash(gh api * --method=*)",
+      "Bash(gh api -X*)",
+      "Bash(gh api * -X*)",
+      "Bash(gh api -f*)",
+      "Bash(gh api * -f*)",
+      "Bash(gh api -F*)",
+      "Bash(gh api * -F*)",
+      "Bash(gh api --field=*)",
+      "Bash(gh api * --field=*)",
+      "Bash(gh api --raw-field=*)",
+      "Bash(gh api * --raw-field=*)",
       "Bash(gh issue close*)"
     ]
   },

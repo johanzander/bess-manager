@@ -152,6 +152,10 @@
       "Bash(gh api * -F *)",
       "Bash(gh api --input*)",
       "Bash(gh api * --input*)",
+      "Bash(gh api --field *)",
+      "Bash(gh api * --field *)",
+      "Bash(gh api --raw-field *)",
+      "Bash(gh api * --raw-field *)",
       "Bash(gh issue close*)"
     ]
   },

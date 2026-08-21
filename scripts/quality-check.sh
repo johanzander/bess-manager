@@ -229,12 +229,27 @@ if ! python3 - <<'PY'
 import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.
-# `gh api` is guarded by a BLANKET rule on purpose: the dangerous shapes put
-# their marker at an arbitrary argument position (`gh api <path> -X PUT`,
-# `gh api <path> -f k=v`), which a prefix glob cannot reach. Enumerating them
-# left real holes twice. Narrowing it back to specific forms re-opens the
-# holes, so the check requires the blanket spelling rather than merely "some
-# rule exists".
+#
+# `gh api` USED to be pinned here by spelling: this list demanded the literal
+# `Bash(gh api)` / `Bash(gh api *)` blanket rules, on the grounds that the
+# dangerous shapes put their marker at an arbitrary argument position
+# (`gh api <path> -X PUT`, `gh api <path> -f k=v`) which a prefix glob cannot
+# reach. #657 replaced that blanket with an enumeration of the write flags, to
+# stop `gh api` reads prompting on every call -- and this gate then failed on
+# a clean `origin/main`, because the strings it demanded were gone while the
+# PROPERTY it cared about still held.
+#
+# Pinning a spelling was the wrong assertion. What matters is that a `gh api`
+# WRITE cannot reach `allow`, not which rule stops it -- and that is already
+# asserted below, by command string, in MUST_BE_GUARDED. Those entries survive
+# any future respelling; the literal ones did not.
+#
+# The enumeration's real risk is a write flag nobody listed. That is not
+# hypothetical: `-F, --field` and `-f, --raw-field` (see `gh api --help`) had
+# only their SHORT forms enumerated, so `gh api <path> --field k=v` resolved to
+# `allow` -- a write that never prompted. Both long forms are pinned below now.
+# When adding a `gh api` write flag, add its command string there too, or the
+# next respelling re-opens the same hole silently.
 #
 # `git push` USED to be in that same sentence and no longer is. It was never
 # the glob that made it safe -- the glob was a blunt instrument compensating
@@ -278,7 +293,6 @@ REQUIRED = {
         "Bash(podman machine rm)", "Bash(podman system reset)",
     ],
     "ask": [
-        "Bash(gh api)", "Bash(gh api *)",
         "Bash(gh pr merge*)", "Bash(gh repo edit*)",
         "Bash(gh release create*)", "Bash(gh release edit*)",
         "Bash(gh release delete*)", "Bash(gh release delete-asset*)",
@@ -341,6 +355,12 @@ MUST_BE_GUARDED = [
     # gh reaching GitHub, including the raw API path
     "gh api repos/o/r/pulls/1/merge -X PUT",
     "gh api repos/o/r/releases -f tag_name=v1",
+    # Long forms of the two field flags. Enumerating only `-f`/`-F` left these
+    # reaching `allow`; see the REQUIRED comment above.
+    "gh api repos/o/r/releases --field tag_name=v1",
+    "gh api repos/o/r/releases --raw-field tag_name=v1",
+    "gh api --field tag_name=v1 repos/o/r/releases",
+    "gh api --raw-field tag_name=v1 repos/o/r/releases",
     "gh pr merge 588 --squash",
     # Publishing a release escapes to GitHub irreversibly. The read-only verbs
     # are exempt (see MUST_NOT_BE_GUARDED) -- the gate pins both directions so

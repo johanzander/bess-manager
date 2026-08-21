@@ -144,7 +144,9 @@ MUST_NOT_BE_DENIED = [
 
 
 @pytest.mark.parametrize("command", RUNS_UNATTENDED)
-def test_implement_issue_runs_without_prompting(command, rules):
+def test_implement_issue_runs_without_prompting(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "allow", (
         f"{command!r} resolves to {verdict!r}. implement-issue runs this "
@@ -153,7 +155,9 @@ def test_implement_issue_runs_without_prompting(command, rules):
 
 
 @pytest.mark.parametrize("command", NEEDS_APPROVAL)
-def test_maintainer_decisions_still_ask(command, rules):
+def test_maintainer_decisions_still_ask(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "ask", (
         f"{command!r} resolves to {verdict!r}, expected 'ask'. This action is "
@@ -162,13 +166,17 @@ def test_maintainer_decisions_still_ask(command, rules):
 
 
 @pytest.mark.parametrize("command", FORBIDDEN)
-def test_prohibited_commands_are_denied(command, rules):
+def test_prohibited_commands_are_denied(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "deny", f"{command!r} resolves to {verdict!r}, expected 'deny'."
 
 
 @pytest.mark.parametrize("command", MUST_NOT_BE_DENIED)
-def test_non_destructive_forms_keep_an_escape_hatch(command, rules):
+def test_non_destructive_forms_keep_an_escape_hatch(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict != "deny", (
         f"{command!r} is denied. `deny` never prompts, so this removes the "
@@ -177,7 +185,7 @@ def test_non_destructive_forms_keep_an_escape_hatch(command, rules):
     )
 
 
-def test_gh_api_writes_ask_in_either_flag_position(rules):
+def test_gh_api_writes_ask_in_either_flag_position(rules: dict[str, list[str]]) -> None:
     """`gh api` reads must pass; writes must ask regardless of argument order.
 
     `Bash(gh api * -X *)` alone does not match `gh api -X POST <endpoint>` --
@@ -194,11 +202,22 @@ def test_gh_api_writes_ask_in_either_flag_position(rules):
         f"gh api --method DELETE {endpoint}",
         f"gh api {endpoint} -f body=hi",
         f"gh api -f body=hi {endpoint}",
+        # Long forms. `gh api --help`: `-F, --field` and `-f, --raw-field`.
+        # Enumerating only the short spellings left these reaching `allow` via
+        # `Bash(gh api *)` -- a write that never prompts. This is the exact
+        # leak the enumeration keeps re-opening, so it is pinned by command
+        # string here rather than by asserting which rule happens to catch it.
+        f"gh api {endpoint} --field body=hi",
+        f"gh api --field body=hi {endpoint}",
+        f"gh api {endpoint} --raw-field body=hi",
+        f"gh api --raw-field body=hi {endpoint}",
     ):
         assert decide(write, rules) == "ask", f"{write!r} must ask"
 
 
-def test_no_client_rule_duplicates_a_server_ruleset(rules):
+def test_no_client_rule_duplicates_a_server_ruleset(
+    rules: dict[str, list[str]],
+) -> None:
     """Ref protection is the server's job; duplicating it is pure friction.
 
     `main`, `beta` and tags are protected by GitHub rulesets with empty bypass

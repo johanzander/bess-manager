@@ -6,10 +6,13 @@ approval nobody is awake to give; every command that is the maintainer's call
 must stop and ask. Those two lists are derivable — they are written down in
 `.claude/skills/*/SKILL.md` — so they can be pinned instead of remembered.
 
-This caught a real inversion: `Bash(gh api *)` sat in `ask` while the blanket
-`Bash(gh *)` allow let `gh auth token` and `gh issue close` through. The one
-command Step 11 explicitly prescribes (reading inline review comments, which
-has no `gh pr view` equivalent) was the one thing blocked.
+`gh api` is deliberately a blanket `ask`, not an allow-plus-enumeration. The
+write forms put their marker at an arbitrary argument position (`gh api <path>
+-X PUT`), which a prefix glob cannot reach, and enumerating them left real
+holes twice (see quality-check.sh). A blanket `Bash(gh *)` allow inverts that,
+letting `gh auth token` and `gh issue close` through — so there is none, and
+every interactive `gh api` prompts once instead. Dispatched agents bypass
+permissions entirely, so headless runs are unaffected.
 
 **What this test does and does not prove.** It models the matcher as
 `deny > ask > allow` with `fnmatch` over the rule strings. Claude Code's real
@@ -17,7 +20,7 @@ matcher parses shell more carefully than that, so this asserts *the rule set
 expresses the intent* — not that the harness behaves this way. The one
 behaviour verified against the real matcher by hand is that mid-string
 wildcards match (`git -c core.pager=cat stash --help` is caught by
-`Bash(git -* stash --*)`), which the `gh api` write-form rules rely on.
+`Bash(git -* stash --*)`).
 """
 
 import fnmatch
@@ -102,9 +105,10 @@ RUNS_UNATTENDED = [
     "scripts/request-pr-review.sh 614",
     "scripts/gh-agent.sh --as dev pr comment 614 --body ok",
     "gh pr view 614 --json reviews",
-    # No `gh pr view` field returns inline review comments -- this endpoint is
-    # the only way to read them, and it is a plain GET (SKILL.md:698).
-    "gh api repos/johanzander/bess-manager/pulls/614/comments --jq .[]",
+    # Step 11's inline-review-comment read (gh api .../comments --jq .[], the
+    # only way to read them) is intentionally NOT here: `gh api` is a blanket
+    # ask by design (see test_gh_api_is_blanket_ask), so it prompts instead of
+    # running unattended.
     "gh pr ready 614",
 ]
 
@@ -144,7 +148,9 @@ MUST_NOT_BE_DENIED = [
 
 
 @pytest.mark.parametrize("command", RUNS_UNATTENDED)
-def test_implement_issue_runs_without_prompting(command, rules):
+def test_implement_issue_runs_without_prompting(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "allow", (
         f"{command!r} resolves to {verdict!r}. implement-issue runs this "
@@ -153,7 +159,9 @@ def test_implement_issue_runs_without_prompting(command, rules):
 
 
 @pytest.mark.parametrize("command", NEEDS_APPROVAL)
-def test_maintainer_decisions_still_ask(command, rules):
+def test_maintainer_decisions_still_ask(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "ask", (
         f"{command!r} resolves to {verdict!r}, expected 'ask'. This action is "
@@ -162,13 +170,17 @@ def test_maintainer_decisions_still_ask(command, rules):
 
 
 @pytest.mark.parametrize("command", FORBIDDEN)
-def test_prohibited_commands_are_denied(command, rules):
+def test_prohibited_commands_are_denied(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict == "deny", f"{command!r} resolves to {verdict!r}, expected 'deny'."
 
 
 @pytest.mark.parametrize("command", MUST_NOT_BE_DENIED)
-def test_non_destructive_forms_keep_an_escape_hatch(command, rules):
+def test_non_destructive_forms_keep_an_escape_hatch(
+    command: str, rules: dict[str, list[str]]
+) -> None:
     verdict = decide(command, rules)
     assert verdict != "deny", (
         f"{command!r} is denied. `deny` never prompts, so this removes the "
@@ -177,15 +189,16 @@ def test_non_destructive_forms_keep_an_escape_hatch(command, rules):
     )
 
 
-def test_gh_api_writes_ask_in_either_flag_position(rules):
-    """`gh api` reads must pass; writes must ask regardless of argument order.
+def test_gh_api_is_blanket_ask(rules: dict[str, list[str]]) -> None:
+    """`gh api` reads and writes all resolve to 'ask' under the blanket rule.
 
-    `Bash(gh api * -X *)` alone does not match `gh api -X POST <endpoint>` --
-    the leading `*` cannot match the empty span before the flag. Both
-    orderings need their own rule, so both are asserted here.
+    The blanket `Bash(gh api *)` sits in `ask`, so argument position no longer
+    matters — every `gh api` prompts once, reads included. This is the decision
+    quality-check.sh enforces; the enumerated write-form rules that used to
+    live here were removed because they left argument-position holes.
     """
     endpoint = "repos/johanzander/bess-manager/pulls/614/comments"
-    assert decide(f"gh api {endpoint}", rules) == "allow"
+    assert decide(f"gh api {endpoint}", rules) == "ask"
 
     for write in (
         f"gh api {endpoint} -X POST -f body=hi",
@@ -198,7 +211,9 @@ def test_gh_api_writes_ask_in_either_flag_position(rules):
         assert decide(write, rules) == "ask", f"{write!r} must ask"
 
 
-def test_no_client_rule_duplicates_a_server_ruleset(rules):
+def test_no_client_rule_duplicates_a_server_ruleset(
+    rules: dict[str, list[str]],
+) -> None:
     """Ref protection is the server's job; duplicating it is pure friction.
 
     `main`, `beta` and tags are protected by GitHub rulesets with empty bypass

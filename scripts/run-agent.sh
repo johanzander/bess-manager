@@ -152,8 +152,18 @@ mkdir -p "$FLEET_DIR"
 dispatch_run_args "$CONTAINER" "$CLONE_DIR" dev "$EGRESS" "$WITH_COMPOSE"
 
 # `--dangerously-skip-permissions` is the phase's whole point -- see the header.
+#
+# A dispatched run is a one-shot `-p` turn, and the first live dispatch (#666)
+# showed that the env var alone is not enough: the agent read the skill's
+# Headless local mode table, then still followed the INTERACTIVE Step-3 confirm
+# gate -- it asked "should I proceed?" in its final message and ended its turn,
+# posting nothing to the issue and leaving fleet status "working". A headless
+# agent has no interactive channel, so a gate is not a question; state the mode
+# in the invocation itself rather than trusting self-identification.
+headless_directive="(HEADLESS DISPATCH: BESS_HEADLESS_MODE=1 -- one-shot turn, no re-invocation; ending your turn ends the container, so the skill's Headless local mode table governs you, not the interactive text. NEVER end your turn at the Step 3/7/11 gates NOR while background work is pending. Gates: post to the issue via scripts/gh-agent.sh --as dev, report via scripts/fleet-manifest.sh update-status, block IN PROCESS on scripts/wait-for-reply.sh <number> <now-iso8601>. Step 6 runs quality-check.sh and the slow suite in the FOREGROUND: no background agents, no ScheduleWakeup, no 'waiting for a background task'.)"
+
 agent_cmd=(
-  claude -p "/implement-issue $NUMBER"
+  claude -p "/implement-issue $NUMBER $headless_directive"
   --dangerously-skip-permissions
   --output-format stream-json --verbose
 )

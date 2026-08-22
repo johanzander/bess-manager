@@ -137,8 +137,11 @@ test.describe('Inverter schedule display branches on controlModel', () => {
     await expect(page.getByRole('columnheader', { name: 'Discharge %' })).toHaveCount(0);
     await expect(page.getByRole('columnheader', { name: 'Grid Charge' })).toHaveCount(0);
 
-    // Signed percent value renders.
-    await expect(page.getByText('+35%')).toBeVisible();
+    // Signed percent value renders in the schedule table's VPP column. Scoped
+    // to a table cell because the Current Strategy card also shows the current
+    // group's percent (e.g. "+35% (Remote)") when the wall clock falls inside
+    // that group's time window — a strict getByText() then resolves to 2.
+    await expect(page.getByRole('cell', { name: '+35%' })).toBeVisible();
   });
 
   test('period_list install shows neither Mode nor VPP Power columns', async ({ page }) => {

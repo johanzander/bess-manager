@@ -5,6 +5,10 @@ capabilities and that BatterySystemManager respects them (e.g. not
 initializing the power monitor on platforms without charge rate control).
 """
 
+from typing import Any
+
+import pytest
+
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.inverter_controller import InverterController
@@ -279,5 +283,95 @@ class TestAdjustChargingPowerSkipsUnsupported:
         # then simulate an unavailable phase-current sensor.
         mock_controller.settings["grid_charge"] = True
         mock_controller.settings["l1_current"] = None
+
+        system.adjust_charging_power()  # must not raise
+
+    def test_transient_ha_failure_does_not_crash_adjust_charging_power(
+        self,
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A transient HA connectivity failure while reading grid-charge state
+        must not escape the 5-minute adjust_charging_power cron job (issue
+        #643: a Supervisor 502 on `Check grid charge state`).
+
+        `grid_charge_enabled()` reads through `_api_request`, which re-raises
+        `requests.RequestException` after its retries are exhausted, but
+        `adjust_charging_power`'s except clause did not name that class -- so
+        the exception escaped to APScheduler instead of being logged and the
+        tick skipped.
+
+        Asserted at the call level rather than against an execution model on
+        purpose: the outcome under test *is* whether the scheduled tick
+        survives the exception, and no charging-power write happens on this
+        path at all once the read fails.
+        """
+        import requests
+
+        from core.bess.battery_system_manager import BatterySystemManager
+        from core.bess.price_manager import MockSource
+
+        monkeypatch.setattr(
+            "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+        )
+        system = BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource(arbitrage_prices),
+            addon_options={"inverter": {"platform": "growatt_server_min"}},
+        )
+        assert system._supports_charge_rate_control is True
+
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+        assert system._power_monitor is not None
+
+        system._inverter_controller.strategic_intents = ["IDLE"] * 96
+
+        def _raise_502(*_args, **_kwargs):
+            raise requests.RequestException(
+                "502 Server Error: Bad Gateway for url: "
+                "http://supervisor/core/api/states/select.allow_grid_charge"
+            )
+
+        monkeypatch.setattr(mock_controller, "grid_charge_enabled", _raise_502)
+
+        system.adjust_charging_power()  # must not raise
+
+    def test_unreadable_charge_rate_does_not_crash_adjust_charging_power(
+        self,
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same transient HA failure hitting the *second* read must not
+        crash the cron job either (issue #643).
+
+        `adjust_battery_charging` makes two HA reads. `get_charging_power_rate`
+        goes through `_get_raw_state`, which already degrades a
+        `RequestException` to `None` -- and `None` then reached
+        `abs(target_power - current_power)` as a `TypeError`, escaping the
+        5-minute job exactly as the unguarded first read did. A Supervisor
+        outage hits both entities, so covering only the first read would leave
+        which read the outage lands on deciding whether the tick survives.
+        """
+        from core.bess.battery_system_manager import BatterySystemManager
+        from core.bess.price_manager import MockSource
+
+        monkeypatch.setattr(
+            "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+        )
+        system = BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource(arbitrage_prices),
+            addon_options={"inverter": {"platform": "growatt_server_min"}},
+        )
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+        assert system._power_monitor is not None
+        system._inverter_controller.strategic_intents = ["IDLE"] * 96
+
+        # First read succeeds; the charge-rate read degrades to None.
+        monkeypatch.setattr(
+            mock_controller, "get_charging_power_rate", lambda *a, **k: None
+        )
 
         system.adjust_charging_power()  # must not raise

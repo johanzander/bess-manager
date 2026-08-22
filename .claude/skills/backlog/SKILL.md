@@ -492,7 +492,20 @@ Serialise, do not stack:
 ## Autonomous spend
 
 Exactly one action costs money without asking: firing Stage 2
-(`@claude-bot analyze`, ~$0.50–2) on an item entering Analysis that meets the
+(`@claude-bot analyze`, ~$0.50–2). **Post it as the PO, never as the
+maintainer:**
+
+    scripts/gh-agent.sh --as po issue comment <n> --body "@claude-bot analyze"
+
+`issue-analyze.yml`'s actor gate accepts `bess-product-owner` for exactly this
+trigger. It did not always, and the mismatch had a real cost: the rule
+authorised the PO to spend while the gate accepted only the repo owner, so the
+trigger went out as the maintainer — putting their name on comments they never
+wrote, and hiding which decisions were the agent's. An automation decision
+carries the automation's face. If this ever fails the gate, **that is the
+finding** — report it; do not route around it with plain `gh`.
+
+It fires on an item entering Analysis that meets the
 tier-1 bar from `Verb: next` directly — labelled `bug`, opened by someone
 other than the maintainer, with its debug log attached — **and that has no
 prior `@claude-bot analyze` comment already on the issue**. Check this by

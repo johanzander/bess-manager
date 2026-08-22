@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **Backlog rhythm no longer re-proposes a resume while a session is live in the worktree** — the digest now matches sessions by their launch directory, not only by `issue-<n>` name. ([#647](https://github.com/johanzander/bess-manager/issues/647))
+- **Beta release changelog merges no longer absorb the new section into the previous one** — the merge is now resolved deterministically instead of by hand. ([#648](https://github.com/johanzander/bess-manager/issues/648))
 
 ## [10.1.0] - 2026-08-22
 

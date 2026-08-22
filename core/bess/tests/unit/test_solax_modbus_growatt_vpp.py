@@ -129,7 +129,9 @@ class TestIntentToVpp:
         assert power_pct == 1
         assert enabled is True
 
-    def test_idle_at_reserve_floor_releases_remote_control(self, controller):
+    def test_idle_at_reserve_floor_releases_remote_control(
+        self, controller: SolaxModbusGrowattController
+    ) -> None:
         """#592: at the reserve floor the battery-first hold has nothing left
         to protect, but keeping remote control enabled re-asserts a command
         every period so the inverter (and its BMS) never sleeps.
@@ -150,7 +152,9 @@ class TestIntentToVpp:
         assert power_pct == 0
         assert enabled is False
 
-    def test_idle_above_reserve_floor_still_holds_battery_first(self, controller):
+    def test_idle_above_reserve_floor_still_holds_battery_first(
+        self, controller: SolaxModbusGrowattController
+    ) -> None:
         """#592 must not weaken #466: above the floor there IS energy being
         held back for a later peak, so the battery-first hold stays."""
         power_pct, enabled = controller._intent_to_vpp(

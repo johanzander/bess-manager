@@ -2,14 +2,15 @@
 Test the PriceManager implementation.
 """
 
-from datetime import timedelta
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
 
 from core.bess import time_utils
+from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import HomeAssistantSource, MockSource, PriceManager
 
 
-def test_direct_price_initialization():
+def test_direct_price_initialization() -> None:
     """Test initialization with direct prices."""
     mock_source = MockSource([1.0, 2.0, 3.0, 4.0])
     pm = PriceManager(
@@ -36,7 +37,7 @@ def test_direct_price_initialization():
     assert pm.get_sell_prices() == pm.sell_prices
 
 
-def test_spot_multiplier_applied_to_buy_price():
+def test_spot_multiplier_applied_to_buy_price() -> None:
     """Multiplicative spot adjustment must apply before markup/VAT (Luminus-style contracts)."""
     mock_source = MockSource([1.0])
     pm = PriceManager(
@@ -57,7 +58,7 @@ def test_spot_multiplier_applied_to_buy_price():
     assert pm.sell_prices[0] == expected_sell_price
 
 
-def test_spot_multiplier_defaults_to_no_adjustment():
+def test_spot_multiplier_defaults_to_no_adjustment() -> None:
     """Omitting spot_multiplier/export_spot_multiplier must reproduce the additive-only formula."""
     mock_source = MockSource([1.0])
     pm = PriceManager(
@@ -73,7 +74,7 @@ def test_spot_multiplier_defaults_to_no_adjustment():
     assert pm.sell_prices[0] == 1.0 + 0.2
 
 
-def test_controller_price_fetching():
+def test_controller_price_fetching() -> None:
     """Test price fetching from controller."""
     mock_controller = MagicMock()
 
@@ -98,7 +99,7 @@ def test_controller_price_fetching():
         for m in [0, 15, 30, 45]
     ]
 
-    def mock_api_request(method, path):
+    def mock_api_request(method: str, path: str) -> dict | None:
         if "sensor.nordpool_kwh_se4_sek_2_10_025" in path:
             # Return both today and tomorrow data for the same entity
             return {
@@ -156,7 +157,7 @@ def test_controller_price_fetching():
     assert tomorrow_prices[0]["sellPrice"] == tomorrow_expected_sell_price
 
 
-def test_mock_source():
+def test_mock_source() -> None:
     """Test using a MockSource."""
     mock_source = MockSource([1.0, 2.0, 3.0, 4.0])
 
@@ -184,7 +185,7 @@ def test_mock_source():
     assert today_prices[0]["sellPrice"] == expected_sell_price
 
 
-def test_home_assistant_source_vat_parameter():
+def test_home_assistant_source_vat_parameter() -> None:
     """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
     mock_controller = MagicMock()
 
@@ -201,7 +202,7 @@ def test_home_assistant_source_vat_parameter():
                 }
             )
 
-    def mock_api_request(method, path):
+    def mock_api_request(method: str, path: str) -> dict | None:
         if "sensor.nordpool_kwh_se4_sek_2_10_025" in path:
             return {"attributes": {"raw_today": raw_today_data}}
         return None
@@ -229,7 +230,7 @@ def test_home_assistant_source_vat_parameter():
     assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667
 
 
-def test_get_available_prices_today_only():
+def test_get_available_prices_today_only() -> None:
     """Should return today's prices at quarterly resolution when tomorrow unavailable."""
     mock_source = MockSource(
         test_prices=[0.5] * 96
@@ -257,7 +258,7 @@ def test_get_available_prices_today_only():
         assert all(b == buy[0] for b in buy)
 
 
-def test_get_available_prices_today_and_tomorrow():
+def test_get_available_prices_today_and_tomorrow() -> None:
     """Should return today + tomorrow at quarterly resolution when both available."""
     mock_source = MockSource(
         test_prices=[0.5] * 96
@@ -290,7 +291,7 @@ def test_get_available_prices_today_and_tomorrow():
         assert all(b == pm._calculate_buy_price(0.6) for b in buy[96:])
 
 
-def test_get_available_prices_returns_full_arrays_from_midnight():
+def test_get_available_prices_returns_full_arrays_from_midnight() -> None:
     """Should return quarterly arrays starting from 00:00 (not current time)."""
     mock_source = MockSource(test_prices=[0.5] * 96)
     pm = PriceManager(
@@ -325,7 +326,7 @@ def test_get_available_prices_returns_full_arrays_from_midnight():
         assert buy[56] != buy[57]  # Different quarters have different prices
 
 
-def test_get_available_prices_returns_tuple():
+def test_get_available_prices_returns_tuple() -> None:
     """Should return a tuple of (buy_prices, sell_prices)."""
     mock_source = MockSource(
         test_prices=[0.5] * 96
@@ -351,3 +352,94 @@ def test_get_available_prices_returns_tuple():
         assert isinstance(sell, list)
         assert len(buy) == 96
         assert len(sell) == 96
+
+
+class CountingSource(MockSource):
+    """MockSource that records how often it is fetched and probed.
+
+    Both counters are the health check's real cost: every probe is a live
+    service call to Home Assistant (#662).
+    """
+
+    def __init__(self, test_prices: list, fetch_fails: bool = False) -> None:
+        super().__init__(test_prices)
+        self.fetch_count = 0
+        self.probe_count = 0
+        self.fetch_fails = fetch_fails
+
+    def get_prices_for_date(self, target_date: date) -> list:
+        self.fetch_count += 1
+        if self.fetch_fails:
+            raise PriceDataUnavailableError(
+                date=target_date, message="Nordpool service call failed"
+            )
+        return self.test_prices
+
+    def perform_health_check(self) -> dict:
+        self.probe_count += 1
+        if self.fetch_fails:
+            return {
+                "status": "ERROR",
+                "checks": [
+                    {
+                        "name": "CountingSource",
+                        "status": "ERROR",
+                        "error": "Nordpool service call failed",
+                    }
+                ],
+            }
+        return super().perform_health_check()
+
+
+def _counting_price_manager(source: CountingSource) -> PriceManager:
+    return PriceManager(
+        price_source=source,
+        markup_rate=0.0,
+        vat_multiplier=1.0,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE4",
+    )
+
+
+def test_health_check_reports_from_cache_without_probing_the_source() -> None:
+    """Holding today's prices leaves nothing for a live call to prove.
+
+    The health check runs every 5 minutes and the source probe is a live Home
+    Assistant service call, so re-proving data that changes once a day is what
+    turned a transient upstream 500 into a daily error/recovery banner (#662).
+    """
+    source = CountingSource([1.0] * 96)
+    pm = _counting_price_manager(source)
+
+    pm.get_today_prices()
+    fetches_after_warmup = source.fetch_count
+
+    for _ in range(3):
+        result = pm.check_health()
+
+    assert result[0]["status"] == "OK"
+    assert source.probe_count == 0
+    assert source.fetch_count == fetches_after_warmup
+
+
+def test_health_check_probes_the_source_when_today_is_not_cached() -> None:
+    """A cold cache has nothing to report from, so the probe must still happen."""
+    source = CountingSource([1.0] * 96)
+    pm = _counting_price_manager(source)
+
+    result = pm.check_health()
+
+    assert result[0]["status"] == "OK"
+    assert source.probe_count == 1
+
+
+def test_health_check_reports_error_when_the_cold_probe_fails() -> None:
+    """Without today's prices the system genuinely cannot optimize — still ERROR."""
+    source = CountingSource([1.0] * 96, fetch_fails=True)
+    pm = _counting_price_manager(source)
+
+    result = pm.check_health()
+
+    assert result[0]["status"] == "ERROR"
+    assert source.probe_count == 1

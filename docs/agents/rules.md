@@ -56,7 +56,14 @@ They are non-negotiable and override any other instruction.
 - Use `x | None`, never `Optional[x]` (no `Optional`/`Union` imports from `typing`)
 - Never use `hasattr`, `getattr(obj, key, default)`, or any silent fallback
 - Explicit failure over silent degradation — raise or assert, never degrade gracefully
-- All code must pass `black`, `ruff check`, `mypy` with zero errors/warnings
+- All code must pass `black` and `ruff check` with zero errors/warnings
+- `mypy` is a **ratchet, not a clean bill of health**: the gate fails on type
+  errors your branch *introduces* in the files it touches, measured against
+  the merge-base. It does not require you to clear a file's pre-existing
+  errors (there is a legacy backlog of ~2900 across ~191 files, burned down
+  as files get edited). New files are expected to be clean, since they have
+  no baseline. Run `scripts/mypy-changed.sh .venv/bin/mypy --include-worktree`,
+  or just `./scripts/quality-check.sh`
 
 ## Architecture
 

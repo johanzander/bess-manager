@@ -55,8 +55,25 @@ fi
 issues=$(gh issue list --repo "$repo" --state open --limit 200 \
   --json number,title,labels,author,createdAt,updatedAt,comments,body)
 
+# GitHub computes `mergeable` LAZILY: the first query on a cold PR returns
+# UNKNOWN and triggers the computation, so a single pass would report UNKNOWN
+# as if it were a verdict. Re-query until no open PR is still UNKNOWN -- the
+# budget covers the #490 measurement, which stayed UNKNOWN for six consecutive
+# passes -- because the digest must never hang on a cold PR. A PR left UNKNOWN
+# after the budget is emitted as null in `prs_for` below, so it never
+# masquerades as a definite state.
+MERGE_RETRY_LIMIT="${MERGE_RETRY_LIMIT:-6}"
+MERGE_RETRY_SLEEP="${MERGE_RETRY_SLEEP:-2}"
 prs=$(gh pr list --repo "$repo" --state open --limit 100 \
   --json number,title,headRefName,mergeable,body,isDraft)
+merge_attempts=0
+while printf '%s' "$prs" | jq -e 'any(.[]; .mergeable == "UNKNOWN")' >/dev/null 2>&1 \
+      && [ "$merge_attempts" -lt "$MERGE_RETRY_LIMIT" ]; do
+  merge_attempts=$((merge_attempts + 1))
+  sleep "$MERGE_RETRY_SLEEP"
+  prs=$(gh pr list --repo "$repo" --state open --limit 100 \
+    --json number,title,headRefName,mergeable,body,isDraft)
+done
 
 # The EXACT half of the collision gate: what every open PR already touches.
 # One gh pr diff per open PR, bounded by the WIP limit in practice. The
@@ -110,7 +127,13 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
   | jq -c '[ .[] | {
       number,
       headRefName,
-      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs) #([0-9]+)") | .[0] | tonumber ]
+      # WORK references only -- the closing verbs plus the no-auto-close
+      # spellings (`Part of`, `tracking`, `Refs`). Deliberately NOT bare `#N`:
+      # a merged PR body can name other issues without working on them
+      # ("until #456 and #457 are also resolved"), and a merged PR must not
+      # flip an unrelated issue to In Verification. Drives both `merged_pr`
+      # (the column) and `merged_prs` (the visibility list).
+      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
@@ -206,12 +229,33 @@ jq -n \
   def resume_count($comments):
     [ $comments[]? | select((.body // "") | contains("<!-- resume-handoff -->")) ] | length;
 
-  # `refs` joins the closing verbs deliberately. The project rule is that a beta
-  # or intermediate PR must NOT close the reporters issue -- only the graduation
-  # PR does -- so an intermediate PR carries `Refs #N` and would otherwise
-  # associate with nothing at all.
+  # LINKAGE is any `#N` reference in the body, not just the closing verbs. The
+  # no-auto-close rule forbids `Closes #N` on an intermediate PR -- it says
+  # `Part of #N`, `tracking #N`, `Refs #N`, or a bare `#N` -- so a digest that
+  # links by closing keyword only makes that PR invisible (the #409/#490
+  # defect). Whether the work has LANDED is the merged-PR scan above, which is
+  # deliberately narrower (work verbs only) so a merged PR that merely names
+  # another issue cannot flip it to In Verification; linkage here is the broad
+  # any-`#N` net for OPEN PRs. The number is bounded on both sides so `#2409`
+  # does not match issue 409 and `#4095` does not match 409.
+  #
+  # Cross-references that name an issue WITHOUT claiming to work on it are
+  # stripped before matching, so they neither link nor orphan-claim: the
+  # documented `Blocked by #N` convention, `Depends on`, `Unblocks`,
+  # `Related to` (and `unrelated to`), `Relationship to`, `Follow-up to`,
+  # `See also`. Real bodies use these -- "Related to #403. Not closing it",
+  # "unblocks #485", "unrelated to #402" -- and linking on them would flip an
+  # unrelated issue to In Review. Stripping the PHRASE, not the whole
+  # line, keeps a combined reference like "- Blocked by #100 -- part of #409"
+  # working: only the blocker phrase disappears and #409 still links. The
+  # remaining test is still any `#N`, so the no-auto-close spellings
+  # (`Part of #N`, `tracking #N`, `Refs #N`, bare `#N`) all link.
+  def linkage_body($body):
+    ($body // "")
+    | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "");
+
   def pr_matches_issue($p; $n):
-    ($p.body // "" | test("(?i)(fixes|closes|resolves|refs) #\($n)\\b"))
+    (linkage_body($p.body) | test("(?i)(^|[^0-9])#\($n)\\b"))
     or ($p.headRefName | test("issue-\($n)(\\D|$)"));
 
   # Returns EVERY matching PR, ascending. Taking `[0]` discarded the rest, and
@@ -219,7 +263,11 @@ jq -n \
   # derived from whichever happened to sort first.
   def prs_for($n):
     [ $prs[] | select(pr_matches_issue(.; $n))
-             | {number: .number, mergeable: .mergeable, isDraft: .isDraft} ]
+             | {number: .number,
+                # A mergeable still UNKNOWN after the retry loop is not a
+                # verdict -- report null so no consumer reads it as definite.
+                mergeable: (if .mergeable == "UNKNOWN" then null else .mergeable end),
+                isDraft: .isDraft} ]
     | sort_by(.number);
 
   # Matches a worktree whose path OR branch contains the issue number in a
@@ -457,6 +505,14 @@ jq -n \
           last_comment: last_comment(.comments; .author.login),
           priority: $prio,
           prs: $open_prs,
+          # Every merged PR whose body references this issue with a WORK verb
+          # (`fixes/closes/resolves/refs/part of/tracking`) -- the visibility
+          # list. `merged_pr` above is the first in the order `gh` returns
+          # (the most recent merge) and drives the In Verification column; this
+          # plural exposes all of them, sorted, so a merged
+          # intermediate PR (`Part of #N`, which must not close the issue)
+          # stays visible even alongside later PRs.
+          merged_prs: ([ $merged_prs[] | select((.refs | index($i.number)) != null) | .number ] | sort),
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),

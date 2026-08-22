@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Backlog digest now links a PR to its issue on any `#N` reference, not just closing keywords** — a "Part of #N" PR no longer leaves its issue showing In Progress. ([#652](https://github.com/johanzander/bess-manager/issues/652))
 - **Beta release changelog merges no longer absorb the new section into the previous one** — the merge is now resolved deterministically instead of by hand. ([#648](https://github.com/johanzander/bess-manager/issues/648))
 
 ## [10.1.0] - 2026-08-22

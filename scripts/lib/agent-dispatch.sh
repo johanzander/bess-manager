@@ -210,6 +210,19 @@ dispatch_run_args() {
     "${DISPATCH_AGENT_AUTH[@]}"
   )
 
+  # The clone carries the repo's tracked .claude/settings.json -- host-interactive
+  # policy (ask rules for `gh api`, git-stash denials, the macOS sandbox block) that
+  # has no meaning for a headless agent and stalls it: a headless ask is a hard
+  # denial, and --dangerously-skip-permissions does NOT override project ask rules
+  # (verified live on the first dispatch: implement-issue died on `gh api`). Shadow
+  # the clone's file with a container-scoped, read-only bypass so the container sees
+  # permissive policy while the host clone and interactive sessions keep the real one.
+  if [ -f "$DISPATCH_REPO_ROOT/container/agent-settings.json" ]; then
+    DISPATCH_RUN_ARGS+=(
+      -v "$DISPATCH_REPO_ROOT/container/agent-settings.json:$clone_dir/.claude/settings.json:ro"
+    )
+  fi
+
   if [ "$with_compose" = true ]; then
     DISPATCH_RUN_ARGS+=(
       -v "$DISPATCH_PODMAN_SOCK:/run/podman/podman.sock"

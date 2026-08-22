@@ -173,13 +173,15 @@ RUN mkdir -p /opt/ms-playwright \
     && chown -R ${AGENT_UID}:${AGENT_UID} "${MAIN_CHECKOUT}" /opt/ms-playwright
 
 # --- Agent configuration -----------------------------------------------------
-# The permissive mode the whole phase is for. This is the container's OWN
-# ~/.claude/settings.json, not the repo's: the clone brings its own tracked
-# .claude/settings.json along, and that one still carries the host's macOS
-# sandbox block, which is meaningless in here. Project settings win over user
-# settings in Claude Code, so run-agent.sh also passes
-# --dangerously-skip-permissions; this file is the belt to that's braces, and
-# documents the intent where someone will actually look for it.
+# The permissive mode the whole phase is for. This user-level
+# ~/.claude/settings.json documents intent, but it is NOT what makes the
+# container permissive: the clone brings the repo's tracked .claude/settings.json
+# along, project settings win over user settings in Claude Code, and
+# --dangerously-skip-permissions does NOT override a project's `ask` rules (a
+# headless ask is a hard denial -- implement-issue died on `gh api` on the first
+# live dispatch). The real override is a read-only bind mount of
+# container/agent-settings.json over the clone's .claude/settings.json, applied
+# by scripts/lib/agent-dispatch.sh.
 RUN mkdir -p /home/agent/.claude \
     && printf '%s\n' '{"permissions": {"defaultMode": "bypassPermissions"}}' \
         > /home/agent/.claude/settings.json \

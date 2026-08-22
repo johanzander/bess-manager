@@ -45,7 +45,14 @@ echo "---------------------------"
 
 if PYTEST=$(py_tool pytest); then
     echo "🔸 Running fast tests (use '$PYTEST' directly to include slow algorithm tests)..."
-    if ! "$PYTEST" -m "not slow" --tb=short -q; then
+    if [ "${BESS_HEADLESS_MODE:-0}" = "1" ]; then
+        # test_agent_permissions.py pins the HOST .claude/settings.json profile,
+        # which a dispatched container replaces with container/agent-settings.json
+        # (bypassPermissions by design -- the container is the boundary). The pins
+        # do not apply there, so exclude the file.
+        PYTEST_IGNORE_PERM="--ignore=backend/tests/test_agent_permissions.py"
+    fi
+    if ! "$PYTEST" -m "not slow" --tb=short -q ${PYTEST_IGNORE_PERM:-}; then
         echo "❌ Tests failed"
         ERRORS=$((ERRORS + 1))
     else
@@ -206,7 +213,14 @@ echo "-------------------------------------------"
 # bare failing statement, so a plain heredoc here would skip the ERRORS
 # increment, the checks below it, AND the final summary -- a missing rule would
 # stop the run mid-file with no verdict, which is the opposite of a gate.
-if ! python3 - <<'PY'
+#
+# These assertions validate the repo's committed .claude/settings.json. A
+# dispatched container shadows that file with container/agent-settings.json --
+# bypassPermissions by design, since the container is the boundary -- so the
+# assertions do not apply there. They still run on the host, where they matter.
+if [ "${BESS_HEADLESS_MODE:-0}" = "1" ]; then
+    echo "⏭️  Skipping permission-surface check (headless container mode)"
+elif ! python3 - <<'PY'
 import json, re, sys
 
 # Patterns match the command AS WRITTEN -- prefix globbing, no normalisation.

@@ -344,6 +344,54 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
 - **Create worktrees with `EnterWorktree`, never `git worktree add` from Bash** —
   the harness is not sandboxed; the Bash form writes `.git/config` and
   `.git/worktrees`, both denied. *(measured)*
+- **`git worktree remove` is denied too, and unlike `add` it fails
+  DESTRUCTIVELY.** Removal deletes the working tree *first*, then unlinks
+  `.git/worktrees/<name>` — and that unlink is the denied one:
+
+  ```
+  error: failed to delete '.../.claude/worktrees/backlogger': Operation not permitted
+  error: failed to delete '.git/worktrees/backlogger': Operation not permitted
+  ```
+
+  By then it has already deleted several hundred tracked files. It does not
+  roll back. What is left is a **carcass**: a registered worktree whose
+  `git status` is a few hundred ` D` lines and nothing else. That reads as
+  "uncommitted changes" to every later prune, so the worktree is now
+  permanently unprunable *by the failure itself* — re-running the removal
+  hits the no-`--force` refusal instead, and `--force` re-hits the denial.
+
+  Because the filename set is identical in every worktree, so is APFS's
+  readdir order, so every carcass loses the **same** ~393 paths (`core/`,
+  `frontend/`, `bess_manager/`, `pyproject.toml`, `Dockerfile`, …). Identical
+  damage across many worktrees is the signature — do not read it as a
+  coincidence or as real edits. *(measured — 13 carcasses accumulated over
+  three sweeps before anyone noticed)*
+
+  The denial is precisely on the `.git/worktrees/<name>` unlink, **not** on the
+  working tree: `rm -rf .claude/worktrees/<name>` from Bash succeeds. So an
+  agent can always destroy the files and never the registration. Do not
+  half-do it — that converts a carcass into a `prunable` phantom, which still
+  needs the same unsandboxed fix. *(measured)*
+
+- **`git worktree prune` is denied by the same unlink, and it EXITS 0 while
+  failing.** *(measured)* This is the nastier of the two:
+
+  ```
+  $ git worktree prune -v; echo "exit=$?"
+  Removing worktrees/backlogger: gitdir file points to non-existent location
+  error: failed to delete '.../.git/worktrees/backlogger': Operation not permitted
+  exit=0
+  ```
+
+  The entry survives and `git worktree list` keeps showing it, now tagged
+  `prunable`. `remove` at least exits 255; `prune` reports success, so
+  `git worktree prune && echo done` prints `done` having done nothing. Never
+  infer from its exit status — re-check `git worktree list`.
+
+  **So there is no in-sandbox path to removing a worktree**, by either verb.
+  It has to run unsandboxed — the maintainer pastes it with a `!` prefix, or
+  the harness does it via `ExitWorktree` (which only ever covers the session's
+  own `EnterWorktree` worktree, not a pre-existing one).
 - **`git checkout -b <branch> origin/<branch>` fails**, because recording the
   upstream writes `.git/config` — and it fails *after* creating the branch, so
   the branch exists while the command reports an error and leaves you on the
@@ -362,6 +410,29 @@ primitive for writes (reads have one, which is why `allowRead` differs), so no
   <branch>` rather than re-pushing, and don't read the message as a failed
   push. Use a plain `git push origin <branch>`; nothing in this repo's flow
   needs the upstream recorded. *(measured)*
+- **`git branch -D` prints a `.git/config` error and deletes the branch
+  anyway**, exiting 0 with the noise on stderr:
+
+  ```
+  $ git branch -D worktree-backlogger; echo "exit=$?"
+  error: could not lock config file .../.git/config
+  warning: update of config-file failed
+  Deleted branch worktree-backlogger (was 6c70a77d).
+  exit=0
+  ```
+
+  Delete completed the part that matters: refs are not denied (next bullet),
+  so the ref is gone. The config write it wanted was to drop the branch's
+  `[branch "<name>"]` stanza — and **nothing was left behind**, verified by
+  grepping `.git/config` afterwards, because the branch never had a stanza to
+  drop. That is the general case under this sandbox rather than luck: writing
+  one requires `git push -u` or `checkout -b --track`, both of which are
+  denied by the two bullets above, so branches created here have no stanza.
+  A branch predating the sandbox could still have one; whether `-D` then
+  strands it is untested.
+
+  Either way, do not re-run the delete on seeing the error and do not report
+  the branch as still present — check `git branch --list <name>`. *(measured)*
 - **`.git/objects`, refs and the index are NOT denied**, so commit, branch,
   reset and reflog work normally. *(measured — this is the one that matters)*
 - The agent-config files are denied individually — `.claude/settings.json`,

@@ -11,9 +11,20 @@
    Commit as `git commit -am "release: v<beta-version>"`. Pushing this single commit (not raw `origin/main`) is what keeps the beta repo from ever momentarily claiming to be the prod add-on.
 4. **Copy the changelog, don't author it** — on the same `beta-release-tmp` branch from step 3, take the current `## [Unreleased]` section verbatim from `origin/main`'s `CHANGELOG.md` (synced in step 1) and rename it to `## [<beta-version>] - <date>` in `CHANGELOG.md`. Amend it into the same commit (`git commit --amend`) rather than adding a second commit.
 
-   **First, detect PRs merged since the last beta with no changelog entry at all.** Get the previous beta release's publish timestamp (`gh release view v<prev-beta-version> -R johanzander/bess-manager-beta --json publishedAt`), then list every `(#N)`-tagged merge commit on `origin/main` since it: `git log origin/main --oneline --since="<prev-beta-release-timestamp>"`. For each PR number found, grep `CHANGELOG.md`'s `Unreleased` section for a matching `#N` link. Any PR with no match is a real gap — it merged without a changelog entry, not just already-shipped content to curate away. Do not silently drop these: read the PR's diff/description (`gh pr view <N> --repo johanzander/bess-manager`), judge whether it's user-facing (a real user would notice the behavior/UI change) or purely internal (refactor, CI wiring, doc/skill-only) — internal PRs correctly have no entry and need none — then for user-facing gaps draft a one-line entry in the existing style and present it in chat for confirmation. Once confirmed, add it both to `origin/main` (a small separate PR against `origin/main`'s `CHANGELOG.md` `Unreleased` section, since that file is the canonical source of truth for every future release, per `CLAUDE.md`) and to this beta's `## [<beta-version>]` section.
+   **Let `scripts/check-changelog.py check` do the gap detection and the curation — don't hand-grep.** On this `beta-release-tmp` branch, run it against the section you just renamed:
 
-   **Then curate, don't dump.** `origin/main`'s `Unreleased` section only ever grows — it's cleared by a *stable* release, not a beta one — so by the second beta release it typically contains content already shipped in an earlier `bN`. Check each entry's PR against `git log --oneline origin/main | grep '(#N)'` relative to the previous beta release's sync-point commit (the last "chore: re-sync..." or release PR merge on `origin/main`); anything that merged *before* that point already shipped and must be dropped from this release's section, not re-listed. Keep only what's new since the last beta, plus a one-line note pointing at the previous release for context (see the `v9.9.0b10`/`v9.9.0b11` entries for the pattern). Getting this wrong silently double-announces old work as new in every subsequent release — it compounds.
+   ```
+   scripts/check-changelog.py check --changelog CHANGELOG.md \
+     --since-ref "$(git merge-base origin/main beta/main)" --section <beta-version>
+   ```
+
+   `--since-ref` is the previous beta's sync point — the merge-base of `origin/main` and `beta/main` — which is precise, unlike the previous release's *publish* timestamp (a PR can merge after the cut but before the release is published). `--section <beta-version>` targets the renamed `## [<beta-version>]` section explicitly rather than assuming it is the topmost `## [` heading (finding: after a stable release, the topmost section is the stable version).
+
+   `check` asserts two invariants against that section (with `--beta-ref`/`--beta-file` omitted it skips the prepend-only check, which only makes sense after the step-5 merge):
+   - **coverage** — every `(#N)` merge commit on `origin/main` since the previous beta's sync point must appear as a `[#N](...)` link in this section — by its PR number or by an issue it references. A missing link is a real gap: it merged with no changelog entry, not just already-shipped content to curate away. Do not silently drop it.
+   - **no re-announcing** — every `[#N](...)` link in this section must correspond to a PR that merged *after* that same sync point (by its number or a referenced issue). Anything merged before already shipped in an earlier `bN` and must be dropped, not re-listed (see the `v9.9.0b10`/`v9.9.0b11` entries for the pattern). Getting this wrong silently double-announces old work as new in every subsequent release — it compounds.
+
+   Iterate until `check` exits 0. When it flags a coverage gap, read the PR's diff/description (`gh pr view <N> --repo johanzander/bess-manager`) and judge whether it's user-facing (a real user would notice the behavior/UI change) or purely internal (refactor, CI wiring, doc/skill-only) — internal PRs correctly have no entry and need none, so add their numbers to a comma-separated `--internal` list and re-run. For user-facing gaps, draft a one-line entry in the existing style and present it in chat for confirmation. Once confirmed, add it both to `origin/main` (a small separate PR against `origin/main`'s `CHANGELOG.md` `Unreleased` section, since that file is the canonical source of truth for every future release, per `CLAUDE.md`) and to this beta's `## [<beta-version>]` section.
 5. **Merge `beta/main` into this branch — expect exactly two conflicts, and that's normal, not an error:**
 
    ```
@@ -22,7 +33,24 @@
 
    `beta/main`'s tip is never an ancestor of `origin/main` after the very first beta release (its own version-stamp commit only exists there), so this is never a fast-forward and a plain merge is the correct tool going forward — a failed `--ff-only` here does *not* mean the "beta never gets its own commits" rule was broken. Two conflicts are guaranteed by construction and mechanical to resolve:
    - `bess_manager/config.yaml`'s `version:` line — keep **ours** (the new `bN` this release just set in step 3).
-   - `CHANGELOG.md`'s heading — keep **ours** (the new version heading + step 4's curated entries), then make sure the previous release's already-published section (which `beta/main` has and this branch doesn't) still appears immediately below it. If your merge tool put it somewhere else or dropped it, fix that before committing — the historical section must survive.
+   - `CHANGELOG.md`'s heading — don't resolve it by hand. The 3-way merge cannot express "append step 4's new section onto beta's accumulated history", so it collapses the new section into the previous one (issue #648) or misplaces the historical section. Resolve deterministically instead — extract both conflicted sides, rebuild, then re-verify:
+
+     ```
+     git show :2:CHANGELOG.md > changelog-new.md
+     git show :3:CHANGELOG.md > changelog-beta.md
+     scripts/check-changelog.py build --new changelog-new.md --beta changelog-beta.md --out CHANGELOG.md
+     rm changelog-new.md changelog-beta.md
+     ```
+
+     `build` keeps beta/main's published history verbatim and inserts the new version section after the preamble — byte-stable, no section collapse. Then re-run the full invariant check against beta, now including prepend-only:
+
+     ```
+     scripts/check-changelog.py check --changelog CHANGELOG.md \
+       --since-ref "$(git merge-base origin/main beta/main)" --section <beta-version> \
+       --beta-ref beta/main --internal <comma-separated internal PRs>
+     ```
+
+     It must exit 0: coverage (every PR merged since the last beta is listed — by PR number or a referenced issue), no re-announcing (nothing already shipped is re-listed), and prepend-only (stripping the new section leaves beta/main's file byte-for-byte). If it fails, `build` was not the only resolution that happened — investigate before committing.
 
    Any *other* file conflicting is not expected and needs real investigation (usually: `origin/main` moved between when this branch's base was chosen and now, surfacing content `beta/main` hasn't seen — resolve by taking the newer, `origin/main`-based side, since that's always the more current code). Commit the resolution as `git commit -m "merge: reconcile beta/main history for v<beta-version> release"`.
 6. **Run tests locally** — ALL of these must pass before proceeding:

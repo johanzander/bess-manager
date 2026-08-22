@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Beta release changelog merges no longer absorb the new section into the previous one** — the merge is now resolved deterministically instead of by hand. ([#648](https://github.com/johanzander/bess-manager/issues/648))
+
 ## [10.1.0] - 2026-08-22
 
 ### Added

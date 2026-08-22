@@ -52,11 +52,14 @@ frontend/node_modules` first) rather than installing through it. Re-running
 **An agent should run end-to-end without approving anything that the sandbox
 already contains.** Prompts are the cost, not the safety: a stalled autonomous
 run is a guaranteed loss, while anything the sandbox bounds is recoverable.
-`rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D`, `git worktree
-remove` all run unattended. **`git push` also runs unattended, in every
-spelling including `--force`** — not because pushing is safe, but because the
-refs worth protecting are protected on GitHub itself. See "Pushing is guarded
-server-side" below.
+`rm`, `git reset --hard`, `rebase`, `merge`, `git branch -D` all run
+unattended. **`git worktree remove`/`prune` are the one exception to that
+list** — the sandbox does not make them safe, it makes them destructively
+unsafe (see "What stays denied" below): they delete the working tree before
+failing on the denied `.git/worktrees/<name>` unlink. **`git push` also runs
+unattended, in every spelling including `--force`** — not because pushing is
+safe, but because the refs worth protecting are protected on GitHub itself. See
+"Pushing is guarded server-side" below.
 
 What still asks is one closed list, and every entry is there because the
 **sandbox cannot contain it** — it bounds the filesystem, not the network, and
@@ -83,7 +86,7 @@ deletion, which is a real bypass. When the choice is between a false prompt and
 a hole, take the prompt. The one case where that trade flips is `deny`, which has no
 override: an over-broad deny **blocks** documented work rather than prompting
 for it, which is why `git prune` has no twin (it caught `git worktree prune`,
-and Step 4 prunes in a loop) and why the stash twins are per-verb.
+which the Step 4 loop used to run) and why the stash twins are per-verb.
 
 Denied outright: the shared podman VM (`machine rm`, `system reset`) and every
 mutating `git stash` form, **including `git -C <path> stash …`**. That last
@@ -309,6 +312,11 @@ must match **nothing**.
 from the actual syscall rather than guessed from a command string. That is why
 `rm -rf` needs no prompt: outside the repo it cannot create *or* unlink — the
 macOS profile denies `file-write-create` and `file-write-unlink` in one rule.
+**`git worktree remove`/`prune` are the one destructive exception**: their
+denied write is the `.git/worktrees/<name>` unlink, which comes *after* the
+working tree is already gone, so the sandbox does not bound their damage — it
+causes it. The bullets below are the measured record; never call either verb
+from sandboxed Bash.
 
 **`allowWrite` must name the repo root, and that is the whole trick.** Writes
 are `allowOnly` minus `denyWithinAllow`, and the built-in `allowOnly` is only
@@ -621,12 +629,15 @@ The full procedure, including the staged-changes variant, is in
 There is no cwd-conditional behaviour left, so nothing changes when a session
 enters a worktree.
 
-**Don't add a prompt where git already refuses.** `git branch -D` and plain
-`git worktree remove` are deliberately not in the `ask` list: git itself blocks
-the dangerous case (it won't delete a branch checked out in another worktree,
-and won't remove a worktree holding uncommitted or untracked files). A second
-prompt there buys nothing and costs a stall on every run — `implement-issue`
-Step 4's prune loop alone would have hit ~24 of them.
+**Don't add a prompt where git already refuses.** `git branch -D` is
+deliberately not in the `ask` list: git refuses to delete a branch checked out
+in another worktree, so nothing a prompt would add is real. `git worktree
+remove`/`prune` are not in the list either, but for a different reason — a
+prompt cannot make them safe, because it does not un-deny the sandboxed
+`.git/worktrees/<name>` unlink that corrupts an otherwise-clean worktree
+mid-removal (see "What stays denied" above). The guard is that the skills never
+call them from sandboxed Bash: they report `PRUNE`/`CARCASS`/`PHANTOM` and emit
+a `!`-prefixed command for the maintainer instead.
 
 **GitHub now refuses the dangerous pushes, which is the same reasoning one
 layer out.** `--force`, `--force-with-lease` and `+refspec` all used to ask,

@@ -116,24 +116,52 @@ def _gh_shim(
     prs: list,
     project_items: list,
     merged_prs: list | None = None,
+    pr_files: dict[int, list[str]] | None = None,
+    fail_pr_diff: list[int] | None = None,
 ) -> str:
-    """A `gh` that answers the four subcommands the digest calls.
+    """A `gh` that answers the subcommands the digest calls.
 
     `pr list` is called twice with different `--state` values, so this shim
     branches on the whole argument string rather than just `$1 $2`. Matching
     only the subcommand returned the OPEN list for both calls, which made every
     open PR look merged and reported every issue as having landed.
+
+    `pr diff <n> --name-only` answers from `pr_files`, keyed by PR number. The
+    match requires `--name-only` literally in the call -- a shim that answered
+    from the subcommand alone could not catch the digest asking for the full
+    diff (or forgetting the flag entirely) and paying for -- or mis-parsing --
+    the whole patch instead of a bare path list.
+
+    `fail_pr_diff` lists PR numbers whose `pr diff --name-only` call exits
+    non-zero, simulating a deleted fork head, a rate limit, or a transient
+    network error -- the case `undiffable_prs` exists to record rather than
+    crash on.
     """
+    files_by_pr = {str(k): v for k, v in (pr_files or {}).items()}
+    fail_ns = {str(n) for n in (fail_pr_diff or [])}
     return f"""
 merged=$(cat <<'EOF'
 {json.dumps(merged_prs or [])}
 EOF
 )
+pr_files_json=$(cat <<'EOF'
+{json.dumps(files_by_pr)}
+EOF
+)
+fail_ns='{" ".join(sorted(fail_ns))}'
 case "$*" in
   *"issue list"*) cat <<'EOF'
 {json.dumps(issues)}
 EOF
     ;;
+  *"pr diff "*"--name-only"*)
+    n=$(printf '%s' "$*" | awk '{{for(i=1;i<=NF;i++) if($i=="diff"){{print $(i+1); exit}}}}')
+    for f in $fail_ns; do
+      if [ "$f" = "$n" ]; then echo "gh: unable to diff PR $n" >&2; exit 1; fi
+    done
+    printf '%s' "$pr_files_json" | jq -r --arg n "$n" '(.[$n] // [])[]'
+    ;;
+  *"pr diff"*) echo "gh pr diff missing --name-only: $*" >&2; exit 1 ;;
   *"pr list"*"--state merged"*) printf '%s\\n' "$merged" ;;
   *"pr list"*) cat <<'EOF'
 {json.dumps(prs)}
@@ -192,6 +220,229 @@ def _issue(number: int, **over: object) -> dict:
 
 def _comment(login: str, body: str = "...", at: str = "2026-08-10T00:00:00Z") -> dict:
     return {"body": body, "author": {"login": login}, "createdAt": at}
+
+
+def _pr(number: int, **over: object) -> dict:
+    """A PR as `gh pr list --json ...` returns it to the digest."""
+    pr: dict = {
+        "number": number,
+        "title": f"pr {number}",
+        "body": "",
+        "headRefName": f"fix/pr-{number}",
+        "isDraft": True,
+        "mergeable": "MERGEABLE",
+    }
+    pr.update(over)
+    return pr
+
+
+def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
+    """The no-auto-close rule means a beta PR and a graduation PR both point at
+    one issue. Returning only the first made the second invisible to every
+    board pass, and derived the column from an arbitrary one of the two.
+
+    Branch names here deliberately carry NO issue number, so the association is
+    proved by the body reference alone -- including the new `Refs` verb, which
+    is the only spelling an intermediate PR is allowed."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(500, labels=[{"name": "bug"}])],
+            [
+                _pr(501, body="Refs #500", headRefName="fix/beta-work"),
+                _pr(
+                    502,
+                    body="Closes #500",
+                    headRefName="fix/graduation",
+                    mergeable="CONFLICTING",
+                ),
+            ],
+            [],
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+    assert [p["number"] for p in item["prs"]] == [501, 502]
+    assert item["prs"][1]["mergeable"] == "CONFLICTING"
+    assert "pr" not in item
+
+
+def test_a_part_of_pr_is_linked_to_its_issue(bin_dir: Path) -> None:
+    """The no-auto-close rule forbids `Closes #N` on an intermediate PR, so a
+    beta PR says `Part of #N` (or `tracking #N`, or nothing but a bare `#N`)
+    instead. A digest that links by closing keyword only therefore makes that
+    PR invisible: #409 reported In Progress while its PR #490 sat approved,
+    because `prs_for` resolved to nothing and the column fell through to the
+    live worktree. Linkage must match any `#N` reference, not just
+    `fixes/closes/resolves/refs`.
+
+    The branch name deliberately carries no issue number, so the association
+    is proved by the body reference alone -- the headRefName fallback is
+    exercised by its own test and must not mask this one."""
+    issue = _issue(409, labels=[{"name": "bug"}])
+    pr = _pr(
+        490,
+        body="Part of #409 — this PR covers PredictionSnapshotStore only.",
+        headRefName="feat/prediction-snapshot-store",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/wt/409", "feat/issue-409-prediction-snapshot-consolidation")
+            )
+        ),
+    )
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert [p["number"] for p in item["prs"]] == [490]
+    assert item["column"] == "In Review"  # was In Progress before the fix
+    # ...and the PR is no longer reported as belonging to no issue.
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] == []
+
+
+def test_a_bare_number_reference_links_a_pr_to_its_issue(bin_dir: Path) -> None:
+    """`tracking #N` and a bare `#N` are the other spellings the no-auto-close
+    rule leaves an intermediate PR with. Any `#N` in the body must link."""
+    issue = _issue(633, labels=[{"name": "bug"}])
+    pr = _pr(
+        634,
+        body="First of two PRs tracking #633; the issue stays open until the second lands.",
+        headRefName="feat/split-work-a",
+        isDraft=False,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert [p["number"] for p in item["prs"]] == [634]
+    assert item["column"] == "In Review"
+
+
+def test_a_blocked_by_reference_does_not_link_a_pr_to_its_issue(bin_dir: Path) -> None:
+    """`Blocked by #N` is a documented convention -- a PR that waits on issue N
+    is not part of N's work. The widened `any #N` linkage must not grab it, or
+    a PR that merely names its blocker would flip the blocked issue to
+    In Review and clear the PR's orphan status."""
+    issue = _issue(900, labels=[{"name": "bug"}])
+    pr = _pr(
+        901,
+        body="Blocked by #900 \u2014 landing once the price-provider decision is made.",
+        headRefName="feat/price-provider-wait",
+        isDraft=True,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] == "Backlog"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
+def test_a_blocked_by_side_reference_still_links_the_prs_own_issue(
+    bin_dir: Path,
+) -> None:
+    """Phrase-stripping removes only the blocker reference, not the whole line:
+    "- Blocked by #900 \u2014 part of #905" links the PR to #905 while leaving
+    #900 untouched."""
+    issues = [
+        _issue(900, labels=[{"name": "bug"}]),
+        _issue(905, labels=[{"name": "bug"}]),
+    ]
+    pr = _pr(
+        901,
+        body="- Blocked by #900 \u2014 part of #905",
+        headRefName="feat/prediction-snapshot-store",
+        isDraft=False,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim(issues, [pr], []))
+
+    items = {i["number"]: i for i in _run(bin_dir)["items"]}
+
+    assert [p["number"] for p in items[905]["prs"]] == [901]
+    assert items[900]["prs"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Related to #900. Not closing it.",
+        "Not blocked by #900 anymore \u2014 resuming.",
+        "Depends on #900.",
+        "Unblocks #900.",
+        "Unblocking #900.",
+        "See also #900.",
+        "See #900 for the original report.",
+        "Relationship to #900.",
+        "Unrelated to #900.",
+        "Not part of #900 anymore.",
+    ],
+)
+def test_a_non_work_reference_does_not_link_a_pr_to_its_issue(
+    bin_dir: Path, body: str
+) -> None:
+    """Phrases that name an issue without claiming to work on it must not link
+    -- real bodies say "Related to #403. Not closing it", "unblocks #485",
+    "unrelated to #402". Linking on them would flip an unrelated issue to
+    In Review and clear the PR's orphan status."""
+    issue = _issue(900, labels=[{"name": "bug"}])
+    pr = _pr(901, body=body, headRefName="feat/price-provider-wait", isDraft=True)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] == "Backlog"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
+def test_open_pr_list_actually_requests_isdraft(bin_dir: Path) -> None:
+    """`prs_for` emits `isDraft` on every PR object, but jq can only surface a
+    field the `gh pr list --json ...` call actually requested -- a fixture
+    that hands `isDraft` over regardless of the requested field list (like
+    `_gh_shim` does) cannot catch a `--json` selection that omits it. This
+    shim inspects the real invocation instead of trusting the fixture: it
+    fails loudly, naming the missing field, if the open-PR `gh pr list` call
+    does not ask for `isDraft` -- and only then hands back a PR whose
+    `isDraft` is `False`, so the assertion below also proves the value flows
+    through end to end rather than resolving to a silent null."""
+    issue = _issue(650, labels=[{"name": "bug"}])
+    pr = _pr(651, body="Fixes #650", isDraft=False)
+    shim = f"""
+case "$*" in
+  *"issue list"*) cat <<'EOF'
+{json.dumps([issue])}
+EOF
+    ;;
+  *"pr diff "*"--name-only"*) : ;;
+  *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*)
+    case "$*" in
+      *isDraft*) : ;;
+      *) echo "gh pr list --json is missing isDraft: $*" >&2; exit 1 ;;
+    esac
+    cat <<'EOF'
+{json.dumps([pr])}
+EOF
+    ;;
+  *"project item-list"*) printf '%s\\n' '{{"items": []}}' ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+    _write_shim(bin_dir, "gh", shim)
+
+    item = _run(bin_dir)["items"][0]
+    assert item["prs"][0]["isDraft"] is False
 
 
 def test_human_comment_alone_does_not_move_the_column(bin_dir: Path) -> None:
@@ -391,15 +642,13 @@ def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
     assert item["column"] == "Ready for Dev"
 
 
-def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
+def test_a_wait_no_longer_outranks_a_live_worktree(
     bin_dir: Path,
 ) -> None:
-    """Confirming intent, per review of #623.
-
-    A recorded wait beats a live worktree in `column`, because an item whose
-    scope is unsettled must not read as progressing — that is the whole point of
-    the precedence fix. The risk is hiding active undelivered code, so the
-    worktree is still reported on the item; only the column defers to the wait.
+    """Supersedes the #623 intent test now that Task 3 makes Status and
+    Awaiting orthogonal (see task-3-brief.md). A live worktree is still real
+    progress even while a wait is recorded — the wait is reported alongside
+    it, not as a phase override.
     """
     issue = _issue(704, labels=[{"name": "needs-debug-log"}])
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
@@ -409,9 +658,9 @@ def test_a_wait_outranks_a_live_worktree_but_the_worktree_stays_visible(
 
     item = _run(bin_dir)["items"][0]
 
-    assert item["column"] == "Analysis"
+    assert item["column"] == "In Progress"
     assert item["awaiting"] == "reporter"
-    # The code is still visible — the wait changes the column, not the evidence.
+    # The code is still visible — the wait is reported, not folded into the column.
     assert item["worktree"] == "/repo/wt/704"
     assert item["worktree_branch"] == "fix/issue-704-live"
     assert item["stale_worktree"] is False
@@ -451,6 +700,88 @@ def test_worktree_on_an_unmerged_branch_is_in_progress(bin_dir: Path) -> None:
 
     assert item["stale_worktree"] is False
     assert item["column"] == "In Progress"
+
+
+def test_a_merged_pr_with_the_issue_open_is_in_verification(bin_dir: Path) -> None:
+    """Merged to main, not yet in a stable release. The digest used to leave
+    this period unnamed, so a fix awaiting real-world confirmation sat in
+    whatever column it happened to be in."""
+    issue = _issue(510, labels=[{"name": "bug"}, {"name": "analyzed"}])
+    merged = [_pr(511, body="Closes #510", headRefName="fix/issue-510")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    assert _run(bin_dir)["items"][0]["column"] == "In Verification"
+
+
+def test_a_merged_intermediate_pr_keeps_the_issue_in_verification(
+    bin_dir: Path,
+) -> None:
+    """A merged intermediate PR (`Part of #N`) means the work has landed on main
+    and is awaiting graduation -- In Verification, never re-dispatchable.
+
+    This is the no-auto-close contract: beta PRs omit `Closes #N` until the
+    fix graduates, so `Part of`/`Refs` are how a fix normally reads on merge.
+    When the merged scan was narrowed to closing keywords only, issues whose
+    fix had already merged (#643 -> #675, #571 -> #584, #592 -> #619, #666 ->
+    #672, #542 -> #591) fell through to Backlog / Ready for Dev, so a backlog
+    pass could re-dispatch an issue whose partial work already landed."""
+    issue = _issue(517, labels=[{"name": "bug"}, {"name": "analyzed"}])
+    merged = [_pr(518, body="Part of #517", headRefName="fix/issue-517-a")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] == 518
+    assert item["merged_prs"] == [518]
+    assert item["column"] == "In Verification"
+
+
+def test_a_merged_cross_ref_does_not_move_an_issue_to_in_verification(
+    bin_dir: Path,
+) -> None:
+    """The merged scan is deliberately narrower than the open-PR one: it uses
+    work verbs only (`fixes/closes/resolves/refs/part of/tracking`), never bare
+    `#N`. A merged PR that merely names another issue -- "Related to #403. Not
+    closing it -- leaving it open until #456 and #457 are also resolved" --
+    must not flip that issue to In Verification."""
+    issue = _issue(403, labels=[{"name": "bug"}])
+    merged = [
+        _pr(
+            453,
+            body="Related to #403. Not closing it -- leaving it open until "
+            "#456 and #457 are also resolved.",
+            headRefName="fix/issue-403-logging",
+        )
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] is None
+    assert item["merged_prs"] == []
+    assert item["column"] != "In Verification"
+
+
+def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
+    """A graduation PR still open means the work is In Review, not verified."""
+    issue = _issue(512, labels=[{"name": "bug"}])
+    prs = [_pr(514, body="Closes #512", headRefName="fix/issue-512-b")]
+    merged = [_pr(513, body="Refs #512", headRefName="fix/issue-512-a")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, [], merged))
+
+    assert _run(bin_dir)["items"][0]["column"] == "In Review"
+
+
+def test_a_wait_no_longer_rewrites_the_phase(bin_dir: Path) -> None:
+    """Status is the phase, Awaiting is the wait, and they are orthogonal. An
+    In Review item blocked on the maintainer must not report Analysis."""
+    issue = _issue(515, labels=[{"name": "bug"}, {"name": "blocked"}])
+    prs = [_pr(516, body="Refs #515", headRefName="fix/issue-515")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, []))
+
+    item = _run(bin_dir)["items"][0]
+    assert item["column"] == "In Review"
+    assert item["blocked"] is True
 
 
 def test_merged_pr_does_not_close_an_open_issue(bin_dir: Path) -> None:
@@ -529,12 +860,71 @@ def test_conflicting_pr_is_reported_on_its_issue(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     item = digest["items"][0]
-    assert item["pr"] == 610
-    assert item["pr_state"] == "CONFLICTING"
+    assert [p["number"] for p in item["prs"]] == [610]
+    assert item["prs"][0]["mergeable"] == "CONFLICTING"
     assert item["column"] == "In Review"
 
 
-def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
+def test_mergeable_is_requeried_until_it_leaves_unknown(bin_dir: Path) -> None:
+    """GitHub computes `mergeable` LAZILY: the first query on a cold PR returns
+    UNKNOWN and triggers the computation, so a single query reports UNKNOWN as
+    if it were a verdict (measured on #490: six consecutive UNKNOWN passes).
+    The digest must re-query until the value settles, exactly as sweep-prs
+    does. This shim returns UNKNOWN on the first `pr list` and MERGEABLE on
+    the second, so only a re-query produces the asserted value."""
+    issue = _issue(801, labels=[{"name": "bug"}])
+    # `Refs #N` (not `Part of #N`): this test isolates the mergeable retry,
+    # and `Refs` already links under both the old and new linkage rules.
+    unknown_pr = _pr(
+        802, body="Refs #801", headRefName="fix/part-a", mergeable="UNKNOWN"
+    )
+    mergeable_pr = dict(unknown_pr, mergeable="MERGEABLE")
+    counter = bin_dir / "gh_pr_list_calls"
+    shim = f"""
+case "$*" in
+  *"issue list"*) cat <<'EOF'
+{json.dumps([issue])}
+EOF
+    ;;
+  *"pr diff "*"--name-only"*) : ;;
+  *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*)
+    if [ -f '{counter}' ]; then
+      cat <<'EOF'
+{json.dumps([mergeable_pr])}
+EOF
+    else
+      touch '{counter}'
+      cat <<'EOF'
+{json.dumps([unknown_pr])}
+EOF
+    fi
+    ;;
+  *"project item-list"*) printf '%s\\n' '{{"items": []}}' ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+    _write_shim(bin_dir, "gh", shim)
+
+    item = _run(bin_dir, MERGE_RETRY_SLEEP="0")["items"][0]
+
+    assert item["prs"][0]["mergeable"] == "MERGEABLE"
+
+
+def test_mergeable_still_unknown_after_retries_is_reported_null(bin_dir: Path) -> None:
+    """If GitHub has still not computed `mergeable` inside the retry budget,
+    the digest must not pass UNKNOWN through as if it were a definite state --
+    it emits null, so no consumer can read it as a verdict."""
+    issue = _issue(803, labels=[{"name": "bug"}])
+    pr = _pr(804, body="Refs #803", headRefName="fix/part-b", mergeable="UNKNOWN")
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    item = _run(bin_dir, MERGE_RETRY_SLEEP="0")["items"][0]
+
+    assert item["prs"][0]["mergeable"] is None
+
+
+def test_issue_matched_by_two_prs_emits_one_item_with_both_prs(
     bin_dir: Path,
 ) -> None:
     """Regression test for a real bug found while implementing this script:
@@ -544,10 +934,10 @@ def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
     matches `select(...)` is a stream and the whole expression becomes a
     stream of PR objects rather than a single scalar. Downstream that stream
     gets cross-multiplied into the `items[]` comprehension, silently emitting
-    one duplicate item row per extra match instead of picking a single PR
-    deterministically. This issue has two open PRs that both match it (one by
+    one duplicate item row per extra match instead of joining all of them onto
+    one item. This issue has two open PRs that both match it (one by
     `Fixes #N` in the body, one by headRefName pattern), which triggers the
-    bug if `pr_for` regresses back to the `// null` idiom."""
+    bug if `prs_for` regresses back to a `// null`-style single-scalar pick."""
     issue = {
         "number": 606,
         "title": "Two competing fix attempts",
@@ -582,10 +972,7 @@ def test_issue_matched_by_two_prs_emits_one_item_with_a_scalar_pr(
     )
     item = digest["items"][0]
     assert item["number"] == 606
-    assert isinstance(item["pr"], int), (
-        "pr must be a single scalar issue number, not a list — " f"got {item['pr']!r}"
-    )
-    assert item["pr"] == 620
+    assert [p["number"] for p in item["prs"]] == [620, 621]
 
 
 def test_worktree_branch_without_issue_prefix_joins_by_delimited_number(
@@ -714,7 +1101,9 @@ def test_pr_joined_only_by_headref_is_not_an_orphan(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     item = digest["items"][0]
-    assert item["pr"] == 630, "PR must still join the issue via headRefName"
+    assert [p["number"] for p in item["prs"]] == [
+        630
+    ], "PR must still join the issue via headRefName"
     pr_orphans = [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"]
     assert pr_orphans == [], (
         "a PR joined to an open issue by headRefName must not be reported as "
@@ -1006,3 +1395,108 @@ def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:
     digest = _run(bin_dir)
 
     assert [o for o in digest["orphans"] if o["kind"] == "issue_no_card"] == []
+
+
+def test_resume_handoffs_are_counted(bin_dir: Path) -> None:
+    """A session that died twice is telling you something -- but nothing
+    counted, so nothing could act on it. The marker is an HTML comment so the
+    handoff still reads as prose on GitHub."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [
+                _issue(
+                    520,
+                    labels=[{"name": "bug"}],
+                    comments=[
+                        _comment(
+                            "bess-developer",
+                            "Resuming implementation.\n<!-- resume-handoff -->",
+                        ),
+                        _comment("johanzander", "thanks"),
+                        _comment(
+                            "bess-developer",
+                            "Resuming implementation.\n<!-- resume-handoff -->",
+                        ),
+                    ],
+                )
+            ],
+            [],
+            [],
+        ),
+    )
+
+    assert _run(bin_dir)["items"][0]["resume_count"] == 2
+
+
+def test_in_flight_files_map_paths_to_the_prs_touching_them(bin_dir: Path) -> None:
+    """The collision gate needs to know what is already being edited. Half of
+    that is exact -- the changed-file set of every open PR -- and only the
+    candidate's own touch-set has to be predicted."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(530, labels=[{"name": "bug"}])],
+            [
+                _pr(531, body="Refs #530", headRefName="fix/a-530"),
+                _pr(532, body="Refs #530", headRefName="fix/b-530"),
+            ],
+            [],
+            pr_files={
+                531: ["CLAUDE.md", "scripts/backlog-rhythm.sh"],
+                532: ["CLAUDE.md"],
+            },
+        ),
+    )
+
+    in_flight = _run(bin_dir)["in_flight_files"]
+    assert in_flight["CLAUDE.md"] == [531, 532]
+    assert in_flight["scripts/backlog-rhythm.sh"] == [531]
+
+
+def test_no_open_prs_gives_empty_in_flight_files(bin_dir: Path) -> None:
+    """Pre-existing shims report no open PRs; the map must still be an empty
+    object, not null, so a caller can index into it unconditionally."""
+    issue = _issue(601, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    assert _run(bin_dir)["in_flight_files"] == {}
+
+
+def test_undiffable_pr_is_recorded_not_a_crash(bin_dir: Path) -> None:
+    """A PR whose diff cannot be read (deleted fork head, rate limit,
+    transient network error) must not abort the whole digest -- that would
+    take down issue triage and dispatch for everyone over one stale PR. It
+    also must not be silently treated as touching no files, which the
+    collision gate would read as safe to dispatch against. It is recorded as
+    data instead."""
+    _write_shim(
+        bin_dir,
+        "gh",
+        _gh_shim(
+            [_issue(530, labels=[{"name": "bug"}])],
+            [
+                _pr(531, body="Refs #530", headRefName="fix/a-530"),
+                _pr(532, body="Refs #530", headRefName="fix/b-530"),
+            ],
+            [],
+            pr_files={532: ["CLAUDE.md"]},
+            fail_pr_diff=[531],
+        ),
+    )
+
+    digest = _run(bin_dir)
+
+    assert digest["undiffable_prs"] == [531]
+    # The readable PR is still processed -- one bad PR does not blank the
+    # whole in-flight set.
+    assert digest["in_flight_files"]["CLAUDE.md"] == [532]
+
+
+def test_no_undiffable_prs_gives_empty_list(bin_dir: Path) -> None:
+    issue = _issue(601, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    assert _run(bin_dir)["undiffable_prs"] == []

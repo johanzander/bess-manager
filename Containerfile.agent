@@ -1,0 +1,197 @@
+# The dispatched-agent sandbox (Phase 1 of
+# docs/superpowers/specs/2026-08-20-agent-fleet-sandbox-router-design.md).
+#
+# One container per agent, per issue. Inside it a `claude` process runs the
+# `implement-issue` skill headless against a private clone bind-mounted at
+# /workspace, with a role-scoped gh token and a permissive permission mode --
+# permissive being safe precisely because the blast radius is this disposable
+# container and that scoped token, not the maintainer's real filesystem and
+# real `gh auth`.
+#
+# ---------------------------------------------------------------------------
+# WHY DEPENDENCIES ARE BAKED IN HERE RATHER THAN MOUNTED FROM THE HOST
+# ---------------------------------------------------------------------------
+# The design's original instruction was to mount the host's .venv and
+# node_modules read-only, so a dispatch costs a container start instead of the
+# ~35 minutes scripts/worktree-setup.sh exists to avoid. That cannot work as
+# written: the host is macOS/arm64 and this container is Linux/arm64.
+#     .venv/bin/python3      -> Mach-O 64-bit executable arm64
+#     frontend/node_modules  -> @esbuild/darwin-arm64, @rollup/rollup-darwin-arm64
+# Mounting those in gives a Linux container binaries it cannot execute.
+#
+# So the trees are built here, ONCE, into an image layer. The per-dispatch cost
+# is then lower than the mounted design's -- there is nothing to mount or check
+# -- and the build only repeats when a lockfile actually changes. The layer
+# order below exists for that: a requirements.txt change must not re-run
+# `npm ci` or re-fetch a browser.
+#
+# THE PATH TRICK. They are built at MAIN_CHECKOUT -- the host's own absolute
+# path to the main checkout, passed in by scripts/run-agent.sh. The clone that
+# gets mounted at /workspace carries the ordinary `.venv ->
+# <main-checkout>/.venv` symlinks scripts/worktree-setup.sh writes for every
+# worktree, so the SAME symlink resolves to macOS deps on the host and to these
+# Linux deps in here. Nothing in the checkout is container-aware, nothing gets
+# rewritten at start, and `cd .agent-clones/issue-<n> && .venv/bin/pytest` keeps
+# working on the host exactly as the design requires.
+#
+# WHAT REPLACES THE READ-ONLY MOUNT. The design mounted deps read-only because
+# two containers installing concurrently into one shared venv corrupts it. With
+# the trees in an image layer there is no shared tree left to corrupt: every
+# container gets its own copy-on-write view, so a task that really does change
+# requirements.txt installs into its own layer, affecting nobody, and the
+# writes vanish with the container. That is the property the read-only mount
+# was buying, obtained structurally instead of by permission bits --
+# scripts/run-agent.sh --verify-isolation demonstrates it.
+# ---------------------------------------------------------------------------
+
+# Node comes from the official image rather than a distro package: bookworm
+# ships 18, and frontend/e2e are built against 20 (see ci.yml's setup-node).
+FROM node:20-bookworm-slim AS node
+
+# Python 3.13 to match ci.yml's pin -- deliberately NOT the host venv's 3.12.13.
+# This container is what opens PRs, so matching CI means green here => green
+# there. (The host/CI drift is pre-existing and not this image's to resolve.)
+FROM python:3.13-slim-bookworm
+
+ARG TARGETARCH=arm64
+ARG GH_VERSION=2.63.2
+
+# MAIN_CHECKOUT must be the host's absolute path to the main bess-manager
+# checkout -- the symlink targets inside every clone point at it. Passed by
+# scripts/run-agent.sh; the default only keeps a bare `podman build` honest.
+ARG MAIN_CHECKOUT=/root/bess-manager
+ENV MAIN_CHECKOUT=${MAIN_CHECKOUT}
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    NODE_PATH=/usr/local/lib/node_modules \
+    PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
+
+# --- System layer ------------------------------------------------------------
+# git + gh: the agent's whole output is commits and PRs.
+# sqlite3: scripts/fleet-manifest.sh, so the agent can report its own status.
+# nftables + iproute2: the egress allowlist in container/agent-entrypoint.sh.
+# ripgrep/jq/less: what the agent's own tools shell out to.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git ca-certificates curl jq less ripgrep sqlite3 \
+        nftables iproute2 procps \
+    && curl -fsSL "https://github.com/cli/cli/releases/download/v${GH_VERSION}/gh_${GH_VERSION}_linux_${TARGETARCH}.tar.gz" \
+        | tar -xz -C /tmp \
+    && mv "/tmp/gh_${GH_VERSION}_linux_${TARGETARCH}/bin/gh" /usr/local/bin/gh \
+    && rm -rf /tmp/gh_* /var/lib/apt/lists/*
+
+# Node 20, copied wholesale from the official image (npm and npx are symlinks
+# into /usr/local/lib/node_modules/npm, so the lib tree has to come too).
+COPY --from=node /usr/local/bin/node /usr/local/bin/node
+COPY --from=node /usr/local/lib/node_modules /usr/local/lib/node_modules
+RUN ln -s /usr/local/lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
+    && ln -s /usr/local/lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx \
+    && node --version && npm --version
+
+# The agent itself.
+RUN npm install -g @anthropic-ai/claude-code && claude --version
+
+# --- Python dependencies -----------------------------------------------------
+# Only the two requirements files are copied, so editing any source file leaves
+# this layer cached.
+WORKDIR ${MAIN_CHECKOUT}
+COPY backend/requirements.txt backend/requirements.txt
+COPY requirements-dev.txt requirements-dev.txt
+RUN python -m venv "${MAIN_CHECKOUT}/.venv" \
+    && "${MAIN_CHECKOUT}/.venv/bin/pip" install --no-cache-dir \
+        -r backend/requirements.txt -r requirements-dev.txt
+
+# --- Node dependencies -------------------------------------------------------
+# `npm ci`, not `npm install`: the lockfile is the input, and a build that
+# silently resolved something else would give the agent a tree CI does not have.
+COPY frontend/package.json frontend/package-lock.json frontend/
+RUN cd frontend && npm ci
+
+COPY e2e/package.json e2e/package-lock.json e2e/
+RUN cd e2e && npm ci
+
+# --- Playwright browsers -----------------------------------------------------
+# Its own layer, last of the dependency layers: it is the slowest to rebuild and
+# the least likely to change. --with-deps pulls the system libraries chromium
+# needs, which a slim base does not have.
+RUN cd e2e && npx playwright install --with-deps chromium
+
+# --- Step 8 (local run & observe) --------------------------------------------
+# Deliberately a LATE layer, after the slow dependency ones, so adding it does
+# not invalidate them.
+#
+# Step 8 stands the real stack up (docker-compose.ci.yml, mock-HA) and watches
+# it work, and it is the documented reason the local flow exists at all -- CI
+# mode skips it and says so in the PR body. A dispatched container is not CI:
+# it CAN run the stack, by talking to the same podman that started it (the
+# socket is bind-mounted in by scripts/run-agent.sh) rather than nesting a
+# second container runtime inside itself. Sibling containers, not children.
+#
+# That works only because run-agent.sh mounts the clone at its own HOST
+# absolute path: the compose file's relative volume paths then resolve to the
+# same real directory for the outer podman as for this container. Mounted at
+# /workspace they would resolve to paths only this container can see, and every
+# volume in the stack would come up empty.
+RUN apt-get update && apt-get install -y --no-install-recommends podman \
+    && pip install --no-cache-dir podman-compose \
+    && apt-get purge -y --auto-remove \
+    && rm -rf /var/lib/apt/lists/* \
+    && podman --version && podman-compose --version
+
+# --- The agent user ----------------------------------------------------------
+#
+# NOT root, and this is a hard requirement rather than hygiene: Claude Code
+# refuses outright with "--dangerously-skip-permissions cannot be used with
+# root/sudo privileges for security reasons". Since that flag is the entire
+# point of the phase, a root container cannot run an agent at all. Observed on
+# the first live dispatch, which started cleanly and then died on that line.
+#
+# uid 1000 and the bind mount: podman's virtiofs presents the mounted clone as
+# owned by whatever uid the process currently has, so the agent user has full
+# write access without any chown of the host's files. The entrypoint still
+# STARTS as root -- it needs NET_ADMIN for the egress ruleset -- and drops here
+# with setpriv immediately afterwards.
+#
+# EXPECTED LOG LINE, NOT A DEFECT: every dispatch prints "Sandbox disabled:
+# ... bubblewrap (bwrap) not installed, socat not installed ... Commands will
+# run WITHOUT sandboxing." That is Claude Code's OWN in-process sandbox, which
+# this container deliberately does without -- the container IS the boundary,
+# and the agent runs bypassPermissions inside it on purpose. Installing bwrap
+# would add a second, narrower sandbox inside the first, with its own network
+# and filesystem restrictions to debug on top of the egress allowlist. Do that
+# only if there is a reason beyond quieting the warning.
+ARG AGENT_UID=1000
+RUN useradd --uid ${AGENT_UID} --create-home --shell /bin/bash agent
+
+# The dependency trees above were baked in as root: MAIN_CHECKOUT/.venv and
+# frontend/node_modules, and the Playwright browsers under PLAYWRIGHT_BROWSERS_PATH.
+# The agent drops to uid 1000 and must be able to pip/npm install into its own
+# copy-on-write layer (--verify-isolation's measurement) and repair a browser
+# cache, so hand the trees over. The bind-mounted clone needs no chown -- podman's
+# virtiofs presents it as owned by the container's current uid (see above).
+RUN mkdir -p /opt/ms-playwright \
+    && chown -R ${AGENT_UID}:${AGENT_UID} "${MAIN_CHECKOUT}" /opt/ms-playwright
+
+# --- Agent configuration -----------------------------------------------------
+# The permissive mode the whole phase is for. This user-level
+# ~/.claude/settings.json documents intent, but it is NOT what makes the
+# container permissive: the clone brings the repo's tracked .claude/settings.json
+# along, project settings win over user settings in Claude Code, and
+# --dangerously-skip-permissions does NOT override a project's `ask` rules (a
+# headless ask is a hard denial -- implement-issue died on `gh api` on the first
+# live dispatch). The real override is a read-only bind mount of
+# container/agent-settings.json over the clone's .claude/settings.json, applied
+# by scripts/lib/agent-dispatch.sh.
+RUN mkdir -p /home/agent/.claude \
+    && printf '%s\n' '{"permissions": {"defaultMode": "bypassPermissions"}}' \
+        > /home/agent/.claude/settings.json \
+    && chown -R agent:agent /home/agent
+
+COPY container/agent-entrypoint.sh /usr/local/bin/agent-entrypoint.sh
+RUN chmod +x /usr/local/bin/agent-entrypoint.sh
+
+# run-agent.sh overrides this with the clone's own host path (see there for
+# why); MAIN_CHECKOUT is the sane default for a bare `podman run`.
+WORKDIR ${MAIN_CHECKOUT}
+ENTRYPOINT ["/usr/local/bin/agent-entrypoint.sh"]
+CMD ["bash"]

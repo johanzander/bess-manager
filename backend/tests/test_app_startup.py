@@ -51,6 +51,14 @@ def _load_real_app_module(monkeypatch):
     monkeypatch.setenv("HA_URL", "http://ha.local")
     monkeypatch.delenv("HASSIO_TOKEN", raising=False)
 
+    # Real app.py's BESSController.__init__ calls time_utils.set_timezone()
+    # from the mocked HA config, permanently mutating the shared module-global
+    # TIMEZONE. Restore it on teardown so this file doesn't leak UTC into the
+    # rest of the test session (e.g. the historical-data dashboard tests).
+    import core.bess.time_utils as time_utils
+
+    monkeypatch.setattr(time_utils, "TIMEZONE", time_utils.TIMEZONE, raising=False)
+
     app_path = os.path.join(backend_dir, "app.py")
     spec = importlib.util.spec_from_file_location("real_backend_app", app_path)
     module = importlib.util.module_from_spec(spec)

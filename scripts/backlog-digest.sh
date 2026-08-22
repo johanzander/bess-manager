@@ -55,8 +55,58 @@ fi
 issues=$(gh issue list --repo "$repo" --state open --limit 200 \
   --json number,title,labels,author,createdAt,updatedAt,comments,body)
 
+# GitHub computes `mergeable` LAZILY: the first query on a cold PR returns
+# UNKNOWN and triggers the computation, so a single pass would report UNKNOWN
+# as if it were a verdict. Re-query until no open PR is still UNKNOWN -- the
+# budget covers the #490 measurement, which stayed UNKNOWN for six consecutive
+# passes -- because the digest must never hang on a cold PR. A PR left UNKNOWN
+# after the budget is emitted as null in `prs_for` below, so it never
+# masquerades as a definite state.
+MERGE_RETRY_LIMIT="${MERGE_RETRY_LIMIT:-6}"
+MERGE_RETRY_SLEEP="${MERGE_RETRY_SLEEP:-2}"
 prs=$(gh pr list --repo "$repo" --state open --limit 100 \
-  --json number,title,headRefName,mergeable,body)
+  --json number,title,headRefName,mergeable,body,isDraft)
+merge_attempts=0
+while printf '%s' "$prs" | jq -e 'any(.[]; .mergeable == "UNKNOWN")' >/dev/null 2>&1 \
+      && [ "$merge_attempts" -lt "$MERGE_RETRY_LIMIT" ]; do
+  merge_attempts=$((merge_attempts + 1))
+  sleep "$MERGE_RETRY_SLEEP"
+  prs=$(gh pr list --repo "$repo" --state open --limit 100 \
+    --json number,title,headRefName,mergeable,body,isDraft)
+done
+
+# The EXACT half of the collision gate: what every open PR already touches.
+# One gh pr diff per open PR, bounded by the WIP limit in practice. The
+# alternative -- predicting a PRs touch-set from issue text alone -- is what
+# let several PRs race to rewrite the same files; this reads the real diff
+# instead of guessing.
+#
+# No `2>/dev/null || true` here: a PR whose diff cannot be read is NOT the
+# same as a PR that touches no files. Swallowing the error would silently
+# report that PR as touching nothing, which the collision gate would read as
+# safe to dispatch against -- exactly the failure this key exists to prevent.
+#
+# It is ALSO not left to abort the whole digest any more. This script (and
+# backlog-rhythm.sh downstream of it) runs under `set -euo pipefail`, so one
+# undiffable PR -- a deleted fork head, a rate limit, a transient network
+# error -- used to take down the entire rhythm pass, blocking all issue
+# triage and dispatch over a single stale PR. Neither extreme is acceptable:
+# the failure is recorded as DATA in `undiffable_prs` instead, and the loop
+# continues over the remaining PRs. The collision gate (backlog-rhythm.sh)
+# reads a non-empty `undiffable_prs` and suppresses dispatch entirely, since
+# collision cannot be evaluated without a complete in-flight set.
+in_flight_files='{}'
+undiffable_prs='[]'
+for n in $(printf '%s' "$prs" | jq -r '.[].number'); do
+  if ! files=$(gh pr diff "$n" --repo "$repo" --name-only); then
+    undiffable_prs=$(printf '%s' "$undiffable_prs" | jq --argjson n "$n" '. + [$n]')
+    continue
+  fi
+  in_flight_files=$(printf '%s' "$in_flight_files" | jq \
+    --argjson n "$n" \
+    --argjson f "$(printf '%s' "$files" | jq -R -s 'split("\n") | map(select(length > 0))')" \
+    'reduce $f[] as $p (.; .[$p] = ((.[$p] // []) + [$n] | unique))')
+done
 
 # Merged PRs are needed to tell a LIVE worktree from a DEAD one. Without this,
 # any worktree left on disk pins its issue to In Progress forever: #602, #593
@@ -77,7 +127,13 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
   | jq -c '[ .[] | {
       number,
       headRefName,
-      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves) #([0-9]+)") | .[0] | tonumber ]
+      # WORK references only -- the closing verbs plus the no-auto-close
+      # spellings (`Part of`, `tracking`, `Refs`). Deliberately NOT bare `#N`:
+      # a merged PR body can name other issues without working on them
+      # ("until #456 and #457 are also resolved"), and a merged PR must not
+      # flip an unrelated issue to In Verification. Drives both `merged_pr`
+      # (the column) and `merged_prs` (the visibility list).
+      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
@@ -152,6 +208,8 @@ jq -n \
   --argjson worktrees "$worktrees" \
   --argjson sessions "$sessions" \
   --argjson board "$board" \
+  --argjson in_flight "$in_flight_files" \
+  --argjson undiffable_prs "$undiffable_prs" \
   --arg now "$(date -u +%s)" '
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
@@ -164,13 +222,53 @@ jq -n \
   # identities (see scripts/gh-agent.sh).
   def bot_authors: ["bess-manager-claude-bot", "bess-agent", "bess-product-owner", "bess-developer"];
 
+  # How many times an implementation session has been handed back on this
+  # issue. The marker is an HTML comment, so the handoff reads as ordinary
+  # prose on GitHub while staying exactly countable here -- no local file, and
+  # no guessing from prose.
+  def resume_count($comments):
+    [ $comments[]? | select((.body // "") | contains("<!-- resume-handoff -->")) ] | length;
+
+  # LINKAGE is any `#N` reference in the body, not just the closing verbs. The
+  # no-auto-close rule forbids `Closes #N` on an intermediate PR -- it says
+  # `Part of #N`, `tracking #N`, `Refs #N`, or a bare `#N` -- so a digest that
+  # links by closing keyword only makes that PR invisible (the #409/#490
+  # defect). Whether the work has LANDED is the merged-PR scan above, which is
+  # deliberately narrower (work verbs only) so a merged PR that merely names
+  # another issue cannot flip it to In Verification; linkage here is the broad
+  # any-`#N` net for OPEN PRs. The number is bounded on both sides so `#2409`
+  # does not match issue 409 and `#4095` does not match 409.
+  #
+  # Cross-references that name an issue WITHOUT claiming to work on it are
+  # stripped before matching, so they neither link nor orphan-claim: the
+  # documented `Blocked by #N` convention, `Depends on`, `Unblocks`,
+  # `Related to` (and `unrelated to`), `Relationship to`, `Follow-up to`,
+  # `See also`. Real bodies use these -- "Related to #403. Not closing it",
+  # "unblocks #485", "unrelated to #402" -- and linking on them would flip an
+  # unrelated issue to In Review. Stripping the PHRASE, not the whole
+  # line, keeps a combined reference like "- Blocked by #100 -- part of #409"
+  # working: only the blocker phrase disappears and #409 still links. The
+  # remaining test is still any `#N`, so the no-auto-close spellings
+  # (`Part of #N`, `tracking #N`, `Refs #N`, bare `#N`) all link.
+  def linkage_body($body):
+    ($body // "")
+    | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "");
+
   def pr_matches_issue($p; $n):
-    ($p.body // "" | test("(?i)(fixes|closes|resolves) #\($n)\\b"))
+    (linkage_body($p.body) | test("(?i)(^|[^0-9])#\($n)\\b"))
     or ($p.headRefName | test("issue-\($n)(\\D|$)"));
 
-  def pr_for($n):
-    ([ $prs[] | select(pr_matches_issue(.; $n)) ]) as $matches
-    | if ($matches | length) == 0 then null else $matches[0] end;
+  # Returns EVERY matching PR, ascending. Taking `[0]` discarded the rest, and
+  # with one issue routinely carrying several PRs that meant the column was
+  # derived from whichever happened to sort first.
+  def prs_for($n):
+    [ $prs[] | select(pr_matches_issue(.; $n))
+             | {number: .number,
+                # A mergeable still UNKNOWN after the retry loop is not a
+                # verdict -- report null so no consumer reads it as definite.
+                mergeable: (if .mergeable == "UNKNOWN" then null else .mergeable end),
+                isDraft: .isDraft} ]
+    | sort_by(.number);
 
   # Matches a worktree whose path OR branch contains the issue number in a
   # delimited position: preceded by start-of-string, "-" or "/"; followed by
@@ -324,24 +422,30 @@ jq -n \
     | if ($matches | length) == 0 then null else $matches[0].number end;
 
   # Column names match the board`s Status options exactly (Backlog, Analysis,
-  # Ready for Dev, In Progress, In Review, Done) so reconciling a card against
-  # this value is a string comparison and not a translation table.
+  # Ready for Dev, In Progress, In Review, In Verification, Done) so
+  # reconciling a card against this value is a string comparison and not a
+  # translation table.
   #
-  # PRECEDENCE IS THE FIX. `analyzed` used to be tested BEFORE any wait, so an
-  # analysed-but-blocked item reported "Ready" and looked dispatchable. Waits
-  # now win: an item whose scope is unsettled goes back to Analysis no matter
-  # how far it got.
-  #
-  # `Ready for Dev` also now requires a Priority. The design always said so;
-  # the condition was left out because no board existed and it would have made
+  # `Ready for Dev` also requires a Priority. The design always said so; the
+  # condition was left out because no board existed and it would have made
   # Ready unreachable. The board exists, and every item carries P1-P4.
-  def column($labels; $pr; $wt_live; $awaiting; $priority; $blocked):
-      if $pr != null then "In Review"
-      elif $blocked then "Analysis"
-      elif $awaiting != null then "Analysis"
+  #
+  # PHASE COMES FROM ARTIFACTS. `Status` says what stage the work is at;
+  # `Awaiting` says who is being waited on, and the two are orthogonal -- a
+  # wait no longer rewrites the phase. The safety property survives in
+  # `Ready for Dev` below, which still requires no blocker and no wait, so an
+  # unsettled item cannot be dispatched however far its analysis got.
+  #
+  # ORDER IS THE CONTENT. Live work outranks landed work: an issue whose
+  # graduation PR is still open is In Review, not In Verification.
+  def column($labels; $open_prs; $merged_pr; $wt_live; $awaiting; $priority; $blocked):
+      if ($open_prs | length) > 0 then "In Review"
       elif $wt_live then "In Progress"
-      elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
+      elif $merged_pr != null then "In Verification"
+      elif ($labels | index("analyzed")) and $priority != null
+           and ($blocked | not) and $awaiting == null then "Ready for Dev"
       elif ($labels | index("analyzed")) then "Analysis"
+      elif $blocked or $awaiting != null then "Analysis"
       else "Backlog" end;
 
   {
@@ -353,7 +457,7 @@ jq -n \
     },
     items: [ $issues[] | . as $i
       | (label_names) as $labels
-      | (pr_for(.number)) as $pr
+      | (prs_for(.number)) as $open_prs
       | (merged_pr_for(.number)) as $merged_pr
       | (worktree_for(.number)) as $wt
       | (worktree_is_stale($wt)) as $wt_stale
@@ -369,7 +473,7 @@ jq -n \
       | (blocked_by) as $bb
       | (blocked_by_open($bb)) as $bb_open
       | (($labels | index("blocked")) != null or (($bb_open | length) > 0)) as $blocked
-      | (column($labels; $pr; $wt_live; $aw; $prio; $blocked)) as $col
+      | (column($labels; $open_prs; $merged_pr; $wt_live; $aw; $prio; $blocked)) as $col
       | {
           number: .number,
           title: .title,
@@ -400,8 +504,15 @@ jq -n \
           awaiting_suggested: $aw_label,
           last_comment: last_comment(.comments; .author.login),
           priority: $prio,
-          pr: ($pr.number // null),
-          pr_state: ($pr.mergeable // null),
+          prs: $open_prs,
+          # Every merged PR whose body references this issue with a WORK verb
+          # (`fixes/closes/resolves/refs/part of/tracking`) -- the visibility
+          # list. `merged_pr` above is the first in the order `gh` returns
+          # (the most recent merge) and drives the In Verification column; this
+          # plural exposes all of them, sorted, so a merged
+          # intermediate PR (`Part of #N`, which must not close the issue)
+          # stays visible even alongside later PRs.
+          merged_prs: ([ $merged_prs[] | select((.refs | index($i.number)) != null) | .number ] | sort),
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),
@@ -416,6 +527,7 @@ jq -n \
           # #579, #591, #517) had already merged.
           stale_worktree: $wt_stale,
           session: session_for(.number),
+          resume_count: resume_count(.comments),
           blocked_by: $bb,
           # The subset still open, and the only one that fails Ready.
           blocked_by_open: $bb_open,
@@ -444,6 +556,10 @@ jq -n \
     # Emitted as a lookup rather than merged into a PR list, because the digest
     # does not own the open-PR list — `backlog-rhythm.sh` fetches that with the
     # review fields it needs, and joins this in by number.
+    in_flight_files: $in_flight,
+    # PRs whose diff could not be read this pass -- see the loop above.
+    # Reported as data, not swallowed and not fatal.
+    undiffable_prs: $undiffable_prs,
     pr_board: [
       $board.items[]?
       | select(.content.type? == "PullRequest")

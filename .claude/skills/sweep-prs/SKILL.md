@@ -91,16 +91,30 @@ merged=$(gh pr list --state merged --limit 200 --json headRefName -q '.[].headRe
 owned=$(cd ~ && claude agents --json 2>/dev/null | jq -r '.[].cwd')
 
 git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
+  # A registration whose directory is gone is a PHANTOM, not a detached HEAD:
+  # `git -C` fails, so $b comes back empty and the detached branch below would
+  # swallow it. `git worktree list` tags these `prunable`.
+  [ -d "$wt" ] || { echo "PHANTOM (prunable, needs unsandboxed prune): $wt"; continue; }
   b=$(git -C "$wt" branch --show-current 2>/dev/null)
   [ -n "$b" ] || { echo "SKIP (detached): $wt"; continue; }
   if echo "$owned" | grep -qF "$wt"; then
     echo "SKIP (live session): $b"; continue
   fi
-  if [ -n "$(git -C "$wt" status --porcelain -uno)" ]; then
-    echo "SKIP (uncommitted changes): $b"; continue
+  dirty=$(git -C "$wt" status --porcelain -uno)
+  if [ -n "$dirty" ]; then
+    # A worktree whose dirty set is ENTIRELY deletions is not someone's work
+    # in progress -- it is a carcass left by a `git worktree remove` that the
+    # sandbox killed halfway (see below). Say so, or the sweep reports its own
+    # wreckage back as a backlog of stranded edits.
+    if [ -z "$(printf '%s\n' "$dirty" | grep -v '^ D ')" ]; then
+      echo "CARCASS (failed prune, $(printf '%s\n' "$dirty" | grep -c .) deletions): $wt  ($b)"
+    else
+      echo "SKIP (uncommitted changes): $b"
+    fi
+    continue
   fi
   if echo "$merged" | grep -qx "$b"; then
-    echo "PRUNE: $b"; continue
+    echo "PRUNE: $wt  ($b)"; continue
   fi
   age=$(( ($(date +%s) - $(git -C "$wt" log -1 --format=%ct)) / 60 ))
   if [ "$age" -lt 30 ]; then
@@ -124,15 +138,49 @@ done
 
 ### 3. Act
 
-**`PRUNE`** — the PR merged:
+**`PRUNE`** — the PR merged. **Do not run `git worktree remove` yourself.**
+The sandbox denies the `.git/worktrees/<name>` unlink that removal ends with,
+and removal deletes the working tree *before* it gets there, so a run from
+here does not fail cleanly — it destroys ~393 tracked files and leaves a
+carcass that can never be pruned again. `git worktree prune` is denied by the
+same unlink **and exits 0 while failing**, so there is no in-sandbox recovery
+either — and no exit status you can trust. This is not a hypothetical: three
+sweeps did exactly that to 13 worktrees before it was diagnosed. See
+`docs/agents/local-agent-environment.md`, "git worktree remove is denied too".
+
+Collect every `PRUNE`, `CARCASS` and `PHANTOM` instead, and emit **one**
+command for the maintainer to paste with a `!` prefix, which runs unsandboxed:
 
 ```bash
-git worktree remove "$wt" && git branch -D "$b"
+# Emit this; do not execute it. It must run from a NON-worktree-isolated
+# session -- an isolated one refuses the `cd` to the shared checkout.
+cd /Users/johanzander/GitHub/bess-manager && for wt in <paths>; do
+  b=$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null)
+  git worktree remove --force "$wt"
+  [ -n "$b" ] && git branch -D "$b"
+done; git worktree prune; git worktree list | wc -l
 ```
 
-Force-delete is expected, not a warning sign: squash-merge means the
-branch's commits never become reachable from `main`, so `git branch -d`'s
-ancestry check always refuses.
+`<paths>` is the space-separated list of full worktree paths from the reported
+`PRUNE`/`CARCASS`/`PHANTOM` lines. Report the path, not the branch name: `git
+worktree list` yields paths, and a sibling worktree (`../bess-manager-feature/`)
+does not live under `.claude/worktrees/`, so the branch name alone cannot
+reconstruct the path to remove.
+
+The trailing `git worktree prune` is what clears any `PHANTOM`, whose
+directory is already gone so `remove` has nothing to work with. `[ -n "$b" ]`
+rather than `&&` because a phantom yields no branch name.
+
+`--force` is required for a `CARCASS` (its own damage reads as uncommitted
+changes) and harmless for a clean `PRUNE`. Force-deleting the *branch* is
+expected too, and is a separate thing: squash-merge means the branch's commits
+never become reachable from `main`, so `git branch -d`'s ancestry check always
+refuses.
+
+Before listing a `CARCASS`, confirm its branch is genuinely spent — the PR
+merged, and any commits past the merged head are already in `origin/main`.
+A carcass has no recoverable working-tree content by definition (deletions
+only), but the *branch* may still hold commits that never landed.
 
 **`OPEN`** — in report-only mode (the default), print the row from the table
 below that this PR matches and take no action. In `--all` mode, or when the

@@ -134,7 +134,7 @@ export function PricingFormSection({ form, onChange }: Props) {
                 { unit: 'factor (1.0 = no adjustment)', min: 0.5, max: 2.0, step: 0.0001 })}
               {numField('Export Compensation', form.taxReduction,
                 v => onChange({ ...form, taxReduction: v }),
-                { unit: `${currency}/kWh`, min: 0, step: 0.001 })}
+                { unit: `${currency}/kWh`, step: 0.001 })}
             </div>
             {isEntsoe ? (
               <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800/40 px-4 py-3 space-y-3 text-xs text-gray-600 dark:text-gray-400">

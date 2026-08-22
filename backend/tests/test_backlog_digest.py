@@ -268,6 +268,144 @@ def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
     assert "pr" not in item
 
 
+def test_a_part_of_pr_is_linked_to_its_issue(bin_dir: Path) -> None:
+    """The no-auto-close rule forbids `Closes #N` on an intermediate PR, so a
+    beta PR says `Part of #N` (or `tracking #N`, or nothing but a bare `#N`)
+    instead. A digest that links by closing keyword only therefore makes that
+    PR invisible: #409 reported In Progress while its PR #490 sat approved,
+    because `prs_for` resolved to nothing and the column fell through to the
+    live worktree. Linkage must match any `#N` reference, not just
+    `fixes/closes/resolves/refs`.
+
+    The branch name deliberately carries no issue number, so the association
+    is proved by the body reference alone -- the headRefName fallback is
+    exercised by its own test and must not mask this one."""
+    issue = _issue(409, labels=[{"name": "bug"}])
+    pr = _pr(
+        490,
+        body="Part of #409 — this PR covers PredictionSnapshotStore only.",
+        headRefName="feat/prediction-snapshot-store",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/wt/409", "feat/issue-409-prediction-snapshot-consolidation")
+            )
+        ),
+    )
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert [p["number"] for p in item["prs"]] == [490]
+    assert item["column"] == "In Review"  # was In Progress before the fix
+    # ...and the PR is no longer reported as belonging to no issue.
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] == []
+
+
+def test_a_bare_number_reference_links_a_pr_to_its_issue(bin_dir: Path) -> None:
+    """`tracking #N` and a bare `#N` are the other spellings the no-auto-close
+    rule leaves an intermediate PR with. Any `#N` in the body must link."""
+    issue = _issue(633, labels=[{"name": "bug"}])
+    pr = _pr(
+        634,
+        body="First of two PRs tracking #633; the issue stays open until the second lands.",
+        headRefName="feat/split-work-a",
+        isDraft=False,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert [p["number"] for p in item["prs"]] == [634]
+    assert item["column"] == "In Review"
+
+
+def test_a_blocked_by_reference_does_not_link_a_pr_to_its_issue(bin_dir: Path) -> None:
+    """`Blocked by #N` is a documented convention -- a PR that waits on issue N
+    is not part of N's work. The widened `any #N` linkage must not grab it, or
+    a PR that merely names its blocker would flip the blocked issue to
+    In Review and clear the PR's orphan status."""
+    issue = _issue(900, labels=[{"name": "bug"}])
+    pr = _pr(
+        901,
+        body="Blocked by #900 \u2014 landing once the price-provider decision is made.",
+        headRefName="feat/price-provider-wait",
+        isDraft=True,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] == "Backlog"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
+def test_a_blocked_by_side_reference_still_links_the_prs_own_issue(
+    bin_dir: Path,
+) -> None:
+    """Phrase-stripping removes only the blocker reference, not the whole line:
+    "- Blocked by #900 \u2014 part of #905" links the PR to #905 while leaving
+    #900 untouched."""
+    issues = [
+        _issue(900, labels=[{"name": "bug"}]),
+        _issue(905, labels=[{"name": "bug"}]),
+    ]
+    pr = _pr(
+        901,
+        body="- Blocked by #900 \u2014 part of #905",
+        headRefName="feat/prediction-snapshot-store",
+        isDraft=False,
+    )
+    _write_shim(bin_dir, "gh", _gh_shim(issues, [pr], []))
+
+    items = {i["number"]: i for i in _run(bin_dir)["items"]}
+
+    assert [p["number"] for p in items[905]["prs"]] == [901]
+    assert items[900]["prs"] == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "Related to #900. Not closing it.",
+        "Not blocked by #900 anymore \u2014 resuming.",
+        "Depends on #900.",
+        "Unblocks #900.",
+        "Unblocking #900.",
+        "See also #900.",
+        "See #900 for the original report.",
+        "Relationship to #900.",
+        "Unrelated to #900.",
+        "Not part of #900 anymore.",
+    ],
+)
+def test_a_non_work_reference_does_not_link_a_pr_to_its_issue(
+    bin_dir: Path, body: str
+) -> None:
+    """Phrases that name an issue without claiming to work on it must not link
+    -- real bodies say "Related to #403. Not closing it", "unblocks #485",
+    "unrelated to #402". Linking on them would flip an unrelated issue to
+    In Review and clear the PR's orphan status."""
+    issue = _issue(900, labels=[{"name": "bug"}])
+    pr = _pr(901, body=body, headRefName="feat/price-provider-wait", isDraft=True)
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] == "Backlog"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
 def test_open_pr_list_actually_requests_isdraft(bin_dir: Path) -> None:
     """`prs_for` emits `isDraft` on every PR object, but jq can only surface a
     field the `gh pr list --json ...` call actually requested -- a fixture
@@ -569,10 +707,59 @@ def test_a_merged_pr_with_the_issue_open_is_in_verification(bin_dir: Path) -> No
     this period unnamed, so a fix awaiting real-world confirmation sat in
     whatever column it happened to be in."""
     issue = _issue(510, labels=[{"name": "bug"}, {"name": "analyzed"}])
-    merged = [_pr(511, body="Refs #510", headRefName="fix/issue-510")]
+    merged = [_pr(511, body="Closes #510", headRefName="fix/issue-510")]
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
 
     assert _run(bin_dir)["items"][0]["column"] == "In Verification"
+
+
+def test_a_merged_intermediate_pr_keeps_the_issue_in_verification(
+    bin_dir: Path,
+) -> None:
+    """A merged intermediate PR (`Part of #N`) means the work has landed on main
+    and is awaiting graduation -- In Verification, never re-dispatchable.
+
+    This is the no-auto-close contract: beta PRs omit `Closes #N` until the
+    fix graduates, so `Part of`/`Refs` are how a fix normally reads on merge.
+    When the merged scan was narrowed to closing keywords only, issues whose
+    fix had already merged (#643 -> #675, #571 -> #584, #592 -> #619, #666 ->
+    #672, #542 -> #591) fell through to Backlog / Ready for Dev, so a backlog
+    pass could re-dispatch an issue whose partial work already landed."""
+    issue = _issue(517, labels=[{"name": "bug"}, {"name": "analyzed"}])
+    merged = [_pr(518, body="Part of #517", headRefName="fix/issue-517-a")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] == 518
+    assert item["merged_prs"] == [518]
+    assert item["column"] == "In Verification"
+
+
+def test_a_merged_cross_ref_does_not_move_an_issue_to_in_verification(
+    bin_dir: Path,
+) -> None:
+    """The merged scan is deliberately narrower than the open-PR one: it uses
+    work verbs only (`fixes/closes/resolves/refs/part of/tracking`), never bare
+    `#N`. A merged PR that merely names another issue -- "Related to #403. Not
+    closing it -- leaving it open until #456 and #457 are also resolved" --
+    must not flip that issue to In Verification."""
+    issue = _issue(403, labels=[{"name": "bug"}])
+    merged = [
+        _pr(
+            453,
+            body="Related to #403. Not closing it -- leaving it open until "
+            "#456 and #457 are also resolved.",
+            headRefName="fix/issue-403-logging",
+        )
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] is None
+    assert item["merged_prs"] == []
+    assert item["column"] != "In Verification"
 
 
 def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
@@ -676,6 +863,65 @@ def test_conflicting_pr_is_reported_on_its_issue(bin_dir: Path) -> None:
     assert [p["number"] for p in item["prs"]] == [610]
     assert item["prs"][0]["mergeable"] == "CONFLICTING"
     assert item["column"] == "In Review"
+
+
+def test_mergeable_is_requeried_until_it_leaves_unknown(bin_dir: Path) -> None:
+    """GitHub computes `mergeable` LAZILY: the first query on a cold PR returns
+    UNKNOWN and triggers the computation, so a single query reports UNKNOWN as
+    if it were a verdict (measured on #490: six consecutive UNKNOWN passes).
+    The digest must re-query until the value settles, exactly as sweep-prs
+    does. This shim returns UNKNOWN on the first `pr list` and MERGEABLE on
+    the second, so only a re-query produces the asserted value."""
+    issue = _issue(801, labels=[{"name": "bug"}])
+    # `Refs #N` (not `Part of #N`): this test isolates the mergeable retry,
+    # and `Refs` already links under both the old and new linkage rules.
+    unknown_pr = _pr(
+        802, body="Refs #801", headRefName="fix/part-a", mergeable="UNKNOWN"
+    )
+    mergeable_pr = dict(unknown_pr, mergeable="MERGEABLE")
+    counter = bin_dir / "gh_pr_list_calls"
+    shim = f"""
+case "$*" in
+  *"issue list"*) cat <<'EOF'
+{json.dumps([issue])}
+EOF
+    ;;
+  *"pr diff "*"--name-only"*) : ;;
+  *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*)
+    if [ -f '{counter}' ]; then
+      cat <<'EOF'
+{json.dumps([mergeable_pr])}
+EOF
+    else
+      touch '{counter}'
+      cat <<'EOF'
+{json.dumps([unknown_pr])}
+EOF
+    fi
+    ;;
+  *"project item-list"*) printf '%s\\n' '{{"items": []}}' ;;
+  *) echo "unexpected gh call: $*" >&2; exit 1 ;;
+esac
+"""
+    _write_shim(bin_dir, "gh", shim)
+
+    item = _run(bin_dir, MERGE_RETRY_SLEEP="0")["items"][0]
+
+    assert item["prs"][0]["mergeable"] == "MERGEABLE"
+
+
+def test_mergeable_still_unknown_after_retries_is_reported_null(bin_dir: Path) -> None:
+    """If GitHub has still not computed `mergeable` inside the retry budget,
+    the digest must not pass UNKNOWN through as if it were a definite state --
+    it emits null, so no consumer can read it as a verdict."""
+    issue = _issue(803, labels=[{"name": "bug"}])
+    pr = _pr(804, body="Refs #803", headRefName="fix/part-b", mergeable="UNKNOWN")
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    item = _run(bin_dir, MERGE_RETRY_SLEEP="0")["items"][0]
+
+    assert item["prs"][0]["mergeable"] is None
 
 
 def test_issue_matched_by_two_prs_emits_one_item_with_both_prs(

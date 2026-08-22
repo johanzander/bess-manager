@@ -768,12 +768,25 @@ net is upstream, not this section.
 
 2. Remove the worktree — via `ExitWorktree action=remove discard_changes=true`
    if the session is still in it. That is the harness doing it, so it is not
-   sandboxed and it works. If the session has already left, **hand the
-   `git worktree remove --force <path>` to the maintainer to paste with `!`**
-   rather than running it: from a sandboxed Bash it half-deletes the worktree
-   and then fails (see Step 4).
+   sandboxed and it works.
 
-3. Force-delete the local branch and prune stale remote refs:
+   If the session has already left, **emit one `!`-prefixed command that
+   removes the worktree and force-deletes the branch together**, in that
+   order — the branch delete has to ride the same deferred command: git
+   refuses `git branch -D` while the worktree registration persists, and the
+   command below is what clears the registration:
+
+   ```bash
+   # Emit this; do not execute it. It must run unsandboxed.
+   git worktree remove --force <path> && git branch -D <branch-name>
+   ```
+
+   Running `git worktree remove` from a sandboxed Bash half-deletes the
+   worktree and then fails (see Step 4), so the agent must not run it either.
+
+3. In-session only — when item 2 completed via `ExitWorktree`, the
+   registration is gone and `git branch -D` is safe. Force-delete the local
+   branch and prune stale remote refs:
 
    ```bash
    git branch -D <branch-name>

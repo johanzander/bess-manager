@@ -124,15 +124,30 @@ of `analyzed`.
 
 ### General bot rules
 
-- Only the repo owner can trigger bot commands. The one exception is Stage 4:
-  `pr-review.yml` also accepts `@claude-bot` from the developer automation
-  identity (currently the `bess-agent` GitHub account; being renamed to
-  `bess-developer` — see `scripts/gh-agent.sh`), so `implement-issue`'s
-  Step 11 loop can request its own review. `bess-developer` is added to that
-  gate only in the same commit that renames the account — never before,
-  since pre-authorising an unregistered username on a public repo is
-  exploitable. Stages 1–3 and 5 stay owner-only — those spend money on work
-  nobody has asked for yet.
+- Bot commands are owner-triggered, with **two** exceptions, each matching an
+  account that a documented rule already makes responsible for that spend:
+  - **Stage 4** — `pr-review.yml` accepts `@claude-bot` from the developer
+    identity (currently `bess-agent`; being renamed to `bess-developer` — see
+    `scripts/gh-agent.sh`), so `implement-issue`'s Step 11 loop can request its
+    own review.
+  - **Stage 2** — `issue-analyze.yml` accepts `@claude-bot analyze` from
+    `bess-product-owner`, because `backlog`'s Autonomous spend rule authorises
+    exactly that trigger and bounds it (labelled `bug`, external reporter,
+    debug log attached, no prior analyze). The rule existed before the gate
+    accepted the account enforcing it, so the only way to satisfy both was to
+    post as the maintainer — putting their name on comments they never wrote
+    and hiding which decisions were the agent's. An automation decision should
+    carry the automation's face.
+
+  **Stages 1, 3 and 5 stay owner-only, and must not copy this.** Their spend
+  ($1–4 and $2–10) is authorised by no autonomous rule, so nothing would be
+  enforcing a bar on the other side of the gate.
+
+  Only ever name a **registered** account in a gate. `bess-developer` is added
+  in the same commit that renames the account, never before: on a public repo
+  anyone can claim an unregistered username, so pre-authorising one is
+  exploitable. `bess-product-owner` is named above because it exists today and
+  is a collaborator.
 - Automation writes carry a **role** identity, and role is the axis:
   `bess-product-owner` (intake, backlog, board, reporter comments),
   `bess-developer` (analyze, fix, PR authorship, requesting review),

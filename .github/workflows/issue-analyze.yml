@@ -15,8 +15,27 @@ on:
 jobs:
   analyze:
     name: Deep Analysis
+    # The Product Owner agent can fire this, not only the repo owner.
+    #
+    # `backlog`'s Autonomous spend rule already authorises exactly this: Stage 2
+    # on an item entering Analysis that is labelled `bug`, opened by someone
+    # other than the maintainer, carries a debug log, and has no prior analyze
+    # comment. The rule existed while this gate did not accept the account that
+    # enforces it, so the only way to obey both was to post the trigger as the
+    # maintainer -- which put the maintainers name on comments they never wrote
+    # and hid which decisions were the agents.
+    #
+    # Stages 3 and 5 stay OWNER-ONLY and must not copy this. Their spend
+    # ($1-4 and $2-10) is not authorised by any autonomous rule, so nothing
+    # would be enforcing the bar on the other side of the gate.
+    #
+    # Safe to name here because `bess-product-owner` is a REGISTERED account
+    # and a collaborator on this repo. Never pre-authorise a username that does
+    # not exist yet: on a public repo anyone could claim it (see CLAUDE.md on
+    # `bess-developer`).
     if: |
-      github.event.comment.user.login == github.repository_owner &&
+      (github.event.comment.user.login == github.repository_owner ||
+       github.event.comment.user.login == 'bess-product-owner') &&
       github.event.issue.pull_request == null &&
       contains(github.event.comment.body, '@claude-bot analyze')
     runs-on: ubuntu-latest

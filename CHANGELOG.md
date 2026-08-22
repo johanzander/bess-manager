@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **A transient Home Assistant outage no longer kills the 5-minute charging-power adjustment** — the tick now skips and keeps the inverter's current rate instead of crashing. ([#643](https://github.com/johanzander/bess-manager/issues/643))
+- **Export Compensation can now be set to a negative value** — needed when a grid operator charges for export instead of paying for it; the field silently allowed only non-negative values. ([#666](https://github.com/johanzander/bess-manager/issues/666))
 - **A brief Nordpool hiccup no longer produces a daily "recovered from an earlier issue" notice** — the health check re-fetched today's prices every five minutes instead of using the ones already held. ([#662](https://github.com/johanzander/bess-manager/issues/662))
 - **Growatt VPP now lets the inverter and BMS sleep through a long idle at minimum SoC** — an empty battery was still held under continuous remote control, which nothing was protecting. ([#592](https://github.com/johanzander/bess-manager/issues/592))
 - **A tiny solar surplus is no longer planned as an export the inverter will absorb** — below the export the plan can express, the battery charged anyway and ran fuller than planned, spilling the difference later. ([#630](https://github.com/johanzander/bess-manager/issues/630))

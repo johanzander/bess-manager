@@ -25,10 +25,20 @@ wildcards match (`git -c core.pager=cat stash --help` is caught by
 
 import fnmatch
 import json
+import os
 import re
 from pathlib import Path
 
 import pytest
+
+# A dispatched container runs bypassPermissions by design: the clone's
+# .claude/settings.json is shadowed by container/agent-settings.json, so the
+# host permission profile is not what executes there. These pins validate that
+# host profile -- meaningless (and failing) inside a container.
+pytestmark = pytest.mark.skipif(
+    os.environ.get("BESS_HEADLESS_MODE") == "1",
+    reason="host permission policy is replaced by container/agent-settings.json in headless mode",
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SETTINGS = REPO_ROOT / ".claude" / "settings.json"

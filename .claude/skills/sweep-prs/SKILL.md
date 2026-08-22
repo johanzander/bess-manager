@@ -107,14 +107,14 @@ git worktree list | awk 'NR>1 {print $1}' | while read -r wt; do
     # sandbox killed halfway (see below). Say so, or the sweep reports its own
     # wreckage back as a backlog of stranded edits.
     if [ -z "$(printf '%s\n' "$dirty" | grep -v '^ D ')" ]; then
-      echo "CARCASS (failed prune, $(printf '%s\n' "$dirty" | grep -c .) deletions): $b"
+      echo "CARCASS (failed prune, $(printf '%s\n' "$dirty" | grep -c .) deletions): $wt  ($b)"
     else
       echo "SKIP (uncommitted changes): $b"
     fi
     continue
   fi
   if echo "$merged" | grep -qx "$b"; then
-    echo "PRUNE: $b"; continue
+    echo "PRUNE: $wt  ($b)"; continue
   fi
   age=$(( ($(date +%s) - $(git -C "$wt" log -1 --format=%ct)) / 60 ))
   if [ "$age" -lt 30 ]; then
@@ -154,12 +154,18 @@ command for the maintainer to paste with a `!` prefix, which runs unsandboxed:
 ```bash
 # Emit this; do not execute it. It must run from a NON-worktree-isolated
 # session -- an isolated one refuses the `cd` to the shared checkout.
-cd /Users/johanzander/GitHub/bess-manager && for wt in <names>; do
-  b=$(git -C ".claude/worktrees/$wt" symbolic-ref --short HEAD 2>/dev/null)
-  git worktree remove --force ".claude/worktrees/$wt"
+cd /Users/johanzander/GitHub/bess-manager && for wt in <paths>; do
+  b=$(git -C "$wt" symbolic-ref --short HEAD 2>/dev/null)
+  git worktree remove --force "$wt"
   [ -n "$b" ] && git branch -D "$b"
 done; git worktree prune; git worktree list | wc -l
 ```
+
+`<paths>` is the space-separated list of full worktree paths from the reported
+`PRUNE`/`CARCASS`/`PHANTOM` lines. Report the path, not the branch name: `git
+worktree list` yields paths, and a sibling worktree (`../bess-manager-feature/`)
+does not live under `.claude/worktrees/`, so the branch name alone cannot
+reconstruct the path to remove.
 
 The trailing `git worktree prune` is what clears any `PHANTOM`, whose
 directory is already gone so `remove` has nothing to work with. `[ -n "$b" ]`

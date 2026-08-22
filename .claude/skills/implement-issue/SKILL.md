@@ -343,8 +343,8 @@ git fetch origin --prune
 is sandbox-denied — it deletes the working tree *first* and then fails on the
 `.git/worktrees/<name>` unlink, destroying ~393 tracked files and leaving a
 carcass that no later prune can clear (`git worktree prune` is denied too).
-Emit one `!`-prefixed command covering every `PRUNE` and `CARCASS` for the
-maintainer to paste, exactly as `sweep-prs` Step 3 does. See
+Emit one `!`-prefixed command covering every `PRUNE`, `CARCASS` and `PHANTOM`
+for the maintainer to paste, exactly as `sweep-prs` Step 3 does. See
 `docs/agents/local-agent-environment.md`, "git worktree remove is denied too".
 
 Three guards that matter: never remove a worktree with **uncommitted tracked

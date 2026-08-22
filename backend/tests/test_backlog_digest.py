@@ -1141,6 +1141,167 @@ def test_an_unlocked_worktree_is_reported_as_unlocked(bin_dir: Path) -> None:
     assert item["worktree_locked"] is False
 
 
+def test_a_dispatched_session_named_issue_n_is_associated(bin_dir: Path) -> None:
+    """#647 acceptance: a `claude --bg -n "issue-N"` dispatch from the main
+    checkout is associated by its name even though its `cwd` is the launch
+    directory, not the worktree the session goes on to work in.
+
+    The rhythm's stalled-work rule fires `resume_implementation` whenever a
+    worktree is on disk, unlocked, and `.session` is null — so a live dispatch
+    that reads as null gets a second session launched against work the skill
+    calls the only copy. The exact-name match is what stops that."""
+    issue = _issue(631, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/wt/631", "fix/issue-631"))),
+    )
+    _write_shim(
+        bin_dir,
+        "claude",
+        'echo \'[{"name": "issue-631", "cwd": "/repo", '
+        '"kind": "background", "state": "blocked"}]\'',
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/wt/631"
+    assert item["session"] == "issue-631"
+
+
+def test_a_session_inside_a_worktree_is_associated_with_its_issue(
+    bin_dir: Path,
+) -> None:
+    """#647, second half: the digest used to associate a session with an issue
+    ONLY when its name was exactly `issue-<n>`. A session started by hand
+    inside a worktree carries a generated name (e.g. `bess-manager-84`), so it
+    was invisible and its unlocked worktree read as abandoned — the rhythm
+    proposed `resume_implementation` on live work.
+
+    The session's `cwd` IS the worktree it is serving, so the worktree-path
+    join (which already associates a worktree with its issue) also associates
+    the session. This is the issue's candidate fix 2: match on cwd as well as
+    name."""
+    issue = _issue(630, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-630-something", "fix/issue-630-something")
+            )
+        ),
+    )
+    _write_shim(
+        bin_dir,
+        "claude",
+        'echo \'[{"name": "bess-manager-84", '
+        '"cwd": "/repo/worktrees/issue-630-something", '
+        '"kind": "interactive", "status": "idle"}]\'',
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-630-something"
+    assert item["session"] == "bess-manager-84"
+
+
+def test_a_dispatch_named_session_launched_inside_another_worktree_is_not_misattributed(
+    bin_dir: Path,
+) -> None:
+    """#647, reviewer confirmed: a `claude --bg -n "issue-<m>"` dispatch
+    launched from inside <n>'s worktree carries that worktree as its `cwd`, so
+    a cwd-only join would attribute it to <n> too. The exact-name match is
+    authoritative: the session belongs to <m>, and <n>'s genuinely stalled work
+    must still read as having no live session."""
+    issue = _issue(630, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-630-something", "fix/issue-630-something")
+            )
+        ),
+    )
+    _write_shim(
+        bin_dir,
+        "claude",
+        'echo \'[{"name": "issue-700", '
+        '"cwd": "/repo/worktrees/issue-630-something", '
+        '"kind": "background", "state": "running"}]\'',
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-630-something"
+    assert item["session"] is None
+
+
+def test_a_session_launched_from_a_worktree_subdirectory_is_associated(
+    bin_dir: Path,
+) -> None:
+    """The cwd join matches a path prefix, so a session launched from a
+    subdirectory of the worktree is still associated with it."""
+    issue = _issue(630, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-630-something", "fix/issue-630-something")
+            )
+        ),
+    )
+    _write_shim(
+        bin_dir,
+        "claude",
+        'echo \'[{"name": "bess-manager-84", '
+        '"cwd": "/repo/worktrees/issue-630-something/backend", '
+        '"kind": "interactive", "status": "idle"}]\'',
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-630-something"
+    assert item["session"] == "bess-manager-84"
+
+
+def test_a_generated_name_session_in_the_main_checkout_matches_nothing(
+    bin_dir: Path,
+) -> None:
+    """The main checkout is skipped when $worktrees is built, so a session
+    launched there -- even one with a generated name that would match by cwd
+    inside a worktree -- has no worktree to join to and stays null."""
+    issue = _issue(630, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/worktrees/issue-630-something", "fix/issue-630-something")
+            )
+        ),
+    )
+    _write_shim(
+        bin_dir,
+        "claude",
+        'echo \'[{"name": "bess-manager-84", '
+        '"cwd": "/repo", '
+        '"kind": "interactive", "status": "idle"}]\'',
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] == "/repo/worktrees/issue-630-something"
+    assert item["session"] is None
+
+
 def test_issue_with_a_card_is_not_an_orphan(bin_dir: Path) -> None:
     issue = _issue(602)
     card = {"content": {"number": 602}, "status": "Backlog", "priority": "P1"}

@@ -4,6 +4,12 @@ All notable changes to BESS Battery Manager will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Backlog rhythm no longer re-proposes a resume while a session is live in the worktree** — the digest now matches sessions by their launch directory, not only by `issue-<n>` name. ([#647](https://github.com/johanzander/bess-manager/issues/647))
+
 ## [10.1.0] - 2026-08-22
 
 ### Added

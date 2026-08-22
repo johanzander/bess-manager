@@ -134,27 +134,30 @@ worktrees=$(git worktree list --porcelain | awk '
   }
 ' | jq -R 'split("\t") | {path: .[0], branch: (.[1] // ""), locked: (.[2] == "true")}' | jq -s .)
 
-# `claude agents` lists BACKGROUND agents only, and this is the trap that made
-# the rhythm pass tell the maintainer to restart work that was actively
-# running. Two independent reasons it cannot answer "is someone on this":
+# `claude agents --json` used to list background agents only, and that is the
+# trap that made the rhythm pass tell the maintainer to restart work that was
+# actively running. A session started in the terminal never appeared, and even
+# a background agent carried a generated descriptive name ("Review PR and
+# create branch for bess-manager"), not the `issue-<n>` the dispatch
+# convention promises, so the exact-name match missed it too.
 #
-#   1. A session started in the terminal — `claude` in a CLI, then
-#      `/implement-issue <n>` — is a foreground session and never appears here
-#      at all. That is how #624 was dispatched.
-#   2. Even a background agent carries a generated descriptive name ("Review PR
-#      and create branch for bess-manager"), not the `issue-<n>` the dispatch
-#      convention promises, so the exact-name match below misses it too.
-#
-# Measured: 41 worktrees on disk, `claude agents --json` returning ONE entry.
-# So `session` was null for essentially every item, every worktree read as
-# abandoned, and `resume_implementation` fired on live sessions — against work
-# whose branch commits the skill itself calls the only copy.
+# Measured at the time: 41 worktrees on disk, `claude agents --json` returning
+# ONE entry. So `session` was null for essentially every item, every worktree
+# read as abandoned, and `resume_implementation` fired on live sessions —
+# against work whose branch commits the skill itself calls the only copy.
 #
 # The worktree LOCK is the signal that actually tracks a live session: 4 of
 # those 41 were locked, and they were exactly the four live sessions. It is
 # local, needs no process list, and covers foreground and background alike.
-# `session` is kept because a name match is strictly more informative when it
-# does happen; it is no longer what liveness rests on.
+# `session` is kept because a match is strictly more informative when it does
+# happen; it is no longer what liveness rests on. The CLI now reports
+# interactive sessions too, with their launch `cwd`, so the match is two-fold
+# (#647): the exact `issue-<n>` name covers the documented `claude --bg
+# -n "issue-<n>"` dispatch (whose cwd is the launch directory, not the
+# worktree), and a cwd inside a worktree covers a session started there — by
+# hand, or a dispatch launched from inside it — whose generated name carries
+# no issue number. A session whose name IS `issue-<m>` always belongs to <m>,
+# never to the worktree, so the two cannot collide.
 sessions=$(claude agents --json)
 
 # No `--field "Priority"` here: verified against the real CLI just now,
@@ -256,9 +259,36 @@ jq -n \
     and ($wt.branch // "") != ""
     and ([ $merged_prs[] | select(.headRefName == $wt.branch) ] | length) > 0;
 
+  # A session cwd is the directory it was launched from, which for a session
+  # started inside a worktree IS that worktree (the CLI reports interactive
+  # sessions too, not only background agents). Match it exactly, or as a path
+  # prefix (a cwd inside a worktree subdirectory), so the same path-or-branch
+  # join that associates a worktree with its issue also associates the session
+  # living there. The main checkout is never a member of $worktrees -- it is
+  # skipped when the list is built -- so a session launched from it matches
+  # nothing here.
+  #
+  # The exact-name match is authoritative when it exists: a session whose name
+  # IS `issue-<m>` belongs to <m>, never to the worktree. Without that
+  # precedence, a `claude --bg -n "issue-<m>"` dispatch launched from inside
+  # the worktree of <n> would also populate the session of <n>, masking
+  # genuinely stalled work on <n> -- the exact failure class this PR fixes,
+  # inverted.
+  def session_is_in_worktree($s; $wt):
+    (($s.cwd // "") == $wt.path) or (($s.cwd // "") | startswith(($wt.path + "/")));
+
   def session_for($n):
-    ([ $sessions[] | select(.name? == "issue-\($n)") | .name ]) as $matches
-    | if ($matches | length) == 0 then null else $matches[0] end;
+    ([ $sessions[] | . as $s
+      | select(
+          ($s.name? == "issue-\($n)")
+          or (
+            (($s.name? // "") | test("^issue-[0-9]+$") | not)
+            and any($worktrees[] | select(matches_issue(.; $n)); session_is_in_worktree($s; .))
+          )
+        )
+      | ($s.name // $s.cwd)
+    ]) as $matches
+    | if ($matches | length) == 0 then null else ($matches | sort | .[0]) end;
 
   # Matched per LINE and anchored to its start, because `Blocked by #N` is a
   # convention -- a line in the body, optionally bulleted -- not a phrase to be

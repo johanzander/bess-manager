@@ -33,8 +33,12 @@ pytestmark = pytest.mark.slow
 
 # Measured 2026-08-10: this fixture splices one window (0, 6) and its boundary
 # period 6 is IDLE with passive solar charging.
+# Re-measured for #602: the concave terminal row moves the value function, so
+# the spliced window now exits at 5. The fixture still satisfies this test's
+# stated precondition -- period 5 is IDLE with passive solar charging -- which
+# is what makes it still able to detect a stale flow record.
 FIXTURE = "synthetic_consumption_efficient"
-BOUNDARY_PERIOD = 6
+BOUNDARY_PERIOD = 5
 
 # Well inside the pin's tolerance band, far above float noise.
 PIN_DRIFT_KWH = 0.004

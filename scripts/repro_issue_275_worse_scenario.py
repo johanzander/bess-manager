@@ -184,7 +184,6 @@ def run_baseline():
         battery_settings=battery_settings,
         solar_production=solar_production,
         period_duration_hours=0.25,
-        terminal_value_per_kwh=0.0,
     )
     print(
         f"{'p':>3} {'day':>8} {'hh:mm':>6} {'sell':>7} {'action':>8} {'intent':>15} {'soe_end':>8} {'export':>7}"
@@ -224,7 +223,6 @@ def sweep_soe_step():
             battery_settings=battery_settings,
             solar_production=solar_production,
             period_duration_hours=0.25,
-            terminal_value_per_kwh=0.0,
         )
         soe = result.period_data[95].energy.battery_soe_end
         cost = result.economic_summary.battery_solar_cost
@@ -248,7 +246,6 @@ def isolate_solar():
             battery_settings=battery_settings,
             solar_production=solar_production,
             period_duration_hours=0.25,
-            terminal_value_per_kwh=0.0,
         )
         soe = result.period_data[95].energy.battery_soe_end
         tonight_disch = sum(
@@ -286,7 +283,6 @@ def myopic_vs_joint():
         battery_settings=battery_settings,
         solar_production=solar_production,
         period_duration_hours=0.25,
-        terminal_value_per_kwh=0.0,
     )
     today_only = optimize_battery_schedule(
         buy_price=buy_prices[:96],
@@ -295,7 +291,6 @@ def myopic_vs_joint():
         battery_settings=battery_settings,
         solar_production=solar_production[:96],
         period_duration_hours=0.25,
-        terminal_value_per_kwh=0.0,
     )
     tomorrow_only = optimize_battery_schedule(
         buy_price=buy_prices[96:],
@@ -304,7 +299,6 @@ def myopic_vs_joint():
         battery_settings=battery_settings,
         solar_production=solar_production[96:],
         period_duration_hours=0.25,
-        terminal_value_per_kwh=0.0,
         initial_soe=today_only.period_data[95].energy.battery_soe_end,
     )
     joint_cost = joint.economic_summary.battery_solar_cost
@@ -334,7 +328,6 @@ def verify_mechanism():
         battery_settings=battery_settings,
         solar_production=solar_production,
         period_duration_hours=0.25,
-        terminal_value_per_kwh=0.0,
     )
     window = result.period_data[96:136]
     min_soe = min(pd.energy.battery_soe_end for pd in window)

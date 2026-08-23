@@ -54,6 +54,7 @@ from core.bess.models import (
 from core.bess.price_manager import MockSource
 from core.bess.settings import BatterySettings
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+from core.bess.terminal_value import TerminalValueCurve
 from core.bess.tests.conftest import MockHomeAssistantController
 from core.bess.tests.unit.test_scenarios import build_scenario_optimizer_inputs
 
@@ -258,7 +259,7 @@ def _curtailment_scenario(
       (IDLE) at period 0 instead -- discharging at a loss to avoid a period-1
       cost that curtailment will neutralize anyway is no longer worth it.
 
-    terminal_value_per_kwh=0.3 gives holding stored energy to the end of the
+    terminal_curve=flat(0.3) gives holding stored energy to the end of the
     horizon a genuine competing value (otherwise a positive-or-neutral
     discharge would trivially dominate regardless of curtailment).
 
@@ -291,7 +292,7 @@ def _curtailment_scenario(
         initial_soe=2.0,
         initial_cost_basis=0.0,
         period_duration_hours=1.0,
-        terminal_value_per_kwh=0.3,
+        terminal_curve=TerminalValueCurve.flat(0.3),
         export_curtailment_active=export_curtailment_active,
     )
 
@@ -364,7 +365,6 @@ def _forced_export_scenario(export_curtailment_active: bool) -> OptimizationResu
         initial_soe=1.0,
         initial_cost_basis=0.0,
         period_duration_hours=1.0,
-        terminal_value_per_kwh=0.0,
         export_curtailment_active=export_curtailment_active,
     )
 

@@ -116,5 +116,6 @@
     }
   },
   "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: this fixture's purpose is testing negative BUY-price behavior (base_prices go as low as -0.30 SEK), and the app's realistic additional_costs (a large fixed grid+tax fee) would push the buy price positive even in those hours, defeating the scenario -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up.",
-  "terminal_value_per_kwh": 0.0
+  "terminal_value_per_kwh": 0.3325,
+  "terminal_knee_kwh": 5.263157895
 }

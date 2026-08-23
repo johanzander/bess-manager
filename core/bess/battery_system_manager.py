@@ -63,7 +63,7 @@ from .settings import (
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
 from .solis_modbus_controller import SolisModbusController
-from .terminal_value import terminal_value_breakdown
+from .terminal_value import TerminalValueCurve, calculate_terminal_curve
 from .time_utils import (
     format_period,
     get_period_count,
@@ -1938,55 +1938,56 @@ class BatterySystemManager:
 
         return optimization_period, optimization_data
 
-    def _calculate_terminal_value(
+    def _calculate_terminal_curve(
         self,
         buy_prices: list[float],
-        sell_prices: list[float],
+        cap_sell_prices: list[float],
         optimization_period: int,
-    ) -> float:
-        """Calculate terminal value per kWh for the DP optimization.
+    ) -> TerminalValueCurve | None:
+        """Build the concave terminal row for the DP (#602).
 
-        The formula itself lives in `core/bess/terminal_value.py` so that
-        production, the forecast-robustness harness and the pinned scenario
-        corpus all price the boundary identically -- see that module's
-        docstring for the full rationale (#126, #244, #246, #345, #359, #422).
-        This method owns fetching the inputs from settings and reporting the
-        result; it does not own the economics.
+        The economics live in `core/bess/terminal_value.py` so that production,
+        the forecast-robustness harness and the pinned scenario corpus price the
+        boundary identically -- see that module for the full rationale (#126,
+        #244, #246, #345, #359, #422, #602). This method owns fetching the
+        inputs and reporting the result; it does not own the economics.
+
+        The knee needs next-day consumption and solar, which is why this takes
+        forecasts where its predecessor took only prices. Both are already
+        fetched for the optimization itself, so nothing new is polled.
 
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
-            sell_prices: Full sell price array (from optimization_period onwards)
             optimization_period: Current optimization starting period
 
         Returns:
-            Terminal value per kWh (floored at 0.0)
+            The terminal curve, or None when no horizon remains to value.
         """
         # A horizon with no remaining periods is an expected state here (the
         # last optimization of the day), and there is nothing left to value.
         # The shared formula deliberately raises on empty input instead of
-        # defaulting, so this case is owned here rather than there -- see
-        # `terminal_value_breakdown`.
+        # defaulting, so this case is owned here rather than there.
         if not buy_prices:
-            return 0.0
+            return None
 
-        breakdown = terminal_value_breakdown(
-            buy_prices, sell_prices, self.battery_settings
+        curve = calculate_terminal_curve(
+            buy_prices,
+            cap_sell_prices,
+            self._get_consumption_forecast(),
+            self._fetch_tomorrow_solar_forecast(),
+            self.battery_settings,
         )
 
         logger.info(
-            "Terminal value: %.3f/kWh (buy_based=%.3f, sell_cap=%.3f, "
-            "cap_applied=%s, median_buy=%.3f, max_sell=%.3f, "
-            "efficiency=%.2f, cycle_cost=%.3f)",
-            breakdown["terminal_value"],
-            breakdown["buy_based"],
-            breakdown["sell_cap"],
-            breakdown["cap_applied"],
-            breakdown["median_buy"],
-            breakdown["max_sell"],
+            "Terminal curve: %.3f/kWh up to %.2f kWh, then %.3f/kWh "
+            "(median_buy=%.3f, efficiency=%.2f)",
+            curve.head_rate,
+            curve.knee_kwh,
+            curve.tail_rate,
+            curve.head_rate / self.battery_settings.efficiency_discharge,
             self.battery_settings.efficiency_discharge,
-            self.battery_settings.cycle_cost_per_kwh,
         )
-        return float(breakdown["terminal_value"])
+        return curve
 
     def _get_temperature_derated_charge_limits(
         self, num_periods: int
@@ -2110,6 +2111,8 @@ class BatterySystemManager:
             # the cap for a later, economically unrelated day's terminal
             # energy. Single-day horizons are unaffected -- the terminal day
             # is the only day present, so this is identical to sell_prices.
+            # Still needed after #602: the cap governs the no-PV regime, which
+            # is where the concave row's knee cannot bind.
             terminal_date = remaining_entries[-1]["timestamp"][:10]
             cap_sell_prices = [
                 entry["sellPrice"]
@@ -2117,8 +2120,8 @@ class BatterySystemManager:
                 if entry["timestamp"][:10] == terminal_date
             ]
 
-            # Calculate terminal value for end-of-horizon energy valuation
-            terminal_value = self._calculate_terminal_value(
+            # Terminal valuation for end-of-horizon energy.
+            terminal_curve = self._calculate_terminal_curve(
                 buy_prices, cap_sell_prices, optimization_period
             )
 
@@ -2138,7 +2141,7 @@ class BatterySystemManager:
                 battery_settings=self.battery_settings,
                 initial_cost_basis=initial_cost_basis,
                 period_duration_hours=0.25,  # Always quarterly after normalization in _get_price_data
-                terminal_value_per_kwh=terminal_value,
+                terminal_curve=terminal_curve,
                 currency=self.home_settings.currency,
                 max_charge_power_per_period=max_charge_power_per_period,
                 capabilities=self.platform_capabilities,

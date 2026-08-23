@@ -118,5 +118,6 @@
     },
     "_note": "BATTERY_EXPORT dropped from intents_present in #497. It was satisfied by a single 0.12 kWh export at period 17, which the DP stopped choosing once its phantom load-support export revenue was removed and the whole plan re-optimised -- realized cost on this fixture improved by 0.317 SEK as a result, and corpus-wide genuine exporting went UP (155 -> 210 periods). Per docs/agents/testing.md, intents_present only discriminates on an engineered scenario; on a multi-purpose fixture like this one the pinned expected_results economics are the real guard, and they still cover the same behaviour."
   },
-  "terminal_value_per_kwh": 2.4481
+  "terminal_value_per_kwh": 2.4481,
+  "terminal_knee_kwh": null
 }

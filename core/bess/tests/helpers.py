@@ -8,6 +8,8 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
+import statistics
+
 from core.bess.dp_battery_algorithm import (
     _period_flows,
     optimize_battery_schedule,
@@ -22,7 +24,10 @@ from core.bess.settings import (
     HomeSettings,
 )
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
-from core.bess.terminal_value import calculate_terminal_value_per_kwh
+from core.bess.terminal_value import (
+    TerminalValueCurve,
+    calculate_terminal_value_per_kwh,
+)
 
 
 def _scenario_inputs(scenario: dict):
@@ -103,7 +108,17 @@ def _scenario_inputs(scenario: dict):
         "period_duration_hours": scenario.get("period_duration_hours", 1.0),
     }
     if "terminal_value_per_kwh" in scenario:
-        inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+        # Recorded as two numbers rather than a curve object so the fixture
+        # stays readable and diffable, same reason #605 recorded the scalar.
+        # A fixture with no knee is the pre-#602 linear row, stated explicitly.
+        knee = scenario.get("terminal_knee_kwh")
+        inputs["terminal_curve"] = (
+            TerminalValueCurve(
+                head_rate=scenario["terminal_value_per_kwh"], knee_kwh=knee
+            )
+            if knee is not None
+            else TerminalValueCurve.flat(scenario["terminal_value_per_kwh"])
+        )
     # export_curtailment_active is capability-aware in production (enabled
     # AND the platform supports export-limit control, resolved in
     # battery_system_manager.py) -- fixtures record the resolved flag
@@ -117,8 +132,8 @@ def _scenario_inputs(scenario: dict):
     return inputs
 
 
-def scenario_terminal_value(scenario: dict) -> float:
-    """Production terminal value for one scenario, with #422 cap scoping.
+def scenario_terminal_curve(scenario: dict) -> TerminalValueCurve:
+    """Production terminal curve for one scenario (#602).
 
     Shared by `scripts/capture_scenario_terminal_values.py` (which records the
     result into the fixture) and
@@ -126,26 +141,51 @@ def scenario_terminal_value(scenario: dict) -> float:
     (which fails when a recorded value drifts from it). One definition, so the
     guard cannot pass against a stale copy of the rule it enforces.
 
-    Production scopes the arbitrage-consistency cap to sell prices on the
-    terminal boundary's own calendar day. Fixtures carry no timestamps, so the
-    equivalent window here is the last `24 / period_duration` periods -- which
-    reproduces `regression_frank_debug_before`'s independently-pinned
-    0.143013413 exactly, where the unscoped array gives the pre-#422
-    0.195488259. `buy_prices` stays the full remaining horizon, as in
-    production.
+    Knee proxy, unavoidable and documented, in the same spirit as the #422 cap
+    window `scenario_terminal_value` used before it: production derives the knee
+    from *tomorrow's* forecasts, and a fixture has no tomorrow -- only the
+    horizon it was captured over. What a fixture does have is the dark stretch
+    immediately *before* its terminal boundary, which is the mirror image of the
+    dark stretch immediately after it, so the knee here is the net load over the
+    fixture's trailing run of zero-solar periods.
 
-    Precondition, unenforceable from fixture data: the horizon ends on a day
-    boundary. True for the whole corpus (every fixture is shorter than a day,
-    or "partial first day + whole terminal day"), and not checkable by
-    arithmetic on the length -- `n % periods_per_day == 0` is false for every
-    correct multi-day fixture here, 118 % 96 = 22 among them.
+    Walking backwards matters and a forward scan is wrong: most fixtures start
+    mid-morning with the sun already up, so a forward scan finds "solar covers
+    load" in the first period and returns a knee of zero. That is how
+    `regression_2026_08_15_084345` -- this issue's own repro, captured at 08:43
+    -- silently recorded `knee=0.0` and stopped exercising the change it exists
+    to pin.
+
+    The consequence stands either way: the corpus pins the *curve*, not the
+    *derivation of the knee*. The derivation is covered against a real profile
+    and Solcast forecast in `test_terminal_value.py`.
     """
     inputs = _scenario_inputs(scenario)
     periods_per_day = round(24 / inputs["period_duration_hours"])
-    return calculate_terminal_value_per_kwh(
-        inputs["buy_price"],
-        inputs["sell_price"][-periods_per_day:],
-        inputs["battery_settings"],
+    consumption = inputs["home_consumption"]
+    solar = inputs["solar_production"]
+
+    if not any(s >= c for c, s in zip(consumption, solar, strict=True)):
+        # No PV crossover anywhere: the no-sun regime, priced by the capped
+        # scalar exactly as production does.
+        return TerminalValueCurve.flat(
+            calculate_terminal_value_per_kwh(
+                inputs["buy_price"],
+                inputs["sell_price"][-periods_per_day:],
+                inputs["battery_settings"],
+            )
+        )
+
+    net = 0.0
+    for consumed, produced in zip(reversed(consumption), reversed(solar), strict=True):
+        if produced > 0.0:
+            break
+        net += max(0.0, consumed - produced)
+    return TerminalValueCurve(
+        head_rate=statistics.median(inputs["buy_price"])
+        * inputs["battery_settings"].efficiency_discharge,
+        knee_kwh=net / inputs["battery_settings"].efficiency_discharge,
+        tail_rate=0.0,
     )
 
 

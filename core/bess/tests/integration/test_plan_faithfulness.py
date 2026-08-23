@@ -277,7 +277,6 @@ def test_subfloor_solar_export_is_never_planned():
         "sell_price": [0.5, 0.2, 0.2, 0.2, 0.2, 0.2],
         "solar_production": [0.5099, 2.0, 2.0, 0.0, 0.0, 0.0],
         "home_consumption": [0.5, 0.5, 0.5, 6.0, 6.0, 6.0],
-        "terminal_value_per_kwh": 0.0,
         "battery": {
             "max_soe_kwh": 20.0,
             "min_soe_kwh": 2.2,

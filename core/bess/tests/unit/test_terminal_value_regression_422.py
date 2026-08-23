@@ -41,8 +41,9 @@ from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.price_manager import MockSource
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
+from core.bess.terminal_value import calculate_terminal_value_per_kwh
 from core.bess.tests.conftest import MockHomeAssistantController
-from core.bess.tests.helpers import _scenario_inputs
+from core.bess.tests.helpers import _scenario_inputs, scenario_terminal_curve
 
 FIXTURE_PATH = Path(__file__).parent / "data" / "regression_frank_debug_before.json"
 TODAY_REMAINING = 22  # periods 74..95 today; index 22 onward is tomorrow
@@ -81,16 +82,15 @@ def test_fixture_reproduces_the_reported_cap_values():
     buggy_cap_input = sell_price  # pre-#422: full remaining-horizon window
     fixed_cap_input = sell_price[TODAY_REMAINING:]  # #422 fix: terminal day only
 
-    system = _terminal_value_calculator(scenario["battery"])
-    buggy_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=buggy_cap_input,
-        optimization_period=OPTIMIZATION_PERIOD,
+    # The cap formula itself, which still prices the no-PV-crossover regime
+    # after #602 -- reached directly rather than through the BSM wrapper,
+    # since the wrapper now builds a curve and the cap is what this pins.
+    settings = _terminal_value_calculator(scenario["battery"]).battery_settings
+    buggy_terminal_value = calculate_terminal_value_per_kwh(
+        scenario["buy_price"], buggy_cap_input, settings
     )
-    fixed_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=fixed_cap_input,
-        optimization_period=OPTIMIZATION_PERIOD,
+    fixed_terminal_value = calculate_terminal_value_per_kwh(
+        scenario["buy_price"], fixed_cap_input, settings
     )
 
     assert buggy_terminal_value == pytest.approx(0.195488, abs=1e-5)
@@ -106,18 +106,16 @@ def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
     just internally consistent DP arithmetic."""
     scenario = _load_fixture()
     inp = _scenario_inputs(scenario)
-    system = _terminal_value_calculator(scenario["battery"])
-
-    fixed_terminal_value = system._calculate_terminal_value(
-        buy_prices=scenario["buy_price"],
-        sell_prices=scenario["sell_price"][TODAY_REMAINING:],
-        optimization_period=OPTIMIZATION_PERIOD,
-    )
-    # The fixture pins its own terminal_value_per_kwh (consumed by
+    # The fixture pins its own terminal curve (consumed by
     # test_scenarios.py::test_all_scenarios' expected_results regression
-    # guard) -- cross-check it stays derived from the real formula above,
-    # not hand-edited independently of it.
-    assert inp["terminal_value_per_kwh"] == pytest.approx(fixed_terminal_value)
+    # guard) -- cross-check it stays derived from the real production rule,
+    # not hand-edited independently of it. Since #602 this fixture's day has
+    # a PV crossover, so it runs the concave row rather than the capped
+    # scalar; what #422 is about -- that tomorrow's evening peak still clears
+    # -- is asserted below on behaviour, which is where it belongs.
+    expected_curve = scenario_terminal_curve(scenario)
+    assert inp["terminal_curve"].head_rate == pytest.approx(expected_curve.head_rate)
+    assert inp["terminal_curve"].knee_kwh == pytest.approx(expected_curve.knee_kwh)
 
     result = optimize_battery_schedule(**inp)
 

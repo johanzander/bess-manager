@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 120.7353,
-    "battery_solar_cost": 13.04068,
-    "base_to_battery_solar_savings": 107.69462,
-    "base_to_battery_solar_savings_pct": 89.19895,
-    "total_charged": 20.8,
-    "total_discharged": 18.74
+    "battery_solar_cost": 22.55962,
+    "base_to_battery_solar_savings": 98.17568,
+    "base_to_battery_solar_savings_pct": 81.31481,
+    "total_charged": 24.2,
+    "total_discharged": 16.86
   },
   "expected_behavior": {
     "description": "Summer day: abundant solar, mostly idle with some grid charging and export",
@@ -115,5 +115,6 @@
       "power_within_limits": true
     }
   },
-  "terminal_value_per_kwh": 1.30886
+  "terminal_value_per_kwh": 2.1356,
+  "terminal_knee_kwh": 5.263157895
 }

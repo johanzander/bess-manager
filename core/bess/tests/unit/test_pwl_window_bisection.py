@@ -33,8 +33,12 @@ from core.bess.tests.unit.golden_capture import DATA_DIR
 FIXTURE = "regression_2026_08_17_624"
 
 # Measured on this fixture: the merged window and where bisection lands.
-EXPECTED_WINDOW = (76, 85)
-EXPECTED_HALVES = [(76, 80), (80, 85)]
+# Re-pinned for #602: the concave terminal row changes V at the boundary, which
+# changes which periods read as near-tied, so the merge grew from (76, 85) to
+# (76, 88). The subject is unaffected -- 12 periods still exceeds what one solve
+# can certify, so the window still bisects, which is what these tests assert.
+EXPECTED_WINDOW = (76, 88)
+EXPECTED_HALVES = [(76, 82), (82, 88)]
 
 
 @pytest.fixture(scope="module")

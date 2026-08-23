@@ -499,7 +499,7 @@
     "initial_soe": 12.6,
     "initial_cost_basis": 0.037260801124831704
   },
-  "terminal_value_per_kwh": 0.143013413,
+  "terminal_value_per_kwh": 0.345271752,
   "expected_behavior": {
     "constraints": {
       "soe_within_bounds": true
@@ -507,8 +507,9 @@
   },
   "expected_results": {
     "base_cost": 7.18306,
-    "battery_solar_cost": -2.85839,
-    "base_to_battery_solar_savings": 10.04144,
-    "base_to_battery_solar_savings_pct": 139.79345
-  }
+    "battery_solar_cost": -2.68126,
+    "base_to_battery_solar_savings": 9.86432,
+    "base_to_battery_solar_savings_pct": 137.32764
+  },
+  "terminal_knee_kwh": 1.073684211
 }

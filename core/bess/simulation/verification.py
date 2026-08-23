@@ -7,7 +7,7 @@ from core.bess.simulation.inverter_simulator import (
     derive_control_command,
     simulate,
 )
-from core.bess.terminal_value import calculate_terminal_value_per_kwh
+from core.bess.terminal_value import calculate_terminal_curve
 
 
 def verify_plan_faithfulness(
@@ -106,8 +106,8 @@ def realized_under_solar_error(
     this harness judge plans by a different objective than the one that produced
     them.
     """
-    terminal_value_per_kwh = calculate_terminal_value_per_kwh(
-        buy_price, sell_price, settings
+    terminal_curve = calculate_terminal_curve(
+        buy_price, sell_price, home, forecast_solar, settings
     )
     result = optimize_battery_schedule(
         buy_price=buy_price,
@@ -117,7 +117,7 @@ def realized_under_solar_error(
         initial_soe=initial_soe,
         battery_settings=settings,
         period_duration_hours=dt,
-        terminal_value_per_kwh=terminal_value_per_kwh,
+        terminal_curve=terminal_curve,
     )
     commands = [
         derive_control_command(
@@ -138,9 +138,8 @@ def realized_under_solar_error(
     realized_usable = max(
         0.0, sim.period_data[-1].energy.battery_soe_end - settings.min_soe_kwh
     )
-    planned_cost = (
-        result.economic_summary.battery_solar_cost
-        - terminal_value_per_kwh * planned_usable
+    planned_cost = result.economic_summary.battery_solar_cost - terminal_curve.value(
+        planned_usable
     )
-    realized_cost = sim.realized_cost - terminal_value_per_kwh * realized_usable
+    realized_cost = sim.realized_cost - terminal_curve.value(realized_usable)
     return planned_cost, realized_cost

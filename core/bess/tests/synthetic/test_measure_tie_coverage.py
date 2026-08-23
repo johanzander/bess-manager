@@ -159,7 +159,8 @@ def _at_zero_terminal_value(name):
     to #450, not to this rig's unit coverage.
     """
     scenario = dict(load_test_scenario(name))
-    scenario["terminal_value_per_kwh"] = 0.0
+    scenario.pop("terminal_value_per_kwh", None)
+    scenario.pop("terminal_knee_kwh", None)
     return scenario
 
 

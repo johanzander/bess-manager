@@ -790,6 +790,34 @@ def test_a_backticked_worked_example_does_not_flip_an_issue(bin_dir: Path) -> No
     assert item["column"] != "In Verification"
 
 
+def test_a_backticked_worked_example_does_not_link_an_open_pr(
+    bin_dir: Path,
+) -> None:
+    """The same rule holds for the OPEN-PR scan, which is a separate code path
+    (`linkage_body`/`pr_matches_issue`) from the merged one. `part of #N` is
+    deliberately not a stripped cross-reference phrase -- it is real linkage on
+    a real intermediate PR -- so without code-span stripping a PR that merely
+    QUOTES that phrase as an example links itself to the quoted issue and
+    reports it In Review. PR #684 did exactly that to issue #409 while
+    describing the merged-scan fix."""
+    issue = _issue(409, labels=[{"name": "bug"}])
+    pr = _pr(
+        684,
+        body="Stripping the phrase (not the line) keeps combined "
+        "references like `- Blocked by #100 -- part of #409` working.",
+        headRefName="fix/backlog-dispatch-and-linkage-regex",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] != "In Review"
+
+
 def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
     """A graduation PR still open means the work is In Review, not verified."""
     issue = _issue(512, labels=[{"name": "bug"}])

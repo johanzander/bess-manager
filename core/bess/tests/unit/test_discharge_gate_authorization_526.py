@@ -1,10 +1,11 @@
 """The sub-period discharge authorization is decided by the DP, not re-derived (#526).
 
-`shadow_price` is a left one-sided slope of the value-function interpolant, which
-is undefined at or below the reserve floor, where no cell below exists. The DP therefore skips the assignment when
+`shadow_price` is a reading of the value-function interpolant below the current
+state, which is undefined at or below the reserve floor, where no cell below exists.
+The DP therefore skips the assignment when
 start-of-period SoE has no cell below it, leaving the field at its `0.0` default — the
 same value a genuinely worthless kWh produces. Consumers comparing
-`buy_price * eff_d >= shadow_price` cannot tell the two apart, and `0.0` satisfies
+`buy_price >= shadow_price` cannot tell the two apart, and `0.0` satisfies
 that inequality for any positive buy price, so the sub-period discharge ceiling was
 opened on a value that was never computed.
 
@@ -83,6 +84,11 @@ def test_computed_periods_authorize_on_the_economics(scenario_name):
 
     Guards against the fix degenerating into "never authorize": the decision must
     still be the buy-vs-hold comparison for every period the DP could evaluate.
+
+    #683: that comparison carries no efficiency factor. `shadow_price` is priced
+    per kWh *delivered*, the same unit as `buy_price` -- covering dE consumes
+    dE/eta of SoE, which would later have delivered dE anyway, so eta cancels on
+    both sides.
     """
     scenario = load_test_scenario(scenario_name)
     _, settings, buy_prices, _, _ = build_scenario_inputs(scenario_name)
@@ -95,15 +101,12 @@ def test_computed_periods_authorize_on_the_economics(scenario_name):
         if id(pd) in floor_periods or period >= len(buy_prices):
             continue
         evaluated += 1
-        expected = (
-            buy_prices[period] * settings.efficiency_discharge
-            >= pd.decision.shadow_price
-        )
+        expected = buy_prices[period] >= pd.decision.shadow_price
         assert pd.decision.intra_period_discharge_allowed is expected, (
             f"period {period} of {scenario_name}: authorization "
             f"{pd.decision.intra_period_discharge_allowed} disagrees with "
-            f"buy {buy_prices[period]:.4f} * eff {settings.efficiency_discharge:.3f} "
-            f">= shadow {pd.decision.shadow_price:.4f}"
+            f"buy {buy_prices[period]:.4f} >= shadow "
+            f"{pd.decision.shadow_price:.4f}"
         )
 
     assert (

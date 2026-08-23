@@ -368,11 +368,13 @@ class DecisionData:
     )
     cost_basis: float = 0.0  # per kWh - cost basis of stored energy
     shadow_price: float = (
-        0.0  # SEK per kWh of SoE - marginal opportunity value of stored energy
-        # (DP value-function gradient dV/dSoE). REPORTING ONLY (#526): it is a
-        # left one-sided slope of the interpolant the policy walks (#571,
-        # `_value_slope_below`), so it does not exist at or below the reserve
-        # floor, where there is no cell underneath to price,
+        0.0  # SEK per kWh DELIVERED - marginal opportunity value of stored
+        # energy, priced per kWh out of the battery rather than per kWh of SoE
+        # (#683; the two differ by the discharge efficiency, delivered =
+        # dV/dSoE / eta). REPORTING ONLY (#526): it is a
+        # reading of the interpolant the policy walks (#571,
+        # `_value_of_delivering_below`), so it does not exist at or below the
+        # reserve floor, where there is no cell underneath to price,
         # and 0.0 is indistinguishable between "computed as worthless" and
         # "never computed". No consumer may re-derive a decision from it --
         # read intra_period_discharge_allowed instead.

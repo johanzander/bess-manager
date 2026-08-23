@@ -110,6 +110,14 @@ loud, not quiet.
 | `reporter`, `upstream`, `discussion` | they owe us | quiet — suppressed from actions, still counted and listed |
 | `maintainer` | we owe them nothing; you owe us a decision | **loud — ranked above every other action (rank 0), with the open question attached** |
 
+The one carve-out: `autonomous_analyze` fires from evidence (`bug` +
+`ready-for-analysis` + non-maintainer author, and no `analyzed` /
+`needs-human-review` label) and overrides the stale wait values — `reporter`,
+`upstream`, `discussion` — so one of those cannot hide an item that is
+actually waiting on analysis. The `maintainer` hold is NOT overridden: that
+row means you owe a decision, so the carve-out stands down and the escalation
+stays loudest — see Autonomous spend.
+
 `analysis` is the fifth value and is not in the signed table above because it
 means the same thing the digest's `awaiting_source: label` marks — a triage
 gap, not a completed wait: set the field to what the item is actually waiting
@@ -276,6 +284,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
 | `nudge_reporter` | one nudge, as the PO identity |
 | `park` | move to *Backlog* — the chase went unanswered |
+| `autonomous_analyze` | the tier-1 carve-out, computed from evidence not the board field: post `@claude-bot analyze` as the PO (`scripts/gh-agent.sh --as po issue comment <n> --body "@claude-bot analyze"`), after confirming no prior analyze on the issue. Fires even when a stale `Awaiting` would otherwise quiet the item, because `ready-for-analysis` already proves the log is in; stands down when the item has Stage 2 history (`analyzed` / `needs-human-review`) or the card holds `Awaiting: maintainer` (see Autonomous spend) |
 | `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
 | `add_card` | open issue, no card on the board at all — add it to Project #1 first, **then** set `Priority`; until both exist it is unrankable and invisible to every board pass |
 | `move_card` | the card sits somewhere the evidence does not support — always move it to match `column`, never re-derive `column` to match the card |
@@ -505,20 +514,32 @@ wrote, and hiding which decisions were the agent's. An automation decision
 carries the automation's face. If this ever fails the gate, **that is the
 finding** — report it; do not route around it with plain `gh`.
 
-It fires on an item entering Analysis that meets the
-tier-1 bar from `Verb: next` directly — labelled `bug`, opened by someone
-other than the maintainer, with its debug log attached — **and that has no
-prior `@claude-bot analyze` comment already on the issue**. Check this by
-reading the issue's comments from the digest (or `gh issue view` if the
-digest's comment count needs confirming) — never a local file. This is a
-check against the item itself, not a ranking pass: an item entering Analysis
-is never a member of the Backlog/Ready list that `next` ranks, so it cannot
-"rank" into a tier. The no-prior-analyze condition exists because the digest
-is a stateless snapshot with no notion of "entering" — without it, an item
-that Stage 2 already failed to reach a conclusion on (`needs-human-review`)
-would keep matching every pass under `/loop`, firing Stage 2 again each time
-at $0.50–2 a shot. Every other item entering Analysis gets a proposal
-instead.
+The rhythm pass surfaces the qualifying items as `autonomous_analyze`
+(ranked with the other Analysis actions) — a check against the item's
+**evidence**, not the board field: labelled `bug`, opened by someone other
+than the maintainer, with its debug log attached. `ready-for-analysis` is the
+debug-log proof and the no-prior-analyze guard in one: triage sets it only
+when it has confirmed the log is attached, and Stage 2 removes it (replacing
+it with `analyzed` or `needs-human-review`). The rule itself also refuses an
+item carrying either Stage 2 label — triage re-stamps `ready-for-analysis`
+on an edited issue even after an inconclusive run, so without that check the
+spend would re-fire on items analysis has already settled. A stale `Awaiting`
+field must not quiet it — #681/#680 was a `bug` + `ready-for-analysis` item
+whose card still said `Awaiting: reporter`, and the old carve-out, evaluated
+only on items the pass surfaced, never saw it. The carve-out overrides the
+stale wait values (`reporter`, `upstream`, `discussion`) but stands down on
+`Awaiting: maintainer`, where the loop is deliberately held for your
+decision; and the same evidence makes the `park` / `nudge_reporter` /
+`surface_discussion` chases stand down, so the pass never tells the PO to
+bury what it just un-hid. Still confirm there is no prior `@claude-bot
+analyze` comment already on the issue before posting — check by reading the
+issue's comments from the digest (or `gh issue view` if the digest's comment
+count needs confirming), never a local file: an in-flight analyze keeps
+`ready-for-analysis` until it completes, so the action may re-propose during
+that window. This is a check against the item itself, not a ranking pass: an
+item entering Analysis is never a member of the Backlog/Ready list that
+`next` ranks, so it cannot "rank" into a tier. Every other item entering
+Analysis gets a proposal instead.
 
 ## Close the loop
 

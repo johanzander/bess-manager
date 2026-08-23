@@ -166,8 +166,10 @@ grid-snap artifact vs. a real, steep-but-correct decision boundary) — test it:
    `### Economic Summary`.
 4. **Apply the governing law.** State the counterfactual explicitly ("the
    alternative to this action was ___"). Compute marginal value vs that
-   counterfactual using opportunity cost = `shadow_price` (floored by `sell_price`
-   under solar replenishment). Verdict: correct / incorrect / marginal-and-why.
+   counterfactual using opportunity cost = `shadow_price` (floored by
+   `sell_price / discharge_efficiency` under solar replenishment -- since #683
+   `shadow_price` is per kWh **delivered**, so it is directly comparable to
+   `buy_price` but sits a factor 1/eta above `sell_price`). Verdict: correct / incorrect / marginal-and-why.
    Never use gross value.
 5. **Cite the code path.** Name the exact function/lines that produced the decision
    (e.g. the discharge gate in `_compute_reward`,

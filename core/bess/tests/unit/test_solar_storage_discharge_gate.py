@@ -10,7 +10,7 @@ well above Min SOC. Whether the battery SHOULD cover the dip is the same
 economic question #187 answered for SOLAR_EXPORT: cover from battery only
 when the stored energy is worth less than buying from grid right now, i.e.
 
-    buy_price * efficiency_discharge >= shadow_price
+    buy_price >= shadow_price
 
 where shadow_price is the DP value-function gradient dV/dSoE (marginal
 opportunity value of stored energy), persisted per period on DecisionData.
@@ -152,7 +152,6 @@ def test_solar_storage_holds_during_early_reserve_accumulation():
     so the DP's reserve-building plan isn't undermined by every small dip.
     """
     bs = make_battery_settings(efficiency_discharge=0.95)
-    eff_d = bs.efficiency_discharge
 
     # Scarce solar relative to accumulation need, then a very expensive
     # evening peak that depends on the reserve being intact -- every marginal
@@ -178,9 +177,11 @@ def test_solar_storage_holds_during_early_reserve_accumulation():
     )
     for t in periods:
         shadow = result.period_data[t].decision.shadow_price
-        assert shadow > buy[t] * eff_d, (
-            f"period {t}: shadow {shadow:.3f} should exceed buy*eff_d "
-            f"{buy[t] * eff_d:.3f} (reserve worth more than covering a dip now)"
+        # #683: shadow_price is per kWh delivered, the same unit as buy_price,
+        # so the close condition carries no efficiency factor.
+        assert shadow > buy[t], (
+            f"period {t}: shadow {shadow:.3f} should exceed buy {buy[t]:.3f} "
+            "(reserve worth more than covering a dip now)"
         )
         assert result.period_data[t].decision.intra_period_discharge_allowed is False
 
@@ -202,7 +203,6 @@ def test_solar_storage_opens_when_shadow_price_is_low():
     the DP's real choice.)
     """
     bs = make_battery_settings(efficiency_discharge=0.95)
-    eff_d = bs.efficiency_discharge
 
     # Morning solar (0.75 kWh/period) far exceeds the modest evening draw
     # (0.125 kWh/period) it needs to cover, so extra stored energy has low
@@ -230,8 +230,12 @@ def test_solar_storage_opens_when_shadow_price_is_low():
     )
     for t in periods:
         shadow = result.period_data[t].decision.shadow_price
-        assert shadow <= buy[t] * eff_d, (
-            f"period {t}: shadow {shadow:.3f} should not exceed buy*eff_d "
-            f"{buy[t] * eff_d:.3f} (low opportunity value, cheap to refill)"
+        # #683: per kWh delivered on both sides, so no efficiency factor. The
+        # old `buy * eff_d` form was strictly tighter than the rule production
+        # applies, so a shadow price landing in (buy*eff_d, buy] would have
+        # failed here while the gate below correctly reported open.
+        assert shadow <= buy[t], (
+            f"period {t}: shadow {shadow:.3f} should not exceed buy "
+            f"{buy[t]:.3f} (low opportunity value, cheap to refill)"
         )
         assert result.period_data[t].decision.intra_period_discharge_allowed is True

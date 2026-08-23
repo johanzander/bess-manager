@@ -243,5 +243,6 @@
     "_note": "Post-fix (#466) pin. Pre-fix (commit c1013fe9) this same input replays the bundle's own reported economics exactly -- grid_only_cost 5.764893562499999, battery_solar_cost -2.094315584625 -- confirming the extraction is faithful to the debug log. The fix improves battery_solar_cost by discharging at periods 32 (19:00) and 45 (22:15) instead of sitting IDLE."
   },
   "terminal_value_per_kwh": 0.619768125,
-  "terminal_knee_kwh": 2.828842105
+  "terminal_knee_kwh": 2.828842105,
+  "terminal_tail_rate": 0.1541755
 }

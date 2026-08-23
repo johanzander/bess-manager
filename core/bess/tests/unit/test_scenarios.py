@@ -59,6 +59,7 @@ def test_every_fixture_declares_a_terminal_value():
         for name in get_all_scenario_files()
         if "terminal_value_per_kwh" not in load_test_scenario(name)
         or "terminal_knee_kwh" not in load_test_scenario(name)
+        or "terminal_tail_rate" not in load_test_scenario(name)
     ]
     assert missing == [], (
         f"fixtures without a declared terminal value: {missing}. Run "
@@ -108,6 +109,16 @@ def test_recorded_terminal_values_still_match_the_production_formula():
             if drifted:
                 stale.append(
                     f"{name}: recorded knee={recorded_knee} computed={computed_knee}"
+                )
+            # `tail_rate` is checked too, not just head and knee. Without it a
+            # fixture can replay a curve that differs from the production one on
+            # the field the reconstruction is most likely to get wrong -- it is
+            # the only one with a dataclass default, so omitting it fails silent
+            # rather than loud.
+            elif abs(scenario["terminal_tail_rate"] - curve.tail_rate) > 1e-9:
+                stale.append(
+                    f"{name}: recorded tail={scenario['terminal_tail_rate']} "
+                    f"computed={curve.tail_rate}"
                 )
 
     assert stale == [], (

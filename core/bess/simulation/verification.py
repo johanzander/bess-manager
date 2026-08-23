@@ -7,7 +7,10 @@ from core.bess.simulation.inverter_simulator import (
     derive_control_command,
     simulate,
 )
-from core.bess.terminal_value import calculate_terminal_curve
+from core.bess.terminal_value import (
+    curve_from_knee,
+    knee_kwh_from_trailing_darkness,
+)
 
 
 def verify_plan_faithfulness(
@@ -106,8 +109,22 @@ def realized_under_solar_error(
     this harness judge plans by a different objective than the one that produced
     them.
     """
-    terminal_curve = calculate_terminal_curve(
-        buy_price, sell_price, home, forecast_solar, settings
+    # This harness optimizes and executes one horizon against itself, so it
+    # has no forecast for the day after its own boundary -- the precondition
+    # `knee_kwh_from_forecast` states. It therefore uses the same documented
+    # stand-in the pinned corpus does: the dark stretch immediately *before*
+    # the boundary, walked backward. Passing `home`/`forecast_solar` forward
+    # from period 0 would scan the wrong end of the array and return a knee of
+    # zero on any horizon starting in daylight.
+    terminal_curve = curve_from_knee(
+        buy_price,
+        sell_price,
+        knee_kwh_from_trailing_darkness(home, forecast_solar, settings),
+        pv_refills=any(
+            solar >= consumption
+            for consumption, solar in zip(home, forecast_solar, strict=True)
+        ),
+        battery_settings=settings,
     )
     result = optimize_battery_schedule(
         buy_price=buy_price,

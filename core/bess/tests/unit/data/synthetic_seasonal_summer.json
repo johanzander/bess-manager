@@ -116,5 +116,6 @@
     }
   },
   "terminal_value_per_kwh": 2.1356,
-  "terminal_knee_kwh": 20.421052632
+  "terminal_knee_kwh": 20.421052632,
+  "terminal_tail_rate": 0.47386
 }

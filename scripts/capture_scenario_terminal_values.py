@@ -70,8 +70,10 @@ def main() -> None:
         computed_knee = (
             None if math.isinf(curve.knee_kwh) else round(curve.knee_kwh, PRECISION)
         )
+        computed_tail = round(curve.tail_rate, PRECISION)
         recorded = scenario.get("terminal_value_per_kwh")
         recorded_knee = scenario.get("terminal_knee_kwh")
+        recorded_tail = scenario.get("terminal_tail_rate")
 
         if (
             recorded is not None
@@ -85,6 +87,8 @@ def main() -> None:
                     and abs(recorded_knee - computed_knee) < 10**-PRECISION
                 )
             )
+            and recorded_tail is not None
+            and abs(recorded_tail - computed_tail) < 10**-PRECISION
         ):
             print(f"  ok    {path.name}: {recorded} knee={recorded_knee}")
             continue
@@ -99,6 +103,7 @@ def main() -> None:
 
         scenario["terminal_value_per_kwh"] = computed
         scenario["terminal_knee_kwh"] = computed_knee
+        scenario["terminal_tail_rate"] = computed_tail
         path.write_text(json.dumps(scenario, indent=2) + "\n")
         print(f"  write {path.name}: {recorded} -> {computed} knee={computed_knee}")
 

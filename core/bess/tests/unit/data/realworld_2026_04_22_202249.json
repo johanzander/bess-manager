@@ -382,5 +382,6 @@
     "_note": "BATTERY_EXPORT removed from intents_present after #466's risk-aware load-covering IDLE tie-break: the 3 periods that were BATTERY_EXPORT (96, 99, 100) are a downstream SOE-trajectory cascade of the earlier near-tied IDLE->LOAD_SUPPORT flips and now resolve to LOAD_SUPPORT instead."
   },
   "terminal_value_per_kwh": 2.4740375,
-  "terminal_knee_kwh": 7.690157895
+  "terminal_knee_kwh": 7.690157895,
+  "terminal_tail_rate": 1.40961
 }

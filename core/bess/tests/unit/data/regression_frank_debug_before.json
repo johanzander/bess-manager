@@ -511,5 +511,6 @@
     "base_to_battery_solar_savings": 9.68976,
     "base_to_battery_solar_savings_pct": 134.89748
   },
-  "terminal_knee_kwh": 2.073052632
+  "terminal_knee_kwh": 2.073052632,
+  "terminal_tail_rate": 0.037474441
 }

@@ -275,5 +275,6 @@
     "_note": " Re-pinned after merging #497 (PR #511): removing the DP's phantom sub-resolution export revenue moved planned cost to the honest figure and closed this fixture's +0.0054 plan-execution gap to exactly zero."
   },
   "terminal_value_per_kwh": 0.263476137,
-  "terminal_knee_kwh": 2.508736842
+  "terminal_knee_kwh": 2.508736842,
+  "terminal_tail_rate": -0.019913273
 }

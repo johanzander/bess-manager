@@ -306,16 +306,80 @@ def calculate_terminal_curve(
     no oracle behind it yet, so on those days this keeps the valuation #381's
     own analysis found wanting.
     """
-    knee_kwh = knee_kwh_from_forecast(
-        consumption_forecast, solar_forecast, battery_settings
+    return curve_from_knee(
+        buy_prices,
+        sell_prices,
+        knee_kwh_from_forecast(consumption_forecast, solar_forecast, battery_settings),
+        pv_refills=any(
+            solar >= consumption
+            for consumption, solar in zip(
+                consumption_forecast, solar_forecast, strict=False
+            )
+        ),
+        battery_settings=battery_settings,
     )
+
+
+def knee_kwh_from_trailing_darkness(
+    consumption: list[float],
+    solar: list[float],
+    battery_settings: BatterySettings,
+) -> float:
+    """Knee for a horizon with no forecast beyond its own boundary.
+
+    `knee_kwh_from_forecast` needs arrays describing the day *after* the
+    boundary. Two callers do not have one and never will: the pinned scenario
+    corpus, whose fixtures carry only the horizon they were captured over, and
+    the forecast-robustness harness, which optimizes and executes one horizon
+    against itself. What both do have is the dark stretch immediately *before*
+    the boundary, which stands in for the one immediately after it.
+
+    Walking backwards is the point, and a forward scan is wrong: most horizons
+    start mid-morning with the sun already up, so a forward scan finds "solar
+    covers load" in the first period and returns a knee of zero. That is how
+    `regression_2026_08_15_084345` -- #602's own repro, captured at 08:43 --
+    silently recorded `knee = 0.0` and stopped exercising the change it exists
+    to pin.
+
+    The scan ends where solar *covers load*, mirroring the forward version,
+    rather than where solar becomes nonzero. Ending on any nonzero reading lets
+    a single 0.003 kWh dusk crumb stop it immediately and zero the whole
+    terminal row: `realworld_2026_04_27_184643` recorded `knee = 0.0` against a
+    head rate of 1.863 that way, i.e. no terminal row at all across the entire
+    battery.
+
+    Two limits, neither fixable from the data these callers have. The mirror
+    assumption is weakest exactly where it is used -- a boundary at midnight has
+    a *short* trailing dark stretch where the real forward one runs to sunrise.
+    And a horizon ending in daylight has no trailing dark stretch at all, so its
+    knee is genuinely zero.
+    """
+    net = 0.0
+    for consumed, produced in zip(reversed(consumption), reversed(solar), strict=True):
+        if produced >= consumed:
+            break
+        net += consumed - produced
+    return net / battery_settings.efficiency_discharge
+
+
+def curve_from_knee(
+    buy_prices: list[float],
+    sell_prices: list[float],
+    knee_kwh: float,
+    *,
+    pv_refills: bool,
+    battery_settings: BatterySettings,
+) -> TerminalValueCurve:
+    """Rates and regime for an already-derived knee.
+
+    Split out so the two knee derivations -- forward from real forecasts in
+    production, backward from trailing darkness where no forecast beyond the
+    boundary exists -- cannot drift on the *economics*, only on the quantity
+    each is able to measure. Reconstructing the rates at a second site is how
+    the corpus came to replay a `tail_rate` of 0.0 against a capture that used
+    a nonzero one.
+    """
     usable_capacity = battery_settings.max_soe_kwh - battery_settings.min_soe_kwh
-    pv_refills = any(
-        solar >= consumption
-        for consumption, solar in zip(
-            consumption_forecast, solar_forecast, strict=False
-        )
-    )
     if knee_kwh >= usable_capacity or not pv_refills:
         return TerminalValueCurve.flat(
             calculate_terminal_value_per_kwh(buy_prices, sell_prices, battery_settings)
@@ -323,15 +387,6 @@ def calculate_terminal_curve(
 
     efficiency = battery_settings.efficiency_discharge
     max_sell = max(sell_prices)
-    # Above the knee tomorrow's PV refills the pack, so the marginal kWh is
-    # worth only what exporting it earns -- floored at the terminal day's
-    # *worst* export price, a strict lower bound on tomorrow's opportunity.
-    # Zero would leave the DP indifferent to dumping surplus at any positive
-    # price at all. The floor is the minimum rather than the maximum precisely
-    # so it cannot tie with the in-horizon best sell slot and manufacture a
-    # plateau there. On a fixed export tariff min and max coincide, so the
-    # floor would land on that tie -- there it stays at zero, matching #359's
-    # existing carve-out, and a flat tariff has no cheap slot to dump into.
     export_prices_vary = max_sell > min(sell_prices)
     return TerminalValueCurve(
         head_rate=statistics.median(buy_prices) * efficiency,

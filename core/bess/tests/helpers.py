@@ -8,8 +8,6 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
-import statistics
-
 from core.bess.dp_battery_algorithm import (
     _period_flows,
     optimize_battery_schedule,
@@ -26,7 +24,8 @@ from core.bess.settings import (
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
 from core.bess.terminal_value import (
     TerminalValueCurve,
-    calculate_terminal_value_per_kwh,
+    curve_from_knee,
+    knee_kwh_from_trailing_darkness,
 )
 
 
@@ -111,10 +110,18 @@ def _scenario_inputs(scenario: dict):
         # Recorded as two numbers rather than a curve object so the fixture
         # stays readable and diffable, same reason #605 recorded the scalar.
         # A fixture with no knee is the pre-#602 linear row, stated explicitly.
+        # All three fields are read back, not two. Reconstructing with the
+        # dataclass default for `tail_rate` silently replayed 0.0 against a
+        # capture that used `min(sell) * efficiency_discharge`, so the corpus
+        # was pinned to a curve production never computes -- worth a different
+        # `battery_solar_cost` on 4 of 27 knee-bound fixtures, and invisible to
+        # the staleness guard, which compared only head and knee.
         knee = scenario.get("terminal_knee_kwh")
         inputs["terminal_curve"] = (
             TerminalValueCurve(
-                head_rate=scenario["terminal_value_per_kwh"], knee_kwh=knee
+                head_rate=scenario["terminal_value_per_kwh"],
+                knee_kwh=knee,
+                tail_rate=scenario.get("terminal_tail_rate", 0.0),
             )
             if knee is not None
             else TerminalValueCurve.flat(scenario["terminal_value_per_kwh"])
@@ -141,34 +148,11 @@ def scenario_terminal_curve(scenario: dict) -> TerminalValueCurve:
     (which fails when a recorded value drifts from it). One definition, so the
     guard cannot pass against a stale copy of the rule it enforces.
 
-    Knee proxy, unavoidable and documented, in the same spirit as the #422 cap
-    window this replaced: production derives the knee from *tomorrow's*
-    forecasts, and a fixture has no tomorrow -- only the horizon it was captured
-    over. What a fixture does have is the dark stretch immediately *before* its
-    terminal boundary, which stands in for the one immediately after it.
-
-    Walking backwards matters and a forward scan is wrong: most fixtures start
-    mid-morning with the sun already up, so a forward scan finds "solar covers
-    load" in the first period and returns a knee of zero. That is how
-    `regression_2026_08_15_084345` -- this issue's own repro, captured at 08:43
-    -- silently recorded `knee = 0.0` and stopped exercising the change it
-    exists to pin.
-
-    The scan ends where solar *covers load*, mirroring production, rather than
-    where solar becomes nonzero. Breaking on any nonzero reading lets a single
-    0.003 kWh dusk crumb end the scan immediately and zero the whole terminal
-    row: `realworld_2026_04_27_184643` recorded `knee = 0.0` against a head rate
-    of 1.863 that way, i.e. no terminal row at all across the entire battery.
-
-    Two limits worth stating, since neither is fixable from fixture data. The
-    mirror assumption is weakest exactly where it is used -- a boundary at
-    midnight has a *short* trailing dark stretch (Frank's fixtures carry 2.0 h)
-    where production would measure midnight to sunrise (~6.5 h in Belgian
-    August), so the corpus under-exercises the change by roughly half. And a
-    fixture whose horizon ends in daylight has no trailing dark stretch at all,
-    so its knee is genuinely zero. Either way the corpus pins the *curve*, not
-    the *derivation of the knee*; the derivation is covered against a real
-    profile and Solcast forecast in `test_terminal_value_concavity.py`.
+    A fixture has no tomorrow, so the knee comes from
+    `knee_kwh_from_trailing_darkness` -- see that function for the proxy and its
+    limits. The rates and the regime split come from `curve_from_knee`, the same
+    code production uses, so only the *quantity* is approximated here and never
+    the economics.
     """
     inputs = _scenario_inputs(scenario)
     periods_per_day = round(24 / inputs["period_duration_hours"])
@@ -176,37 +160,15 @@ def scenario_terminal_curve(scenario: dict) -> TerminalValueCurve:
     consumption = inputs["home_consumption"]
     solar = inputs["solar_production"]
 
-    net = 0.0
-    for consumed, produced in zip(reversed(consumption), reversed(solar), strict=True):
-        if produced >= consumed:
-            break
-        net += consumed - produced
-    knee_kwh = net / settings.efficiency_discharge
-
-    pv_refills = any(
-        produced >= consumed
-        for consumed, produced in zip(consumption, solar, strict=True)
-    )
-    if knee_kwh >= settings.max_soe_kwh - settings.min_soe_kwh or not pv_refills:
-        return TerminalValueCurve.flat(
-            calculate_terminal_value_per_kwh(
-                inputs["buy_price"],
-                inputs["sell_price"][-periods_per_day:],
-                settings,
-            )
-        )
-
-    terminal_sell = inputs["sell_price"][-periods_per_day:]
-    max_sell = max(terminal_sell)
-    return TerminalValueCurve(
-        head_rate=statistics.median(inputs["buy_price"])
-        * settings.efficiency_discharge,
-        knee_kwh=knee_kwh,
-        tail_rate=(
-            min(terminal_sell) * settings.efficiency_discharge
-            if max_sell > min(terminal_sell)
-            else 0.0
+    return curve_from_knee(
+        inputs["buy_price"],
+        inputs["sell_price"][-periods_per_day:],
+        knee_kwh_from_trailing_darkness(consumption, solar, settings),
+        pv_refills=any(
+            produced >= consumed
+            for consumed, produced in zip(consumption, solar, strict=True)
         ),
+        battery_settings=settings,
     )
 
 

@@ -91,10 +91,24 @@ horizon's end is valued at:
 a **concave** row, not a single rate (#602). `knee_kwh` is the household's own
 net load from the boundary until tomorrow's PV covers it, so the *quantity*
 carried is set by a load profile rather than by a price estimate;
-`head_rate` is `max(median(buy_prices), max(sell_prices)) * efficiency_discharge`
-and `tail_rate` is `min(sell_prices) * efficiency_discharge`, since energy
-beyond the knee is refilled by tomorrow's sun and is worth only what exporting
-it earns.
+`head_rate` is `median(buy_prices) * efficiency_discharge` — the purchase the
+household avoids by having carried the energy. `tail_rate` is
+`min(sell_prices) * efficiency_discharge` (the terminal day's window), since
+energy beyond the knee is refilled by tomorrow's sun and is worth only what
+exporting it earns; on a **fixed export tariff** `min` and `max` coincide, so
+the floor would land exactly on the hold-versus-export tie and `tail_rate` is
+0.0 there instead, matching #359's existing carve-out.
+
+`head_rate` is deliberately **not** floored at
+`max(sell_prices) * efficiency_discharge`. That was tried and reverted: it
+prices terminal energy above what the DP can buy at inside the horizon, which
+turns the terminal row into an arbitrage target — on `synthetic_seasonal_spring`
+(median buy 1.05, best sell 1.90) the floored rate of 1.805 made the DP charge
+40.6 kWh to bank 23.6 against a 42.64 SEK credit, which is #126/#244's
+fictitious bonus at scale. The consequence of not flooring is that the rate
+still decides *whether* to carry while the knee decides *how much* — a ~12%
+move in the rate swings the full knee on #595's fixture. That is a known
+limitation, not an oversight.
 
 Before #602 this was one unbounded slope,
 `median(buy_prices) * efficiency_discharge - cycle_cost` capped at

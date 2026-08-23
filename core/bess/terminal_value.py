@@ -291,6 +291,16 @@ def calculate_terminal_curve(
     and the DP holds ~89% of the pack at an uncapped rate. The knee must bind
     *and* the premise behind it must hold.
 
+    The scan stops at the *first* crossover, so it reserves only for the dark
+    stretch before the sun arrives and never for the following evening. That is
+    the right stopping point in the case this was built for -- past sunrise the
+    PV refills the pack, and the next evening is served from that refill inside
+    a horizon that by then has real prices for it. It understates the need on a
+    day whose sun covers load briefly but never builds a surplus to recharge
+    from: the crossover exists, so the day takes the concave path, with a knee
+    that assumes a refill it will not get. Thin winter sun, i.e. the same gap as
+    below rather than a separate one.
+
     The winter carry #381 asks for needs a knee derived from the next cheap
     charging window rather than from sunrise. That is not in scope here and has
     no oracle behind it yet, so on those days this keeps the valuation #381's

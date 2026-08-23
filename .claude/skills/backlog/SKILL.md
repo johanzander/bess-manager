@@ -443,10 +443,16 @@ maintainer's go-ahead.
 
 Only after approval, and only for an item that meets the Definition of Ready:
 
-    claude --bg -n "issue-<n>" "/implement-issue <n>"
+    scripts/run-agent.sh <n>
+    scripts/run-agent.sh --with-compose <n>   # when Step 8 (local run & observe) applies
 
-**Never create a worktree.** That session's Step 4 creates its own from a
-fresh `origin/main`.
+**Never create a worktree or a clone.** `run-agent.sh` owns the isolation: a
+private clone at `.agent-clones/issue-<n>`, the dev-role gh token, a restricted
+egress allowlist, and permissions skipped inside the disposable container — the
+boundary is the container, not an allowlist entry. That is what keeps a headless
+dispatch from ever stopping to ask for a permission nobody can answer (the old
+`claude --bg` path hung exactly there). Implement-issue's Step 4 creates the
+branch in that clone directly.
 
 Gated three ways, and any one of them holds `dispatchable` shut:
 

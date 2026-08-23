@@ -762,6 +762,34 @@ def test_a_merged_cross_ref_does_not_move_an_issue_to_in_verification(
     assert item["column"] != "In Verification"
 
 
+def test_a_backticked_worked_example_does_not_flip_an_issue(bin_dir: Path) -> None:
+    """Inline-code spans in a PR body are examples, not linkage declarations.
+    PR #679 explained its own linkage fix with the literal line
+    `- Blocked by #100 -- part of #409` (a worked example inside backticks),
+    and the merged scan read `part of #409` as a work reference -- bouncing
+    issue #409 to In Verification for work it never did. A real `Part of #N`
+    intermediate PR
+    (test_a_merged_intermediate_pr_keeps_the_issue_in_verification) carries
+    no code markup, so stripping backticked spans before scanning leaves that
+    linkage intact."""
+    issue = _issue(409, labels=[{"name": "bug"}])
+    merged = [
+        _pr(
+            679,
+            body="Stripping the phrase (not the line) keeps combined "
+            "references like `- Blocked by #100 -- part of #409` working.",
+            headRefName="fix/backlog-digest-linkage",
+        )
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] is None
+    assert item["merged_prs"] == []
+    assert item["column"] != "In Verification"
+
+
 def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
     """A graduation PR still open means the work is In Review, not verified."""
     issue = _issue(512, labels=[{"name": "bug"}])

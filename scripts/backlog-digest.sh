@@ -133,7 +133,13 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       # ("until #456 and #457 are also resolved"), and a merged PR must not
       # flip an unrelated issue to In Verification. Drives both `merged_pr`
       # (the column) and `merged_prs` (the visibility list).
-      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
+      #
+      # Inline-code spans are stripped BEFORE scanning, so `#N` inside a
+      # backticked worked example cannot flip an issue: PR #679 explained its
+      # own fix with the literal line `- Blocked by #100 -- part of #409` and
+      # that example bounced issue #409 to In Verification. A real linkage
+      # declaration is never in code markup.
+      refs: [ (.body // "") | gsub("`[^`]*`"; "") | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree

@@ -70,7 +70,7 @@ def _optimize():
 
 def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
     """A real DP-optimized LOAD_SUPPORT period whose shadow price makes the
-    gate condition favorable (buy_price * eff_d >= shadow_price) must NOT
+    gate condition favorable (buy_price >= shadow_price, #683) must NOT
     raise the discharge ceiling above the DP's plan-scaled baseline *in the
     simulator* -- deliberately unlike production, which does raise it (#520).
     The simulator stays plan-faithful so the corpus keeps measuring the plan,
@@ -93,10 +93,10 @@ def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
         "this test is that an authorized period is still ignored for "
         "LOAD_SUPPORT)"
     )
-    assert (
-        buy_price[LOAD_SUPPORT_PERIOD] * settings.efficiency_discharge
-        >= pd.decision.shadow_price
-    ), (
+    # #683: shadow_price is per kWh delivered, so this mirrors the DP's rule
+    # exactly. The old `* efficiency_discharge` form was strictly tighter and
+    # would have reported an uncomputed shadow price for a computed one.
+    assert buy_price[LOAD_SUPPORT_PERIOD] >= pd.decision.shadow_price, (
         "scenario sanity check failed -- the DP's authorization here must "
         "come from a genuinely favorable buy-vs-hold comparison, not from an "
         "uncomputed shadow price (#526)"

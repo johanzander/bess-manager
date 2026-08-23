@@ -6,10 +6,12 @@ blocks the battery from covering an intra-period solar dip. Whether it SHOULD
 cover the dip is an economic question: cover from battery only when the stored
 energy is worth less than buying from grid right now, i.e.
 
-    buy_price * efficiency_discharge >= shadow_price
+    buy_price >= shadow_price
 
-where shadow_price is the DP value-function gradient dV/dSoE (marginal
-opportunity value of stored energy), persisted per period on DecisionData.
+where shadow_price is the marginal opportunity value of stored energy priced
+per kWh *delivered* (#683), persisted per period on DecisionData. Both sides are
+therefore in the same unit and no efficiency factor appears: covering dE consumes
+dE/eta of SoE, which would later have delivered dE anyway, so eta cancels.
 
 See docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md.
 """
@@ -26,7 +28,7 @@ from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.dp_battery_algorithm import (
     _interpolate_value,
     _record_marginal_value,
-    _value_slope_below,
+    _value_of_delivering_below,
     optimize_battery_schedule,
 )
 from core.bess.dp_constants import SOE_STEP_KWH
@@ -47,9 +49,15 @@ PERIOD = 20  # Arbitrary test period (quarter-hour slot)
 ISSUE_571_FIXTURE = Path(__file__).parent / "data" / "regression_2026_08_13_145213.json"
 
 
-def _authorize(shadow_price: float, buy_price: float, eff_d: float):
-    """Run `_record_marginal_value` against a value function engineered to make
-    dV/dSoE equal `shadow_price` at the sampled state, and return the decision.
+def _authorize(cell_slope: float, buy_price: float, eff_d: float):
+    """Run `_record_marginal_value` against a value function whose SoE-cell slope
+    is `cell_slope` at the sampled state, and return the decision.
+
+    The parameter is the slope per kWh of *SoE*. What the DP records is the value
+    given up per kWh *delivered* (#683), which on a linear V_row is exactly
+    `cell_slope / eff_d` -- delivering one step costs `1/eff_d` steps of SoE. The
+    tests below assert that conversion explicitly rather than passing the recorded
+    number in, so the unit the gate compares against is stated, not assumed.
 
     The buy-vs-hold comparison moved into the DP (#526), so the boundary test
     below drives it where it now lives rather than through a standalone gate
@@ -57,10 +65,10 @@ def _authorize(shadow_price: float, buy_price: float, eff_d: float):
     """
     settings = make_battery_settings(efficiency_discharge=eff_d)
     decision = DecisionData(strategic_intent="SOLAR_EXPORT")
-    # A SoE one grid step above the floor lands on index 1, so the backward
-    # difference V[t,1] - V[t,0] exists and equals shadow_price * SOE_STEP_KWH.
+    # A SoE one grid step above the floor lands on index 1, so V is linear over
+    # the span the delivery consumes and its cell slope is exactly `cell_slope`.
     soe = settings.min_soe_kwh + SOE_STEP_KWH
-    V = np.array([[0.0, shadow_price * SOE_STEP_KWH]])
+    V = np.array([[0.0, cell_slope * SOE_STEP_KWH]])
     _record_marginal_value(
         decision,
         V=V,
@@ -73,22 +81,32 @@ def _authorize(shadow_price: float, buy_price: float, eff_d: float):
 
 
 def test_intra_period_discharge_authorization_boundary():
-    """The DP authorizes iff buy*eff_d >= shadow; equality discharges (>=)."""
+    """The DP authorizes iff buy >= shadow; equality discharges (>=).
+
+    #683: both sides are per kWh delivered, so no efficiency factor appears in the
+    rule -- and it appears here only in converting the constructed SoE-cell slope
+    into the delivered-kWh price the DP actually records.
+    """
     eff_d = 0.95
     # stored energy worth less than buying now -> cover from battery
-    decision = _authorize(shadow_price=1.0, buy_price=2.0, eff_d=eff_d)
-    assert decision.shadow_price == pytest.approx(1.0)
+    decision = _authorize(cell_slope=1.0, buy_price=2.0, eff_d=eff_d)
+    assert decision.shadow_price == pytest.approx(1.0 / eff_d)
     assert decision.intra_period_discharge_allowed is True
     assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 100
 
     # stored energy worth more (reserved for a peak) -> hold, buy from grid
-    decision = _authorize(shadow_price=4.0, buy_price=0.5, eff_d=eff_d)
-    assert decision.shadow_price == pytest.approx(4.0)
+    decision = _authorize(cell_slope=4.0, buy_price=0.5, eff_d=eff_d)
+    assert decision.shadow_price == pytest.approx(4.0 / eff_d)
     assert decision.intra_period_discharge_allowed is False
     assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 0
 
-    # exact equality -> discharge (>=)
-    decision = _authorize(shadow_price=0.95, buy_price=1.0, eff_d=0.95)
+    # Exact equality -> discharge (>=). Note this case is NOT a behaviour change:
+    # a cell slope of eff_d prices delivery at exactly 1.0, and the old
+    # `buy * eff_d >= shadow` rule evaluated 0.95 >= 0.95 -> True on the same
+    # inputs. It is pinned because `>=` is what makes an exact tie discharge, and
+    # a `>` would silently change that.
+    decision = _authorize(cell_slope=eff_d, buy_price=1.0, eff_d=eff_d)
+    assert decision.shadow_price == pytest.approx(1.0)
     assert decision.intra_period_discharge_allowed is True
     assert intra_period_discharge_gate(decision.intra_period_discharge_allowed) == 100
 
@@ -115,35 +133,43 @@ def test_no_computable_shadow_price_does_not_authorize():
 
 
 @pytest.mark.parametrize("offset_steps", [1.5, 2.0])
-def test_gate_slope_stays_on_the_policys_interpolant(offset_steps):
+def test_gate_price_stays_on_the_policys_interpolant(offset_steps):
     """#571's standing guard: the gate's value estimate must BE a reading of
     `_interpolate_value`, not a second implementation that can drift from it.
 
     Checked at a strictly-interior SoE and at an exact grid point, because
     those are the two cases the old `round()` arithmetic got differently wrong.
+
+    This restates the implementation deliberately -- that is the whole point of
+    a structural pin. #571 was not a wrong formula but a *second* formula, and
+    what stops that recurring is an assertion a re-implementation must break.
+    #683 only widened the span read: a whole delivery's worth of SoE
+    (`SOE_STEP_KWH / eta`) rather than a fraction of one cell.
     """
     settings = make_battery_settings()
     V_row = np.array([0.0, 1.0, 3.0, 4.0])  # deliberately non-linear
     soe = settings.min_soe_kwh + offset_steps * SOE_STEP_KWH
 
-    step_down = 0.25 * SOE_STEP_KWH  # stays inside the cell below `soe`
+    soe_consumed = SOE_STEP_KWH / settings.efficiency_discharge
     expected = (
         _interpolate_value(V_row, soe, settings)
-        - _interpolate_value(V_row, soe - step_down, settings)
-    ) / step_down
+        - _interpolate_value(V_row, soe - soe_consumed, settings)
+    ) / SOE_STEP_KWH
 
-    assert _value_slope_below(V_row, soe, settings) == pytest.approx(expected)
+    assert _value_of_delivering_below(V_row, soe, settings) == pytest.approx(expected)
 
 
-def test_no_cell_below_the_floor_has_no_slope_to_read():
+def test_no_cell_below_the_floor_has_no_price_to_read():
     """At and below the bottom grid level there is no removable kWh, so there
     is nothing to price -- `None`, which #526 requires to read as "no
     authorization" rather than "worthless"."""
     settings = make_battery_settings()
     V_row = np.array([0.0, 1.0, 3.0, 4.0])
 
-    assert _value_slope_below(V_row, settings.min_soe_kwh, settings) is None
-    assert _value_slope_below(V_row, settings.min_soe_kwh - 1.0, settings) is None
+    assert _value_of_delivering_below(V_row, settings.min_soe_kwh, settings) is None
+    assert (
+        _value_of_delivering_below(V_row, settings.min_soe_kwh - 1.0, settings) is None
+    )
 
     # A battery resting ON the floor does not always land on a clean 0.0: the
     # subtraction leaves a sub-picowatt-hour positive residue in several
@@ -151,23 +177,27 @@ def test_no_cell_below_the_floor_has_no_slope_to_read():
     # one-sided slope is discontinuous here, and #526 is what breaks otherwise.
     a_hair_above_floor = np.nextafter(settings.min_soe_kwh, np.inf)
     assert a_hair_above_floor > settings.min_soe_kwh  # guard: really is above
-    assert _value_slope_below(V_row, a_hair_above_floor, settings) is None
+    assert _value_of_delivering_below(V_row, a_hair_above_floor, settings) is None
 
 
-def test_single_level_value_row_has_no_slope_to_read():
+def test_single_level_value_row_has_no_price_to_read():
     """A one-level `V_row` has no cell at all, so there is nothing to price.
 
-    Without an explicit guard the clamp produces `lo = -1` and the function
-    reads `V_row[0] - V_row[-1]` -- the same element twice -- returning a
-    computed `0.0`. That is the #526 failure mode exactly: a zero shadow price
-    clears any positive buy price and opens the gate on a value that was never
-    computed, and unlike the missing-field default it survives every `None`
-    check downstream. Asserted directly rather than through a schedule because
-    a production battery always has >= 2 grid levels, so no scenario reaches it.
+    Without the explicit `len(V_row) < 2` guard, `_interpolate_value` returns
+    `V_row[0]` at both ends (its below-floor extrapolation has a zero gradient
+    with nothing to extrapolate from), so the difference is a computed `0.0`.
+    That is the #526 failure mode exactly: a zero shadow price clears any
+    positive buy price and opens the gate on a value that was never computed,
+    and unlike the missing-field default it survives every `None` check
+    downstream. Asserted directly rather than through a schedule because a
+    production battery always has >= 2 grid levels, so no scenario reaches it.
     """
     settings = make_battery_settings()
 
-    assert _value_slope_below(np.array([5.0]), settings.max_soe_kwh, settings) is None
+    assert (
+        _value_of_delivering_below(np.array([5.0]), settings.max_soe_kwh, settings)
+        is None
+    )
 
 
 def _shadow_price_at_start_soe(initial_soe: float) -> float:
@@ -183,26 +213,55 @@ def _shadow_price_at_start_soe(initial_soe: float) -> float:
     return run_scenario(scenario).period_data[0].decision.shadow_price
 
 
-def test_shadow_price_is_constant_within_one_grid_cell():
-    """#571: the recorded dV/dSoE must be the slope of the SoE cell the battery
-    is actually in, so two states inside the same cell report the same value.
+def test_shadow_price_is_continuous_in_soe():
+    """#571's guard, re-pinned to continuity by #683.
 
-    `_record_marginal_value` used to snap with `round()` while `_interpolate_value`
-    (which the policy walks) floors. Rounding makes the reported slope piecewise
-    constant around each *grid point* instead of across each *cell*, so a state
-    in the lower half of a cell is priced off the cell below -- a value function
-    region the battery is not in. On this bundle that put a 0.013 EUR/kWh step
-    in the middle of a cell, and the gate reads this number raw.
+    #571 was a *discontinuity*: `_record_marginal_value` snapped with `round()`
+    while `_interpolate_value` (which the policy walks) floors, so a state in the
+    lower half of a cell was priced off the cell below -- a value-function region
+    the battery is not in. On this bundle that put a 0.013 EUR/kWh step in the
+    middle of a cell, forming an isolated 25 Wh window where the gate closed, and
+    the gate reads this number raw.
+
+    #571 pinned that by asserting the price is *constant* within a cell, which was
+    true of a one-cell backward difference. #683 replaced that estimator with one
+    that prices a whole delivery (`SOE_STEP_KWH / eta` of SoE, spanning just over
+    one cell), and the result is genuinely continuous rather than piecewise
+    constant -- so constancy is no longer the right pin, and monotonicity is not
+    true either (the measured sweep reverses direction at 9.8750 -> 9.8800).
+
+    Continuity is pinned by *resolution scaling*, which needs no arbitrary
+    threshold: sample the same interval four times as finely and the largest
+    step between neighbours must fall by a factor of four. A jump cannot shrink,
+    so #571's defect floors the ratio at 1.0 while a continuous price gives 4.0.
+    Measured on this fixture: 4.00 with the fix, 1.00 with the pre-#683
+    estimator restored.
     """
     min_soe = json.loads(ISSUE_571_FIXTURE.read_text())["battery"]["min_soe_kwh"]
-    # Both inside cell [323, 324] -> SoE 9.8750..9.9000; fractions 0.2 and 0.8
-    # straddle the 0.5 point where round() -- and only round() -- changes cell.
-    lower_half, upper_half = 9.8800, 9.8950
-    assert int((lower_half - min_soe) / SOE_STEP_KWH) == 323
-    assert int((upper_half - min_soe) / SOE_STEP_KWH) == 323
+    # Three whole cells starting at a grid point, so the sweep crosses two cell
+    # boundaries -- where #571's discontinuity lived.
+    lo = min_soe + 322 * SOE_STEP_KWH
+    span = 3 * SOE_STEP_KWH
+    refinement = 4
+    fine_n = 24
 
-    assert _shadow_price_at_start_soe(lower_half) == pytest.approx(
-        _shadow_price_at_start_soe(upper_half)
+    fine = [
+        _shadow_price_at_start_soe(lo + span * k / fine_n) for k in range(fine_n + 1)
+    ]
+    fine_step = max(abs(fine[i + 1] - fine[i]) for i in range(fine_n))
+    coarse_step = max(
+        abs(fine[i + refinement] - fine[i]) for i in range(0, fine_n, refinement)
+    )
+
+    # Vacuity guard: a degenerate estimator reporting one value everywhere would
+    # give 0/0 and satisfy any ratio.
+    assert fine_step > 0.0, "shadow price does not vary across three grid cells"
+
+    assert coarse_step / fine_step == pytest.approx(refinement, rel=0.05), (
+        f"shadow price is not continuous in SoE: sampling {refinement}x finer "
+        f"shrank the largest step only {coarse_step / fine_step:.2f}x "
+        f"(coarse {coarse_step:.6f}, fine {fine_step:.6f}). A ratio near 1.0 "
+        "means a jump, which is #571."
     )
 
 
@@ -315,8 +374,10 @@ def _solar_export_periods(result):
 def test_solar_export_covers_dip_when_buy_exceeds_export():
     """Normal prices (buy comfortably above shadow). During the solar-surplus
     window the battery is at/near capacity and exporting surplus, so the
-    marginal stored kWh is worth only the export price: shadow price
-    converges to sell_price in steady state, per the documented economic law
+    marginal *stored* kWh is worth only the export price. Since #683 the
+    recorded shadow price is denominated per kWh **delivered**, so it converges
+    to `sell_price / efficiency_discharge` in steady state -- the same economic
+    law in a different unit, per the documented law
     (see docs/agents/bess-knowledge.md and
     docs/superpowers/specs/2026-06-27-solar-export-discharge-rate-design.md).
 
@@ -371,10 +432,16 @@ def test_solar_export_covers_dip_when_buy_exceeds_export():
             # solar-surplus window (battery at/near capacity, solar refills
             # it for free -- marginal kWh is worth only the export price).
             assert shadow > 0.0, f"period {t}: shadow_price not populated"
-            assert shadow == pytest.approx(
-                sell[t], abs=0.01
-            ), f"period {t}: shadow {shadow:.4f} should equal sell_price {sell[t]}"
-        assert shadow < buy[t] * eff_d
+            # #683: shadow_price is per kWh delivered, so the steady-state value
+            # of a stored kWh (the sell price) appears divided by eff_d.
+            assert shadow == pytest.approx(sell[t] / eff_d, abs=0.01), (
+                f"period {t}: shadow {shadow:.4f} should equal sell_price "
+                f"{sell[t]} / eff_d {eff_d} = {sell[t] / eff_d:.4f}"
+            )
+        # #683: both sides per kWh delivered, so no efficiency factor. This is
+        # the same condition as the old `shadow < buy * eff_d` on a per-SoE
+        # shadow price -- `buy >= sell/eta` and `buy * eta >= sell` agree.
+        assert shadow < buy[t]
         assert result.period_data[t].decision.intra_period_discharge_allowed is True
 
 

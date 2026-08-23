@@ -209,8 +209,12 @@ alternative for that same slot** — never by its gross value, and never against
 "do nothing = 0".
 
 The opportunity cost of a stored kWh is its **forward-looking `shadow_price`** (the
-DP's value-to-go slope), floored by `sell_price` when upcoming solar will replenish
-the battery for free. It is **not** the sunk `cost_basis`, and **not** zero.
+DP's value-to-go, priced per kWh **delivered** since #683), floored by
+`sell_price / discharge_efficiency` when upcoming solar will replenish the battery
+for free. Mind that denominator: `shadow_price` is directly comparable to
+`buy_price`, but sits a factor `1/η` above `sell_price`, so comparing it to a raw
+`sell_price` makes every export look like a 5.3% loss. It is **not** the sunk
+`cost_basis`, and **not** zero.
 
 Operational forms of the one law:
 
@@ -340,9 +344,12 @@ decided per period from the **shadow price** (above):
 
 > Cover the dip from the battery only when the stored energy is worth *less*
 > than buying that energy from the grid right now:
-> **`buy_price × discharge_efficiency ≥ shadow_price` → rate 100, else rate 0`.**
-> (The efficiency factor applies only to the buy side — the shadow price is
-> already per-kWh-of-stored-energy.)
+> **`buy_price ≥ shadow_price` → rate 100, else rate 0`.**
+> No efficiency factor appears (#683): `shadow_price` is denominated per kWh
+> **delivered**, the same unit as `buy_price`. Covering `ΔE` from the battery
+> consumes `ΔE/η` of stored energy, which would later have delivered `ΔE`
+> anyway, so the opportunity cost is `ΔE × p_future` and `η` cancels on both
+> sides.
 
 **Where that comparison happens (#526).** It is made *inside the DP*, in
 `_record_marginal_value`, at the point where the value function `V` is still in
@@ -351,8 +358,8 @@ hand — not downstream in `battery_system_manager.py`. The result is recorded a
 consumer (the BSM apply path and the inverter simulator) reads that boolean
 rather than re-deriving the comparison.
 
-The reason is that `shadow_price` is a *one-sided slope* of the value function
-below the current state, so it does not exist at the bottom level — and a SoE at
+The reason is that `shadow_price` is read from the value function *below* the
+current state, so it does not exist at the bottom level — and a SoE at
 or below the reserve floor clamps there. The DP used to skip the assignment in
 that case, leaving the field at its `0.0` default, which is also what a
 genuinely worthless kWh produces. Any consumer comparing against the scalar
@@ -362,13 +369,13 @@ had computed. **`shadow_price` is now reporting-only; do not derive a decision
 from it.** Where no shadow price is computable there is no removable kWh below
 that state, so the authorization is `False`: absence is not permission.
 
-**How that slope is read (#571).** `_record_marginal_value` calls
-`_value_slope_below`, which returns the **left** one-sided derivative of the
-same piecewise-linear interpolant the policy walks (`_interpolate_value`) —
-left-sided because the gate authorizes energy *leaving* the battery, so what it
-must price is the value given up going down. It is deliberately not
-`_local_value_slope`, the right-sided reading the tie detector (#450) uses for a
-noise magnitude; swapping the two systematically over-opens the gate.
+**How that price is read (#571, #683).** `_record_marginal_value` calls
+`_value_of_delivering_below`, which reads the same piecewise-linear interpolant
+the policy walks (`_interpolate_value`) **downwards** — downwards because the
+gate authorizes energy *leaving* the battery, so what it must price is the value
+given up going down. It is deliberately not `_local_value_slope`, the right-sided
+reading the tie detector (#450) uses for a noise magnitude; swapping the two
+systematically over-opens the gate.
 
 Until #571 this function did its own index arithmetic, snapping to the *nearest*
 grid point with `round()` while the interpolant floors. A state in the lower
@@ -380,10 +387,45 @@ holding while its neighbours discharge. Measured effect of the fix on the
 fixture corpus: 142 of 2168 gate decisions flipped, 141 of them opening a gate
 that had been wrongly closed, with no change to planned energy or cost.
 
+**Why one cell was the wrong span (#683).** Note first what was *not* wrong: the
+old `buy_price × discharge_efficiency ≥ shadow_price` was dimensionally sound.
+Covering `ΔE` consumes `ΔE/η` of stored energy, so `ΔE × buy ≥ (ΔE/η) × dV/dSoE`
+reduces to exactly that test. #683 is filed as a units mismatch; it is not one,
+and where `V` is smooth the new rule is algebraically identical to the old.
+
+What was wrong is **estimation**. Even after #571 the reading was a *one-cell*
+backward difference, and that cannot price this value function accurately. `SOE_STEP_KWH` (0.025) equals `POWER_STEP_KW × dt`, while converting
+stored energy into delivered energy carries `η`. `V` is therefore a staircase
+whose riser is one whole delivery step and which is flat once every `1/(1-η)`
+cells, so a one-cell difference lands on a riser most of the time and reports the
+*undiscounted* price — and on a flat cell reports far too little. `_value_of_delivering_below` prices the **delivery**
+instead: delivering `SOE_STEP_KWH` costs `SOE_STEP_KWH/η` of stored energy, so the
+interpolant is read across exactly the span the discharge consumes and the
+staircase averages out by construction. The result is per delivered kWh, which is
+why the rule above *loses* its `η` rather than gaining one.
+
+Measured effect on the fixture corpus (2508 periods, 39 fixtures): planned
+actions, intents and SoE trajectory **bit-identical everywhere** and cost delta
+exactly zero — the gate is intra-period hardware authorization, which the DP's
+cost model does not simulate. 122 gate decisions flipped (4.9%): **100 closing
+and 22 opening.** The dominant correction runs *opposite* to the issue's original
+"5.3% too strict" framing, because the one-cell difference was noisy in both
+directions rather than η-biased — in 111 rule disagreements the old price
+was 1.5–2.9× too *low*, authorizing discharge of energy worth well above the grid
+price being paid. Against a 20-step reference price the median error falls from
+6.7% to 2.7%. Where `V` is smooth the new reading is exactly `old/η` and the
+decision is unchanged, which is why the median new/old ratio across all periods
+is `1/η`.
+
 What this works out to in practice — important for analysis:
 - During SOLAR_EXPORT the battery is full and exporting surplus, so its marginal
-  kWh is only worth the **export (sell) price** — the surplus refills it for
-  free (replenishment).  The shadow price therefore ≈ the sell price.
+  kWh **of stored energy** is only worth the **export (sell) price** — the
+  surplus refills it for free (replenishment).  Since #683 the reported
+  `shadow_price` is per kWh *delivered*, so it reads ≈ `sell_price ÷
+  discharge_efficiency` (e.g. 0.3158 for a 0.30 sell price at η = 0.95), not
+  ≈ `sell_price`.  This is a change of denomination only: the gate condition
+  in terms of `buy` and `sell` is unchanged, because `buy ≥ sell/η` is the
+  same test as the old `buy × η ≥ sell`.
 - **Normal prices** (`buy > sell`): the gate is **100** — covering the dip from
   the battery beats buying from grid, because solar refills the battery.  This
   is the usual case.

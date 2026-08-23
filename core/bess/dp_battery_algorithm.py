@@ -950,14 +950,12 @@ def _record_marginal_value(
     at cell boundaries, and the gate reads that number raw. It now reads the
     interpolant like every other consumer.
     """
-    shadow_price = _value_slope_below(V[t], soe, battery_settings)
+    shadow_price = _value_of_delivering_below(V[t], soe, battery_settings)
     if shadow_price is None:
         return
 
     decision.shadow_price = shadow_price
-    decision.intra_period_discharge_allowed = bool(
-        buy_price_t * battery_settings.efficiency_discharge >= shadow_price
-    )
+    decision.intra_period_discharge_allowed = bool(buy_price_t >= shadow_price)
 
 
 def _build_period_data(
@@ -1585,6 +1583,41 @@ def _value_slope_below(
         return None
     lo = int(np.ceil(min(idx, len(V_row) - 1))) - 1
     return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
+
+
+def _value_of_delivering_below(
+    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
+) -> float | None:
+    """Value given up per kWh **delivered** by discharging from this state.
+
+    `_value_slope_below` answers a different question -- value per kWh of *SoE* --
+    and in the discharge-limited regime it cannot answer it accurately, which is
+    #683. `SOE_STEP_KWH` equals `POWER_STEP_KW * dt`, while converting SoE into
+    delivery carries `efficiency_discharge`. So V is a staircase whose riser is one
+    whole delivery step and which is flat once every `1/(1-eta)` cells: a one-cell
+    backward difference lands on a riser 19 times out of 20 and reports the
+    *undiscounted* price, and on the flat cell reports zero.
+
+    Pricing the delivery instead removes the artifact rather than compensating for
+    it. Delivering `SOE_STEP_KWH` costs `SOE_STEP_KWH / eta` of SoE, which spans
+    1/eta cells -- just over one -- so the interpolant is read across exactly the
+    span the discharge consumes, and the staircase averages out by construction
+    instead of 19 times in 20.
+
+    The result is denominated per delivered kWh, the same unit as `buy_price`, so
+    the gate's comparison needs no efficiency factor: covering `dE` now consumes
+    `dE/eta` of SoE, which would later have delivered `dE` anyway, so the
+    opportunity cost is `dE * p_future` and eta cancels on both sides.
+
+    `None` when no cell below exists -- absence is not permission (#526).
+    """
+    if not has_value_cell_below(soe, battery_settings) or len(V_row) < 2:
+        return None
+
+    soe_consumed = SOE_STEP_KWH / battery_settings.efficiency_discharge
+    value_here = _interpolate_value(V_row, soe, battery_settings)
+    value_below = _interpolate_value(V_row, soe - soe_consumed, battery_settings)
+    return float((value_here - value_below) / SOE_STEP_KWH)
 
 
 def _best_action_at_continuous_state(

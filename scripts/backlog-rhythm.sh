@@ -60,6 +60,10 @@ fi
 # in the issue digest, and both were invisible in practice: three PRs sat green
 # and reviewed with nobody flipping them, and #619 was never reviewed at all.
 repo="${REPO:-johanzander/bess-manager}"
+# The repo owner is the maintainer for the tier-1 carve-out: an issue opened
+# by anyone else is an external report, and external bug reports with a debug
+# log are exactly what the autonomous Stage 2 spend is for.
+owner="${repo%%/*}"
 if [ -n "${RHYTHM_PRS_FILE:-}" ]; then
     prs=$(cat "$RHYTHM_PRS_FILE")
 else
@@ -71,7 +75,8 @@ actions=$(printf '%s' "$digest" | jq \
     --argjson nudge "$NUDGE_DAYS" \
     --argjson park "$PARK_DAYS" \
     --argjson wip_limit "$WIP_LIMIT" \
-    --argjson prs "$prs" '
+    --argjson prs "$prs" \
+    --arg owner "$owner" '
   # Board cards for PRs, keyed by number. Absent on an older digest, so this
   # defaults to empty rather than failing -- a rhythm run against a stale
   # digest then simply defers nothing, which is the pre-existing behaviour.
@@ -99,6 +104,21 @@ actions=$(printf '%s' "$digest" | jq \
   # change, a board move or a bot touch all bump updatedAt, so an issue nobody
   # has spoken on for a month can look active and never age into a chase.
   def quiet_days: if .last_comment == null then .age_days else .last_comment.days end;
+
+  # TIER-1 READY: the evidence basis for the autonomous Stage 2 carve-out
+  # below, and (negated) the suppressor of the reporter/discussion chases for
+  # the same items. Every condition is EVIDENCE, never the board field: the
+  # three label checks are triage and Stage 2 stamps (bug confirmed,
+  # ready-for-analysis = the debug log is attached, and no analyzed or
+  # needs-human-review label = no Stage 2 history), the author check is the
+  # external-reporter bar, and the awaiting check keeps a deliberate
+  # `maintainer` hold from being overridden by the carve-out.
+  def tier1_ready: (.labels | index("bug")) != null
+     and (.labels | index("ready-for-analysis")) != null
+     and (.labels | index("analyzed")) == null
+     and (.labels | index("needs-human-review")) == null
+     and .author != $owner
+     and .awaiting != "maintainer";
 
   (.items) as $items
   | [ $items[]
@@ -150,14 +170,25 @@ actions=$(printf '%s' "$digest" | jq \
     # and the wait that matters is the PR review, which the PR half of this
     # pass already reports. Nudging the reporter of a 46-day-stale conflicted
     # PR asks the wrong person about the wrong thing.
+    #
+    # A TIER-1 BUG SUPPRESSES THEM TOO, for the opposite reason. When triage
+    # has stamped `ready-for-analysis`, the ball is not with the reporter: the
+    # debug log is attached and the item is waiting on analysis, not on them.
+    # Chasing or parking it would bury the exact bug the autonomous carve-out
+    # exists to surface (#681/#680) -- the stale `Awaiting` field and the
+    # evidence contradict, and the evidence wins. `tier1_ready` is the same
+    # check the carve-out uses, so the carve-out and the chases can never
+    # contradict each other in one pass.
     (if (.prs | length) > 0 then empty
      elif .awaiting == "reporter"
+        and (tier1_ready | not)
         and ((.last_comment.is_reporter // false) | not)
         and quiet_days >= $park
      then {issue: .number, action: "park",
            why: "awaiting reporter, quiet \(quiet_days)d (>= \($park))",
            detail: "move to Backlog; the chase has gone unanswered"}
      elif .awaiting == "reporter"
+        and (tier1_ready | not)
         and ((.last_comment.is_reporter // false) | not)
         and quiet_days >= $nudge
      then {issue: .number, action: "nudge_reporter",
@@ -167,11 +198,39 @@ actions=$(printf '%s' "$digest" | jq \
 
     # A discussion nobody has advanced is a question for the maintainer, not a
     # reason to keep waiting. Never auto-parked: an open conversation is not
-    # the same as an unanswered chase.
-    (if .awaiting == "discussion" and quiet_days >= $nudge
+    # the same as an unanswered chase. A tier-1 bug is never this -- putting an
+    # open question to the maintainer contradicts spending on analysing it in
+    # the same pass, so the carve-out suppresses it.
+    (if .awaiting == "discussion" and (tier1_ready | not) and quiet_days >= $nudge
      then {issue: .number, action: "surface_discussion",
            why: "discussion stalled \(quiet_days)d",
            detail: "summarise the thread and put the open question to the maintainer"}
+     else empty end),
+
+    # THE ONE UNBUDGETED SPEND THIS PASS MAY FIRE WITHOUT ASKING: the
+    # autonomous Stage 2 carve-out, checked against EVIDENCE not the board
+    # field. `tier1_ready` above is all evidence: `ready-for-analysis` is the
+    # debug-log stamp triage applies, the absent `analyzed` /
+    # `needs-human-review` labels mean the item has no Stage 2 history (triage
+    # re-stamps `ready-for-analysis` on an edit even after an inconclusive
+    # run, so coexisting labels would otherwise re-fire the spend on items
+    # analysis has already settled), a non-maintainer author is the
+    # external-report bar, and a deliberate `Awaiting: maintainer` hold beats
+    # the carve-out -- the loop cannot advance without a decision there, so
+    # the spend is not the point.
+    #
+    # The `Awaiting` field must NOT gate this: it can go stale (a card left at
+    # `reporter` after the reporter supplied the log) and hide the item from
+    # the pass entirely -- the #681/#680 failure, where the carve-out was only
+    # ever evaluated on items the pass surfaced. Stage 2 removes
+    # `ready-for-analysis` when it runs, so this fires at most until analysis
+    # lands; confirming there is no prior `@claude-bot analyze` comment stays
+    # a PO-time check in the backlog skill before the spend, which is also
+    # what catches an analyze that is still in flight.
+    (if tier1_ready
+     then {issue: .number, action: "autonomous_analyze",
+           why: "tier-1 bug: \(.author), debug log attached, no analyzed/needs-human-review label",
+           detail: "fire Stage 2 as the PO, after confirming no prior @claude-bot analyze comment: scripts/gh-agent.sh --as po issue comment \(.number) --body \"@claude-bot analyze\""}
      else empty end),
 
     # Grooming debt: the board field is unset while a label implies a wait, so
@@ -533,7 +592,8 @@ actions=$(printf '%s' "$digest" | jq \
        elif .action == "dispatchable" or .action == "queued_behind"
             or .action == "cluster" or .action == "needs_touch_set" then 4
        elif .action == "recheck_ready" or .action == "surface_discussion"
-            or .action == "nudge_reporter" or .action == "park" then 5
+            or .action == "nudge_reporter" or .action == "park"
+            or .action == "autonomous_analyze" then 5
        elif .action == "set_awaiting" or .action == "add_card"
             or .action == "set_priority" or .action == "move_card"
             or .action == "triage_labels" then 6

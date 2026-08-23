@@ -9,6 +9,7 @@ from core.bess.dp_battery_algorithm import (
     _create_idle_schedule,
     optimize_battery_schedule,
 )
+from core.bess.models import OptimizationResult
 from core.bess.tests.helpers import make_battery_settings
 from core.bess.tests.unit.test_scenarios import (
     build_scenario_optimizer_inputs,
@@ -210,12 +211,30 @@ def test_dp_output_never_worse_than_all_idle_schedule(scenario_name):
         dt=dt,
         currency="SEK",
     )
-    assert result.economic_summary.battery_solar_cost <= (
-        idle_result.economic_summary.battery_solar_cost + 1e-6
-    ), (
-        f"{scenario_name}: DP schedule cost "
-        f"{result.economic_summary.battery_solar_cost:.4f} exceeds all-IDLE "
-        f"cost {idle_result.economic_summary.battery_solar_cost:.4f}"
+    # Both sides are credited for energy left at the boundary, because that is
+    # the objective the DP actually optimized (#602). Comparing raw in-horizon
+    # cost would make every plan that deliberately carries energy look worse
+    # than doing nothing -- it forgoes in-horizon export revenue to hold value
+    # past the boundary, which is the entire point. Pre-#602 the capped scalar
+    # was small enough that no plan carried enough for the omission to show;
+    # `synthetic_seasonal_spring` now carries 23.62 kWh and the raw comparison
+    # reads 48.24 against all-IDLE's 44.47 while the credited one reads 24.68.
+    # This mirrors the guardrail's own comparison in `optimize_battery_schedule`,
+    # which nets the same term on both sides for the same reason.
+    curve = inputs.get("terminal_curve")
+    min_soe = battery_settings.min_soe_kwh
+
+    def credited(schedule: OptimizationResult) -> float:
+        cost = schedule.economic_summary.battery_solar_cost
+        if curve is None:
+            return float(cost)
+        usable = schedule.period_data[-1].energy.battery_soe_end - min_soe
+        return float(cost - curve.value(usable))
+
+    assert credited(result) <= credited(idle_result) + 1e-6, (
+        f"{scenario_name}: DP schedule cost {credited(result):.4f} exceeds "
+        f"all-IDLE cost {credited(idle_result):.4f} (both credited for "
+        f"boundary energy)"
     )
 
 

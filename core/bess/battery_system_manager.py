@@ -1956,6 +1956,22 @@ class BatterySystemManager:
         forecasts where its predecessor took only prices. Both are already
         fetched for the optimization itself, so nothing new is polled.
 
+        Alignment, stated because it is a real approximation and not an
+        oversight: `knee_kwh_from_forecast` wants arrays anchored at the
+        terminal boundary. On a single-day horizon that boundary is midnight
+        tonight and tomorrow's forecasts are exactly right. On a 48h-extended
+        horizon -- every afternoon once tomorrow's prices land -- the boundary
+        is midnight *tomorrow*, and the day after has no forecast at all:
+        Solcast publishes tomorrow, and the consumption profile is a
+        time-of-day shape with no notion of which day it describes. Tomorrow's
+        PV is therefore used as the stand-in for the day after's. The error is
+        one of amplitude, not shape -- sunrise moves by minutes day to day,
+        while the knee is an integral up to sunrise -- so it mis-sizes the carry
+        on a day whose weather differs sharply from the next, and never
+        mis-times it. #422 shows this codebase treats "which day is the terminal
+        day" as load-bearing for *prices*, where a single peak can move a cap;
+        an integral to sunrise has no such sensitivity.
+
         Args:
             buy_prices: Full buy price array (from optimization_period onwards)
             optimization_period: Current optimization starting period

@@ -63,6 +63,7 @@ import numpy as np
 
 from core.bess.dp_constants import (
     POWER_STEP_KW,
+    SHADOW_PRICE_NOISE_REL,
     SOE_STEP_KWH,
 )
 from core.bess.execution_model import (
@@ -961,7 +962,16 @@ def _record_marginal_value(
         return
 
     decision.shadow_price = shadow_price
-    decision.intra_period_discharge_allowed = bool(buy_price_t >= shadow_price)
+    # At economic indifference the gate OPENS. The direction is not arbitrary:
+    # when covering load from the battery and importing it are worth the same to
+    # the model, P2's row 3 prefers load-tracking discharge, and P7's argument is
+    # that a load-following cover absorbs forecast error where an import does
+    # not. That is what the `>=` already intends; only differencing noise defeats
+    # it, so the comparison is made against that noise rather than against zero
+    # (#602 -- see SHADOW_PRICE_NOISE_REL for why these ties became structural).
+    decision.intra_period_discharge_allowed = bool(
+        buy_price_t >= shadow_price - abs(shadow_price) * SHADOW_PRICE_NOISE_REL
+    )
 
 
 def _build_period_data(

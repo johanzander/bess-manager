@@ -331,5 +331,5 @@
     }
   },
   "terminal_value_per_kwh": 1.0,
-  "terminal_knee_kwh": 1.8
+  "terminal_knee_kwh": 3.0062
 }

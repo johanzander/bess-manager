@@ -287,6 +287,46 @@ invariant to how a fixed total splits across them, so no economic margin,
 however small, can rank them and the choice would otherwise fall to float
 ordering. No further exception may be added without amending this section.
 
+**The second exception, and its boundary (#602).**
+`dp_constants.SHADOW_PRICE_NOISE_REL` bands the discharge gate's comparison
+of a buy price against a shadow price. It is amended in rather than added
+silently, per the paragraph above.
+
+Unlike `VALUE_INDISTINGUISHABLE_SEK` this one *does* decide an eligibility
+— which is why it needs stating here rather than hiding behind the existing
+carve-out. What makes it admissible is that it decides eligibility against
+**differencing noise**, not against an economic margin. `shadow_price` is a
+finite difference of the value function, so it carries V's accumulated
+rounding divided by the SoE step; the band is that bound with headroom
+(1e-12 relative), eight orders of magnitude below the ~1e-4 SEK/kWh
+smallest real price difference in any observed market. It cannot change a
+decision that any market could express.
+
+It is *relative* where the other two are absolute, because it bands a
+quantity whose own noise scales with its magnitude — shadow prices run from
+~0.1 to ~2.6 SEK/kWh across the corpus.
+
+The gate's tie direction is stated, not left to the comparison: **at
+indifference the gate opens.** That follows P2 row 3 (load-tracking
+discharge is preferred within a tie) and P7 (a load-following cover absorbs
+forecast error where an import does not), so it is the same preference the
+rest of this document already asserts, applied at the one place that
+compares a price against a slope.
+
+Why it became necessary: the #602 concave terminal row gives V a constant
+slope over the head segment equal to `median(buy_prices)`, and a median is
+by construction an element of the array it is taken over. Every period
+whose buy price attains the horizon median therefore ties against its own
+shadow price to the last bits — deterministically, not occasionally.
+Measured on `realworld_2026_04_22_202249` period 85: buy 2.60425 against
+shadow 2.60425000000005. The pre-#602 formula escaped this only by
+accident, because subtracting `cycle_cost` detuned the rate off the price
+array.
+
+A PR widening this band, making it absolute, reusing it outside the
+shadow-price comparison, or adding a fourth band fails the compliance
+check below.
+
 ### P6. Exactness claims are certified or bounded
 
 A solver output spliced over another solver's output (the #450 PWL path)
@@ -350,11 +390,17 @@ A PR touching the files in the header fails review if it:
    action (P4).
 4. Applies a sensor-noise heuristic to planned or simulated flows (P4).
 5. Hand-picks a SEK tie margin instead of consuming `epsilon_for_period`
-   (P5). The sole permitted exception is
+   (P5). Two exceptions are permitted, both bounded in P5:
    `tie_policy.VALUE_INDISTINGUISHABLE_SEK`, which decides no eligibility
-   and applies only within an eligible set already fixed by epsilon — see
-   P5 for its boundary. A PR widening it, reusing it for eligibility, or
-   adding a third band fails this check.
+   and applies only within an eligible set already fixed by epsilon; and
+   `dp_constants.SHADOW_PRICE_NOISE_REL`, which bands the discharge gate
+   against value-function differencing noise and nothing else. A PR
+   widening either, reusing them elsewhere, or adding a fourth band fails
+   this check.
 6. Adds reward shaping that flattens the objective without the matching
-   preference-table row (P2).
+   preference-table row (P2). The #602 terminal row flattens V over its
+   head segment; its matching statement is P5's stated gate direction
+   (at indifference the gate opens), not a new table row, because the
+   plateau it creates is compared against a *price* outside the selector
+   rather than against another candidate inside it.
 7. Adds per-period uncertainty modeling without field evidence (P7).

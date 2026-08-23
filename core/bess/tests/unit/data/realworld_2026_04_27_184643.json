@@ -379,9 +379,9 @@
   },
   "expected_results": {
     "base_cost": 170.50235,
-    "battery_solar_cost": -11.63304,
-    "base_to_battery_solar_savings": 182.13539,
-    "base_to_battery_solar_savings_pct": 106.8228,
+    "battery_solar_cost": -11.66644,
+    "base_to_battery_solar_savings": 182.16879,
+    "base_to_battery_solar_savings_pct": 106.84239,
     "total_charged": 59.42214,
     "total_discharged": 72.68285,
     "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 6 periods change (5 IDLE->LOAD_SUPPORT near-ties, 1 downstream LOAD_SUPPORT->BATTERY_EXPORT cascade), improving battery_solar_cost from -11.70394 to -11.79787. total_charged/total_discharged were re-derived from the current run as part of this refresh too."
@@ -402,6 +402,6 @@
     }
   },
   "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread surfaces a genuine DP SOE-grid-snap R!=P (#145) gap (+1.15 SEK, exceeds tolerance) that zero-spread pricing happens to mask -- this is the #450 DP discretization issue itself, tracked and fixed separately (not in scope for this fixture-pinning cleanup). See docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up.",
-  "terminal_value_per_kwh": 1.86283125,
-  "terminal_knee_kwh": 0.0
+  "terminal_value_per_kwh": 1.36283125,
+  "terminal_knee_kwh": null
 }

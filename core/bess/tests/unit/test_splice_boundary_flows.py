@@ -31,14 +31,25 @@ from core.bess.tests.unit.golden_capture import DATA_DIR
 
 pytestmark = pytest.mark.slow
 
-# Measured 2026-08-10: this fixture splices one window (0, 6) and its boundary
-# period 6 is IDLE with passive solar charging.
+# Measured 2026-08-10 on `synthetic_consumption_efficient`, window (0, 6),
+# boundary period 6.
 # Re-measured for #602: the concave terminal row moves the value function, so
-# the spliced window now exits at 5. The fixture still satisfies this test's
-# stated precondition -- period 5 is IDLE with passive solar charging -- which
-# is what makes it still able to detect a stale flow record.
-FIXTURE = "synthetic_consumption_efficient"
-BOUNDARY_PERIOD = 5
+# that fixture no longer splices a window whose boundary passively charges. A
+# corpus scan for this test's stated precondition -- a spliced exit whose next
+# period derives `battery_charged` from the SOE delta rather than from a
+# commanded action -- leaves exactly one fixture, this one.
+#
+# Note the precondition is narrower than "the period charges": several fixtures
+# have a boundary period charging a clean commanded amount (3.75 kWh on
+# `realworld_2026_04_24_090423`), and those cannot detect the bug at all,
+# because the reported charge comes from the action and no splice can move it --
+# the same trap the module docstring records for a discharging boundary.
+#
+# Here the un-drifted boundary absorbs nothing and the drifted one absorbs
+# 0.0041 kWh, so a stale record shows up as 0.0 against 0.0041: the signal is
+# the entire reported quantity rather than a fraction of it.
+FIXTURE = "regression_2026_08_02_043728"
+BOUNDARY_PERIOD = 42
 
 # Well inside the pin's tolerance band, far above float noise.
 PIN_DRIFT_KWH = 0.004
@@ -78,6 +89,10 @@ def test_boundary_period_flows_track_the_spliced_exit_soe():
     assert d.battery_charged > 0, (
         "fixture no longer has a passively-charging boundary period, so this "
         "test can no longer detect a stale record -- re-pick the fixture"
+    )
+    assert b.battery_charged == pytest.approx(0.0, abs=1e-9), (
+        "the un-drifted boundary should absorb nothing here, which is what "
+        "makes the drifted reading the whole signal -- re-pick the fixture"
     )
     assert d.battery_soe_start == pytest.approx(
         b.battery_soe_start - PIN_DRIFT_KWH, abs=1e-9

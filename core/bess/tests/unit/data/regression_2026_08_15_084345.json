@@ -279,5 +279,5 @@
     "initial_cost_basis": 0.4
   },
   "terminal_value_per_kwh": 0.809845312,
-  "terminal_knee_kwh": 2.063157895
+  "terminal_knee_kwh": 3.793263158
 }

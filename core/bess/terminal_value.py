@@ -230,67 +230,101 @@ def calculate_terminal_curve(
 ) -> TerminalValueCurve:
     """The production terminal row (#602).
 
-    Two regimes, separated by whether the next day's PV ever covers its load.
+    Two regimes, separated by whether the knee can bind at all -- that is, by
+    whether the household's pre-dawn need is smaller than the battery.
 
-    **PV crossover exists** -- the concave row this issue is about: the
-    buy-median rate up to `knee_kwh`, nothing above. `cycle_cost_per_kwh` is not
-    subtracted and the arbitrage-consistency cap is not applied, because the
-    knee has taken over both their jobs. On wear: it is charged on charging only
-    (`_compute_reward` bills STORE and the positive IDLE delta; `reward_discharge`
-    has no wear term), so a kWh at the boundary has already paid its full
-    round-trip wear and the old deduction billed it twice. On the cap: it exists
-    to stop the DP holding charge for a bonus it will not collect, and a
-    *quantity* bound does that better than a *rate* haircut -- it cannot hold
-    more than the household will actually consume. The cap is also arithmetically
-    incompatible with the knee: when it binds it sets the rate to exactly
-    ``max_sell * efficiency_discharge``, which is precisely the hold-versus-export
-    tie point, so the head segment would land on the tie instead of clearing it.
+    **Knee binds** -- the concave row this issue is about. The head segment is
+    priced at the avoided purchase, `median(buy) * efficiency_discharge`: what
+    the household does not have to buy tomorrow because it carried the energy.
 
-    **No PV crossover** -- every winter day, and any overcast one: the previous
-    capped scalar, unchanged, via `calculate_terminal_value_per_kwh`. Without PV
-    to refill the battery there is no quantity at which the marginal stored kWh
-    stops being worth the buy price, so the knee runs past anything the battery
-    can hold and the row is straight over its whole reachable range. That is not
-    merely the old shape -- it is the old shape at an *uncapped* rate, which is
-    #126/#244's hoarding bug exactly. Measured on #246's Belgian regression
-    scenario (buy median 0.30, best export 0.16, no solar): the concave row
-    exports 0.00 kWh at the evening peak and ends at 6.16 kWh, against the
-    capped scalar's 0.70 kWh and 1.58 kWh. So the cap is still load-bearing
-    wherever the knee cannot bind, and this is a domain distinction rather than
-    a fallback -- a day with sun and a day without are different problems, and
-    #602's evidence covers only the first.
+    A known limitation, deliberately left: that rate still decides *whether* to
+    carry, where the knee decides *how much*. Measured on #595's fixture the
+    carry swings the full knee between head rates of 0.70 and 0.75, so a ~12%
+    move in the rate is still binary. Flooring the rate at the export
+    alternative (`max(median(buy), max(sell)) * efficiency_discharge`) removes
+    that threshold and was tried -- but it prices terminal energy above what the
+    DP can buy at inside the horizon, which turns the terminal row into an
+    arbitrage target: on `synthetic_seasonal_spring` (median buy 1.05, best sell
+    1.90) the floored rate of 1.805 made the DP charge 40.6 kWh to bank 23.6
+    against a credit of 42.64 SEK. That is #126/#244's fictitious bonus, at
+    scale. Valuing carried energy by an avoided purchase keeps the estimate tied
+    to a cost the household would really pay; valuing it by a speculative future
+    export price does not.
+
+    `cycle_cost_per_kwh` is not subtracted, and the arbitrage-consistency cap is
+    not applied. On wear: it is charged on charging only (`_compute_reward`
+    bills STORE and the positive IDLE delta; `reward_discharge` has no wear
+    term), so a kWh at the boundary has already paid its full round-trip wear
+    and the old deduction billed it twice. This is load-bearing, not tidying --
+    `head_rate - cycle_cost` is 0.4098 on #595's fixture, far below the ~0.72
+    the carry needs, so keeping the deduction leaves the knee inert. On the cap:
+    when it binds it sets the rate to `max_sell * efficiency_discharge -
+    cycle_cost`, *strictly below* the crossover, which guaranteed the DP
+    preferred exporting everything over holding any of it. That is the
+    mechanism behind the all-or-nothing midnight SOE, and it is why the cap
+    cannot coexist with a quantity bound. Its premise -- that terminal energy
+    can only be monetised by export -- was always wrong: terminal energy is
+    monetised by self-consumption, which is exactly the value #381 reports
+    missing (#126, #244, #246, #359, #422).
+
+    **Knee cannot bind** -- when the pre-dawn need exceeds what the battery can
+    hold, which is every winter day and any overcast one: the previous capped
+    scalar, unchanged. There the row would be straight over its whole reachable
+    range *and* uncapped, which is #126/#244's hoarding bug exactly. Measured on
+    #246's Belgian regression scenario (buy median 0.30, best export 0.16, no
+    solar): the concave row exports 0.00 kWh at the evening peak and ends at
+    6.16 kWh, against the capped scalar's 0.70 and 1.58. So the cap is still
+    load-bearing wherever the quantity bound is not, and this is a domain
+    distinction rather than a fallback -- a day whose need the battery can cover
+    and one whose it cannot are different problems, and #602's evidence covers
+    only the first.
+
+    **Both** conditions are required, because each catches what the other
+    misses. Testing only "does PV ever cover load" is a leaky proxy for a
+    binding knee: `realworld_2026_03_24_225535` has a crossover and a knee of
+    32.07 kWh against a 28.5 kWh pack, so it would take the concave branch and
+    get an uncapped rate over an unbounded reachable range -- the configuration
+    this split exists to prevent. Testing only the capacity bound misses the
+    other side: on #246's Belgian scenario the knee is 12.0 kWh against 13.5
+    usable, so it binds arithmetically, but with no sun at all the "PV refills
+    the pack above the knee" premise the tail rate rests on is simply absent,
+    and the DP holds ~89% of the pack at an uncapped rate. The knee must bind
+    *and* the premise behind it must hold.
 
     The winter carry #381 asks for needs a knee derived from the next cheap
     charging window rather than from sunrise. That is not in scope here and has
-    no oracle behind it yet.
-
-    `buy_prices` is the remaining optimization horizon, matching the median the
-    previous formula took. Deliberately not the terminal day's overnight window,
-    though that is where the energy is consumed: carried energy competes for the
-    whole of the next day including its evening peak, and the narrower window
-    measured worse against the #595 oracle (2.01 kWh against 4.37, where the
-    horizon median gives 5.41).
+    no oracle behind it yet, so on those days this keeps the valuation #381's
+    own analysis found wanting.
     """
-    if not _pv_covers_load(consumption_forecast, solar_forecast):
-        return TerminalValueCurve.flat(
-            calculate_terminal_value_per_kwh(buy_prices, sell_prices, battery_settings)
-        )
-    return TerminalValueCurve(
-        head_rate=statistics.median(buy_prices) * battery_settings.efficiency_discharge,
-        knee_kwh=knee_kwh_from_forecast(
-            consumption_forecast, solar_forecast, battery_settings
-        ),
-        tail_rate=0.0,
+    knee_kwh = knee_kwh_from_forecast(
+        consumption_forecast, solar_forecast, battery_settings
     )
-
-
-def _pv_covers_load(
-    consumption_forecast: list[float], solar_forecast: list[float]
-) -> bool:
-    """Whether the next day's solar ever meets its own load."""
-    return any(
+    usable_capacity = battery_settings.max_soe_kwh - battery_settings.min_soe_kwh
+    pv_refills = any(
         solar >= consumption
         for consumption, solar in zip(
             consumption_forecast, solar_forecast, strict=False
         )
+    )
+    if knee_kwh >= usable_capacity or not pv_refills:
+        return TerminalValueCurve.flat(
+            calculate_terminal_value_per_kwh(buy_prices, sell_prices, battery_settings)
+        )
+
+    efficiency = battery_settings.efficiency_discharge
+    max_sell = max(sell_prices)
+    # Above the knee tomorrow's PV refills the pack, so the marginal kWh is
+    # worth only what exporting it earns -- floored at the terminal day's
+    # *worst* export price, a strict lower bound on tomorrow's opportunity.
+    # Zero would leave the DP indifferent to dumping surplus at any positive
+    # price at all. The floor is the minimum rather than the maximum precisely
+    # so it cannot tie with the in-horizon best sell slot and manufacture a
+    # plateau there. On a fixed export tariff min and max coincide, so the
+    # floor would land on that tie -- there it stays at zero, matching #359's
+    # existing carve-out, and a flat tariff has no cheap slot to dump into.
+    export_prices_vary = max_sell > min(sell_prices)
+    return TerminalValueCurve(
+        head_rate=statistics.median(buy_prices) * efficiency,
+        knee_kwh=knee_kwh,
+        tail_rate=min(sell_prices) * efficiency if export_prices_vary else 0.0,
     )

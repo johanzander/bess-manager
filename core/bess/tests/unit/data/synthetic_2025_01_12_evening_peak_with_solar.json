@@ -97,11 +97,11 @@
   },
   "expected_results": {
     "base_cost": 239.9514,
-    "battery_solar_cost": 125.23778,
-    "base_to_battery_solar_savings": 114.71362,
+    "battery_solar_cost": 125.22869,
+    "base_to_battery_solar_savings": 114.72271,
     "base_to_battery_solar_savings_pct": 47.81081,
-    "total_charged": 29.72105,
-    "total_discharged": 26.8
+    "total_charged": 29.62105,
+    "total_discharged": 26.72
   },
   "expected_behavior": {
     "description": "Evening peak with solar: grid-charge off-peak, export during peak hours",
@@ -114,6 +114,6 @@
       "power_within_limits": true
     }
   },
-  "terminal_value_per_kwh": 1.7615375,
-  "terminal_knee_kwh": 21.894736842
+  "terminal_value_per_kwh": 1.3615375,
+  "terminal_knee_kwh": null
 }

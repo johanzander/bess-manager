@@ -425,9 +425,9 @@
   },
   "expected_results": {
     "base_cost": 11.54994365625,
-    "battery_solar_cost": -3.11446,
-    "base_to_battery_solar_savings": 14.66441,
-    "base_to_battery_solar_savings_pct": 126.96519
+    "battery_solar_cost": -2.05948,
+    "base_to_battery_solar_savings": 13.60942,
+    "base_to_battery_solar_savings_pct": 117.83109
   },
   "expected_behavior": {
     "intents_present": [
@@ -441,5 +441,5 @@
     }
   },
   "terminal_value_per_kwh": 0.61286875,
-  "terminal_knee_kwh": 1.410526316
+  "terminal_knee_kwh": 3.357894737
 }

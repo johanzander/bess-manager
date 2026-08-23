@@ -352,6 +352,6 @@
     }
   },
   "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread eliminates both meaningful pinned intents (BATTERY_EXPORT, GRID_CHARGING) for this fixture, leaving only baseline IDLE/LOAD_SUPPORT -- see docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up.",
-  "terminal_value_per_kwh": 1.164795,
-  "terminal_knee_kwh": 32.067710526
+  "terminal_value_per_kwh": 0.664795,
+  "terminal_knee_kwh": null
 }

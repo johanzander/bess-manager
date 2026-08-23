@@ -70,10 +70,12 @@ def test_gate_opens_when_buying_costs_at_least_the_marginal_value(
     """
     result = run_scenario(load_test_scenario(scenario_name))
 
+    # A shadow price of exactly 0.0 is the "never computed" default (#526), not a
+    # worthless kWh -- those periods have nothing to authorize, so skip them.
     wrongly_closed = [
         (i, pd.economic.buy_price, pd.decision.shadow_price)
         for i, pd in enumerate(result.period_data)
-        if getattr(pd.decision, "shadow_price", 0.0)
+        if pd.decision.shadow_price != 0.0
         and not pd.decision.intra_period_discharge_allowed
         and pd.economic.buy_price >= pd.decision.shadow_price - 1e-9
     ]

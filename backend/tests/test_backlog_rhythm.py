@@ -401,6 +401,171 @@ def test_ready_for_dev_is_reported_as_dispatchable(tmp_path: Path) -> None:
     assert "dispatchable" in _actions_for(_run(tmp_path, [item]), 10)
 
 
+# --- the autonomous Stage 2 carve-out --------------------------------------
+
+
+def test_a_tier1_bug_is_surfaced_for_autonomous_analysis_even_when_awaiting_reporter(
+    tmp_path: Path,
+) -> None:
+    """#681: a stale `Awaiting: reporter` hid #680 from the autonomous Stage 2
+    carve-out, because the carve-out was only ever evaluated against items the
+    rhythm pass surfaced, and the stale field suppressed the item entirely.
+    The tier-1 check must run against the evidence (bug + ready-for-analysis +
+    non-maintainer author), never the board field — `ready-for-analysis` is
+    triage's own confirmation that the debug log is attached, so the item is
+    waiting on analysis, not the reporter. And the same evidence must suppress
+    the chases for that item: with the log attached the ball is NOT with the
+    reporter, so parking or nudging it in the same pass would bury the exact
+    bug the carve-out just un-hid."""
+    item = _item(
+        681,
+        labels=["bug", "bot-analyzed", "ready-for-analysis"],
+        author="ridax67",
+        awaiting="reporter",
+        awaiting_source="board",
+        awaiting_suggested="analysis",
+        last_comment=None,
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 681)
+    assert "autonomous_analyze" in actions
+    assert "park" not in actions
+    assert "nudge_reporter" not in actions
+    assert "surface_discussion" not in actions
+
+
+def test_a_qualifying_bug_fires_even_when_the_card_is_otherwise_quiet(
+    tmp_path: Path,
+) -> None:
+    """The carve-out must not depend on the item producing some other action
+    first — a fresh, reconciled, correctly-groomed card would otherwise be
+    silent and never reach the PO."""
+    item = _item(
+        682,
+        labels=["bug", "ready-for-analysis"],
+        author="ridax67",
+        column="Analysis",
+        board_status="Analysis",
+        awaiting=None,
+        priority="P2",
+    )
+    assert "autonomous_analyze" in _actions_for(_run(tmp_path, [item]), 682)
+
+
+def test_a_bug_still_waiting_for_its_log_does_not_fire(tmp_path: Path) -> None:
+    """`needs-debug-log` means the reporter still owes the bundle — not yet a
+    tier-1 bug, whatever the author."""
+    item = _item(
+        683,
+        labels=["bug", "needs-debug-log"],
+        author="ridax67",
+        awaiting="reporter",
+        awaiting_source="label",
+    )
+    assert "autonomous_analyze" not in _actions_for(_run(tmp_path, [item]), 683)
+
+
+def test_a_bug_opened_by_the_maintainer_does_not_fire(tmp_path: Path) -> None:
+    item = _item(684, labels=["bug", "ready-for-analysis"], author="johanzander")
+    assert "autonomous_analyze" not in _actions_for(_run(tmp_path, [item]), 684)
+
+
+def test_an_already_analyzed_bug_does_not_fire(tmp_path: Path) -> None:
+    """`ready-for-analysis` is consumed by Stage 2 (replaced with `analyzed` or
+    `needs-human-review`), so an analysed item must not match again — otherwise
+    the pass would re-fire Stage 2 at $0.50-2 a shot under /loop."""
+    analyzed = _item(685, labels=["bug", "analyzed"], author="ridax67")
+    inconclusive = _item(686, labels=["bug", "needs-human-review"], author="ridax67")
+    result = _run(tmp_path, [analyzed, inconclusive])
+    assert "autonomous_analyze" not in _actions_for(result, 685)
+    assert "autonomous_analyze" not in _actions_for(result, 686)
+
+
+def test_autonomous_analyze_ranks_with_the_analysis_column(tmp_path: Path) -> None:
+    """Analysis-column work, so it sorts with the other Analysis actions — not
+    with the rank-9 catch-all an unnamed action would fall to."""
+    item = _item(687, labels=["bug", "ready-for-analysis"], author="ridax67")
+    result = _run(tmp_path, [item])
+    action = next(a for a in result["actions"] if a.get("issue") == 687)
+    assert action["action"] == "autonomous_analyze"
+    assert action["rank"] == 5
+
+
+def test_a_tier1_bug_at_nudge_threshold_is_analyzed_not_nudged(
+    tmp_path: Path,
+) -> None:
+    """The same stale-field suppression at the nudge boundary: with the debug
+    log attached, `nudge_reporter` would chase the reporter for something they
+    already supplied — the two actions contradict, so the chase must stand
+    down whenever the carve-out fires."""
+    item = _item(
+        688,
+        labels=["bug", "ready-for-analysis"],
+        author="ridax67",
+        awaiting="reporter",
+        last_comment=_comment(14),
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 688)
+    assert "autonomous_analyze" in actions
+    assert "nudge_reporter" not in actions
+    assert "park" not in actions
+
+
+def test_a_tier1_bug_with_stage2_history_does_not_fire(tmp_path: Path) -> None:
+    """`ready-for-analysis` is consumed by Stage 2 (replaced with `analyzed` or
+    `needs-human-review`), but triage re-runs on an edited issue and re-stamps
+    `ready-for-analysis` even after an inconclusive run, so the two can coexist
+    on one item. The carve-out is for items with NO Stage 2 history at all —
+    an item analysis has already settled must not re-fire the $0.50-2 spend
+    every /loop tick, whatever labels have since accrued."""
+    analyzed = _item(
+        689, labels=["bug", "ready-for-analysis", "analyzed"], author="ridax67"
+    )
+    inconclusive = _item(
+        690,
+        labels=["bug", "ready-for-analysis", "needs-human-review"],
+        author="ridax67",
+    )
+    result = _run(tmp_path, [analyzed, inconclusive])
+    assert "autonomous_analyze" not in _actions_for(result, 689)
+    assert "autonomous_analyze" not in _actions_for(result, 690)
+
+
+def test_a_tier1_bug_awaiting_the_maintainer_escalates_instead_of_firing(
+    tmp_path: Path,
+) -> None:
+    """`Awaiting: maintainer` is the one deliberate board hold — the loop
+    cannot advance without a decision, so the spend is not the point. The
+    carve-out must stand down and let the escalation be the loudest (rank 0)
+    action."""
+    item = _item(
+        691,
+        labels=["bug", "ready-for-analysis"],
+        author="ridax67",
+        awaiting="maintainer",
+        awaiting_source="board",
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 691)
+    assert "escalated" in actions
+    assert "autonomous_analyze" not in actions
+
+
+def test_a_tier1_bug_in_discussion_is_analyzed_not_surfaced(tmp_path: Path) -> None:
+    """`discussion` is a "someone else owes us" state like `reporter`, so it is
+    stale-field material too: the evidence says ready, so the carve-out fires
+    and the surface-to-maintainer action stands down rather than contradicting
+    it."""
+    item = _item(
+        692,
+        labels=["bug", "ready-for-analysis"],
+        author="ridax67",
+        awaiting="discussion",
+        last_comment=_comment(40),
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 692)
+    assert "autonomous_analyze" in actions
+    assert "surface_discussion" not in actions
+
+
 # --- the PR half: reaching a READY PR ------------------------------------
 
 

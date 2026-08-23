@@ -949,6 +949,11 @@ def _record_marginal_value(
     the battery is not in -- so the reported slope stepped mid-cell instead of
     at cell boundaries, and the gate reads that number raw. It now reads the
     interpolant like every other consumer.
+
+    #683 then widened *how much* of the interpolant it reads: one cell is a poor
+    estimate of a staircase, so the price is taken across the whole span a
+    delivery consumes (`_value_of_delivering_below`). That reading is per kWh
+    delivered, which is why the comparison below carries no efficiency factor.
     """
     shadow_price = _value_of_delivering_below(V[t], soe, battery_settings)
     if shadow_price is None:
@@ -1547,7 +1552,7 @@ def _snapped_grid_index(soe: float, battery_settings: BatterySettings) -> float:
 
 def has_value_cell_below(soe: float, battery_settings: BatterySettings) -> bool:
     """Whether a value-function cell exists below `soe` -- i.e. whether
-    `_value_slope_below` can price the last kWh below this state at all.
+    `_value_of_delivering_below` can price the last kWh below this state at all.
 
     Exposed because tests need to select exactly the periods where the shadow
     price is (or is not) computable. Re-deriving that rule test-side is what
@@ -1557,52 +1562,36 @@ def has_value_cell_below(soe: float, battery_settings: BatterySettings) -> bool:
     return _snapped_grid_index(soe, battery_settings) > 0.0
 
 
-def _value_slope_below(
-    V_row: np.ndarray, soe: float, battery_settings: BatterySettings
-) -> float | None:
-    """Left one-sided dV/dSoE at a continuous SoE -- the value of the last kWh
-    below this state, priced on the same piecewise-linear interpolant
-    `_interpolate_value` walks. `None` when no cell below exists.
-
-    Left-sided, because the only consumer authorizes energy *leaving* the
-    battery (#526): what it must price is the value given up going down, not
-    the value gained going up. That makes it the mirror of `_local_value_slope`,
-    which is right-sided because the tie detector wants a noise magnitude.
-
-    Strictly inside a cell the two agree; they diverge only exactly on a grid
-    point, where this reads the cell below and `_local_value_slope` the one
-    above. In practice that case is rarer than it looks: SoC arrives as whole
-    percent, and those SoEs land a hair *below* their nominal index in binary
-    (66% of 15.0 kWh -> 323.99999999999994), so both fall in the same cell.
-    Both stay on the interpolant -- which is the property #571 was about
-    (see `_record_marginal_value`).
-    """
-    idx = _snapped_grid_index(soe, battery_settings)
-
-    if not has_value_cell_below(soe, battery_settings) or len(V_row) < 2:
-        return None
-    lo = int(np.ceil(min(idx, len(V_row) - 1))) - 1
-    return float((V_row[lo + 1] - V_row[lo]) / SOE_STEP_KWH)
-
-
 def _value_of_delivering_below(
     V_row: np.ndarray, soe: float, battery_settings: BatterySettings
 ) -> float | None:
     """Value given up per kWh **delivered** by discharging from this state.
 
-    `_value_slope_below` answers a different question -- value per kWh of *SoE* --
-    and in the discharge-limited regime it cannot answer it accurately, which is
-    #683. `SOE_STEP_KWH` equals `POWER_STEP_KW * dt`, while converting SoE into
-    delivery carries `efficiency_discharge`. So V is a staircase whose riser is one
-    whole delivery step and which is flat once every `1/(1-eta)` cells: a one-cell
-    backward difference lands on a riser 19 times out of 20 and reports the
-    *undiscounted* price, and on the flat cell reports zero.
+    This replaced a one-cell backward difference, which answered in a different
+    unit (per kWh of *SoE*) and, in the discharge-limited regime, answered even
+    that inaccurately -- the latter being the actual #683 defect. The old rule
+    `buy * eta >= dV/dSoE` was itself dimensionally sound; what it could not
+    survive was a bad reading of `dV/dSoE`. `SOE_STEP_KWH` equals
+    `POWER_STEP_KW * dt`, while converting SoE into delivery carries
+    `efficiency_discharge`. So V is a staircase whose riser is one whole delivery
+    step and which is flat once every `1/(1-eta)` cells: a one-cell backward
+    difference lands on a riser 19 times out of 20 and reports the *undiscounted*
+    price, and on the flat cell reports zero.
 
     Pricing the delivery instead removes the artifact rather than compensating for
     it. Delivering `SOE_STEP_KWH` costs `SOE_STEP_KWH / eta` of SoE, which spans
     1/eta cells -- just over one -- so the interpolant is read across exactly the
     span the discharge consumes, and the staircase averages out by construction
     instead of 19 times in 20.
+
+    That averaging does not hold in the bottom cell. For a grid index below `1/eta`,
+    `soe - SOE_STEP_KWH/eta` falls under `min_soe_kwh`, where `_interpolate_value`
+    extrapolates on the `V[0]->V[1]` gradient (#336); the result then collapses
+    algebraically to that one cell's slope divided by eta, with no averaging. This is
+    not a regression -- it is exactly what the previous estimator returned there, and
+    the rule change compensates for it identically (`buy >= g/eta` is `buy*eta >= g`)
+    -- but it does mean a flat bottom cell still prices at 0.0 and opens the gate. The
+    `None` guard above only covers index 0 itself (#526).
 
     The result is denominated per delivered kWh, the same unit as `buy_price`, so
     the gate's comparison needs no efficiency factor: covering `dE` now consumes

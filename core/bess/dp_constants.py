@@ -29,9 +29,11 @@ so it is not derived from POWER_STEP_KW and is not defined here).
 # POWER_STEP_KW * 0.25h (the quarterly-period reachable-state increment, the
 # production resolution -- see battery_system_manager.py) so V is sampled
 # only at states a single action can actually reach; a finer SOE_STEP_KWH
-# than that makes shadow_price's one-sided-slope report jagged/incorrect
-# values at intermediate grid points that aren't independently reachable
-# (verified empirically during the #275 Option B investigation).
+# than that makes shadow_price report jagged/incorrect values at intermediate
+# grid points that aren't independently reachable (verified empirically during
+# the #275 Option B investigation). Note this equality is also what makes V a
+# staircase in the discharge-limited regime, which is why the shadow price is
+# read across a whole delivery's worth of SoE rather than one cell (#683).
 #
 # Resolution history: 0.2 kW / 0.05 kWh until #512, whose full-corpus
 # benchmark showed the coarser grid's value-function discretization left

@@ -122,9 +122,19 @@ done
 # several KB each. Only the closing references and the branch name are needed to
 # decide whether a merged PR belongs to an issue, so extract those here and hand
 # jq a few hundred bytes instead of a megabyte.
+# Inline-code spans carry EXAMPLES, never linkage declarations, so a `#N`
+# inside backticks must not associate a PR with an issue. Defined once, here,
+# because BOTH linkage scans need it and they are separate jq programs -- the
+# merged-PR scan immediately below, and `linkage_body` in the digest program
+# further down. Fixing only one of them is how PR #684 shipped: it stripped
+# code spans in the merged scan while its own body, quoting
+# `- Blocked by #100 -- part of #409` as the worked example, went on linking
+# itself to issue #409 through the open-PR scan it had not touched.
+jq_strip_code_spans='def strip_code_spans: gsub("`[^`]*`"; "");'
+
 merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
   --json number,headRefName,body \
-  | jq -c '[ .[] | {
+  | jq -c "$jq_strip_code_spans"'[ .[] | {
       number,
       headRefName,
       # WORK references only -- the closing verbs plus the no-auto-close
@@ -133,7 +143,13 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       # ("until #456 and #457 are also resolved"), and a merged PR must not
       # flip an unrelated issue to In Verification. Drives both `merged_pr`
       # (the column) and `merged_prs` (the visibility list).
-      refs: [ (.body // "") | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
+      #
+      # Inline-code spans are stripped BEFORE scanning, so `#N` inside a
+      # backticked worked example cannot flip an issue: PR #679 explained its
+      # own fix with the literal line `- Blocked by #100 -- part of #409` and
+      # that example bounced issue #409 to In Verification. A real linkage
+      # declaration is never in code markup.
+      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
     } ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
@@ -210,7 +226,7 @@ jq -n \
   --argjson board "$board" \
   --argjson in_flight "$in_flight_files" \
   --argjson undiffable_prs "$undiffable_prs" \
-  --arg now "$(date -u +%s)" '
+  --arg now "$(date -u +%s)" "$jq_strip_code_spans"'
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
   def label_names: [.labels[].name];
@@ -250,8 +266,15 @@ jq -n \
   # working: only the blocker phrase disappears and #409 still links. The
   # remaining test is still any `#N`, so the no-auto-close spellings
   # (`Part of #N`, `tracking #N`, `Refs #N`, bare `#N`) all link.
+  #
+  # Inline-code spans go first, for the same reason the merged scan strips
+  # them: a backticked worked example is not a declaration. The phrase list
+  # below cannot cover this on its own -- `part of #N` is REAL linkage and so
+  # is deliberately absent from it, which means a quoted example carrying that
+  # phrase links unless the markup is removed before matching.
   def linkage_body($body):
     ($body // "")
+    | strip_code_spans
     | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "");
 
   def pr_matches_issue($p; $n):

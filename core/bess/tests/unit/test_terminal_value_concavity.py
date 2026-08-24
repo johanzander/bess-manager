@@ -169,3 +169,33 @@ def test_a_sunless_day_keeps_the_capped_scalar() -> None:
         "the cap must still hold the rate under the export alternative here, "
         "or the DP hoards instead of exporting into the evening peak (#244)"
     )
+
+
+def test_a_row_that_cannot_be_concave_falls_back_to_the_capped_scalar() -> None:
+    """The head must never sit at or below the tail (#687 review round 3).
+
+    Concavity is `head_rate > tail_rate` and nothing else. Buy prices carry
+    markup and VAT while sell prices carry a tax reduction, so a deeply negative
+    spot can drive the buy median under a still-positive sell floor. The row
+    would then be *convex*, and convexity makes the extremes dominate -- the DP
+    goes back to carrying everything or nothing, which is #602's own defect in
+    the new shape. Flooring the head at zero would not catch it: `0 < tail` is
+    still convex.
+    """
+    settings = BatterySettings(total_capacity=20.0, min_soc=10, max_soc=100)
+    # Deeply negative spot: the buy median lands below the sell floor.
+    buy = [-0.40] * 48
+    sell = [0.05, 0.30] * 24
+    consumption = [0.25] * 48
+    solar = [0.0] * 24 + [1.0] * 24
+
+    curve = calculate_terminal_curve(buy, sell, consumption, solar, settings)
+
+    assert curve.head_rate * settings.efficiency_discharge <= max(
+        sell
+    ), "fixture no longer produces the inverted shape this guards -- re-pick"
+    assert curve.knee_kwh == float("inf"), (
+        "a row that cannot be concave has no knee to express, so it must take "
+        f"the capped scalar; got head={curve.head_rate} tail={curve.tail_rate}"
+    )
+    assert curve.head_rate >= curve.tail_rate, "the emitted row must be concave"

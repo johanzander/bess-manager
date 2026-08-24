@@ -213,6 +213,16 @@ def knee_kwh_from_forecast(
     differently-derived knee -- bounded by the next cheap charging window rather
     than by sunrise -- which is not in scope here and has no oracle behind it yet.
     """
+    # `strict=False` is deliberate and must stay: the two arrays legitimately
+    # differ in length. `_get_consumption_forecast` hardcodes 96 on every
+    # strategy branch, while `_fetch_tomorrow_solar_forecast`'s no-sensor
+    # fallback sizes itself to `get_period_count(tomorrow)` -- 92 on DST spring,
+    # 100 on DST fall. `strict=True` would raise there, i.e. crash the optimizer
+    # twice a year for every install without a solar sensor, which is worse than
+    # the truncation it would replace: that path yields an all-zero solar array,
+    # so the day has no PV crossover and takes the capped regime at either
+    # length. The real defect is the 96-vs-period-count mismatch upstream, not
+    # the zip.
     net = 0.0
     for consumption, solar in zip(consumption_forecast, solar_forecast, strict=False):
         if solar >= consumption:
@@ -388,8 +398,33 @@ def curve_from_knee(
     efficiency = battery_settings.efficiency_discharge
     max_sell = max(sell_prices)
     export_prices_vary = max_sell > min(sell_prices)
+    head_rate = statistics.median(buy_prices) * efficiency
+    tail_rate = min(sell_prices) * efficiency if export_prices_vary else 0.0
+
+    # Concavity is the property this whole row exists to have, and it is
+    # `head_rate > tail_rate` -- nothing else. Neither rate is floored at zero
+    # (a negative tail is normal and pinned: `synthetic_extreme_negative_prices`
+    # records -0.285), so on a day priced deeply enough below zero the head can
+    # fall to or under the tail. Buy carries markup and VAT while sell carries a
+    # tax reduction, so a sufficiently negative spot drives the buy median under
+    # a still-positive sell floor -- head under tail, and the row is *convex*.
+    #
+    # A convex terminal row is worse than no fix at all: convexity makes the
+    # extremes dominate, so the DP goes back to carrying everything or nothing,
+    # which is #602's original defect wearing the new shape. Flooring the head
+    # at zero does not prevent it (0 < tail is still convex); only comparing the
+    # two rates does.
+    #
+    # When it cannot be concave there is no knee to express -- no reason to
+    # value the first kWh above the last -- so this is the same "the quantity
+    # bound cannot bind" case handled above, and it takes the same capped
+    # scalar. No fixture in the corpus reaches this today (checked: no negative
+    # head, no head under tail), so it is a guard, not a behaviour change.
+    if head_rate <= tail_rate:
+        return TerminalValueCurve.flat(
+            calculate_terminal_value_per_kwh(buy_prices, sell_prices, battery_settings)
+        )
+
     return TerminalValueCurve(
-        head_rate=statistics.median(buy_prices) * efficiency,
-        knee_kwh=knee_kwh,
-        tail_rate=min(sell_prices) * efficiency if export_prices_vary else 0.0,
+        head_rate=head_rate, knee_kwh=knee_kwh, tail_rate=tail_rate
     )

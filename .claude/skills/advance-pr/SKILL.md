@@ -114,18 +114,24 @@ reopens the failure it fixed.
 - **CI must be green, not merely unconflicted, before `gh pr ready`.** A
   `MERGEABLE` PR with checks still running is not ready — `mergeable` only
   says the diff applies cleanly, it says nothing about whether it passes.
-- **`COMMENTED` is ambiguous, and `request-pr-review.sh` resolves it for
-  you — do not second-guess it.** The bot posts an early placeholder review
-  as `COMMENTED` before its real summary, so a `COMMENTED` seen while the
-  review run is still going decides nothing. The script asks whether the
+- **`COMMENTED` is not a verdict, and `request-pr-review.sh` resolves it for
+  you — do not second-guess it.** `pr-review.yml` has exactly two legal
+  verdicts, `APPROVE` and `REQUEST_CHANGES`; findings that do not block merge
+  are an approval with the nits in the body, because a `COMMENTED` review
+  leaves GitHub's `reviewDecision` showing the previous round's
+  `CHANGES_REQUESTED`. The bot also posts an early placeholder review as
+  `COMMENTED` before its real summary, so a `COMMENTED` seen while the review
+  run is still going decides nothing. The script asks whether the
   workflow run is still live, not how long has elapsed, because no fixed
-  timer is both short enough to return a real `COMMENT` verdict promptly and
+  timer is both short enough to report a finished `COMMENTED` promptly and
   long enough to never pre-empt a summary — this was tried and measured
   wrong in both directions (see the script's own comments for the incident
   history: #617, #622, #615, #636, #623). A `COMMENTED` that reaches you from
-  the script arrived *after* the run finished, and that **is** the verdict:
-  treat it exactly like `CHANGES_REQUESTED` — collect findings, do not flip
-  the PR ready.
+  the script arrived *after* the run finished, so it is the reviewer's last
+  word without being a verdict: treat it exactly like `CHANGES_REQUESTED` —
+  collect findings, do not flip the PR ready — and say in your report that
+  the bot broke its own two-verdict contract, because the stale
+  `reviewDecision` will still be blocking the merge.
 - **On `APPROVED`, re-check mergeability before doing anything else** — do
   not trust whatever mergeability you read at the top of this invocation.
   A review round takes minutes, other PRs merge during it, and a

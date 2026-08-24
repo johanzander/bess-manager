@@ -23,12 +23,18 @@
 # trigger is a real signal, including one the maintainer submits by hand while
 # the bot is still thinking. The caller decides what to do with it.
 #
-# THE COMMENTED PROBLEM. `pr-review.yml` gives the bot three final verdicts:
-# APPROVE, REQUEST_CHANGES and COMMENT ("questions/observations only"). But the
-# bot ALSO posts its inline notes as a separate review before the summary, and
-# that one is `COMMENTED` too -- body "Inline notes below; summary review to
-# follow.". So `COMMENTED` is ambiguous: either a placeholder that decides
-# nothing, or a legitimate final verdict. The state alone cannot tell them apart.
+# THE COMMENTED PROBLEM. `pr-review.yml` now gives the bot exactly two final
+# verdicts, APPROVE and REQUEST_CHANGES: findings that do not block merge are an
+# APPROVE with the nits in the body, because a COMMENTED review does not clear
+# GitHub's `reviewDecision` and so leaves an earlier REQUEST_CHANGES blocking
+# the merge (measured on #687: four rounds, the last two explicitly
+# non-blocking, still needing a manual dismissal). COMMENT used to be a third
+# legal verdict, which is why everything below exists -- and the ambiguity does
+# not disappear with it, because the bot may still post inline notes as a
+# separate `COMMENTED` review before its summary, body "Inline notes below;
+# summary review to follow.". So `COMMENTED` remains ambiguous from state
+# alone: either a placeholder that decides nothing, or a run that ended without
+# ever giving a legal verdict.
 #
 # Getting this wrong in either direction has been observed:
 #   - Treating COMMENTED as terminal returns the placeholder. Measured on #617
@@ -36,9 +42,9 @@
 #     08:49:14Z -- 16s). `implement-issue` Step 11 then saw a non-APPROVED
 #     verdict and skipped `gh pr ready`: that is how #615 sat approved-but-draft
 #     overnight with only the merge left to do.
-#   - Treating COMMENTED as never-terminal swallows a real COMMENT verdict. The
-#     loop waits out the full timeout and reports "no summary landed", which is
-#     false when a summary with findings is sitting on the PR.
+#   - Treating COMMENTED as never-terminal swallows a run whose last word was
+#     COMMENTED. The loop waits out the full timeout and reports "no summary
+#     landed", which is false when a summary with findings sits on the PR.
 #
 # So COMMENTED is resolved by asking whether the REVIEWER IS STILL WORKING, not
 # by parsing its body and not by a timer. Body text is bot-generated prose with
@@ -46,12 +52,14 @@
 # from those 16s/50s gaps, it still pre-empted a summary, because the gap that
 # matters is not placeholder-to-summary but placeholder-to-END-OF-RUN — the bot
 # posts an early permission check within a couple of minutes and works for five
-# to eight more. No fixed number is both short enough to return a real COMMENT
-# promptly and long enough never to pre-empt.
+# to eight more. No fixed number is both short enough to report a finished
+# COMMENTED promptly and long enough never to pre-empt.
 #
 # APPROVED/CHANGES_REQUESTED return immediately. A COMMENTED is held while the
-# run is live and accepted as the verdict once the run has finished, which is
-# exactly what COMMENT means in pr-review.yml's own three-verdict contract.
+# run is live and returned once the run has finished -- not because it is a
+# verdict (it no longer is) but because the reviewer has stopped talking, and
+# reporting its last word beats timing out. Callers treat anything that is not
+# APPROVED the same way: collect findings, do not flip the PR ready.
 #
 # `pr-review.yml` step 3 is also changed so inline notes post via `gh api`
 # instead of `gh pr review`, which stops the placeholder being submitted as a
@@ -247,14 +255,16 @@ while [ "$(date +%s)" -lt "$deadline" ]; do
             # Treating "I could not tell" as "it finished" re-opens the exact
             # race this script exists to close, gated on API flakiness instead
             # of timing. Not knowing must never promote a placeholder to a
-            # verdict; waiting costs one more poll, and a genuine COMMENT
-            # verdict still returns as soon as the state resolves.
+            # verdict; waiting costs one more poll, and a run that ends on
+            # COMMENTED still returns as soon as the state resolves.
             echo "COMMENTED seen but the review is ${state} — waiting." >&2
         else
-            # The run has finished and its last word was COMMENTED, so that IS
-            # the verdict: `pr-review.yml` lists COMMENT as one of three final
-            # verdicts ("questions/observations only").
-            echo "Review finished with COMMENTED as its last word — that is the verdict." >&2
+            # The run has finished and its last word was COMMENTED. Under the
+            # current two-verdict contract that is a protocol violation, not a
+            # verdict -- but it is still the reviewer's last word, and the
+            # caller must be told rather than left to time out. Returned as-is;
+            # every caller treats a non-APPROVED as "do not flip ready".
+            echo "Review finished with COMMENTED as its last word — no legal verdict; returning it." >&2
             echo "VERDICT ${commented}"
             exit 0
         fi

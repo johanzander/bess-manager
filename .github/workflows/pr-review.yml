@@ -84,12 +84,12 @@ jobs:
 
                  **Submit EXACTLY ONE review per run — the summary in step 4.**
                  This is a hard constraint, not a style preference.
-                 `scripts/request-pr-review.sh` waits for your verdict, and any
-                 extra submitted review is indistinguishable by state from a
-                 real `COMMENT` verdict. That ambiguity left PR #615 approved
-                 but stuck in draft overnight, and a stray "test permission
-                 check" review was submitted to PR #622 while probing what was
-                 available.
+                 `scripts/request-pr-review.sh` waits for your verdict, and an
+                 extra submitted review lands as a `COMMENTED` review that no
+                 caller can tell apart from your real summary until the run
+                 ends. That ambiguity left PR #615 approved but stuck in draft
+                 overnight, and a stray "test permission check" review was
+                 submitted to PR #622 while probing what was available.
 
                  So: never call `gh pr review` except once, in step 4. Never
                  call it to probe permissions — it submits.
@@ -105,20 +105,46 @@ jobs:
                  and the real code quoted. A complete summary review is a fine
                  outcome; a second submitted review is not.
 
-              4. End with a single summary review using `gh pr review`:
-                   - APPROVE  — no blockers, only nits or none
-                   - REQUEST_CHANGES — at least one rule violation or correctness bug
-                   - COMMENT  — questions/observations only
+              4. End with a single summary review using `gh pr review`.
+                 There are exactly TWO verdicts, and the choice between them
+                 is mechanical, not a matter of tone:
+
+                   - REQUEST_CHANGES — you can name at least one BLOCKER: a
+                     violation of a rule in `docs/agents/rules.md`, or a
+                     correctness bug stated as a concrete failure scenario
+                     (inputs/state → wrong output or crash), with `file:line`
+                     and the real code quoted.
+                   - APPROVE — everything else, INCLUDING when you have
+                     findings. Nits, style preferences, design questions,
+                     asymmetries you cannot demonstrate as failures, "worth a
+                     look before this lands" — every one of those is an
+                     APPROVE with the finding written into the body. The
+                     author decides which to act on; that call is theirs, not
+                     yours.
+
+                 **`COMMENT` is not a verdict in this repo. Never submit one.**
+                 If you catch yourself writing "not blocking", "worth a look",
+                 or "neither finding blocks merge", you have already decided:
+                 the verdict is APPROVE. Approving does not mean the PR is
+                 perfect — it means you found nothing that MUST change before
+                 merge. Say what you would still change, then APPROVE.
+
+                 This is not bookkeeping. GitHub shows the last explicit
+                 verdict, and a `COMMENTED` review is not one, so a
+                 REQUEST_CHANGES from an earlier round keeps blocking the
+                 merge no matter how many clean rounds follow — only the
+                 maintainer can clear it by hand. PR #687 ran four rounds:
+                 every substantive finding was fixed, the last two rounds said
+                 in their own words that nothing blocked, and the PR still sat
+                 blocked on a stale round-2 review needing a manual dismissal.
 
                  **Submitting this review is mandatory in every case,
                  including when you find nothing wrong.** Finishing the run
                  without calling `gh pr review` is a failed run, not a clean
                  one. Silence is indistinguishable from a crash to everything
-                 downstream, and it has a concrete cost: GitHub keeps showing
-                 the LAST explicit verdict, so a prior REQUEST_CHANGES goes on
-                 blocking the merge no matter how many clean runs follow, and
-                 the review can never be cleared by re-running. If the diff is
-                 clean, say so in one line and APPROVE.
+                 downstream, and it leaves the same stale verdict in place as
+                 a `COMMENTED` does. If the diff is clean, say so in one line
+                 and APPROVE.
 
               5. The summary must include:
                  - Whether the fix matches the linked issue's root-cause

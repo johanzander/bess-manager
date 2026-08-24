@@ -223,13 +223,14 @@ def test_commented_while_running_is_not_a_verdict(
     assert "the review is running" in proc.stderr
 
 
-def test_commented_after_the_run_finished_is_the_verdict(
+def test_commented_after_the_run_finished_is_reported(
     bin_dir: Path, env_file: Path
 ) -> None:
-    """The opposite failure. `pr-review.yml` lists COMMENT as one of three final
-    verdicts, so once the run is over a COMMENTED last word IS the answer —
-    swallowing it made the script report "no summary" while findings sat on the
-    PR."""
+    """The opposite failure. COMMENT is no longer a legal verdict —
+    `pr-review.yml` allows only APPROVE and REQUEST_CHANGES — but once the run
+    is over, a COMMENTED last word is still the reviewer's last word and must
+    reach the caller. Swallowing it made the script report "no summary" while
+    findings sat on the PR."""
     _gh(bin_dir, [_review("COMMENTED")], "finished")
     proc = _run(bin_dir, env_file)
 

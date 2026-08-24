@@ -38,13 +38,14 @@ Usage: .venv/bin/python scripts/capture_scenario_terminal_values.py [--check]
 """
 
 import json
+import math
 import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
-from core.bess.tests.helpers import scenario_terminal_value  # noqa: E402
+from core.bess.tests.helpers import scenario_terminal_curve  # noqa: E402
 
 DATA_DIR = REPO_ROOT / "core/bess/tests/unit/data"
 
@@ -60,21 +61,51 @@ def main() -> None:
 
     for path in paths:
         scenario = json.loads(path.read_text())
-        computed = round(scenario_terminal_value(scenario), PRECISION)
+        curve = scenario_terminal_curve(scenario)
+        computed = round(curve.head_rate, PRECISION)
+        # A flat curve's knee is infinite, which is not representable in
+        # JSON; record it as null and let the helper rebuild `flat()` from
+        # its absence. That is also the honest encoding -- "no knee" is what
+        # the no-PV regime means.
+        computed_knee = (
+            None if math.isinf(curve.knee_kwh) else round(curve.knee_kwh, PRECISION)
+        )
+        computed_tail = round(curve.tail_rate, PRECISION)
         recorded = scenario.get("terminal_value_per_kwh")
+        recorded_knee = scenario.get("terminal_knee_kwh")
+        recorded_tail = scenario.get("terminal_tail_rate")
 
-        if recorded is not None and abs(recorded - computed) < 10**-PRECISION:
-            print(f"  ok    {path.name}: {recorded}")
+        if (
+            recorded is not None
+            and "terminal_knee_kwh" in scenario
+            and abs(recorded - computed) < 10**-PRECISION
+            and (
+                (recorded_knee is None and computed_knee is None)
+                or (
+                    recorded_knee is not None
+                    and computed_knee is not None
+                    and abs(recorded_knee - computed_knee) < 10**-PRECISION
+                )
+            )
+            and recorded_tail is not None
+            and abs(recorded_tail - computed_tail) < 10**-PRECISION
+        ):
+            print(f"  ok    {path.name}: {recorded} knee={recorded_knee}")
             continue
 
         stale.append(path.name)
         if check_only:
-            print(f"  STALE {path.name}: recorded={recorded} computed={computed}")
+            print(
+                f"  STALE {path.name}: recorded={recorded}/{recorded_knee} "
+                f"computed={computed}/{computed_knee}"
+            )
             continue
 
         scenario["terminal_value_per_kwh"] = computed
+        scenario["terminal_knee_kwh"] = computed_knee
+        scenario["terminal_tail_rate"] = computed_tail
         path.write_text(json.dumps(scenario, indent=2) + "\n")
-        print(f"  write {path.name}: {recorded} -> {computed}")
+        print(f"  write {path.name}: {recorded} -> {computed} knee={computed_knee}")
 
     if check_only:
         if stale:

@@ -63,6 +63,7 @@ import numpy as np
 
 from core.bess.dp_constants import (
     POWER_STEP_KW,
+    SHADOW_PRICE_NOISE_REL,
     SOE_STEP_KWH,
 )
 from core.bess.execution_model import (
@@ -82,6 +83,7 @@ from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.strategic_intent import (
     create_decision_data,
 )
+from core.bess.terminal_value import TerminalValueCurve
 
 # Configure logging
 logging.basicConfig(
@@ -960,7 +962,16 @@ def _record_marginal_value(
         return
 
     decision.shadow_price = shadow_price
-    decision.intra_period_discharge_allowed = bool(buy_price_t >= shadow_price)
+    # At economic indifference the gate OPENS. The direction is not arbitrary:
+    # when covering load from the battery and importing it are worth the same to
+    # the model, P2's row 3 prefers load-tracking discharge, and P7's argument is
+    # that a load-following cover absorbs forecast error where an import does
+    # not. That is what the `>=` already intends; only differencing noise defeats
+    # it, so the comparison is made against that noise rather than against zero
+    # (#602 -- see SHADOW_PRICE_NOISE_REL for why these ties became structural).
+    decision.intra_period_discharge_allowed = bool(
+        buy_price_t >= shadow_price - abs(shadow_price) * SHADOW_PRICE_NOISE_REL
+    )
 
 
 def _build_period_data(
@@ -1209,7 +1220,7 @@ def _run_dynamic_programming(
     solar_production: list[float] | None = None,
     initial_soe: float | None = None,
     initial_cost_basis: float = 0.0,
-    terminal_value_per_kwh: float = 0.0,
+    terminal_curve: TerminalValueCurve | None = None,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     import_cap_kwh: float | None = None,
@@ -1263,10 +1274,9 @@ def _run_dynamic_programming(
     V = np.zeros((horizon + 1, len(soe_levels)))
 
     # Terminal value: assign value to usable energy remaining at end of horizon
-    if terminal_value_per_kwh > 0.0:
+    if terminal_curve is not None:
         for i, soe in enumerate(soe_levels):
-            usable_energy = soe - battery_settings.min_soe_kwh
-            V[horizon, i] = max(0.0, usable_energy) * terminal_value_per_kwh
+            V[horizon, i] = terminal_curve.value(soe - battery_settings.min_soe_kwh)
 
     min_soe_kwh = battery_settings.min_soe_kwh
     max_soe_kwh = battery_settings.max_soe_kwh
@@ -1945,7 +1955,7 @@ def optimize_battery_schedule(
     initial_soe: float | None = None,
     initial_cost_basis: float | None = None,
     period_duration_hours: float = 0.25,
-    terminal_value_per_kwh: float = 0.0,
+    terminal_curve: TerminalValueCurve | None = None,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
@@ -1966,9 +1976,11 @@ def optimize_battery_schedule(
         initial_soe: Initial battery state of energy (kWh), defaults to min_soe
         initial_cost_basis: Initial cost basis for battery cycling, defaults to cycle_cost
         period_duration_hours: Duration of each period in hours (always 0.25 for quarterly resolution)
-        terminal_value_per_kwh: Value assigned to each kWh of usable energy remaining at
-            end of horizon. Used to prevent end-of-day battery dumping when tomorrow's
-            prices aren't available yet. Defaults to 0.0 (no terminal value).
+        terminal_curve: Concave valuation of usable energy remaining at end of
+            horizon -- the buy-median rate up to the household's pre-dawn need,
+            nothing above it. Prevents end-of-day dumping when tomorrow's prices
+            aren't available yet, without the all-or-nothing midnight SOE a single
+            rate produces (#602). Defaults to None (no terminal value).
         max_charge_power_per_period: Per-period max charge power limits (kW), typically
             from temperature derating. When provided, charging actions exceeding the
             limit for each period are excluded from the optimization. Defaults to None
@@ -2075,7 +2087,7 @@ def optimize_battery_schedule(
         battery_settings=battery_settings,
         initial_cost_basis=initial_cost_basis,
         dt=dt,
-        terminal_value_per_kwh=terminal_value_per_kwh,
+        terminal_curve=terminal_curve,
         currency=currency,
         max_charge_power_per_period=max_charge_power_per_period,
         import_cap_kwh=import_cap_kwh,
@@ -2576,6 +2588,23 @@ def optimize_battery_schedule(
             dt=dt,
             currency=currency,
         ).economic_summary.battery_solar_cost
+
+    # Both sides must also be credited for energy left at the boundary, or the
+    # guardrail judges the DP's plan by a different objective than the DP
+    # optimized against and discards plans that deliberately carry energy past
+    # the horizon (#602). Latent before the concave row: the capped scalar was
+    # small enough that the omission rarely changed the comparison, whereas a
+    # buy-median head rate is roughly twice it. Caught by
+    # `test_tie_detection_synthetic_coverage`, which found the guardrail firing
+    # on a plan that was better once the carry was counted.
+    if terminal_curve is not None:
+        min_soe = battery_settings.min_soe_kwh
+        guardrail_optimized_cost -= terminal_curve.value(
+            hourly_results[-1].energy.battery_soe_end - min_soe
+        )
+        guardrail_idle_cost -= terminal_curve.value(
+            idle_schedule.period_data[-1].energy.battery_soe_end - min_soe
+        )
 
     if guardrail_idle_cost < guardrail_optimized_cost:
         logger.info(

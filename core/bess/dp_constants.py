@@ -76,3 +76,21 @@ POWER_CLASSIFICATION_THRESHOLD_KW = POWER_STEP_KW / 2
 # GRID_FLOW_RESOLUTION_KWH lives in models.py: it describes a property of the
 # measurement layer (Home Assistant's lifetime counters), not of the DP -- the
 # optimizer imports it from there (#497 review follow-up).
+
+# Relative band for comparing a price against a shadow price (#602).
+#
+# `shadow_price` is a finite difference of the value function, so it carries V's
+# accumulated rounding divided by the SoE step -- roughly a machine epsilon per
+# backward step, over horizons of ~100 periods. This is that bound with headroom,
+# not a tuned preference: it must swallow differencing noise and nothing that
+# could change a decision. The smallest real price difference in any observed
+# market is ~1e-4 SEK/kWh, eight orders of magnitude above this.
+#
+# It exists because the concave terminal row makes exact ties structural rather
+# than occasional: the head segment gives V a constant slope equal to
+# `median(buy_prices)`, and a median is by construction an element of the array
+# it is taken over -- so every period whose buy price attains the horizon median
+# ties against its own shadow price to the last bits. Measured on
+# `realworld_2026_04_22_202249` period 85: buy 2.60425 vs shadow
+# 2.60425000000005, a 5e-14 gap that closed the discharge gate.
+SHADOW_PRICE_NOISE_REL = 1e-12

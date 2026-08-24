@@ -86,15 +86,51 @@ holds regardless of where that boundary currently sits, since no provider
 ever supplies data past midnight-tomorrow either. Each leftover kWh at the
 horizon's end is valued at:
 
-    terminal_value = median(buy_prices) * efficiency_discharge - cycle_cost
+    value(u) = head_rate * min(u, knee_kwh) + tail_rate * max(0, u - knee_kwh)
 
-where `buy_prices` is the median over the full remaining horizon, capped at
-`max(sell_prices) * efficiency_discharge - cycle_cost` — an
-**arbitrage-consistency cap** that prevents the estimate from exceeding what
-could actually be realized by selling at the best available price
+a **concave** row, not a single rate (#602). `knee_kwh` is the household's own
+net load from the boundary until tomorrow's PV covers it, so the *quantity*
+carried is set by a load profile rather than by a price estimate;
+`head_rate` is `median(buy_prices) * efficiency_discharge` — the purchase the
+household avoids by having carried the energy. `tail_rate` is
+`min(sell_prices) * efficiency_discharge` (the terminal day's window), since
+energy beyond the knee is refilled by tomorrow's sun and is worth only what
+exporting it earns; on a **fixed export tariff** `min` and `max` coincide, so
+the floor would land exactly on the hold-versus-export tie and `tail_rate` is
+0.0 there instead, matching #359's existing carve-out.
+
+`head_rate` is deliberately **not** floored at
+`max(sell_prices) * efficiency_discharge`. That was tried and reverted: it
+prices terminal energy above what the DP can buy at inside the horizon, which
+turns the terminal row into an arbitrage target — on `synthetic_seasonal_spring`
+(median buy 1.05, best sell 1.90) the floored rate of 1.805 made the DP charge
+40.6 kWh to bank 23.6 against a 42.64 SEK credit, which is #126/#244's
+fictitious bonus at scale. The consequence of not flooring is that the rate
+still decides *whether* to carry while the knee decides *how much* — a ~12%
+move in the rate swings the full knee on #595's fixture. That is a known
+limitation, not an oversight.
+
+Before #602 this was one unbounded slope,
+`median(buy_prices) * efficiency_discharge - cycle_cost` capped at
+`max(sell_prices) * efficiency_discharge - cycle_cost`. That shape made midnight
+SOE all-or-nothing: the DP compares the slope against the best in-horizon export
+value, so every kWh was worth holding or none were. The `cycle_cost` deduction
+also double-billed wear, which is charged on charging only. **Both the deduction
+and the cap are gone** on days where the knee can bind; the quantity bound
+replaces what the cap was doing, and does it better, because terminal energy is
+monetised by self-consumption rather than only by export.
+
+**When the knee cannot bind** — it exceeds usable capacity, i.e. every winter
+day and any overcast one — the pre-#602 capped scalar above is still used
+verbatim. Without PV to refill the pack there is no quantity at which a stored
+kWh stops being worth the buy price, so the row would be straight *and*
+uncapped, which is #126/#244's hoarding bug. #602's evidence covers only the
+knee-bounded regime; #381's winter carry needs a knee derived from the next
+cheap charging window and is not yet addressed.
+
 (the formula lives in `core/bess/terminal_value.py`, called by
-`BatterySystemManager._calculate_terminal_value`, which owns fetching its
-inputs and logging the result; see issues #126/#244/#246/#345/#422). The same
+`BatterySystemManager._calculate_terminal_curve`, which owns fetching its
+inputs and logging the result; see issues #126/#244/#246/#345/#422/#602). The same
 function is what the forecast-robustness harness and the pinned scenario
 corpus price the boundary with, so all three optimize against one objective.
 This is the mechanism to check first for
@@ -174,9 +210,12 @@ accounting anywhere in the code.
 **All-IDLE safety net (not a profit threshold)**: After optimization, an
 all-IDLE schedule is unconditionally computed and swapped in only if its
 `battery_solar_cost` is cheaper than the optimized schedule's
-(`core/bess/dp_battery_algorithm.py:1514-1536`). This is a plain cost
-comparison — there is **no minimum-profit threshold and no day-fraction
-scaling**. An earlier design had a threshold/guardrail here; it was removed
+(`core/bess/dp_battery_algorithm.py`). Both sides of that comparison are first
+credited for energy left at the boundary using the same terminal row the DP
+optimized against (#602) — without it the net judges a plan that deliberately
+carries energy by an objective that ignores the carry, and discards it. It
+remains a plain cost comparison — there is **no minimum-profit threshold and no
+day-fraction scaling**. An earlier design had a threshold/guardrail here; it was removed
 in the "Bellman-optimality guardrail removal" refactor (commit
 `ee24537f`/`f57d4fed`,
 `docs/superpowers/specs/2026-07-06-dp-bellman-guardrail-removal-design.md`)

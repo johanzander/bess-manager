@@ -27,13 +27,14 @@ from unittest.mock import patch
 import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.terminal_value import TerminalValueCurve
 from core.bess.tests.unit.test_scenarios import build_scenario_optimizer_inputs
 
 
 def _optimize(scenario_name, terminal_value_per_kwh=None):
     _, kwargs = build_scenario_optimizer_inputs(scenario_name)
     if terminal_value_per_kwh is not None:
-        kwargs["terminal_value_per_kwh"] = terminal_value_per_kwh
+        kwargs["terminal_curve"] = TerminalValueCurve.flat(terminal_value_per_kwh)
     result = optimize_battery_schedule(**kwargs)
 
     # Grid DP alone, tie detection suppressed: the behaviour #450 fixed.

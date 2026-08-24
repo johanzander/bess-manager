@@ -269,10 +269,12 @@
   },
   "expected_results": {
     "base_cost": 3.85552,
-    "battery_solar_cost": -1.52381,
-    "base_to_battery_solar_savings": 5.37933,
-    "base_to_battery_solar_savings_pct": 139.52289,
+    "battery_solar_cost": -1.13702,
+    "base_to_battery_solar_savings": 4.99254,
+    "base_to_battery_solar_savings_pct": 129.49074,
     "_note": " Re-pinned after merging #497 (PR #511): removing the DP's phantom sub-resolution export revenue moved planned cost to the honest figure and closed this fixture's +0.0054 plan-execution gap to exactly zero."
   },
-  "terminal_value_per_kwh": 0.128845398
+  "terminal_value_per_kwh": 0.263476137,
+  "terminal_knee_kwh": 2.508736842,
+  "terminal_tail_rate": -0.019913273
 }

@@ -118,5 +118,7 @@
       "power_within_limits": true
     }
   },
-  "terminal_value_per_kwh": 1.9151875
+  "terminal_value_per_kwh": 1.9151875,
+  "terminal_knee_kwh": null,
+  "terminal_tail_rate": 0.0
 }

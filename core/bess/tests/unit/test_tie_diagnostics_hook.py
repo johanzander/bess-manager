@@ -2,6 +2,7 @@
 (#450 synthetic coverage validation suite)."""
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.terminal_value import TerminalValueCurve
 from core.bess.tests.helpers import _scenario_inputs
 from core.bess.tests.unit.test_scenarios import load_test_scenario
 
@@ -28,7 +29,9 @@ def test_tie_diagnostics_populated_when_dict_passed():
         initial_soe=scenario["battery"]["initial_soe"],
         battery_settings=inputs["battery_settings"],
         period_duration_hours=inputs["period_duration_hours"],
-        terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
+        terminal_curve=TerminalValueCurve.flat(
+            scenario.get("terminal_value_per_kwh", 0.0)
+        ),
         tie_diagnostics=diagnostics,
     )
 
@@ -55,6 +58,8 @@ def test_tie_diagnostics_none_by_default_is_a_no_op():
         initial_soe=scenario["battery"]["initial_soe"],
         battery_settings=inputs["battery_settings"],
         period_duration_hours=inputs["period_duration_hours"],
-        terminal_value_per_kwh=scenario.get("terminal_value_per_kwh", 0.0),
+        terminal_curve=TerminalValueCurve.flat(
+            scenario.get("terminal_value_per_kwh", 0.0)
+        ),
     )
     assert result.economic_summary is not None

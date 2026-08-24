@@ -361,11 +361,11 @@
   },
   "expected_results": {
     "base_cost": 92.20526,
-    "battery_solar_cost": -16.10792,
-    "base_to_battery_solar_savings": 108.31317,
-    "base_to_battery_solar_savings_pct": 117.46963,
+    "battery_solar_cost": -14.73026,
+    "base_to_battery_solar_savings": 106.93552,
+    "base_to_battery_solar_savings_pct": 115.97551,
     "total_charged": 5.7,
-    "total_discharged": 8.66848,
+    "total_discharged": 8.11648,
     "_note": "Re-pinned after #466's risk-aware load-covering IDLE tie-break: 46 periods change (mostly IDLE->LOAD_SUPPORT near-ties, plus downstream SOE-trajectory cascades into a few SOLAR_EXPORT->SOLAR_STORAGE and BATTERY_EXPORT->LOAD_SUPPORT periods), improving battery_solar_cost from -15.85187 to -16.01343. total_charged/total_discharged were re-derived from the current run as part of this refresh too."
   },
   "expected_behavior": {
@@ -381,5 +381,7 @@
     "intents_absent": [],
     "_note": "BATTERY_EXPORT removed from intents_present after #466's risk-aware load-covering IDLE tie-break: the 3 periods that were BATTERY_EXPORT (96, 99, 100) are a downstream SOE-trajectory cascade of the earlier near-tied IDLE->LOAD_SUPPORT flips and now resolve to LOAD_SUPPORT instead."
   },
-  "terminal_value_per_kwh": 1.89761
+  "terminal_value_per_kwh": 2.4740375,
+  "terminal_knee_kwh": 7.690157895,
+  "terminal_tail_rate": 1.40961
 }

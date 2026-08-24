@@ -8,6 +8,7 @@ produce reasonable outputs.
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from core.bess.tests.helpers import (
     assert_physical_constraints,
     assert_savings_positive,
     get_intent_distribution,
-    scenario_terminal_value,
+    scenario_terminal_curve,
 )
 
 pytestmark = pytest.mark.slow
@@ -57,6 +58,8 @@ def test_every_fixture_declares_a_terminal_value():
         name
         for name in get_all_scenario_files()
         if "terminal_value_per_kwh" not in load_test_scenario(name)
+        or "terminal_knee_kwh" not in load_test_scenario(name)
+        or "terminal_tail_rate" not in load_test_scenario(name)
     ]
     assert missing == [], (
         f"fixtures without a declared terminal value: {missing}. Run "
@@ -88,10 +91,35 @@ def test_recorded_terminal_values_still_match_the_production_formula():
     stale = []
     for name in get_all_scenario_files():
         scenario = load_test_scenario(name)
+        curve = scenario_terminal_curve(scenario)
         recorded = scenario["terminal_value_per_kwh"]
-        computed = scenario_terminal_value(scenario)
-        if abs(recorded - computed) > 1e-9:
-            stale.append(f"{name}: recorded={recorded} computed={computed}")
+        recorded_knee = scenario["terminal_knee_kwh"]
+        if abs(recorded - curve.head_rate) > 1e-9:
+            stale.append(f"{name}: recorded={recorded} computed={curve.head_rate}")
+        else:
+            # A null knee records the no-PV-crossover regime, whose curve is
+            # flat (an infinite knee) -- JSON has no infinity, so absence is
+            # how that regime is written down.
+            computed_knee = None if math.isinf(curve.knee_kwh) else curve.knee_kwh
+            drifted = (recorded_knee is None) != (computed_knee is None) or (
+                recorded_knee is not None
+                and computed_knee is not None
+                and abs(recorded_knee - computed_knee) > 1e-9
+            )
+            if drifted:
+                stale.append(
+                    f"{name}: recorded knee={recorded_knee} computed={computed_knee}"
+                )
+            # `tail_rate` is checked too, not just head and knee. Without it a
+            # fixture can replay a curve that differs from the production one on
+            # the field the reconstruction is most likely to get wrong -- it is
+            # the only one with a dataclass default, so omitting it fails silent
+            # rather than loud.
+            elif abs(scenario["terminal_tail_rate"] - curve.tail_rate) > 1e-9:
+                stale.append(
+                    f"{name}: recorded tail={scenario['terminal_tail_rate']} "
+                    f"computed={curve.tail_rate}"
+                )
 
     assert stale == [], (
         "recorded terminal values no longer match the production formula:\n  "

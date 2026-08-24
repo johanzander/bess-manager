@@ -6,6 +6,7 @@ import pytest
 
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.settings import BatterySettings
+from core.bess.terminal_value import TerminalValueCurve
 
 pytestmark = pytest.mark.slow
 
@@ -60,7 +61,7 @@ class TestTerminalValueZero:
             battery_settings=battery_settings,
             solar_production=low_evening_prices["solar"],
             initial_soe=5.0,
-            terminal_value_per_kwh=0.0,
+            terminal_curve=TerminalValueCurve.flat(0.0),
         )
 
         # Actions should be identical
@@ -86,7 +87,7 @@ class TestTerminalValueHoldsEnergy:
             battery_settings=battery_settings,
             solar_production=low_evening_prices["solar"],
             initial_soe=5.0,
-            terminal_value_per_kwh=0.0,
+            terminal_curve=TerminalValueCurve.flat(0.0),
         )
 
         # With terminal value higher than sell price (0.2) - should hold energy
@@ -97,7 +98,7 @@ class TestTerminalValueHoldsEnergy:
             battery_settings=battery_settings,
             solar_production=low_evening_prices["solar"],
             initial_soe=5.0,
-            terminal_value_per_kwh=0.8,
+            terminal_curve=TerminalValueCurve.flat(0.8),
         )
 
         # Calculate total discharge in second half (low price periods)
@@ -169,7 +170,9 @@ class TestTerminalValueCapRegression:
             battery_settings=settings,
             solar_production=solar,
             initial_soe=14.0,
-            terminal_value_per_kwh=buy_based,  # old, buggy (#244) behavior
+            terminal_curve=TerminalValueCurve.flat(
+                buy_based
+            ),  # old, buggy (#244) behavior
         )
         result_capped = optimize_battery_schedule(
             buy_price=buy,
@@ -178,7 +181,9 @@ class TestTerminalValueCapRegression:
             battery_settings=settings,
             solar_production=solar,
             initial_soe=14.0,
-            terminal_value_per_kwh=capped_terminal_value,  # fixed (#246) behavior
+            terminal_curve=TerminalValueCurve.flat(
+                capped_terminal_value
+            ),  # fixed (#246) behavior
         )
 
         peak_price = max(sell)
@@ -257,7 +262,7 @@ class TestTerminalValueCapRegression:
                 battery_settings=settings,
                 solar_production=solar,
                 initial_soe=4.2,
-                terminal_value_per_kwh=terminal_value,
+                terminal_curve=TerminalValueCurve.flat(terminal_value),
             )
             return max(pd.energy.battery_soe_end for pd in result.period_data)
 
@@ -322,7 +327,7 @@ class TestTerminalValueCapRegression:
             battery_settings=settings,
             solar_production=solar,
             initial_soe=14.9,
-            terminal_value_per_kwh=capped_terminal_value,
+            terminal_curve=TerminalValueCurve.flat(capped_terminal_value),
         )
 
         final_soe = result.period_data[-1].energy.battery_soe_end
@@ -353,7 +358,9 @@ class TestTerminalValueDoesNotOverride:
             battery_settings=battery_settings,
             solar_production=solar,
             initial_soe=5.0,
-            terminal_value_per_kwh=0.5,  # Much lower than sell price of 2.0
+            terminal_curve=TerminalValueCurve.flat(
+                0.5
+            ),  # Much lower than sell price of 2.0
         )
 
         # Should still discharge when profitable (sell=2.0 > terminal=0.5 + cycle_cost=0.30)

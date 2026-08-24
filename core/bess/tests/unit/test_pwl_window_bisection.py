@@ -42,6 +42,32 @@ def scenario() -> dict:
     return json.loads((DATA_DIR / f"{FIXTURE}.json").read_text())
 
 
+def _inputs_without_terminal_row(scenario: dict) -> dict:
+    """This rig runs with NO terminal row, and must keep doing so (#602).
+
+    A nonzero terminal row adds a value gradient at the boundary that breaks the
+    very near-ties this path exists to resolve. That was already measured in
+    `TODO.md` after the #605 retrofit -- only four of 38 fixtures still flagged a
+    tie window at all -- and #602 raises terminal values further. With the
+    concave row this fixture's merge shrinks from nine periods to five, (76, 81),
+    comfortably inside what a single solve certifies: the tests below would then
+    pass while exercising the ordinary un-bisected path, which is exactly the
+    silent coverage loss the first test guards against. A corpus-wide scan after
+    #602 finds *no* fixture producing a window of eight periods or more, so there
+    is nothing to re-point this at.
+
+    Pinning the rig at zero is the same choice `test_issue_450_hybrid_resolution`
+    and `test_measure_tie_coverage` already made, for the same reason: the
+    subject is near-ties, so it has to run where near-ties exist. What it costs
+    is recorded in `TODO.md` -- the hybrid path's *production* value is now
+    measured by nothing -- and #602 sharpens that open question rather than
+    answering it.
+    """
+    inputs = dict(_scenario_inputs(scenario))
+    inputs.pop("terminal_curve", None)
+    return inputs
+
+
 def test_the_reporters_day_still_merges_a_window_no_single_solve_can_certify(
     scenario,
 ):
@@ -52,7 +78,7 @@ def test_the_reporters_day_still_merges_a_window_no_single_solve_can_certify(
     ordinary un-bisected path. Assert the input really is pathological, so
     that day arrives as a failure here rather than as silent coverage loss.
     """
-    inputs = _scenario_inputs(scenario)
+    inputs = _inputs_without_terminal_row(scenario)
     diagnostics: dict = {}
     dpa.optimize_battery_schedule(**inputs, tie_diagnostics=diagnostics)
 
@@ -63,7 +89,7 @@ def test_the_reporters_day_still_merges_a_window_no_single_solve_can_certify(
     )
 
     start, end = EXPECTED_WINDOW
-    inp = _scenario_inputs(scenario)
+    inp = inputs
     with pytest.raises(PWLWindowUnderRefinedError):
         run_pwl_window_backward_induction(
             window_horizon=end - start,
@@ -84,7 +110,7 @@ def test_an_over_long_window_is_bisected_instead_of_killing_the_schedule(scenari
     `battery_system_manager` turned that into `return None`, so the system had
     no schedule to publish.
     """
-    inputs = _scenario_inputs(scenario)
+    inputs = _inputs_without_terminal_row(scenario)
     result = dpa.optimize_battery_schedule(**inputs)
 
     assert len(result.period_data) == len(inputs["buy_price"])
@@ -102,7 +128,7 @@ def test_bisection_splits_at_the_midpoint_and_both_halves_certify(scenario, capl
     This is what makes the fix a re-sizing rather than a fallback: nothing
     uncertified is ever spliced, so P6 is untouched.
     """
-    inputs = _scenario_inputs(scenario)
+    inputs = _inputs_without_terminal_row(scenario)
     with caplog.at_level("WARNING"):
         dpa.optimize_battery_schedule(**inputs)
 

@@ -22,7 +22,11 @@ from core.bess.settings import (
     HomeSettings,
 )
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
-from core.bess.terminal_value import calculate_terminal_value_per_kwh
+from core.bess.terminal_value import (
+    TerminalValueCurve,
+    curve_from_knee,
+    knee_kwh_from_trailing_darkness,
+)
 
 
 def _scenario_inputs(scenario: dict):
@@ -103,7 +107,27 @@ def _scenario_inputs(scenario: dict):
         "period_duration_hours": scenario.get("period_duration_hours", 1.0),
     }
     if "terminal_value_per_kwh" in scenario:
-        inputs["terminal_value_per_kwh"] = scenario["terminal_value_per_kwh"]
+        # Recorded as two numbers rather than a curve object so the fixture
+        # stays readable and diffable, same reason #605 recorded the scalar.
+        # A fixture with no knee is the pre-#602 linear row, stated explicitly.
+        # All three fields are read back, not two, and `terminal_tail_rate` is
+        # indexed rather than `.get`-with-default: a knee-bound scenario missing
+        # it must raise here, not silently replay 0.0. That silent default is
+        # what pinned the corpus to a curve production never computes -- a
+        # different `battery_solar_cost` on 4 of 27 knee-bound fixtures, and
+        # invisible to the staleness guard, which compared only head and knee.
+        # `terminal_knee_kwh` stays a `.get`: `None` there is the documented
+        # encoding of the flat regime, not a defensive default.
+        knee = scenario.get("terminal_knee_kwh")
+        inputs["terminal_curve"] = (
+            TerminalValueCurve(
+                head_rate=scenario["terminal_value_per_kwh"],
+                knee_kwh=knee,
+                tail_rate=scenario["terminal_tail_rate"],
+            )
+            if knee is not None
+            else TerminalValueCurve.flat(scenario["terminal_value_per_kwh"])
+        )
     # export_curtailment_active is capability-aware in production (enabled
     # AND the platform supports export-limit control, resolved in
     # battery_system_manager.py) -- fixtures record the resolved flag
@@ -117,8 +141,8 @@ def _scenario_inputs(scenario: dict):
     return inputs
 
 
-def scenario_terminal_value(scenario: dict) -> float:
-    """Production terminal value for one scenario, with #422 cap scoping.
+def scenario_terminal_curve(scenario: dict) -> TerminalValueCurve:
+    """Production terminal curve for one scenario (#602).
 
     Shared by `scripts/capture_scenario_terminal_values.py` (which records the
     result into the fixture) and
@@ -126,26 +150,27 @@ def scenario_terminal_value(scenario: dict) -> float:
     (which fails when a recorded value drifts from it). One definition, so the
     guard cannot pass against a stale copy of the rule it enforces.
 
-    Production scopes the arbitrage-consistency cap to sell prices on the
-    terminal boundary's own calendar day. Fixtures carry no timestamps, so the
-    equivalent window here is the last `24 / period_duration` periods -- which
-    reproduces `regression_frank_debug_before`'s independently-pinned
-    0.143013413 exactly, where the unscoped array gives the pre-#422
-    0.195488259. `buy_prices` stays the full remaining horizon, as in
-    production.
-
-    Precondition, unenforceable from fixture data: the horizon ends on a day
-    boundary. True for the whole corpus (every fixture is shorter than a day,
-    or "partial first day + whole terminal day"), and not checkable by
-    arithmetic on the length -- `n % periods_per_day == 0` is false for every
-    correct multi-day fixture here, 118 % 96 = 22 among them.
+    A fixture has no tomorrow, so the knee comes from
+    `knee_kwh_from_trailing_darkness` -- see that function for the proxy and its
+    limits. The rates and the regime split come from `curve_from_knee`, the same
+    code production uses, so only the *quantity* is approximated here and never
+    the economics.
     """
     inputs = _scenario_inputs(scenario)
     periods_per_day = round(24 / inputs["period_duration_hours"])
-    return calculate_terminal_value_per_kwh(
+    settings = inputs["battery_settings"]
+    consumption = inputs["home_consumption"]
+    solar = inputs["solar_production"]
+
+    return curve_from_knee(
         inputs["buy_price"],
         inputs["sell_price"][-periods_per_day:],
-        inputs["battery_settings"],
+        knee_kwh_from_trailing_darkness(consumption, solar, settings),
+        pv_refills=any(
+            produced >= consumed
+            for consumed, produced in zip(consumption, solar, strict=True)
+        ),
+        battery_settings=settings,
     )
 
 

@@ -467,5 +467,7 @@
     "initial_soe": 16.0,
     "initial_cost_basis": 0.4
   },
-  "terminal_value_per_kwh": 0.10806
+  "terminal_value_per_kwh": 1.04785,
+  "terminal_knee_kwh": 8.811578947,
+  "terminal_tail_rate": 0.24966
 }

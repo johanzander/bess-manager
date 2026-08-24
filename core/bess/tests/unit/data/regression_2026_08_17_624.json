@@ -411,12 +411,14 @@
     "initial_soe": 19.2,
     "initial_cost_basis": 0.4
   },
-  "terminal_value_per_kwh": 1.2057565,
+  "terminal_value_per_kwh": 1.8657107,
   "expected_results": {
     "base_cost": 26.27677,
-    "battery_solar_cost": -47.81462,
-    "base_to_battery_solar_savings": 74.09139,
-    "base_to_battery_solar_savings_pct": 281.96535,
+    "battery_solar_cost": -42.53296,
+    "base_to_battery_solar_savings": 68.80973,
+    "base_to_battery_solar_savings_pct": 261.86526,
     "_note": "Post-fix (#624) pin, re-pinned by #630. #624's discriminator is raise-vs-schedule, not a cost delta: pre-#624 this input produced no schedule at all, since the merged tie window (76, 85) raised PWLWindowUnderRefinedError out of optimize_battery_schedule. Bisection splits it at 80; both halves certify. #630 then moved battery_solar_cost by +0.001550 (-47.81617 -> -47.81462) by no longer planning period 32's 0.0034 kWh solar surplus as an export the derived IDLE command absorbs. That is the plan becoming honest, not a saving lost: realized cost is unchanged at -47.814616, and planned now equals it exactly, which is why this fixture's KNOWN_PLAN_EXECUTION_GAP_SEK entry is gone."
-  }
+  },
+  "terminal_knee_kwh": 3.475358947,
+  "terminal_tail_rate": 0.216638
 }

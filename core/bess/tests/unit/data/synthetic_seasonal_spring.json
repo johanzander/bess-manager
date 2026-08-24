@@ -97,9 +97,9 @@
   },
   "expected_results": {
     "base_cost": 67.67,
-    "battery_solar_cost": 14.71863,
-    "base_to_battery_solar_savings": 52.95137,
-    "base_to_battery_solar_savings_pct": 78.2494,
+    "battery_solar_cost": 14.74263,
+    "base_to_battery_solar_savings": 52.92737,
+    "base_to_battery_solar_savings_pct": 78.21393,
     "total_charged": 28.42105,
     "total_discharged": 25.62
   },
@@ -116,5 +116,7 @@
     }
   },
   "_zero_spread_reason": "Zero-spread (buy==sell) price_data is intentional, not an oversight: applying the app's realistic markup/VAT/tax spread surfaces a genuine DP SOE-grid-snap R!=P (#145) gap (+0.52 SEK, exceeds tolerance) that zero-spread pricing happens to mask -- this is the #450 DP discretization issue itself, tracked and fixed separately (not in scope for this fixture-pinning cleanup). See docs/superpowers/specs/2026-08-03-milp-optimizer-pivot-450.md follow-up.",
-  "terminal_value_per_kwh": 0.5975
+  "terminal_value_per_kwh": 0.9975,
+  "terminal_knee_kwh": 23.684210526,
+  "terminal_tail_rate": 0.38
 }

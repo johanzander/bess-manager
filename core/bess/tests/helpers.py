@@ -110,18 +110,20 @@ def _scenario_inputs(scenario: dict):
         # Recorded as two numbers rather than a curve object so the fixture
         # stays readable and diffable, same reason #605 recorded the scalar.
         # A fixture with no knee is the pre-#602 linear row, stated explicitly.
-        # All three fields are read back, not two. Reconstructing with the
-        # dataclass default for `tail_rate` silently replayed 0.0 against a
-        # capture that used `min(sell) * efficiency_discharge`, so the corpus
-        # was pinned to a curve production never computes -- worth a different
-        # `battery_solar_cost` on 4 of 27 knee-bound fixtures, and invisible to
-        # the staleness guard, which compared only head and knee.
+        # All three fields are read back, not two, and `terminal_tail_rate` is
+        # indexed rather than `.get`-with-default: a knee-bound scenario missing
+        # it must raise here, not silently replay 0.0. That silent default is
+        # what pinned the corpus to a curve production never computes -- a
+        # different `battery_solar_cost` on 4 of 27 knee-bound fixtures, and
+        # invisible to the staleness guard, which compared only head and knee.
+        # `terminal_knee_kwh` stays a `.get`: `None` there is the documented
+        # encoding of the flat regime, not a defensive default.
         knee = scenario.get("terminal_knee_kwh")
         inputs["terminal_curve"] = (
             TerminalValueCurve(
                 head_rate=scenario["terminal_value_per_kwh"],
                 knee_kwh=knee,
-                tail_rate=scenario.get("terminal_tail_rate", 0.0),
+                tail_rate=scenario["terminal_tail_rate"],
             )
             if knee is not None
             else TerminalValueCurve.flat(scenario["terminal_value_per_kwh"])

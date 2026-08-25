@@ -357,6 +357,41 @@ certification a whole window would have. It is the one exception that may be
 caught, and only to re-size the work — catching it to keep the grid DP's
 result, or to splice the uncertified table, remains forbidden.
 
+**A budget that is not denominated in what it spends is not a budget (#697).**
+The paragraph above used to say the exactly-solvable horizon is ~8 periods.
+That was wrong about the binding constraint, and the error was expensive: the
+real limit was transient memory in the objective evaluation, and it bit at
+*five* periods — measured 1.1 GB RSS on the corpus's own bisected half —
+inside the range the doc treated as safe. `_pwl_candidate_values_at` built a
+dense `|X| × |actions|` matrix in one allocation, `|actions|` is ~102 for every
+battery (the discharge lattice is `max_discharge_power_kw / 100`, so hardware
+size does not enter), and the two budgets that existed both looked at the
+wrong thing: `PWL_MAX_PREIMAGE_SEED_POINTS` counted seed *abscissae* (8 MB)
+rather than the ~10 GB of evaluation they imply, and `PWL_MAX_BREAKPOINTS` was
+checked *after* the evaluation it bounds and against the *pruned* row, an
+order of magnitude smaller than what had just been allocated. So the kernel
+OOM-killed the add-on instead, eleven times, and Supervisor's backoff turned a
+deterministic solver bug into a 38-hour outage.
+
+Two rules follow, and they are general, not incidental to this bug:
+
+- **Bound the resource where it is actually spent, in its own units.** The
+  objective is evaluated in fixed-size row blocks (`PWL_EVAL_BLOCK_CELLS`), so
+  peak memory is independent of `|X|`. Blocking is exact — every reduction is
+  over the action axis, so rows are independent and the blocked result is
+  bitwise identical — which is why this bounds cost without touching P6.
+- **A ceiling checked after the allocation it bounds is not a ceiling.**
+  `PWL_MAX_EVAL_CELLS` is checked before the evaluation, in cells, and raising
+  it feeds the bisection above like any other budget.
+
+Note the failure mode this leaves closed: an optimizer that exceeds a budget
+raises and gets re-sized, but an optimizer that is SIGKILLed cannot raise at
+all, so **no in-process safety net can cover unbounded allocation**. The DP
+shares the uvicorn process with the control loop, so bounding the allocation
+is the only thing standing between a solver pathology and the battery going
+unmanaged. Isolating the optimizer so that exhaustion surfaces as a catchable
+`MemoryError` is tracked separately (#698).
+
 ### P7. Point forecasts stay; risk handling is structural, not stochastic
 
 The DP remains deterministic over point forecasts. Forecast-error

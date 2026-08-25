@@ -113,16 +113,100 @@ def _pwl_candidate_values_at(
     import_cap_kwh: float | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
 ) -> np.ndarray:
-    """Best achievable value at each SOE in `X` for period `t`: max over the
-    shared action set (IDLE, STORE, discharge grid) plus the
-    SOLAR_EXPORT-below-max bypass (#313), with V[t+1] evaluated exactly at
-    each candidate's true (continuous) next_soe -- no state snapping.
+    """Best achievable value at each SOE in `X` for period `t`, evaluated in
+    bounded row blocks (#697).
+
+    The objective itself lives in `_pwl_candidate_values_block`; this wrapper
+    exists only to stop it being asked for the whole of `X` at once. That
+    matters because the block builds a dense `|X| x |actions|` matrix and a
+    dozen same-shape temporaries, `|actions|` is ~102 for every battery
+    (`discharge_rate_step_kw` is `max_discharge_power_kw / 100`, so the count
+    is fixed by the lattice, not the hardware), and `|X|` compounds per
+    backward stage via the discharge-preimage cross product. Measured cost is
+    a flat ~10 kB per breakpoint, so the tens of thousands of breakpoints a
+    five-period window reaches turned into ~1.1 GB RSS and an OOM kill --
+    a kill, not an exception, so none of the accuracy budgets ever got to
+    speak and #624's bisection was structurally unreachable.
+
+    Blocking is exact, not an approximation: every reduction in the block is
+    over `axis=1` (actions), including the import-cap floor, so rows are
+    independent and `concatenate(block(X_i)) == block(X)` bitwise. It also
+    removes the allocator fragmentation that made peak RSS ~4x the traced
+    peak, since no single allocation is large enough to fragment around.
 
     `import_cap_kwh` is the house fuse's per-period grid-import ceiling
     (#429), enforced exactly as `_run_dynamic_programming` enforces it on the
     grid DP: total import (load + grid charging) is a hard constraint,
     constraining rather than excluding a period whose load alone exceeds the
     cap."""
+    X = np.asarray(X)
+    # `_pwl_candidate_values_block` appends one SOLAR_EXPORT-bypass column and
+    # at most one residual-cover column, so this is the width's upper bound.
+    n_actions = np.asarray(power_row).size + 2
+
+    cells = X.size * n_actions
+    if cells > PWL_MAX_EVAL_CELLS:
+        raise PWLWindowUnderRefinedError(
+            f"PWL window t={t}: the objective evaluation would need {cells} "
+            f"candidate cells ({X.size} breakpoints x {n_actions} actions) > "
+            f"PWL_MAX_EVAL_CELLS={PWL_MAX_EVAL_CELLS}; V[{t}] cannot be built "
+            f"within budget and must not be treated as exact."
+        )
+
+    block = max(1, PWL_EVAL_BLOCK_CELLS // n_actions)
+    if X.size <= block:
+        return _pwl_candidate_values_block(
+            X,
+            t,
+            V_next,
+            power_row,
+            horizon_inputs,
+            battery_settings,
+            dt,
+            period_max_charge,
+            import_cap_kwh,
+            capabilities,
+        )
+    return np.concatenate(
+        [
+            _pwl_candidate_values_block(
+                X[i : i + block],
+                t,
+                V_next,
+                power_row,
+                horizon_inputs,
+                battery_settings,
+                dt,
+                period_max_charge,
+                import_cap_kwh,
+                capabilities,
+            )
+            for i in range(0, X.size, block)
+        ]
+    )
+
+
+def _pwl_candidate_values_block(
+    X: np.ndarray,
+    t: int,
+    V_next: tuple[np.ndarray, np.ndarray],
+    power_row: np.ndarray,
+    horizon_inputs: tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray],
+    battery_settings: BatterySettings,
+    dt: float,
+    period_max_charge: float | None,
+    import_cap_kwh: float | None = None,
+    capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
+) -> np.ndarray:
+    """One block of `_pwl_candidate_values_at`: max over the shared action set
+    (IDLE, STORE, discharge grid) plus the SOLAR_EXPORT-below-max bypass
+    (#313), with V[t+1] evaluated exactly at each candidate's true
+    (continuous) next_soe -- no state snapping.
+
+    Call `_pwl_candidate_values_at` instead of this. Every reduction below is
+    over `axis=1`, which is what lets the wrapper split `X` into blocks; a
+    candidate that coupled rows would break that silently, so it is pinned by
+    `test_the_objective_evaluation_is_row_separable`."""
     buy_price, sell_price, home_consumption, solar_production = horizon_inputs
     min_soe = battery_settings.min_soe_kwh
     max_soe = battery_settings.max_soe_kwh
@@ -425,13 +509,42 @@ PWL_MAX_BREAKPOINTS = 30000
 
 # Separate, much larger budget for the *transient* discharge-preimage cross
 # product in `_pwl_window_seed_points` (|xs_next| x |discharge levels|). It is
-# built, deduped and pruned within a single seeding call, so it is bounded by
-# memory (1e6 float64 ~ 8 MB), not by the per-row breakpoint ceiling. These
-# were one constant until review: sharing `PWL_MAX_BREAKPOINTS` silently
-# disabled exact preimage seeding on every row after the first backward step
-# (|xs_next| > ~303 already trips 303 x 98 > 30000), i.e. the mechanism was
-# off exactly where it was documented to be required.
+# built, deduped and pruned within a single seeding call, so it is bounded
+# independently of the per-row breakpoint ceiling. These were one constant
+# until review: sharing `PWL_MAX_BREAKPOINTS` silently disabled exact preimage
+# seeding on every row after the first backward step (|xs_next| > ~303 already
+# trips 303 x 98 > 30000), i.e. the mechanism was off exactly where it was
+# documented to be required.
+#
+# This budget used to justify itself as "bounded by memory (1e6 float64 ~ 8
+# MB)". That was the wrong denomination and it is what let #697 happen: the
+# seed *abscissae* are 8 MB, but evaluating the objective on them costs ~10 kB
+# each, so 1e6 of them is ~10 GB. Seeding is cheap; evaluating is not. Memory
+# is now bounded where it is actually spent, by `PWL_EVAL_BLOCK_CELLS`, and
+# this constant is what it always really was -- a ceiling on how much work one
+# seeding round may propose.
 PWL_MAX_PREIMAGE_SEED_POINTS = 1_000_000
+
+# Row-block size for `_pwl_candidate_values_at`, in candidate cells
+# (breakpoints x actions). This is the constant that actually bounds peak
+# memory: the objective's dense matrix and its dozen temporaries cost ~97 bytes
+# per cell, so 1e5 cells is ~10 MB per evaluation regardless of how large |X|
+# has grown. Blocking is exact (see the wrapper's docstring), so this trades
+# nothing but a little numpy call overhead.
+PWL_EVAL_BLOCK_CELLS = 100_000
+
+# Ceiling on a single objective evaluation, in the same cells. With blocking in
+# place this is no longer a memory bound -- it is a work bound, and saying so
+# is the honest version of what the preimage budget above was pretending to be.
+# It is checked BEFORE the evaluation, unlike `PWL_MAX_BREAKPOINTS`, which is
+# checked after the `values_at` it nominally bounds and against the *pruned*
+# row -- roughly a tenth of what was just evaluated. That ordering is why no
+# budget fired in #697. Set ~6x above the largest evaluation measured on the
+# corpus (~34k breakpoints x ~102 actions on a five-period window), so it
+# catches pathological growth without demoting windows that solve fine today;
+# exceeding it raises `PWLWindowUnderRefinedError`, which #624's bisection
+# already catches and answers by re-sizing the window.
+PWL_MAX_EVAL_CELLS = 20_000_000
 
 # Two distinct tolerances that were previously ad-hoc literals:
 # points closer than this are the same breakpoint...
@@ -672,7 +785,8 @@ def run_pwl_window_backward_induction(
     `ValueError` (see `_pinned_terminal_row`).
 
     Exhausting any of the accuracy budgets (`PWL_MAX_BREAKPOINTS`,
-    `PWL_MAX_REFINE_ITERS`, `PWL_MAX_PREIMAGE_SEED_POINTS`) raises
+    `PWL_MAX_REFINE_ITERS`, `PWL_MAX_PREIMAGE_SEED_POINTS`,
+    `PWL_MAX_EVAL_CELLS`) raises
     `PWLWindowUnderRefinedError` rather than returning the approximation --
     unlike infeasibility, an uncertifiable table has no honest use, and
     splicing one in as if exact is the silent degradation this whole path

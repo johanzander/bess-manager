@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.daily_view_builder import DailyView
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
 _test_app = FastAPI()
@@ -150,7 +151,7 @@ def _make_started_controller() -> MagicMock:
     sm.get_all_tou_segments.return_value = []
     sm.tou_intervals = []
 
-    ctrl.ha_controller.get_device_maps.return_value = None
+    ctrl.ha_controller.get_device_maps.return_value = ({}, {})
     ctrl.ha_controller.get_battery_soc.return_value = 75.0
     ctrl.ha_controller.get_pv_power.return_value = 0.0
     ctrl.ha_controller.get_local_load_power.return_value = 0.0
@@ -735,6 +736,48 @@ class TestDashboardHealthSummary:
         assert issues[0]["detail"] == "Battery Control, Battery Monitoring"
         assert issues[1]["component"] == "Energy Meter"
         assert issues[1]["detail"] == "Energy Monitoring"
+        assert resp.json()["totalCriticalIssues"] == 2
+
+    def test_critical_issues_group_by_component_when_registry_unavailable(
+        self,
+    ) -> None:
+        """A registry query failure must not drop the critical banner — it
+        degrades to component-name grouping, one line per failing component."""
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = [
+            "Battery Control",
+            "Battery Monitoring",
+        ]
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                },
+                {
+                    "name": "Battery Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                },
+            ]
+        }
+        ctrl.ha_controller.get_device_maps.side_effect = SystemConfigurationError(
+            "registry down"
+        )
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        resp = _client.get("/api/dashboard-health-summary")
+
+        issues = resp.json()["criticalIssues"]
+        assert len(issues) == 2
+        assert {i["component"] for i in issues} == {
+            "Battery Control",
+            "Battery Monitoring",
+        }
         assert resp.json()["totalCriticalIssues"] == 2
 
 

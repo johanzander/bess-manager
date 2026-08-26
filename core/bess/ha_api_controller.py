@@ -2892,16 +2892,19 @@ class HomeAssistantAPIController:
         finally:
             ws.close()
 
-    def get_device_maps(self, ttl_seconds: int = 900) -> tuple[dict, dict] | None:
+    def get_device_maps(self, ttl_seconds: int = 900) -> tuple[dict, dict]:
         """Return ``entity_id -> device_id`` and ``device_id -> name`` maps.
 
         Fetches the HA entity and device registries in one WebSocket
         connection and builds both maps. Results are cached for
         ``ttl_seconds`` so the 5-minute health check does not re-fetch the
         full registries every run; the TTL self-heals after a sensor is
-        reconfigured. Returns ``None`` on any failure — the banner-grouping
-        caller then falls back to component-name grouping rather than
-        surfacing a registry error.
+        reconfigured.
+
+        Raises:
+            SystemConfigurationError: If the HA registries cannot be
+                queried — the banner call site decides explicitly whether a
+                registry failure degrades the grouping or surfaces.
         """
         now = time.time()
         if (
@@ -2930,8 +2933,9 @@ class HomeAssistantAPIController:
             self._device_maps_cache_ts = now
             return self._device_maps_cache
         except Exception as e:
-            logger.warning("Failed to fetch HA device maps: %s", e)
-            return None
+            raise SystemConfigurationError(
+                f"Failed to query Home Assistant device/entity registries: {e}"
+            ) from e
 
     def get_statistics_during_period(
         self,

@@ -645,7 +645,7 @@ class TestHealthRecoveryTracking:
     banner when it happened. See #215.
     """
 
-    def _run(self, system, result, device_maps=None):
+    def _run(self, system, result, device_maps=({}, {})):
         with (
             patch(
                 "core.bess.battery_system_manager.run_system_health_checks",
@@ -871,6 +871,45 @@ class TestHealthRecoveryTracking:
         assert recoveries[0].component == "Power Inverter"
         assert recoveries[0].previous_status == "ERROR"
         assert recoveries[0].detail == "Battery Control, Battery Monitoring"
+
+    def test_recovery_grouped_by_component_when_registry_unavailable(
+        self, system: BatterySystemManager
+    ) -> None:
+        """A registry query failure must not drop the recovery — grouping
+        degrades to component names, one recovery per recovered component."""
+        outage = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                }
+            ],
+        }
+        recovered = {
+            "status": "OK",
+            "checks": [{"name": "Battery Control", "status": "OK", "required": True}],
+        }
+        for result in (outage, recovered):
+            with (
+                patch(
+                    "core.bess.battery_system_manager.run_system_health_checks",
+                    return_value=result,
+                ),
+                patch.object(
+                    system._controller,
+                    "get_device_maps",
+                    side_effect=SystemConfigurationError("registry down"),
+                ),
+            ):
+                system.refresh_health_check()
+
+        recoveries = system.get_health_recoveries()
+        assert len(recoveries) == 1
+        assert recoveries[0].component == "Battery Control"
+        assert recoveries[0].previous_status == "ERROR"
 
     def test_recovery_cleared_when_any_component_still_failing(
         self, system: BatterySystemManager

@@ -34,7 +34,6 @@ from .ha_api_controller import HomeAssistantAPIController
 from .health_check import (
     resolve_component_device,
     run_system_health_checks,
-    safe_device_maps,
 )
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
@@ -3276,7 +3275,18 @@ class BatterySystemManager:
         if not previous_results:
             return
 
-        entity_to_device, device_names = safe_device_maps(self._controller)
+        # Health checks (the caller of this method) already dereference
+        # self._controller, so it is never None here.
+        assert self._controller is not None
+        try:
+            entity_to_device, device_names = self._controller.get_device_maps()
+        except SystemConfigurationError as e:
+            logger.warning(
+                "HA device registry unavailable, grouping recoveries by "
+                "component name: %s",
+                e,
+            )
+            entity_to_device, device_names = {}, {}
 
         previous_components_by_name = {
             component["name"]: component

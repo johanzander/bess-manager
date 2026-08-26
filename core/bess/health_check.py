@@ -1,7 +1,6 @@
 import logging
 import math
 from datetime import datetime
-from typing import Any
 
 from .influxdb_helper import (
     get_influxdb_config,
@@ -76,23 +75,6 @@ def group_components_by_device(
         group["component_names"].append(component["name"])
         group["statuses"].append(component.get("status"))
     return list(groups.values())
-
-
-def safe_device_maps(controller: Any) -> tuple[dict, dict]:
-    """Return entity->device and device->name registry maps, or empty dicts.
-
-    The controller may be a test mock whose ``get_device_maps`` returns
-    something other than a 2-tuple, or a real controller mid-registry-
-    failure. Treat any such return as empty maps so banner grouping falls
-    back to component names.
-    """
-    try:
-        maps = controller.get_device_maps()
-    except Exception:
-        return {}, {}
-    if not isinstance(maps, tuple) or len(maps) != 2:
-        return {}, {}
-    return maps[0] or {}, maps[1] or {}
 
 
 def format_sensor_value_with_unit(value, method_name: str, controller) -> str:

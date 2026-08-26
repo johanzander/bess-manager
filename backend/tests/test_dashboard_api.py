@@ -807,10 +807,20 @@ class TestHistoricalDataStatus:
         resp = _client.post("/api/historical-data-status/dismiss")
         assert resp.status_code == 503
 
-    def test_dismiss_persists_across_requests(self):
+    def test_dismiss_persists_across_requests(self, monkeypatch):
         """A dismissal for today's missing hours suppresses the banner on
         the next GET, matching the runtime-failures/health-recoveries
         dismiss-then-refetch pattern the frontend relies on."""
+        # Freeze the clock to a non-boundary hour. The endpoint only expects
+        # periods before the current hour (current_period = hour * 4), so at
+        # 00:xx current_period == 0 and is_incomplete is False — the dismissal
+        # can never show as active, and the test would deterministically fail
+        # for one wall-clock hour each day.
+        monkeypatch.setattr(
+            time_utils,
+            "now",
+            lambda: datetime(2026, 1, 15, 14, 30, tzinfo=time_utils.TIMEZONE),
+        )
         ctrl = _make_started_controller()
         system = BatterySystemManager.__new__(BatterySystemManager)
         system._dismissed_historical_warning_signature = None

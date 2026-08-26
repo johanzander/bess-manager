@@ -11,9 +11,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **The add-on no longer runs out of memory and stops restarting when the optimizer refines a near-tied decision** — the exact re-solve now runs within a bounded memory footprint. ([#697](https://github.com/johanzander/bess-manager/issues/697))
 - **The battery now keeps a sensible overnight reserve instead of all-or-nothing** — end-of-horizon energy is valued by how much the house needs before sunrise, so midnight charge no longer flips between empty and full. ([#602](https://github.com/johanzander/bess-manager/issues/602))
 - **Sub-period discharge authorization now values stored energy accurately** — the gate read the battery's marginal value from a single grid cell, which mis-priced it in both directions, so it both held and released the battery in the wrong periods. ([#683](https://github.com/johanzander/bess-manager/issues/683))
-- **A stale `Awaiting` field no longer hides a qualifying bug from autonomous analysis** — the tier-1 carve-out is now computed from the issue's own evidence instead of the board field. ([#681](https://github.com/johanzander/bess-manager/issues/681))
-- **Backlog digest now links a PR to its issue on any `#N` reference, not just closing keywords** — a "Part of #N" PR no longer leaves its issue showing In Progress. ([#652](https://github.com/johanzander/bess-manager/issues/652))
-- **Beta release changelog merges no longer absorb the new section into the previous one** — the merge is now resolved deterministically instead of by hand. ([#648](https://github.com/johanzander/bess-manager/issues/648))
 
 ## [10.1.0] - 2026-08-22
 

@@ -1,6 +1,7 @@
 import logging
 import math
 from datetime import datetime
+from typing import Any
 
 from .influxdb_helper import (
     get_influxdb_config,
@@ -28,6 +29,70 @@ def describe_failing_checks(component: dict) -> str:
         entity_id = check.get("entity_id")
         parts.append(f"{check['name']} ({entity_id})" if entity_id else check["name"])
     return "; ".join(parts)
+
+
+def resolve_component_device(
+    component: dict, entity_to_device: dict, device_names: dict
+) -> str:
+    """Resolve the underlying device a health component reports about.
+
+    The first sub-check that carries a resolvable ``entity_id`` wins: the
+    entity maps through ``entity_to_device`` to a device id, which
+    ``device_names`` renders as a human label. If no sub-check resolves (the
+    component is not sensor-backed, or the registry maps are unavailable),
+    fall back to the component's own name — unresolvable components group
+    under that name, which is a data limit rather than a workaround.
+    """
+    for check in component.get("checks", []):
+        entity_id = check.get("entity_id")
+        if entity_id and entity_id != "Not mapped":
+            device_id = entity_to_device.get(entity_id)
+            if device_id:
+                return str(device_names.get(device_id, device_id))
+    return str(component["name"])
+
+
+def group_components_by_device(
+    components: list[dict],
+    entity_to_device: dict | None = None,
+    device_names: dict | None = None,
+) -> list[dict]:
+    """Bucket health components by the underlying device they report about.
+
+    Returns one dict per distinct device: ``device`` (the label), ordered
+    ``component_names``, and each member's ``statuses``. Collapses the
+    per-component banner spam from a single-device outage into one line per
+    device; ``None`` registry maps are treated as empty so the helpers stay
+    usable when the registry is unreachable.
+    """
+    entity_to_device = entity_to_device or {}
+    device_names = device_names or {}
+    groups: dict[str, dict] = {}
+    for component in components:
+        device = resolve_component_device(component, entity_to_device, device_names)
+        group = groups.setdefault(
+            device, {"device": device, "component_names": [], "statuses": []}
+        )
+        group["component_names"].append(component["name"])
+        group["statuses"].append(component.get("status"))
+    return list(groups.values())
+
+
+def safe_device_maps(controller: Any) -> tuple[dict, dict]:
+    """Return entity->device and device->name registry maps, or empty dicts.
+
+    The controller may be a test mock whose ``get_device_maps`` returns
+    something other than a 2-tuple, or a real controller mid-registry-
+    failure. Treat any such return as empty maps so banner grouping falls
+    back to component names.
+    """
+    try:
+        maps = controller.get_device_maps()
+    except Exception:
+        return {}, {}
+    if not isinstance(maps, tuple) or len(maps) != 2:
+        return {}, {}
+    return maps[0] or {}, maps[1] or {}
 
 
 def format_sensor_value_with_unit(value, method_name: str, controller) -> str:

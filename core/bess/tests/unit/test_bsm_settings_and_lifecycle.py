@@ -645,10 +645,15 @@ class TestHealthRecoveryTracking:
     banner when it happened. See #215.
     """
 
-    def _run(self, system, result):
-        with patch(
-            "core.bess.battery_system_manager.run_system_health_checks",
-            return_value=result,
+    def _run(self, system, result, device_maps=None):
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=result,
+            ),
+            patch.object(
+                system._controller, "get_device_maps", return_value=device_maps
+            ),
         ):
             system.refresh_health_check()
 
@@ -723,10 +728,10 @@ class TestHealthRecoveryTracking:
 
         recoveries = system.get_health_recoveries()
         assert len(recoveries) == 1
-        assert (
-            recoveries[0].detail
-            == "Battery Charging Power Rate (number.growatt_battery_charging_power_rate)"
-        )
+        # Recoveries are per-device now; without a resolvable device the
+        # component name is the group key, and detail names the recovered
+        # component rather than its individual sensors.
+        assert recoveries[0].detail == "Battery Control"
 
     def test_no_recovery_recorded_when_first_check_is_ok(self, system):
         self._run(
@@ -807,6 +812,131 @@ class TestHealthRecoveryTracking:
                 ],
             },
         )
+        assert system.get_health_recoveries() == []
+
+    def test_recovery_grouped_one_per_device(
+        self, system: BatterySystemManager
+    ) -> None:
+        """Two components on the same device recovering together yield ONE
+        recovery line naming both — the banner is per device, not per
+        component."""
+        device_maps = (
+            {
+                "sensor.device_a_sensor": "device-a",
+                "sensor.device_b_sensor": "device-a",
+            },
+            {"device-a": "Power Inverter"},
+        )
+        outage = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Power Setpoint",
+                            "entity_id": "sensor.device_a_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+                {
+                    "name": "Battery Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery SOC",
+                            "entity_id": "sensor.device_b_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+            ],
+        }
+        recovered = {
+            "status": "OK",
+            "checks": [
+                {"name": "Battery Control", "status": "OK", "required": True},
+                {"name": "Battery Monitoring", "status": "OK", "required": True},
+            ],
+        }
+        self._run(system, outage, device_maps)
+        self._run(system, recovered, device_maps)
+
+        recoveries = system.get_health_recoveries()
+        assert len(recoveries) == 1
+        assert recoveries[0].component == "Power Inverter"
+        assert recoveries[0].previous_status == "ERROR"
+        assert recoveries[0].detail == "Battery Control, Battery Monitoring"
+
+    def test_recovery_cleared_when_any_component_still_failing(
+        self, system: BatterySystemManager
+    ) -> None:
+        """If only part of a device's components recovered, the device is
+        still failing — no recovery is recorded, and any stale one is
+        cleared."""
+        device_maps = (
+            {
+                "sensor.device_a_sensor": "device-a",
+                "sensor.device_b_sensor": "device-a",
+            },
+            {"device-a": "Power Inverter"},
+        )
+        outage = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Power Setpoint",
+                            "entity_id": "sensor.device_a_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+                {
+                    "name": "Battery Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery SOC",
+                            "entity_id": "sensor.device_b_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+            ],
+        }
+        still_failing = {
+            "status": "ERROR",
+            "checks": [
+                {"name": "Battery Control", "status": "OK", "required": True},
+                {
+                    "name": "Battery Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery SOC",
+                            "entity_id": "sensor.device_b_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+            ],
+        }
+        self._run(system, outage, device_maps)
+        self._run(system, still_failing, device_maps)
+
+        # The device never fully recovered: B is still down, so the (would-be)
+        # A recovery must not be recorded and nothing stale lingers.
         assert system.get_health_recoveries() == []
 
     def test_acknowledge_health_recoveries_clears_them(self, system):
@@ -1081,6 +1211,9 @@ class TestNotApplyBranchRefreshesCurrentSchedule:
                 system, "_gather_optimization_data", return_value=(0, MagicMock())
             ),
             patch.object(system, "_run_optimization", return_value=MagicMock()),
+            # The apply path now prints the DP results table from the caller;
+            # the optimization result is a MagicMock here, so intercept it.
+            patch("core.bess.battery_system_manager.print_optimization_results"),
             patch.object(
                 system,
                 "_create_updated_schedule",
@@ -1115,6 +1248,77 @@ class TestNotApplyBranchRefreshesCurrentSchedule:
 
         assert system._inverter_controller.current_schedule is second_schedule
         assert system._inverter_controller.current_schedule.actions == [5.0, 6.0]
+
+    def test_apply_cycle_logs_schedule_and_results(
+        self, system: BatterySystemManager
+    ) -> None:
+        """An apply cycle logs both the DP results table and the schedule tables."""
+        schedule = MagicMock(actions=[1.0], strategic_intents=["IDLE"])
+        optimization_result = MagicMock()
+
+        with (
+            patch.object(system, "_handle_special_cases"),
+            patch.object(
+                system, "_get_price_data", return_value=([1.0], [MagicMock()])
+            ),
+            patch.object(system, "_update_energy_data"),
+            patch.object(system, "_get_current_battery_soc", return_value=50.0),
+            patch.object(
+                system, "_gather_optimization_data", return_value=(0, MagicMock())
+            ),
+            patch.object(system, "_run_optimization", return_value=optimization_result),
+            patch.object(system, "_create_updated_schedule", return_value=schedule),
+            patch.object(
+                system, "_should_apply_schedule", return_value=(True, "changed")
+            ),
+            patch.object(system, "_apply_schedule"),
+            patch.object(system, "_apply_period_schedule"),
+            patch.object(system, "_capture_prediction_snapshot"),
+            patch.object(system, "log_battery_schedule") as mock_log,
+            patch(
+                "core.bess.battery_system_manager.print_optimization_results"
+            ) as mock_print,
+        ):
+            assert system.update_battery_schedule(0, prepare_next_day=False) is True
+
+        mock_log.assert_called_once_with(0)
+        mock_print.assert_called_once()
+        # print_optimization_results receives the optimization result plus the
+        # buy/sell price lists derived from the mocked price entry.
+        assert mock_print.call_args.args[0] is optimization_result
+        assert len(mock_print.call_args.args[1]) == 1
+        assert len(mock_print.call_args.args[2]) == 1
+
+    def test_keep_cycle_logs_neither(self, system: BatterySystemManager) -> None:
+        """A quiet keep cycle must not re-dump the schedule or results tables."""
+        schedule = MagicMock(actions=[1.0], strategic_intents=["IDLE"])
+
+        with (
+            patch.object(system, "_handle_special_cases"),
+            patch.object(
+                system, "_get_price_data", return_value=([1.0], [MagicMock()])
+            ),
+            patch.object(system, "_update_energy_data"),
+            patch.object(system, "_get_current_battery_soc", return_value=50.0),
+            patch.object(
+                system, "_gather_optimization_data", return_value=(0, MagicMock())
+            ),
+            patch.object(system, "_run_optimization", return_value=MagicMock()),
+            patch.object(system, "_create_updated_schedule", return_value=schedule),
+            patch.object(
+                system, "_should_apply_schedule", return_value=(False, "no change")
+            ),
+            patch.object(system, "_apply_period_schedule"),
+            patch.object(system, "_capture_prediction_snapshot"),
+            patch.object(system, "log_battery_schedule") as mock_log,
+            patch(
+                "core.bess.battery_system_manager.print_optimization_results"
+            ) as mock_print,
+        ):
+            assert system.update_battery_schedule(0, prepare_next_day=False) is True
+
+        mock_log.assert_not_called()
+        mock_print.assert_not_called()
 
 
 class TestLoadTodayFromDisk:

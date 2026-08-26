@@ -31,7 +31,11 @@ from .execution_model import PlatformCapabilities, intra_period_discharge_gate
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
-from .health_check import describe_failing_checks, run_system_health_checks
+from .health_check import (
+    resolve_component_device,
+    run_system_health_checks,
+    safe_device_maps,
+)
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
 from .huawei_controller import HuaweiController
@@ -773,7 +777,21 @@ class BatterySystemManager:
                     format_period(current_period),
                 )
 
-            self.log_battery_schedule(current_period)
+            # Log the applied schedule tables and the DP results table only
+            # when the schedule actually changed. On quiet keep cycles both
+            # are byte-identical to what was already logged, and re-dumping
+            # them every 15 minutes is what grew the daily log to 2.3MB.
+            if should_apply:
+                # Reaching here means prices were non-empty (guarded above),
+                # and prices are derived from price_entries — so it is safe.
+                assert price_entries is not None
+                remaining_entries = price_entries[optimization_period:]
+                buy_prices, sell_prices = self._extract_buy_sell_prices(
+                    remaining_entries
+                )
+                print_optimization_results(optimization_result, buy_prices, sell_prices)
+                self.log_battery_schedule(current_period)
+
             return True
 
         except Exception as e:
@@ -2065,6 +2083,19 @@ class BatterySystemManager:
 
         return derated_limits
 
+    def _extract_buy_sell_prices(
+        self, entries: list[dict[str, Any]]
+    ) -> tuple[list[float], list[float]]:
+        """Split pre-calculated price entries into buy and sell price lists.
+
+        Mirrors the extraction inside ``_run_optimization`` so the apply path
+        can reproduce the DP results table when the schedule changes.
+        """
+        return (
+            [entry["buyPrice"] for entry in entries],
+            [entry["sellPrice"] for entry in entries],
+        )
+
     def _run_optimization(
         self,
         optimization_period: int,
@@ -2116,8 +2147,7 @@ class BatterySystemManager:
             # Get buy and sell prices from pre-calculated price entries
             # This preserves direct sell prices from sources like Octopus Energy
             remaining_entries = price_entries[optimization_period:]
-            buy_prices = [entry["buyPrice"] for entry in remaining_entries]
-            sell_prices = [entry["sellPrice"] for entry in remaining_entries]
+            buy_prices, sell_prices = self._extract_buy_sell_prices(remaining_entries)
 
             # Scope the arbitrage-consistency cap to sell prices on the
             # terminal boundary's own calendar day (#422): on a 48h-extended
@@ -2169,9 +2199,6 @@ class BatterySystemManager:
             self._add_timestamps_to_period_data(
                 result, optimization_period, next_day=prepare_next_day
             )
-
-            # Print results table with strategic intents
-            print_optimization_results(result, buy_prices, sell_prices)
 
             # Store full day data in result for UI
             result.input_data["full_home_consumption"] = optimization_data[
@@ -3237,35 +3264,67 @@ class BatterySystemManager:
     def _update_health_recoveries(
         self, previous_results: dict[str, Any] | None, new_results: dict[str, Any]
     ) -> None:
-        """Detect per-component ERROR/WARNING -> OK transitions and record them.
+        """Detect device-level ERROR/WARNING -> OK transitions and record them.
 
-        A component still in ERROR/WARNING clears any stale pending recovery
-        for itself, since the live banner already covers it.
+        A single underlying device outage fails several health components at
+        once, so recoveries are tracked per device, not per component: one
+        recovery line per recovered device, naming the components that
+        recovered. A device any of whose components still fails clears any
+        stale pending recovery for itself — the live banner already covers
+        that device.
         """
         if not previous_results:
             return
+
+        entity_to_device, device_names = safe_device_maps(self._controller)
 
         previous_components_by_name = {
             component["name"]: component
             for component in previous_results.get("checks", [])
         }
 
+        def _device_of(component: dict) -> str:
+            return resolve_component_device(component, entity_to_device, device_names)
+
+        # Devices with a component still failing: their live banner lines
+        # supersede any pending "recovered" note, which must not linger.
+        failing_devices = {
+            _device_of(component)
+            for component in new_results.get("checks", [])
+            if component.get("status") in ("ERROR", "WARNING")
+        }
+        for device in failing_devices:
+            self._health_recovery_tracker.clear_for_component(device)
+
+        # Components that recovered. Resolve the device from the PREVIOUS
+        # component, which still carries the failing entity_ids — the new OK
+        # component may have empty checks.
+        recovered_by_device: dict[str, list[dict]] = {}
         for component in new_results.get("checks", []):
-            name = component["name"]
-            new_status = component["status"]
-            previous_component = previous_components_by_name.get(name)
+            previous_component = previous_components_by_name.get(component["name"])
             previous_status = (
                 previous_component["status"] if previous_component else None
             )
+            if (
+                previous_component is not None
+                and previous_status in ("ERROR", "WARNING")
+                and component["status"] == "OK"
+            ):
+                device = _device_of(previous_component)
+                recovered_by_device.setdefault(device, []).append(component)
 
-            if previous_status in ("ERROR", "WARNING") and new_status == "OK":
-                self._health_recovery_tracker.record_recovery(
-                    component=name,
-                    previous_status=previous_status,
-                    detail=describe_failing_checks(previous_component),
-                )
-            elif new_status in ("ERROR", "WARNING"):
-                self._health_recovery_tracker.clear_for_component(name)
+        for device, components in recovered_by_device.items():
+            if device in failing_devices:
+                continue
+            previous_statuses = [
+                previous_components_by_name[c["name"]]["status"] for c in components
+            ]
+            worst = "ERROR" if "ERROR" in previous_statuses else "WARNING"
+            self._health_recovery_tracker.record_recovery(
+                component=device,
+                previous_status=worst,
+                detail=", ".join(c["name"] for c in components),
+            )
 
     def get_health_recoveries(self) -> list[HealthRecovery]:
         """Get all pending (unacknowledged) health-check recoveries."""

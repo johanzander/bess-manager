@@ -150,6 +150,7 @@ def _make_started_controller() -> MagicMock:
     sm.get_all_tou_segments.return_value = []
     sm.tou_intervals = []
 
+    ctrl.ha_controller.get_device_maps.return_value = None
     ctrl.ha_controller.get_battery_soc.return_value = 75.0
     ctrl.ha_controller.get_pv_power.return_value = 0.0
     ctrl.ha_controller.get_local_load_power.return_value = 0.0
@@ -631,7 +632,7 @@ class TestDashboardHealthSummary:
         resp = _client.get("/api/dashboard-health-summary")
         assert resp.status_code == 503
 
-    def test_critical_issue_names_the_failing_sensor(self):
+    def test_critical_issue_names_the_failing_component(self):
         ctrl = _make_started_controller()
         ctrl.system.has_critical_sensor_failures.return_value = True
         ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
@@ -658,9 +659,83 @@ class TestDashboardHealthSummary:
         resp = _client.get("/api/dashboard-health-summary")
 
         issue = resp.json()["criticalIssues"][0]
-        assert issue["detail"] == (
-            "Battery Charging Power Rate (number.growatt_battery_charging_power_rate)"
+        # Without a resolvable device the component name is the group key,
+        # and detail names the component rather than its individual sensors.
+        assert issue["detail"] == "Battery Control"
+
+    def test_critical_issues_grouped_by_device(self) -> None:
+        """A single-device outage (three components, two devices) shows one
+        banner line per device, not one per component."""
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = [
+            "Battery Control",
+            "Battery Monitoring",
+            "Energy Monitoring",
+        ]
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Power Setpoint",
+                            "entity_id": "sensor.device_a_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+                {
+                    "name": "Battery Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Battery SOC",
+                            "entity_id": "sensor.device_b_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+                {
+                    "name": "Energy Monitoring",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [
+                        {
+                            "name": "Energy Today",
+                            "entity_id": "sensor.device_c_sensor",
+                            "status": "ERROR",
+                        }
+                    ],
+                },
+            ],
+            "system_mode": "degraded",
+        }
+        ctrl.ha_controller.get_device_maps.return_value = (
+            {
+                "sensor.device_a_sensor": "device-a",
+                "sensor.device_b_sensor": "device-a",
+                "sensor.device_c_sensor": "device-b",
+            },
+            {"device-a": "Power Inverter", "device-b": "Energy Meter"},
         )
+        # Direct assignment matches the rest of this file; the mypy
+        # attr-defined is pre-existing ratchet debt, so suppress it here
+        # rather than add another occurrence.
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        resp = _client.get("/api/dashboard-health-summary")
+
+        issues = resp.json()["criticalIssues"]
+        assert len(issues) == 2
+        assert issues[0]["component"] == "Power Inverter"
+        assert issues[0]["detail"] == "Battery Control, Battery Monitoring"
+        assert issues[1]["component"] == "Energy Meter"
+        assert issues[1]["detail"] == "Energy Monitoring"
+        assert resp.json()["totalCriticalIssues"] == 2
 
 
 # ===========================================================================

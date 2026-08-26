@@ -47,17 +47,19 @@ test.describe('Health-check recovery banner (#215)', () => {
     expect(summary.hasCriticalErrors).toBe(true);
     const issue = summary.criticalIssues.find((i: { component: string }) => i.component === 'Battery Control');
     expect(issue).toBeTruthy();
-    expect(issue.detail).toContain(SENSOR);
+    // One banner line per device: detail names the component, not the sensor.
+    expect(issue.detail).toContain('Battery Control');
 
     await page.goto('/');
     await expect(page.getByText('Critical System Issues Detected')).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText('Battery Control')).toBeVisible();
-    await expect(page.getByText(SENSOR)).toBeVisible();
+    // Per-sensor detail lives on the System Health page, not the banner.
+    await expect(page.getByText(SENSOR)).not.toBeVisible();
     // Active issues are not dismissible.
     await expect(page.getByRole('button', { name: /dismiss/i })).not.toBeVisible();
   });
 
-  test('fixing it records a recovery with the specific sensor and previous status', async ({ request }) => {
+  test('fixing it records a recovery with the component and previous status', async ({ request }) => {
     await breakSensor(request);
     await fixSensor(request);
 
@@ -65,7 +67,7 @@ test.describe('Health-check recovery banner (#215)', () => {
     const recovery = recoveries.find((r: { component: string }) => r.component === 'Battery Control');
     expect(recovery).toBeTruthy();
     expect(recovery.previousStatus).toBe('ERROR');
-    expect(recovery.detail).toContain(SENSOR);
+    expect(recovery.detail).toContain('Battery Control');
   });
 
   test('acknowledging clears the recovery', async ({ request }) => {

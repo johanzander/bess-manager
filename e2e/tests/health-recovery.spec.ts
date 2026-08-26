@@ -52,7 +52,10 @@ test.describe('Health-check recovery banner (#215)', () => {
 
     await page.goto('/');
     await expect(page.getByText('Critical System Issues Detected')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('Battery Control')).toBeVisible();
+    // The outage collapses to one banner line per device: the device label and
+    // detail render together on that single line (both "Battery Control" here,
+    // since the mock stack has no device registry to resolve a device name).
+    await expect(page.getByText(/Battery Control: Critical sensor configuration issue detected/)).toBeVisible();
     // Per-sensor detail lives on the System Health page, not the banner.
     await expect(page.getByText(SENSOR)).not.toBeVisible();
     // Active issues are not dismissible.

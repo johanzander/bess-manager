@@ -690,6 +690,15 @@ class BatterySystemManager:
                 logger.error("Failed to optimize battery schedule")
                 return False
 
+            # Capture the full-horizon economic summary before
+            # _create_updated_schedule rescopes result.economic_summary to
+            # today-only in place (see _create_updated_schedule). The DP
+            # results table logs the full extended horizon, so the Summary
+            # block must come from the full-horizon summary, not the
+            # today-scoped one — otherwise table and Summary silently
+            # disagree in the same log block.
+            full_horizon_summary = optimization_result.economic_summary
+
             # Create new schedule
             temp_schedule = self._create_updated_schedule(
                 optimization_period,
@@ -788,7 +797,12 @@ class BatterySystemManager:
                 buy_prices, sell_prices = self._extract_buy_sell_prices(
                     remaining_entries
                 )
-                print_optimization_results(optimization_result, buy_prices, sell_prices)
+                print_optimization_results(
+                    optimization_result,
+                    buy_prices,
+                    sell_prices,
+                    economic_summary=full_horizon_summary,
+                )
                 self.log_battery_schedule(current_period)
 
             return True

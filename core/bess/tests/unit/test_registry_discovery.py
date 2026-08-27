@@ -313,9 +313,9 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             f"{serial}_storage_charging_cutoff_capacity",
         ),
         _entity(
-            "number.huawei_battery_grid_charge_cutoff_state_of_charge",
+            "number.huawei_battery_discharging_cutoff_capacity",
             "huawei_solar",
-            f"{serial}_storage_grid_charge_cutoff_state_of_charge",
+            f"{serial}_storage_discharging_cutoff_capacity",
         ),
         _entity(
             "switch.huawei_battery_charge_from_grid_function",
@@ -2378,6 +2378,10 @@ class TestHuaweiDiscovery:
         )
         assert result["battery_soc"] == "sensor.huawei_battery_state_of_capacity"
         assert result["huawei_working_mode"] == "select.huawei_battery_working_mode"
+        assert (
+            result["battery_discharge_stop_soc"]
+            == "number.huawei_battery_discharging_cutoff_capacity"
+        )
         assert len(result) == 16
 
     def test_huawei_power_monitoring_sensors_mapped(self):

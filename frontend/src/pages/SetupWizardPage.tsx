@@ -450,6 +450,14 @@ const SetupWizardPage: React.FC = () => {
     );
   });
 
+  // Huawei LUNA2000 drives the device-targeted huawei_solar.set_tou_periods
+  // service, so a Device ID is mandatory — completing setup without one leaves
+  // write_huawei_tou_periods failing every cycle with nothing to target. It
+  // can be manually entered when auto-detection didn't surface one.
+  const huaweiDeviceIdMissing =
+    activeInverterIntegrationId === 'huawei_solar_luna2000'
+    && !inverterForm.deviceId.trim();
+
   // Required sensors whose only HA entity is disabled (#549). The entity
   // exists but has no state, so BESS cannot read it — the wizard must say
   // "enable it", not "it's missing", and must not let setup complete with
@@ -597,6 +605,17 @@ const SetupWizardPage: React.FC = () => {
               </div>
             )}
 
+            {huaweiDeviceIdMissing && (
+              <div
+                data-testid="huawei-device-id-warning"
+                className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+              >
+                Enter the Huawei <span className="font-semibold">Device ID</span> for the battery.
+                It targets the <span className="font-mono">huawei_solar.set_tou_periods</span> service —
+                without it every schedule write fails.
+              </div>
+            )}
+
             <div className="flex justify-between pt-2">
               <button
                 onClick={handleScan}
@@ -607,7 +626,7 @@ const SetupWizardPage: React.FC = () => {
               </button>
               <button
                 onClick={handleConfirm}
-                disabled={!allRequiredFilled || disabledRequiredEntities.length > 0}
+                disabled={!allRequiredFilled || disabledRequiredEntities.length > 0 || huaweiDeviceIdMissing}
                 className="flex items-center space-x-2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 font-medium disabled:opacity-60"
               >
                 <span>Next: Electricity Pricing</span>

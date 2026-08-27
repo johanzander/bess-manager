@@ -35,14 +35,25 @@ def resolve_component_device(
 ) -> str:
     """Resolve the underlying device a health component reports about.
 
-    The first sub-check that carries a resolvable ``entity_id`` wins: the
-    entity maps through ``entity_to_device`` to a device id, which
-    ``device_names`` renders as a human label. If no sub-check resolves (the
-    component is not sensor-backed, or the registry maps are unavailable),
-    fall back to the component's own name — unresolvable components group
-    under that name, which is a data limit rather than a workaround.
+    Failing sub-checks resolve first (mirroring ``describe_failing_checks``'s
+    ``status not in ("OK", None)`` filter): a component's checks span several
+    underlying devices — e.g. Energy Monitoring reads smart-meter, PV-inverter
+    and battery sensors — so a healthy first entry must not win over a failing
+    one. If no failing sub-check carries a resolvable ``entity_id``, fall back
+    to any resolvable sub-check; if none resolves (the component is not
+    sensor-backed, or the registry maps are unavailable), fall back to the
+    component's own name — unresolvable components group under that name,
+    which is a data limit rather than a workaround.
     """
-    for check in component.get("checks", []):
+    checks = component.get("checks", [])
+    failing = [check for check in checks if check.get("status") not in ("OK", None)]
+    for check in failing:
+        entity_id = check.get("entity_id")
+        if entity_id and entity_id != "Not mapped":
+            device_id = entity_to_device.get(entity_id)
+            if device_id:
+                return str(device_names.get(device_id, device_id))
+    for check in checks:
         entity_id = check.get("entity_id")
         if entity_id and entity_id != "Not mapped":
             device_id = entity_to_device.get(entity_id)

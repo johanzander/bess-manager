@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import requests
 
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.runtime_failure_tracker import RuntimeFailureTracker
 from core.bess.settings_store import SettingsStore
@@ -1249,3 +1250,50 @@ class TestSensorsLiveView:
         store.data["sensors"] = {"battery_soc": "sensor.battery_soc_v2"}
 
         assert c.sensors == {"battery_soc": "sensor.battery_soc_v2"}
+
+
+class TestGetDeviceMaps:
+    """The registry maps feed banner grouping. A registry query failure must
+    surface as an explicit ``SystemConfigurationError`` (the banner call site
+    decides how to degrade), and successful queries build both maps and cache
+    them for the TTL."""
+
+    def test_raises_on_registry_query_failure(
+        self, ctrl: HomeAssistantAPIController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = MagicMock()
+        ws.side_effect = RuntimeError("auth failed")
+        monkeypatch.setattr(ctrl, "_ws_query", ws)
+        with pytest.raises(SystemConfigurationError, match="device/entity registries"):
+            ctrl.get_device_maps()
+
+    def test_builds_maps_from_registries(
+        self, ctrl: HomeAssistantAPIController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = MagicMock()
+        ws.return_value = [
+            [
+                {"entity_id": "sensor.a", "device_id": "dev-1"},
+                {"entity_id": "sensor.b", "device_id": "dev-1"},
+                {"entity_id": "sensor.unmapped"},
+            ],
+            [
+                {"id": "dev-1", "name": "Power Inverter"},
+                {"id": "dev-2"},
+            ],
+        ]
+        monkeypatch.setattr(ctrl, "_ws_query", ws)
+        entity_to_device, device_names = ctrl.get_device_maps()
+        assert entity_to_device == {"sensor.a": "dev-1", "sensor.b": "dev-1"}
+        assert device_names == {"dev-1": "Power Inverter", "dev-2": "dev-2"}
+
+    def test_caches_maps_within_ttl(
+        self, ctrl: HomeAssistantAPIController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = MagicMock()
+        ws.return_value = [[], []]
+        monkeypatch.setattr(ctrl, "_ws_query", ws)
+        first = ctrl.get_device_maps()
+        second = ctrl.get_device_maps()
+        assert ws.call_count == 1
+        assert second is first

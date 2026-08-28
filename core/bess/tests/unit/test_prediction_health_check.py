@@ -24,6 +24,8 @@ def _make_controller(
     estimated_consumption_ok: bool = True,
     solar_forecast_ok: bool = True,
     estimated_consumption_configured: bool = True,
+    overlay_configured: bool = False,
+    overlay_ok: bool = True,
 ):
     """Return a minimal controller stub with configurable sensor behaviour.
 
@@ -49,7 +51,26 @@ def _make_controller(
             "precision": 1,
             "conversion_threshold": None,
         },
+        "get_consumption_overlay_blocks": {
+            "sensor_key": "consumption_overlay",
+            "name": "Planned Consumption Changes",
+            "unit": "list",
+            "precision": None,
+            "conversion_threshold": None,
+        },
     }
+    controller.is_sensor_configured.side_effect = lambda key: (
+        overlay_configured if key == "consumption_overlay" else True
+    )
+
+    if overlay_ok:
+        controller.get_consumption_overlay_blocks.return_value = []
+    else:
+        from core.bess.exceptions import ConsumptionOverlayError
+
+        controller.get_consumption_overlay_blocks.side_effect = ConsumptionOverlayError(
+            "overlay block 0 is missing 'end'"
+        )
 
     def _validate(method_list):
         results = []
@@ -345,3 +366,49 @@ class TestCheckHealthStrategyPropagation:
         prediction = next(c for c in checks if c["name"] == "Energy Prediction")
         method_names = [ch["method_name"] for ch in prediction["checks"]]
         assert "get_estimated_consumption" not in method_names
+
+
+class TestConsumptionOverlay:
+    """The overlay (#428) is checked whenever configured, on any strategy.
+
+    It is not a strategy, so it cannot be keyed off one — and it must not
+    produce a warning on the overwhelming majority of installs that never
+    configure it.
+    """
+
+    def test_omitted_when_no_overlay_entity_is_configured(self) -> None:
+        collector = _make_collector(_make_controller(overlay_configured=False))
+        result = collector.check_prediction_health("ha_statistics")
+        method_names = [ch["method_name"] for ch in result["checks"]]
+        assert "get_consumption_overlay_blocks" not in method_names
+
+    def test_checked_when_an_overlay_entity_is_configured(self) -> None:
+        collector = _make_collector(_make_controller(overlay_configured=True))
+        result = collector.check_prediction_health("ha_statistics")
+        method_names = [ch["method_name"] for ch in result["checks"]]
+        assert "get_consumption_overlay_blocks" in method_names
+
+    def test_an_overlay_with_no_blocks_today_is_healthy(self) -> None:
+        """No blocks declared is the normal steady state, not a fault.
+
+        The documented template emits an empty list whenever none of the
+        user's input_booleans are on — most days. An empty list must not read
+        as "sensor returned nothing useful" the way an empty solar forecast
+        does.
+        """
+        collector = _make_collector(_make_controller(overlay_configured=True))
+        result = collector.check_prediction_health("ha_statistics")
+        assert result["status"] == "OK"
+
+    def test_a_broken_overlay_makes_the_check_fail(self) -> None:
+        """Configured-but-broken is an error, not something to skip past.
+
+        Every optimization run reads the overlay once configured, so a
+        malformed one stops schedules being built. The health check is where
+        the user finds out why.
+        """
+        collector = _make_collector(
+            _make_controller(overlay_configured=True, overlay_ok=False)
+        )
+        result = collector.check_prediction_health("ha_statistics")
+        assert result["status"] == "ERROR"

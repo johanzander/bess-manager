@@ -16,8 +16,9 @@ from typing import ClassVar
 import requests
 import websocket
 
+from .consumption_overlay import OverlayBlock, parse_overlay_blocks
 from .energy_balance import derive_load_consumption
-from .exceptions import SystemConfigurationError
+from .exceptions import ConsumptionOverlayError, SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .settings_store import SettingsStore, apply_signed_pair_aliases
 
@@ -291,6 +292,13 @@ class HomeAssistantAPIController:
             "unit": "W",
             "precision": 1,
             "conversion_threshold": 1000,
+        },
+        "get_consumption_overlay_blocks": {
+            "sensor_key": "consumption_overlay",
+            "name": "Planned Consumption Changes",
+            "unit": "list",
+            "precision": None,
+            "conversion_threshold": None,
         },
         # Solar forecast
         "get_solar_forecast": {
@@ -1451,6 +1459,61 @@ class HomeAssistantAPIController:
             return False
         result = self._get_binary_state("discharge_inhibit")
         return result is True
+
+    def get_consumption_overlay_blocks(self) -> list[OverlayBlock]:
+        """Read the user's declared changes to expected consumption (issue #428).
+
+        Returns:
+            The blocks declared on the overlay entity's ``blocks`` attribute,
+            or an empty list when no overlay entity is configured. "No
+            overlay" is a supported configuration, not a degraded one — it is
+            what an install that never sets one up keeps running.
+
+        Raises:
+            ConsumptionOverlayError: If an overlay entity IS configured but
+                its ``blocks`` attribute is absent and the state offers no
+                better explanation, or the blocks it holds are malformed. A
+                user who declared an EV session is better served by an error
+                than by an optimization that quietly ignored it.
+
+        """
+        if not self.sensors.get("consumption_overlay"):
+            return []
+
+        entity_id, _ = self._resolve_entity_id("consumption_overlay")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read planned consumption changes",
+            category="CONSUMPTION_OVERLAY",
+            context={"entity_id": entity_id},
+        )
+        if not response:
+            raise ConsumptionOverlayError(
+                f"Planned consumption changes entity '{entity_id}' returned no state"
+            )
+
+        # `blocks` is the data; `state` is incidental. A template sensor's
+        # state commonly comes from an unrelated helper (per the docs'
+        # example, an input_boolean) that can itself go "unknown" while
+        # `blocks` still renders correctly -- gating on state alone would
+        # make that documented example a schedule-stopper. Check `blocks`
+        # first, and fall back to reporting the state only when there is no
+        # data to fall back on.
+        attributes = response.get("attributes") or {}
+        if "blocks" in attributes:
+            return parse_overlay_blocks(attributes["blocks"])
+
+        state = response.get("state")
+        if state in ("unavailable", "unknown", None):
+            raise ConsumptionOverlayError(
+                f"Planned consumption changes entity '{entity_id}' is {state}"
+            )
+
+        raise ConsumptionOverlayError(
+            f"Planned consumption changes entity '{entity_id}' has no 'blocks' "
+            f"attribute (found: {sorted(attributes)})"
+        )
 
     def get_estimated_consumption(self):
         """Get estimated consumption in quarterly resolution (96 periods).

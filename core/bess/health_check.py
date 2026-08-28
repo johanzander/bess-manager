@@ -200,6 +200,7 @@ def perform_health_check(
     controller,
     all_methods: list[str],
     required_methods: list[str] | None = None,
+    empty_list_is_ok: set[str] | None = None,
 ) -> dict:
     """Generic health check function that can be used by any component.
 
@@ -297,12 +298,23 @@ def perform_health_check(
                 if isinstance(value, list):
                     # Handle list values (like predictions)
                     if len(value) == 0:
+                        # For most list sensors an empty reading means the
+                        # source produced nothing and something is wrong. For
+                        # a few it is the normal answer — the consumption
+                        # overlay declares nothing on an ordinary day — so
+                        # those are named by the caller rather than warned on.
+                        empty_is_fine = (
+                            empty_list_is_ok is not None
+                            and method_name in empty_list_is_ok
+                        )
                         check_result.update(
                             {
-                                "status": "WARNING",
-                                "error": "Empty list returned",
+                                "status": "OK" if empty_is_fine else "WARNING",
+                                "error": None if empty_is_fine else "Empty list",
                                 "rawValue": value,
-                                "displayValue": "Empty list",
+                                "displayValue": (
+                                    "None declared" if empty_is_fine else "Empty list"
+                                ),
                             }
                         )
                     else:

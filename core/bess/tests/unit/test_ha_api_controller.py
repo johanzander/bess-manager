@@ -1262,7 +1262,7 @@ class TestConsumptionOverlayBlocksStateGating:
     """
 
     @pytest.fixture
-    def overlay_ctrl(self):
+    def overlay_ctrl(self) -> HomeAssistantAPIController:
         c = HomeAssistantAPIController(
             ha_url="http://ha.local:8123",
             token="test-token",
@@ -1276,7 +1276,9 @@ class TestConsumptionOverlayBlocksStateGating:
         c.failure_tracker = RuntimeFailureTracker()
         return c
 
-    def test_blocks_are_read_even_when_state_is_unknown(self, overlay_ctrl):
+    def test_blocks_are_read_even_when_state_is_unknown(
+        self, overlay_ctrl: HomeAssistantAPIController
+    ) -> None:
         with patch.object(
             overlay_ctrl,
             "_api_request",
@@ -1287,7 +1289,9 @@ class TestConsumptionOverlayBlocksStateGating:
         ):
             assert overlay_ctrl.get_consumption_overlay_blocks() == []
 
-    def test_blocks_are_read_even_when_state_is_unavailable(self, overlay_ctrl):
+    def test_blocks_are_read_even_when_state_is_unavailable(
+        self, overlay_ctrl: HomeAssistantAPIController
+    ) -> None:
         with patch.object(
             overlay_ctrl,
             "_api_request",
@@ -1299,8 +1303,8 @@ class TestConsumptionOverlayBlocksStateGating:
             assert overlay_ctrl.get_consumption_overlay_blocks() == []
 
     def test_missing_blocks_attribute_with_unknown_state_reports_the_state(
-        self, overlay_ctrl
-    ):
+        self, overlay_ctrl: HomeAssistantAPIController
+    ) -> None:
         from core.bess.consumption_overlay import ConsumptionOverlayError
 
         with patch.object(
@@ -1312,8 +1316,8 @@ class TestConsumptionOverlayBlocksStateGating:
                 overlay_ctrl.get_consumption_overlay_blocks()
 
     def test_missing_blocks_attribute_with_a_real_state_reports_missing_blocks(
-        self, overlay_ctrl
-    ):
+        self, overlay_ctrl: HomeAssistantAPIController
+    ) -> None:
         from core.bess.consumption_overlay import ConsumptionOverlayError
 
         with patch.object(

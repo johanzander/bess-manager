@@ -13,11 +13,7 @@ from typing import Any, ClassVar
 import requests
 
 from . import time_utils
-from .consumption_overlay import (
-    ConsumptionOverlayError,
-    apply_overlay,
-    period_starts_from,
-)
+from .consumption_overlay import apply_overlay, period_starts_from
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
@@ -28,6 +24,7 @@ from .dp_battery_algorithm import (
 from .dp_schedule import DPSchedule
 from .entsoe_source import EntsoeSource
 from .exceptions import (
+    ConsumptionOverlayError,
     HAStatisticsUnavailableError,
     HistoricalDataUnavailableError,
     SystemConfigurationError,

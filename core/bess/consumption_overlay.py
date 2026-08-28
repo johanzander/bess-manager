@@ -14,20 +14,12 @@ no overlay entity keeps exactly the forecast it has today.
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
+from .exceptions import ConsumptionOverlayError
 from .time_utils import INTERVAL_MINUTES
 
 PERIOD_DURATION = timedelta(minutes=INTERVAL_MINUTES)
 
 VALID_MODES = ("add", "set")
-
-
-class ConsumptionOverlayError(Exception):
-    """The overlay entity could not be read as a set of blocks.
-
-    Raised rather than skipping the offending block: a user who declared an EV
-    session and got half of it applied is worse off than one told their
-    template is wrong.
-    """
 
 
 @dataclass(frozen=True)

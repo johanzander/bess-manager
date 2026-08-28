@@ -93,3 +93,12 @@ class PWLEndSoeOutOfRangeError(ValueError):
     it on below-min-SOE recovery trajectories) can select for it by type
     instead of matching a substring of this module's prose error message.
     """
+
+
+class ConsumptionOverlayError(BESSException):
+    """The Planned Consumption Changes entity could not be read as blocks.
+
+    Raised rather than skipping the offending block: a user who declared an
+    EV session and got half of it applied is worse off than one told their
+    template is wrong.
+    """

@@ -66,7 +66,7 @@ def _make_controller(
     if overlay_ok:
         controller.get_consumption_overlay_blocks.return_value = []
     else:
-        from core.bess.consumption_overlay import ConsumptionOverlayError
+        from core.bess.exceptions import ConsumptionOverlayError
 
         controller.get_consumption_overlay_blocks.side_effect = ConsumptionOverlayError(
             "overlay block 0 is missing 'end'"

@@ -14,12 +14,12 @@ import pytest
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.consumption_overlay import (
-    ConsumptionOverlayError,
     OverlayBlock,
     apply_overlay,
     parse_overlay_blocks,
     period_starts_from,
 )
+from core.bess.exceptions import ConsumptionOverlayError
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController
 

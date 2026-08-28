@@ -1305,7 +1305,7 @@ class TestConsumptionOverlayBlocksStateGating:
     def test_missing_blocks_attribute_with_unknown_state_reports_the_state(
         self, overlay_ctrl: HomeAssistantAPIController
     ) -> None:
-        from core.bess.consumption_overlay import ConsumptionOverlayError
+        from core.bess.exceptions import ConsumptionOverlayError
 
         with patch.object(
             overlay_ctrl,
@@ -1318,7 +1318,7 @@ class TestConsumptionOverlayBlocksStateGating:
     def test_missing_blocks_attribute_with_a_real_state_reports_missing_blocks(
         self, overlay_ctrl: HomeAssistantAPIController
     ) -> None:
-        from core.bess.consumption_overlay import ConsumptionOverlayError
+        from core.bess.exceptions import ConsumptionOverlayError
 
         with patch.object(
             overlay_ctrl,

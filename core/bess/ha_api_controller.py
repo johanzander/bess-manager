@@ -16,13 +16,9 @@ from typing import ClassVar
 import requests
 import websocket
 
-from .consumption_overlay import (
-    ConsumptionOverlayError,
-    OverlayBlock,
-    parse_overlay_blocks,
-)
+from .consumption_overlay import OverlayBlock, parse_overlay_blocks
 from .energy_balance import derive_load_consumption
-from .exceptions import SystemConfigurationError
+from .exceptions import ConsumptionOverlayError, SystemConfigurationError
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .settings_store import SettingsStore, apply_signed_pair_aliases
 

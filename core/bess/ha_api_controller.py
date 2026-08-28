@@ -147,6 +147,12 @@ class HomeAssistantAPIController:
         # get_battery_discharge_power).
         self.battery_power_polarity = battery_power_polarity or ""
 
+        # Cached entity->device and device->name registry maps for health
+        # banner grouping, refreshed on a TTL so the 5-minute health check
+        # does not re-fetch the full HA registries every run.
+        self._device_maps_cache: tuple | None = None
+        self._device_maps_cache_ts: float | None = None
+
         # Runtime failure tracker (injected by BatterySystemManager)
         self.failure_tracker = None
 
@@ -2952,6 +2958,51 @@ class HomeAssistantAPIController:
             return results
         finally:
             ws.close()
+
+    def get_device_maps(self, ttl_seconds: int = 900) -> tuple[dict, dict]:
+        """Return ``entity_id -> device_id`` and ``device_id -> name`` maps.
+
+        Fetches the HA entity and device registries in one WebSocket
+        connection and builds both maps. Results are cached for
+        ``ttl_seconds`` so the 5-minute health check does not re-fetch the
+        full registries every run; the TTL self-heals after a sensor is
+        reconfigured.
+
+        Raises:
+            SystemConfigurationError: If the HA registries cannot be
+                queried — the banner call site decides explicitly whether a
+                registry failure degrades the grouping or surfaces.
+        """
+        now = time.time()
+        if (
+            self._device_maps_cache is not None
+            and now - (self._device_maps_cache_ts or 0) < ttl_seconds
+        ):
+            return self._device_maps_cache
+        try:
+            results = self._ws_query(
+                [
+                    {"type": "config/entity_registry/list"},
+                    {"type": "config/device_registry/list"},
+                ]
+            )
+            entity_to_device = {
+                entry["entity_id"]: entry.get("device_id")
+                for entry in results[0]
+                if entry.get("entity_id") and entry.get("device_id")
+            }
+            device_names = {
+                device["id"]: device.get("name") or device["id"]
+                for device in results[1]
+                if device.get("id")
+            }
+            self._device_maps_cache = (entity_to_device, device_names)
+            self._device_maps_cache_ts = now
+            return self._device_maps_cache
+        except Exception as e:
+            raise SystemConfigurationError(
+                f"Failed to query Home Assistant device/entity registries: {e}"
+            ) from e
 
     def get_statistics_during_period(
         self,

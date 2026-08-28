@@ -8,6 +8,19 @@
 **Description**: `sample_live_power()` early-returns on `if not self.power_sensors`, but `power_sensors` comes from `_resolve_power_sensor_ids()`, which deliberately *excludes* shared signed entities (their direction is unrecoverable from an InfluxDB period mean). The sampling loop itself never touches `power_sensors` — it calls the sign-splitting getters, which handle those entities fine. So an install whose only mapped power sensors are the shared signed ones gets no live sampling at all, silently disabling the `PowerSampleBuffer` path that `_shared_signed_power_entities()`'s docstring names as the covering fallback for exactly those installs. The guard should test the flow map / getters instead. Pre-existing; found during the #604 review, which widens the set of installs hitting the exclusion.
 
 
+### **`describe_failing_checks()` is dead code after the device-grouping banner**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `health_check.py`, `test_describe_failing_checks.py`
+
+**Description**: PR #701 replaced the only two production call sites of `describe_failing_checks()` (in `api.py` and `battery_system_manager.py`) with the new device-grouping helpers, leaving it exercised only by its own `test_describe_failing_checks.py`. Not wrong, just dead weight — a follow-up removal (function plus its dedicated test file) should land separately from the banner PR.
+
+### **DP-results/schedule log can be dropped by an unexpected exception after `should_apply`**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`
+
+**Description**: PR #701 moved `print_optimization_results`/`log_battery_schedule` to run after `_apply_period_schedule()` inside `if should_apply:`. `update_battery_schedule`'s outer `except Exception` (logs + returns False) now sits between the optimization and the log block, so an exception raised in the `should_apply=True` path before the log calls (e.g. a genuine bug in `_apply_period_schedule`/`_capture_prediction_snapshot`) would silently drop the DP-results/schedule tables for that cycle — the diagnostic you'd want when something downstream breaks. No concrete repro: the realistic failure surfaces (discharge-inhibit read, `apply_period`, hardware write) are already internally guarded. Design observation from the #701 review, not a demonstrated bug.
+
+
 ## 🔴 **CRITICAL PRIORITY** (System Reliability)
 
 ### 0. **Fix Battery Discharge Power Control Bug**

@@ -1083,16 +1083,22 @@ def _build_period_data(
     )
 
 
-def print_optimization_results(results, buy_prices, sell_prices):
+def print_optimization_results(results, buy_prices, sell_prices, economic_summary=None):
     """Log a detailed results table with strategic intents - new format version.
 
     Args:
         results: OptimizationResult object with period_data and economic_summary
         buy_prices: List of buy prices
         sell_prices: List of sell prices
+        economic_summary: Optional override for the Summary block. Defaults to
+            results.economic_summary. Callers pass the full-horizon summary
+            when the result's own summary has been rescoped to today-only,
+            so the Summary block matches the full-horizon table above it.
     """
     period_data_list = results.period_data
-    economic_results = results.economic_summary
+    economic_results = (
+        economic_summary if economic_summary is not None else results.economic_summary
+    )
 
     # Initialize totals
     total_consumption = 0

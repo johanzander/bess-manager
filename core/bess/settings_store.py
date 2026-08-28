@@ -49,6 +49,7 @@ SHARED_SENSOR_KEYS = frozenset(
         "solar_forecast_today",
         "solar_forecast_tomorrow",
         "48h_avg_grid_import",
+        "consumption_overlay",
         "current_l1",
         "current_l2",
         "current_l3",

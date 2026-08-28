@@ -66,7 +66,7 @@ export interface PerPlatformSensors {
 
 /** IDs of non-inverter (shared) integrations. */
 export const SHARED_INTEGRATION_IDS = new Set([
-  'nordpool', 'solar_forecast', 'consumption_forecast',
+  'nordpool', 'solar_forecast', 'consumption_forecast', 'consumption_overlay',
   'phase_current', 'discharge_inhibit', 'weather',
 ]);
 
@@ -537,6 +537,21 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Consumption',
         sensors: [
           { key: '48h_avg_grid_import', label: '48h Avg Grid Import', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'consumption_overlay',
+    name: 'Planned Consumption Changes',
+    required: false,
+    description:
+      'Optional. A template sensor whose "blocks" attribute declares consumption you know is coming — an EV session tonight, a pool pump you are skipping. Applies on top of whichever consumption forecast you use.',
+    sensorGroups: [
+      {
+        name: 'Planned Changes',
+        sensors: [
+          { key: 'consumption_overlay', label: 'Planned Consumption Changes', required: false },
         ],
       },
     ],

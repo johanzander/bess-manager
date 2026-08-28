@@ -13,6 +13,11 @@ from typing import Any, ClassVar
 import requests
 
 from . import time_utils
+from .consumption_overlay import (
+    ConsumptionOverlayError,
+    apply_overlay,
+    period_starts_from,
+)
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
@@ -1186,6 +1191,94 @@ class BatterySystemManager:
             "actual_hours_available": actual_hours,
         }
 
+    def _apply_consumption_overlay(
+        self,
+        consumption_predictions: list[float],
+        period_count: int,
+        prepare_next_day: bool,
+    ) -> list[float]:
+        """Compose the user's declared consumption changes onto the forecast.
+
+        Args:
+            consumption_predictions: The forecast as the configured strategy
+                produced it, already extended to cover the horizon.
+            period_count: Periods in the horizon.
+            prepare_next_day: Whether this horizon starts at tomorrow 00:00
+                rather than today 00:00 — which day index 0 refers to.
+
+        Returns:
+            The composed forecast, or the input unchanged when no overlay
+            entity is configured.
+
+        """
+        try:
+            blocks = self.controller.get_consumption_overlay_blocks()
+        except ConsumptionOverlayError as e:
+            # The error still propagates — no silent fallback. Recording it
+            # first is what puts it on the dashboard: the caller's blanket
+            # handler logs and returns False, which on its own leaves the
+            # schedule frozen at the last good one with no user-visible signal.
+            logger.error("Planned consumption changes are unusable: %s", e)
+            self._runtime_failure_tracker.record_failure_once(
+                category="CONSUMPTION_OVERLAY",
+                operation=(
+                    "Planned consumption changes entity could not be read — "
+                    "optimization is blocked until the template is fixed"
+                ),
+                error=e,
+            )
+            raise
+        self._runtime_failure_tracker.dismiss_by_category("CONSUMPTION_OVERLAY")
+
+        if not blocks:
+            # Nothing declared today. Dismiss any stale clamp warning first —
+            # deleting the offending block is the obvious way a user expects
+            # to clear it, and returning before the dismiss below made that
+            # impossible.
+            self._runtime_failure_tracker.dismiss_by_category(
+                "CONSUMPTION_OVERLAY_CLAMPED"
+            )
+            return consumption_predictions
+
+        first_period = (
+            time_utils.get_period_count(time_utils.today()) if prepare_next_day else 0
+        )
+        period_starts = period_starts_from(
+            time_utils.period_index_to_timestamp(first_period), period_count
+        )
+
+        result = apply_overlay(
+            consumption_predictions[:period_count], period_starts, blocks
+        )
+
+        logger.info(
+            "Applied planned consumption changes: %d entr(y/ies), %.1f kWh net over the horizon",
+            len(blocks),
+            sum(result.values) - sum(consumption_predictions[:period_count]),
+        )
+
+        if result.clamped_periods:
+            logger.warning(
+                "Planned consumption changes subtracted more than the forecast held in "
+                "%d period(s); those were clamped to zero",
+                result.clamped_periods,
+            )
+            self._runtime_failure_tracker.record_failure_once(
+                category="CONSUMPTION_OVERLAY_CLAMPED",
+                operation=(
+                    f"Planned consumption changes clamped {result.clamped_periods} "
+                    f"period(s) to zero — a subtract block removes more "
+                    f"load than the forecast contains"
+                ),
+                error=ValueError("overlay subtraction exceeded base forecast"),
+            )
+        else:
+            self._runtime_failure_tracker.dismiss_by_category(
+                "CONSUMPTION_OVERLAY_CLAMPED"
+            )
+
+        return result.values
+
     def _get_consumption_forecast(self) -> list[float]:
         """Get consumption forecast based on the configured strategy.
 
@@ -1795,11 +1888,10 @@ class BatterySystemManager:
             self.home_settings.consumption_strategy
             in self._DATE_CACHED_CONSUMPTION_STRATEGIES
         ):
-            consumption_predictions_fresh = (
+            if (
                 self._consumption_predictions is not None
                 and self._consumption_predictions_date == time_utils.today()
-            )
-            if consumption_predictions_fresh:
+            ):
                 consumption_predictions = self._consumption_predictions
             else:
                 consumption_predictions = self._get_consumption_forecast()
@@ -1842,6 +1934,16 @@ class BatterySystemManager:
                     len(tomorrow_solar),
                 )
                 solar_predictions = solar_predictions + tomorrow_solar
+
+        # --- Apply the user's planned consumption changes (issue #428) ---
+        # Deliberately here, not inside _get_consumption_forecast: after the
+        # daily prediction cache, so editing the overlay takes effect on the
+        # next run rather than tomorrow; and after the extension above, so a
+        # block declared for tomorrow lands on tomorrow instead of today's
+        # blocks being duplicated onto it.
+        consumption_predictions = self._apply_consumption_overlay(
+            consumption_predictions, period_count, prepare_next_day
+        )
 
         # --- Build data arrays ---
         consumption_data = [0.0] * period_count

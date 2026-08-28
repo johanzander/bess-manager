@@ -873,6 +873,61 @@ they're cached and only refetched once the date changes, not on a clock
 timer.  Solar has no cache at all: it's fetched live from the HA forecast
 sensor on every quarterly run.
 
+### Planned Consumption Changes (issue #428)
+
+All four strategies above describe *normal* usage — they are built from
+history, or from a constant.  None of them can know that the EV is charging
+tonight, that the pool pump is being skipped, or that the house is empty for
+a week.  The **overlay** is the input channel for exactly that: the user
+declares what differs from normal, and BESS composes it onto whichever
+strategy is configured.
+
+It is **not a fifth strategy**.  It is a post-processing stage, so it applies
+identically on top of `ha_statistics`, `influxdb_7d_avg`, `sensor` and
+`fixed`.  An install with no overlay entity configured keeps precisely the
+forecast it would have had — "no overlay" is a supported configuration, not a
+degraded one, which is why the feature has no cold-start step.
+
+The user points BESS at a template sensor (`consumption_overlay`) whose
+`blocks` attribute is a sparse list of timestamped spans:
+
+    {start, end, energy_kwh, mode}
+
+`energy_kwh` is the total for the whole span, apportioned across the periods
+the span overlaps — so 15-minute, hourly and arbitrary block boundaries all
+work, and a horizon longer than 96 periods needs no special case.  `mode` is
+`add` (the default; negative values subtract) or `set` (replace the base
+across the span).  A `set` block covering part of a period replaces only that
+fraction, so a block ending at 07:10 does not erase 07:00–07:15 wholesale.
+
+**Where it applies, and why that matters**
+(`battery_system_manager.py::_apply_consumption_overlay`): in
+`_gather_optimization_data`, *after* the daily prediction cache and *after*
+the tomorrow-horizon extension.  Applying it inside `_get_consumption_forecast`
+instead would trap it in the date cache — an overlay edited at noon would do
+nothing until the next day — and would let the extension duplicate today's
+blocks onto tomorrow while dropping blocks genuinely declared for tomorrow.
+
+**DST**: the overlay builds its own period grid with
+`consumption_overlay.period_starts_from`, stepping in UTC and converting back,
+rather than using `time_utils.period_index_to_timestamp`.  That helper does
+wall-clock arithmetic (`day_start + 15min * i`), which on the fall-back day
+steps straight over the repeated local hour: index 11 lands at UTC 00:45 and
+index 12 at UTC 02:00, so every later period is an hour late and the day's
+last four indices collide with the next day's first four.  Harmless for the
+display and logging that helper was written for; not harmless for a consumer
+whose numbers depend on it, which the overlay is the first of.  The helper's
+own flaw is untouched here and still awaits a fix.
+
+**Failure behaviour**: a configured overlay entity that is missing,
+unavailable, or malformed raises `ConsumptionOverlayError` rather than being
+skipped — a user who declared an EV session is worse served by an
+optimization that quietly ignored it.  The one exception is over-subtraction:
+a block removing more load than the base forecast holds clamps that period to
+zero (negative consumption is not physical) and records a
+`CONSUMPTION_OVERLAY_CLAMPED` runtime failure, so it is surfaced rather than
+silent.
+
 
 ## Savings Calculation
 

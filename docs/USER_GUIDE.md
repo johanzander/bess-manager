@@ -350,6 +350,67 @@ This is the recommended strategy for most users — it adapts to your actual usa
 
 The **Insights** page includes a **Consumption Forecast Comparison** section that evaluates all available strategies against your actual consumption. Each strategy shows its hourly profile overlaid on actual data, along with a Mean Absolute Error (MAE) metric. Use this to verify which strategy best matches your real consumption patterns before committing to one.
 
+#### Planned Consumption Changes — telling BESS what's coming
+
+Every strategy above describes your *normal* usage. None of them can know the EV is charging tonight, that you're skipping the pool pump, or that a heatwave will have the AC running all afternoon. **Planned Consumption Changes** is how you say so.
+
+It is not a fifth strategy — it applies on top of whichever one you use. If you never configure it, nothing changes.
+
+Create a template sensor whose `blocks` attribute lists what differs, then point BESS at it in the **Sensors** tab under **Planned Consumption Changes**.
+
+```yaml
+template:
+  - sensor:
+      - name: "BESS Planned Consumption Changes"
+        # `state` is cosmetic -- BESS reads the `blocks` attribute below
+        # regardless of it, precisely so a helper this depends on going
+        # temporarily "unknown" can't block your schedule. Anything
+        # human-readable works; a fixed literal is simplest.
+        state: "ok"
+        attributes:
+          blocks: >
+            {% set blocks = [] %}
+            {# The EV charges overnight: 40 kWh between 22:00 and 06:00.
+               Anchor to YESTERDAY's 22:00 in the small hours, otherwise
+               today_at('22:00') rolls forward at midnight and the running
+               session vanishes from the forecast exactly when it matters. #}
+            {% if is_state('input_boolean.ev_charging_tonight', 'on') %}
+              {% set ev_start = today_at('22:00') - timedelta(days=1)
+                   if now() < today_at('06:00') else today_at('22:00') %}
+              {% set blocks = blocks + [{
+                'start': ev_start.isoformat(),
+                'end': (ev_start + timedelta(hours=8)).isoformat(),
+                'energy_kwh': 40.0
+              }] %}
+            {% endif %}
+            {# Away for the day: hold the whole daytime near zero #}
+            {% if is_state('input_boolean.away_today', 'on') %}
+              {% set blocks = blocks + [{
+                'start': (today_at('08:00')).isoformat(),
+                'end': (today_at('18:00')).isoformat(),
+                'energy_kwh': 1.0,
+                'mode': 'set'
+              }] %}
+            {% endif %}
+            {{ blocks }}
+```
+
+Each entry is a time span plus the energy for that whole span:
+
+| Field | Meaning |
+|---|---|
+| `start`, `end` | ISO-8601 timestamps. **Must include a UTC offset** — `isoformat()` on a HA template time gives you one. |
+| `energy_kwh` | Total kWh across the span, spread over the periods it covers. Not a per-period value. |
+| `mode` | `add` (default) adds to your normal forecast; a **negative** value subtracts. `set` replaces it across the span. |
+
+Use `add` for things that are happening on top of normal (the EV tonight), a negative `add` for a regular load that *isn't* happening (the EV is away, so subtract the usual evening session), and `set` for the blunt cases where you don't know what the baseline holds — away for a week, or forcing a window near zero.
+
+Entries can be timestamped for tomorrow; BESS places them on the real horizon, so an entry that starts at 22:00 and runs to 06:00 is correctly split across midnight.
+
+**One trap when writing overnight entries:** `today_at()` re-evaluates against the current day, so an entry anchored at `today_at('22:00')` jumps forward a full day the moment midnight passes — taking the still-running session out of the forecast just as the optimizer needs it. Anchor to the previous day while you are still inside the window, as the example above does.
+
+**If the declaration is broken, BESS says so rather than ignoring it.** A missing, unavailable or malformed entity is reported as an error on the system health check — declaring an EV session and having it silently dropped would be worse than a clear failure. The one thing BESS corrects rather than rejects: if a subtraction removes more load than your forecast contains, that period is clamped to zero and a warning is raised, because negative consumption isn't physical.
+
 ### EV Charging and Discharge Inhibit
 
 BESS does not control EV charging — it is designed to work alongside it. Under normal circumstances there is no conflict: when electricity is cheap, both the car and the battery charge at the same time.

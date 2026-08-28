@@ -891,15 +891,31 @@ class SensorCollector:
         if sensor_strategy_active:
             all_methods = ["get_estimated_consumption", *all_methods]
 
+        required_methods = (
+            ["get_estimated_consumption"] if sensor_strategy_active else []
+        )
+
+        # The consumption overlay (#428) is not a strategy, so it is keyed off
+        # configuration rather than the active strategy. Once configured it is
+        # required: every optimization run reads it, and a malformed one stops
+        # schedules being built, so the user needs to see it here rather than
+        # in a failed run.
+        empty_list_is_ok = set()
+        if self.ha_controller.is_sensor_configured("consumption_overlay"):
+            all_methods = [*all_methods, "get_consumption_overlay_blocks"]
+            required_methods = [*required_methods, "get_consumption_overlay_blocks"]
+            # Declaring no blocks is the normal state on an ordinary day, so
+            # an empty list here is a healthy reading rather than a missing one.
+            empty_list_is_ok.add("get_consumption_overlay_blocks")
+
         return perform_health_check(
             component_name="Energy Prediction",
             description="Solar and consumption forecasting for optimization",
-            is_required=sensor_strategy_active,
+            is_required=bool(required_methods),
             controller=self.ha_controller,
             all_methods=all_methods,
-            required_methods=(
-                ["get_estimated_consumption"] if sensor_strategy_active else None
-            ),
+            required_methods=required_methods or None,
+            empty_list_is_ok=empty_list_is_ok or None,
         )
 
     def check_health(self, consumption_strategy: str = "sensor") -> list:

@@ -7,6 +7,7 @@ import dataclasses
 import threading
 from datetime import date as date_cls
 from datetime import datetime, timedelta
+from typing import Any
 
 from api_conversion import (
     BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
@@ -36,7 +37,11 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from core.bess import time_utils
-from core.bess.health_check import describe_failing_checks, run_system_health_checks
+from core.bess.exceptions import SystemConfigurationError
+from core.bess.health_check import (
+    group_components_by_device,
+    run_system_health_checks,
+)
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
 from core.bess.time_utils import get_period_count
@@ -1662,6 +1667,24 @@ async def recheck_system_health():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _device_maps_from(controller: Any) -> tuple[dict, dict]:
+    """Resolve HA entity/device registry maps for banner grouping.
+
+    A registry query failure is a data outage, not a banner outage: the
+    banner must still report the critical failure, so degrade to empty maps
+    (component-name grouping) and log it rather than drop the banner.
+    """
+    try:
+        entity_to_device, device_names = controller.get_device_maps()
+        return entity_to_device, device_names
+    except SystemConfigurationError as e:
+        logger.warning(
+            "HA device registry unavailable, grouping banner by component name: %s",
+            e,
+        )
+        return {}, {}
+
+
 @router.get("/api/dashboard-health-summary")
 async def get_dashboard_health_summary():
     """Get lightweight health summary for dashboard alert banner - only critical issues."""
@@ -1696,17 +1719,27 @@ async def get_dashboard_health_summary():
                 component.get("name"): component
                 for component in cached_results.get("checks", [])
             }
-            critical_issues = []
-            for failure in critical_failures:
-                component = components_by_name.get(failure, {})
-                critical_issues.append(
-                    {
-                        "component": failure,
-                        "description": "Critical sensor configuration issue detected",
-                        "detail": describe_failing_checks(component),
-                        "status": "ERROR",
-                    }
+            # One device outage fails several components at once (Battery
+            # Control, Battery Monitoring, ...) — show ONE banner line per
+            # underlying device, not one per component.
+            failing_components = [
+                components_by_name.get(failure) or {"name": failure, "status": "ERROR"}
+                for failure in critical_failures
+            ]
+            entity_to_device, device_names = _device_maps_from(
+                bess_controller.ha_controller
+            )
+            critical_issues = [
+                {
+                    "component": group["device"],
+                    "description": "Critical sensor configuration issue detected",
+                    "detail": ", ".join(group["component_names"]),
+                    "status": "ERROR",
+                }
+                for group in group_components_by_device(
+                    failing_components, entity_to_device, device_names
                 )
+            ]
 
             summary = {
                 "has_critical_errors": True,
@@ -1737,35 +1770,43 @@ async def get_dashboard_health_summary():
                 }
                 return convert_keys_to_camel_case(summary)
 
-            # Extract critical and warning information
+            # Extract critical and warning information, grouped per device so
+            # one device outage shows as one banner line. has_critical_error is
+            # decided before grouping, from the raw components: it must stay
+            # true whenever a REQUIRED component is in ERROR, even if that
+            # component shares its device with optional WARNING-only ones.
+            non_ok = [
+                component
+                for component in health_results.get("checks", [])
+                if component.get("status") in ("WARNING", "ERROR")
+            ]
+            has_critical_error = any(
+                component.get("required") and component.get("status") == "ERROR"
+                for component in non_ok
+            )
+            entities_by_name = {
+                component.get("name"): component for component in non_ok
+            }
+            entity_to_device, device_names = _device_maps_from(
+                bess_controller.ha_controller
+            )
             critical_issues = []
-            has_critical_error = False
-
-            for component in health_results.get("checks", []):
-                status = component.get("status", "UNKNOWN")
-                is_required = component.get("required", False)
-
-                # Show required components with ERROR status as critical
-                if is_required and status == "ERROR":
-                    has_critical_error = True
-                    critical_issues.append(
-                        {
-                            "component": component.get("name", "Unknown"),
-                            "description": component.get("description", ""),
-                            "detail": describe_failing_checks(component),
-                            "status": status,
-                        }
-                    )
-                # Show all components (required or not) with WARNING or ERROR status
-                elif status in ["WARNING", "ERROR"]:
-                    critical_issues.append(
-                        {
-                            "component": component.get("name", "Unknown"),
-                            "description": component.get("description", ""),
-                            "detail": describe_failing_checks(component),
-                            "status": status,
-                        }
-                    )
+            for group in group_components_by_device(
+                non_ok, entity_to_device, device_names
+            ):
+                members = [entities_by_name[n] for n in group["component_names"]]
+                critical_issues.append(
+                    {
+                        "component": group["device"],
+                        "description": members[0].get("description", ""),
+                        "detail": ", ".join(group["component_names"]),
+                        "status": (
+                            "ERROR"
+                            if any(s == "ERROR" for s in group["statuses"])
+                            else "WARNING"
+                        ),
+                    }
+                )
 
             has_warnings = any(
                 issue["status"] == "WARNING" for issue in critical_issues

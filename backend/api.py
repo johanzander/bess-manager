@@ -201,6 +201,30 @@ def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> 
         )
 
 
+def _validate_managed_load_sensors(home_section: dict) -> None:
+    """Raise HTTPException(422) if managed_load_sensors isn't a list of entity IDs.
+
+    ``sensors`` section values are validated against ``_ENTITY_ID_RE`` before
+    persisting (see the PATCH handler); managed_load_sensors lives in
+    ``home`` instead, since it is a list rather than a single sensor_key ->
+    entity_id mapping, so it needs the same check applied here.
+    """
+    sensors = home_section.get("managed_load_sensors")
+    if sensors is None:
+        return
+    if not isinstance(sensors, list):
+        raise HTTPException(
+            status_code=422,
+            detail="managed_load_sensors must be a list of entity IDs",
+        )
+    for entity_id in sensors:
+        if not isinstance(entity_id, str) or not _ENTITY_ID_RE.match(entity_id):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid entity ID format in managed_load_sensors: {entity_id!r}",
+            )
+
+
 def _require_configured_system(bess_controller) -> None:
     """Raise HTTP 503 if the BESS system has not been configured yet.
 
@@ -371,6 +395,7 @@ async def patch_settings(updates: dict):
                 }
                 _validate_power_monitoring_sensors(section, effective_sensors)
                 _validate_consumption_strategy(section, effective_sensors)
+                _validate_managed_load_sensors(section)
 
             if store_key == "sensors":
                 # A sensor removal (e.g. unmapping a phase-current sensor) can
@@ -3143,6 +3168,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             "safetyMarginFactor": "safety_margin",
             "phaseCount": "phase_count",
             "powerMonitoringEnabled": "power_monitoring_enabled",
+            "managedLoadSensors": "managed_load_sensors",
         }
         if any(getattr(payload, f) is not None for f in _HOME_MAP):
             home = bess_controller.settings_store.get_section("home")
@@ -3155,6 +3181,7 @@ async def setup_complete(payload: APISetupCompletePayload):
             }
             _validate_power_monitoring_sensors(home, effective_sensors)
             _validate_consumption_strategy(home, effective_sensors)
+            _validate_managed_load_sensors(home)
             sections["home"] = home
 
         # --- electricity price ---
@@ -3294,6 +3321,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "safety_margin": payload.safetyMarginFactor,
                     "phase_count": payload.phaseCount,
                     "power_monitoring_enabled": payload.powerMonitoringEnabled,
+                    "managed_load_sensors": payload.managedLoadSensors,
                 }
             )
         if "electricity_price" in sections:

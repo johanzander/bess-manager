@@ -9,6 +9,66 @@ export interface HomeForm {
   safetyMarginFactor: number;
   phaseCount: number;
   powerMonitoringEnabled: boolean;
+  /** Cumulative/lifetime energy sensors for loads (typically EV chargers)
+   * to exclude from the ha_statistics baseline before it is computed —
+   * see issue #706. Empty by default; only meaningful for that strategy. */
+  managedLoadSensors: string[];
+}
+
+/** Add/remove list of managed-load sensor entity IDs. Only shown for the
+ * ha_statistics strategy, since it is the only baseline this subtracts from
+ * today (issue #706) — influxdb_7d_avg needs its own mechanism. */
+function ManagedLoadSensorsField({
+  sensors,
+  onChange,
+}: {
+  sensors: string[];
+  onChange: (_: string[]) => void;
+}) {
+  return (
+    <div className="pt-2">
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
+        Managed load sensors
+      </span>
+      <p className="text-xs text-gray-500 dark:text-gray-400 mb-2">
+        Cumulative/lifetime energy sensors (e.g. an EV charger) to exclude from
+        the learned baseline above. Re-declare their expected energy via
+        Planned Consumption Changes in the <strong>Sensors</strong> tab.
+      </p>
+      <div className="space-y-2">
+        {sensors.map((entityId, index) => (
+          <div key={index} className="flex gap-2">
+            <input
+              type="text"
+              value={entityId}
+              placeholder="sensor.ev_charger_energy_total"
+              onChange={e => {
+                const next = [...sensors];
+                next[index] = e.target.value;
+                onChange(next);
+              }}
+              className="block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-1.5 text-sm font-mono text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="button"
+              onClick={() => onChange(sensors.filter((_, i) => i !== index))}
+              className="px-2 text-xs text-gray-500 hover:text-red-600 dark:text-gray-400 dark:hover:text-red-400"
+              aria-label={`Remove managed load sensor ${index + 1}`}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => onChange([...sensors, ''])}
+          className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+        >
+          + Add managed load sensor
+        </button>
+      </div>
+    </div>
+  );
 }
 
 interface Props {
@@ -82,12 +142,18 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           </p>
         )}
         {form.consumptionStrategy === 'ha_statistics' && (
-          <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-            Uses Home Assistant's built-in long-term statistics to build a time-of-day consumption profile
-            from the past 7 days. Captures daily patterns (morning/evening peaks, overnight baseline) using
-            a trimmed average that filters out outlier spikes like EV charging. No extra integrations needed.
-            Configure the load consumption sensor in the <strong>Sensors</strong> tab under Consumption Forecast.
-          </p>
+          <div className="pt-1">
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Uses Home Assistant's built-in long-term statistics to build a time-of-day consumption profile
+              from the past 7 days. Captures daily patterns (morning/evening peaks, overnight baseline) using
+              a trimmed average that filters out outlier spikes like EV charging. No extra integrations needed.
+              Configure the load consumption sensor in the <strong>Sensors</strong> tab under Consumption Forecast.
+            </p>
+            <ManagedLoadSensorsField
+              sensors={form.managedLoadSensors}
+              onChange={v => onChange({ ...form, managedLoadSensors: v })}
+            />
+          </div>
         )}
       </SectionCard>
 

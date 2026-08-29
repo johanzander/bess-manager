@@ -223,12 +223,24 @@ class HomeAssistantSource(PriceSource):
     def _extract_prices_for_date(
         self, sensor_attributes: dict | None, target_date: date, sensor_name: str
     ) -> list | None:
-        """Extract prices for a specific date from sensor attributes."""
+        """Extract prices for a specific date from sensor attributes.
+
+        Tomorrow's prices are accepted only when the sensor confirms they are
+        real: a timestamp-validated ``raw_tomorrow`` array, or a plain
+        ``tomorrow`` array guarded by ``tomorrow_valid`` being true. Before
+        Nordpool publishes next-day prices (~13:00 CET) the HACS sensor keeps
+        ``tomorrow_valid`` false while its plain ``tomorrow`` array still
+        mirrors today. Accepting that mirror caused issue #704: today's
+        (VAT-inclusive) prices were cached as tomorrow, inflated by the VAT
+        multiplier. When tomorrow is not yet confirmed we return None so the
+        caller raises PriceDataUnavailableError and retries on a later cycle,
+        matching every other price source.
+        """
         if not sensor_attributes:
             return None
 
         try:
-            # Try raw data first (with timestamp validation)
+            # Prefer the timestamp-validated raw arrays.
             for raw_key in ["raw_today", "raw_tomorrow"]:
                 raw_data = sensor_attributes.get(raw_key)
                 if raw_data:
@@ -236,19 +248,24 @@ class HomeAssistantSource(PriceSource):
                     if prices:
                         return prices
 
-            # Fallback to regular arrays (simple date matching)
+            # Fall back to the plain (timestamp-less) arrays. Nordpool HA
+            # arrays include VAT -- strip it to match the raw path and every
+            # other source.
             current_date = time_utils.today()
             tomorrow_date = current_date + timedelta(days=1)
 
             if target_date == current_date:
                 prices = sensor_attributes.get("today")
-                if prices:
-                    return self._handle_dst_transitions(prices)
-
-            elif target_date == tomorrow_date:
+            elif target_date == tomorrow_date and (
+                sensor_attributes.get("tomorrow_valid") is True
+            ):
                 prices = sensor_attributes.get("tomorrow")
-                if prices:
-                    return self._handle_dst_transitions(prices)
+            else:
+                prices = None
+
+            if prices:
+                prices = [price / self.vat_multiplier for price in prices]
+                return self._handle_dst_transitions(prices)
 
             return None
 

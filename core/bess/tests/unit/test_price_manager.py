@@ -230,6 +230,151 @@ def test_home_assistant_source_vat_parameter() -> None:
     assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667
 
 
+def _quarterly_array(value: float) -> list[float]:
+    """96 identical quarterly values (a plain, timestamp-less Nordpool array)."""
+    return [value] * 96
+
+
+def test_home_assistant_source_rejects_premarket_tomorrow_mirror() -> None:
+    """Issue #704: a plain ``tomorrow`` array mirroring today must not be used.
+
+    Before Nordpool publishes next-day prices (~13:00 CET) the HACS sensor
+    keeps ``tomorrow_valid`` false while its plain ``tomorrow`` attribute still
+    holds today's VAT-inclusive values and there is no ``raw_tomorrow``. That
+    array carries no timestamps, so without the ``tomorrow_valid`` guard it
+    cannot be told apart from real next-day data. It must be rejected (caller
+    raises PriceDataUnavailableError and retries later), not accepted and
+    cached as tomorrow inflated by the VAT multiplier.
+    """
+    mock_controller = MagicMock()
+    today_date = time_utils.today()
+    tomorrow_date = today_date + timedelta(days=1)
+
+    raw_today_data = [
+        {
+            "start": f"{today_date.isoformat()}T{hour:02d}:{minute:02d}:00+02:00",
+            "value": 2.0,  # VAT-inclusive
+        }
+        for hour in range(24)
+        for minute in (0, 15, 30, 45)
+    ]
+
+    def mock_api_request(method: str, path: str) -> dict | None:
+        if "sensor.nordpool" in path:
+            return {
+                "attributes": {
+                    "raw_today": raw_today_data,
+                    # pre-market: no raw_tomorrow, tomorrow mirrors today,
+                    # and the sensor itself says tomorrow is not valid yet
+                    "tomorrow_valid": False,
+                    "tomorrow": _quarterly_array(2.0),
+                }
+            }
+        return None
+
+    mock_controller._api_request = mock_api_request
+
+    ha_source = HomeAssistantSource(
+        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
+    )
+
+    # today still resolves from the validated raw path
+    assert ha_source.get_prices_for_date(today_date)[0] == 2.0 / 1.25
+
+    # tomorrow must be reported unavailable, not returned as today * 1.25
+    try:
+        ha_source.get_prices_for_date(tomorrow_date)
+    except PriceDataUnavailableError:
+        pass
+    else:
+        raise AssertionError("expected PriceDataUnavailableError for tomorrow")
+
+
+def test_home_assistant_source_tomorrow_plain_array_used_when_valid() -> None:
+    """A plain ``tomorrow`` array IS used once ``tomorrow_valid`` is true.
+
+    This is the shape used by the mock-HA scenarios and by HACS sensor
+    configurations that expose ``today``/``tomorrow`` but not ``raw_*``.
+    VAT must still be stripped.
+    """
+    mock_controller = MagicMock()
+    today_date = time_utils.today()
+    tomorrow_date = today_date + timedelta(days=1)
+
+    def mock_api_request(method: str, path: str) -> dict | None:
+        if "sensor.nordpool" in path:
+            return {
+                "attributes": {
+                    "today": _quarterly_array(2.0),
+                    "tomorrow_valid": True,
+                    "tomorrow": _quarterly_array(1.5),
+                }
+            }
+        return None
+
+    mock_controller._api_request = mock_api_request
+
+    ha_source = HomeAssistantSource(
+        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
+    )
+
+    prices = ha_source.get_prices_for_date(tomorrow_date)
+    assert len(prices) == 96
+    assert prices[0] == 1.5 / 1.25
+
+
+def test_home_assistant_source_tomorrow_from_valid_raw_data_still_works() -> None:
+    """A timestamp-validated ``raw_tomorrow`` array is still accepted, VAT stripped."""
+    mock_controller = MagicMock()
+    today_date = time_utils.today()
+    tomorrow_date = today_date + timedelta(days=1)
+
+    raw_tomorrow_data = [
+        {
+            "start": f"{tomorrow_date.isoformat()}T{hour:02d}:{minute:02d}:00+02:00",
+            "value": 0.8,
+        }
+        for hour in range(24)
+        for minute in (0, 15, 30, 45)
+    ]
+
+    def mock_api_request(method: str, path: str) -> dict | None:
+        if "sensor.nordpool" in path:
+            return {"attributes": {"raw_tomorrow": raw_tomorrow_data}}
+        return None
+
+    mock_controller._api_request = mock_api_request
+
+    ha_source = HomeAssistantSource(
+        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
+    )
+
+    prices = ha_source.get_prices_for_date(tomorrow_date)
+    assert len(prices) == 96
+    assert prices[0] == 0.8 / 1.25
+
+
+def test_home_assistant_source_today_plain_array_fallback_strips_vat() -> None:
+    """The plain ``today`` array fallback (no ``raw_today``) must strip VAT too."""
+    mock_controller = MagicMock()
+    today_date = time_utils.today()
+
+    def mock_api_request(method: str, path: str) -> dict | None:
+        if "sensor.nordpool" in path:
+            return {"attributes": {"today": _quarterly_array(2.0)}}
+        return None
+
+    mock_controller._api_request = mock_api_request
+
+    ha_source = HomeAssistantSource(
+        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
+    )
+
+    prices = ha_source.get_prices_for_date(today_date)
+    assert len(prices) == 96
+    assert prices[0] == 2.0 / 1.25
+
+
 def test_get_available_prices_today_only() -> None:
     """Should return today's prices at quarterly resolution when tomorrow unavailable."""
     mock_source = MockSource(

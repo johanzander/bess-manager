@@ -328,6 +328,21 @@ actions=$(printf '%s' "$digest" | jq \
            detail: "set Awaiting on the card"}
      else empty end),
 
+    # Grooming debt: the board field still says `analysis` -- the placeholder
+    # for "needs Stage 2" -- on an item Stage 2 has demonstrably finished (the
+    # `analyzed` or `needs-human-review` label is on). `analysis` is not a real
+    # wait; the skill calls it a triage gap. Nothing else contradicts an
+    # explicitly-set board value, so a stale one silently pins the item in the
+    # Analysis column forever -- #680 and #704 sat here, analysed weeks ago,
+    # invisible to every pass because `awaiting_source == "board"`.
+    (if .awaiting == "analysis" and .awaiting_source == "board"
+        and ((.labels | index("analyzed")) != null
+             or (.labels | index("needs-human-review")) != null)
+     then {issue: .number, action: "set_awaiting",
+           why: "board Awaiting=analysis but Stage 2 is done (analyzed/needs-human-review label present) -- a stale placeholder pinning the item in Analysis",
+           detail: "re-point Awaiting at the real wait (reporter/discussion/upstream), or clear it if the item is ready for dev"}
+     else empty end),
+
     # No priority means the item cannot be ranked, so it can never be "next".
     #
     # The two causes need different actions, and conflating them sent the PO

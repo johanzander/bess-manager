@@ -249,6 +249,37 @@ def test_label_derived_awaiting_asks_for_the_board_field(tmp_path: Path) -> None
     assert "set_awaiting" in _actions_for(_run(tmp_path, [item]), 7)
 
 
+def test_stale_analysis_awaiting_after_stage2_is_grooming_debt(tmp_path: Path) -> None:
+    # Board Awaiting still reads "analysis" (the "needs Stage 2" placeholder)
+    # but Stage 2 has finished -- the analyzed label is on. Nothing else
+    # contradicts an explicitly-set board value, so without this rule the item
+    # sits in Analysis forever. #680/#704 were exactly this.
+    item = _item(
+        810,
+        labels=["bug", "analyzed"],
+        awaiting="analysis",
+        awaiting_source="board",
+        column="Analysis",
+        board_status="Analysis",
+    )
+    assert "set_awaiting" in _actions_for(_run(tmp_path, [item]), 810)
+
+
+def test_analysis_awaiting_before_stage2_is_not_flagged(tmp_path: Path) -> None:
+    # Same field value, but Stage 2 genuinely has not run (no analyzed /
+    # needs-human-review label). "analysis" is then an accurate wait, not a
+    # stale placeholder -- do not raise grooming debt for it.
+    item = _item(
+        811,
+        labels=["bug", "ready-for-analysis"],
+        awaiting="analysis",
+        awaiting_source="board",
+        column="Analysis",
+        board_status="Analysis",
+    )
+    assert "set_awaiting" not in _actions_for(_run(tmp_path, [item]), 811)
+
+
 def test_missing_priority_and_missing_labels_are_grooming_debt(tmp_path: Path) -> None:
     item = _item(8, labels=[], priority=None, last_comment=_comment(1))
     actions = _actions_for(_run(tmp_path, [item]), 8)

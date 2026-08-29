@@ -84,7 +84,7 @@
         "battery_charging_power_rate": "number.inverter_maximum_charging_power",
         "battery_discharging_power_rate": "number.inverter_maximum_discharging_power",
         "battery_charge_stop_soc": "number.inverter_end_of_charge_soc",
-        "battery_discharge_stop_soc": "number.inverter_grid_charge_cutoff_soc",
+        "battery_discharge_stop_soc": "number.batteries_end_of_discharge_soc",
         "pv_power": "sensor.inverter_input_power",
         "local_load_power": "sensor.inverter_active_power",
         "lifetime_solar_energy": "sensor.inverter_total_dc_input_energy",
@@ -218,6 +218,19 @@
         "unit_of_measurement": "%",
         "icon": "mdi:battery-charging-50",
         "friendly_name": "Inverter Grid charge cutoff SOC"
+      }
+    },
+    "number.batteries_end_of_discharge_soc": {
+      "entity_id": "number.batteries_end_of_discharge_soc",
+      "state": "10.0",
+      "attributes": {
+        "min": 0,
+        "max": 100,
+        "step": 0.1,
+        "mode": "box",
+        "unit_of_measurement": "%",
+        "icon": "mdi:battery-charging-50",
+        "friendly_name": "Batteries End of discharge SOC"
       }
     },
     "sensor.batteries_total_charge": {

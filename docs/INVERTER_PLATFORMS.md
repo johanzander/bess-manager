@@ -109,7 +109,9 @@ What has to line up:
 - **Optional entities may legitimately be missing.** Huawei's working-mode
   select is the example: EMMA owns the mode, so nothing maps it. BESS then
   skips both the mode write and the LUNA2000-vs-LG-RESU battery check, logs
-  that it did, and the health check reports WARNING rather than OK.
+  that it did, and the health check reports WARNING rather than OK. If an
+  EMMA integration does expose the select, BESS recognizes its `Time Of Use`
+  option as equivalent to `time_of_use_luna2000`.
 
 BESS cannot test against an integration it doesn't ship support for, so any
 such setup is experimental by definition. If your inverter has no matching
@@ -551,10 +553,12 @@ and the number of periods effective.
 huawei_solar.set_tou_periods(device_id, charge_periods, discharge_periods, working_mode_settings="time_of_use_luna2000")
 ```
 
-The service call is gated by a preflight check verifying the battery model via
-`get_huawei_working_mode_options()` — **LUNA2000 only**; LG RESU batteries are
-explicitly not supported (they use a price-bidding TOU format incompatible with
-BESS's optimization model).
+The service call is gated by a preflight check verifying a compatible TOU mode
+via `get_huawei_working_mode_options()`. Stock `huawei_solar` exposes
+`time_of_use_luna2000`; Huawei EMMA exposes the equivalent `Time Of Use`
+(matched case- and separator-insensitively). LG RESU batteries remain
+explicitly unsupported because they use a price-bidding TOU format incompatible
+with BESS's optimization model.
 
 **When no working-mode entity is mapped**, that whole gate is skipped: BESS
 neither sets the working mode nor verifies the battery family, and logs both.
@@ -887,7 +891,7 @@ Only slot 1 of each direction is strictly required; slots 2-6 are optional
 | `battery_charging_power_rate` | number | `storage_maximum_charging_power` | Max charge power (W) |
 | `battery_discharging_power_rate` | number | `storage_maximum_discharging_power` | Max discharge power (W) |
 | `battery_charge_stop_soc` | number | `storage_charging_cutoff_capacity` | Charge stop SOC (%) |
-| `battery_discharge_stop_soc` | number | `storage_grid_charge_cutoff_state_of_charge` | Discharge stop SOC (%) |
+| `battery_discharge_stop_soc` | number | `storage_discharging_cutoff_capacity` | Discharge stop SOC (%) |
 | `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
 | `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
 | `huawei_tou_periods` | sensor | `storage_huawei_luna2000_time_of_use_charging_and_discharging_periods` | Optional: programmed TOU periods, read back at startup (#431) |

@@ -6,6 +6,7 @@ internally. Tests use a temporary directory so they never touch /data/.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from api_dataclasses import (
@@ -850,3 +851,58 @@ class TestSignedPairAliasing:
             store.get_active_sensors()["battery_discharge_power"]
             == "sensor.batteries_charge_discharge_power"
         )
+
+
+# ---------------------------------------------------------------------------
+# Huawei discharge-stop SOC repoint migration
+# ---------------------------------------------------------------------------
+
+
+def test_migrate_schema_clears_stale_huawei_grid_charge_cutoff_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An existing install mapped battery_discharge_stop_soc to the grid-charge
+    cutoff register; the migration clears it so a re-scan repoints it."""
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {
+        "inverter": {"platform": "huawei_solar_luna2000", "control_mode": "tou"},
+        "sensors": {
+            "platform": "huawei_solar_luna2000",
+            "shared": {},
+            "huawei_solar_luna2000": {
+                "battery_soc": "sensor.batteries_state_of_capacity",
+                "battery_discharge_stop_soc": "number.batteries_grid_charge_cutoff_soc",
+            },
+        },
+    }
+    store._migrate_schema()
+    assert (
+        "battery_discharge_stop_soc"
+        not in store.data["sensors"]["huawei_solar_luna2000"]
+    )
+
+
+def test_migrate_schema_keeps_repointed_huawei_discharge_stop_soc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A mapping already on the discharging-cutoff entity is left untouched."""
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {
+        "inverter": {"platform": "huawei_solar_luna2000", "control_mode": "tou"},
+        "sensors": {
+            "platform": "huawei_solar_luna2000",
+            "shared": {},
+            "huawei_solar_luna2000": {
+                "battery_discharge_stop_soc": (
+                    "number.batteries_discharging_cutoff_capacity"
+                ),
+            },
+        },
+    }
+    store._migrate_schema()
+    assert (
+        store.data["sensors"]["huawei_solar_luna2000"]["battery_discharge_stop_soc"]
+        == "number.batteries_discharging_cutoff_capacity"
+    )

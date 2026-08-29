@@ -794,6 +794,33 @@ class SettingsStore:
                 )
                 changed = True
 
+        # --- Huawei discharge-stop SOC repoint (existing installs) ---
+        # battery_discharge_stop_soc used to be mapped to the grid-charge
+        # cutoff register (storage_grid_charge_cutoff_state_of_charge) — a
+        # reserve floor for grid charging, not the discharge floor BESS needs.
+        # It now maps to storage_discharging_cutoff_capacity. Discovery only
+        # re-runs from the wizard, never on startup, so an install persisted
+        # with the old entity would keep writing the wrong register forever.
+        # Clearing the stale mapping makes the health check report it missing,
+        # which prompts a wizard re-scan that repoints it correctly. A mapping
+        # already on the discharging-cutoff entity (or one a user renamed away
+        # from the grid-charge-cutoff pattern) is left untouched.
+        sensors = self.data.get("sensors")
+        if isinstance(sensors, dict):
+            huawei_sensors = sensors.get("huawei_solar_luna2000")
+            if isinstance(huawei_sensors, dict):
+                stale = huawei_sensors.get("battery_discharge_stop_soc", "")
+                if isinstance(stale, str) and "grid_charge_cutoff" in stale:
+                    del huawei_sensors["battery_discharge_stop_soc"]
+                    logger.info(
+                        "Schema migration: cleared stale Huawei "
+                        "battery_discharge_stop_soc mapping %s (grid-charge "
+                        "cutoff register); re-run discovery to repoint it to the "
+                        "discharging cutoff capacity entity.",
+                        stale,
+                    )
+                    changed = True
+
         # --- demo_mode section (added v9.5) ---
         if "demo_mode" not in self.data:
             self.data["demo_mode"] = {"enabled": False}

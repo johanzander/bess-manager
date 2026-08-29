@@ -18,6 +18,7 @@ Huawei Intent Mapping:
 """
 
 import logging
+import re
 from datetime import datetime
 from typing import ClassVar
 
@@ -30,6 +31,55 @@ from .settings import BatterySettings
 logger = logging.getLogger(__name__)
 
 WORKING_MODE_TOU = "time_of_use_luna2000"
+
+# Working-mode select options that mean "BESS-controlled Time Of Use", across
+# the integrations that front a Huawei battery. Stock huawei_solar exposes
+# ``time_of_use_luna2000``; Huawei EMMA's EmmaEssControlMode select exposes a
+# localized ``Time Of Use`` label for the same thing. The other EMMA modes
+# (Maximum Self Consumption, Fully Fed To Grid, ...) are deliberately absent so
+# a genuinely non-TOU battery (e.g. LG RESU) still fails the guard below.
+WORKING_MODE_TOU_EQUIVALENTS = ("time_of_use_luna2000", "Time Of Use")
+
+
+def _normalize_working_mode(mode: str) -> str:
+    """Lowercase and collapse whitespace/underscores for tolerant matching.
+
+    The exposed option label differs by integration and locale (``Time Of
+    Use`` vs ``time_of_use``), so equality on the raw string is too brittle —
+    normalizing both sides recognizes the same option across those variants.
+    """
+    return re.sub(r"[\s_]+", " ", str(mode).strip().lower())
+
+
+_TOU_NORMALIZED_EQUIVALENTS = frozenset(
+    _normalize_working_mode(mode) for mode in WORKING_MODE_TOU_EQUIVALENTS
+)
+
+
+def _resolve_tou_working_mode(available_modes: list[str]) -> str:
+    """Return the integration's own option string for BESS Time Of Use control.
+
+    An empty ``available_modes`` means the option list was unreadable (a
+    transient HA read hiccup): proceed with the stock LUNA2000 option rather
+    than turning a read glitch into a scheduling outage. A non-empty list that
+    contains no TOU-equivalent option is a real incompatibility (e.g. an LG
+    RESU battery) and raises. Matching is normalized so a re-cased or localized
+    label of the same option is still recognized, and the actual exposed
+    string is returned so ``set_huawei_working_mode`` writes what the
+    integration expects.
+    """
+    if not available_modes:
+        return WORKING_MODE_TOU
+    for mode in available_modes:
+        if _normalize_working_mode(mode) in _TOU_NORMALIZED_EQUIVALENTS:
+            return mode
+    raise SystemConfigurationError(
+        "Connected Huawei battery does not expose a supported Time Of Use "
+        f"working mode (available modes: {available_modes}). Supported "
+        f"options: {list(WORKING_MODE_TOU_EQUIVALENTS)}. Only LUNA2000/EMMA "
+        "Time Of Use batteries are supported — LG RESU is not."
+    )
+
 
 # The integration this platform normally drives. An install pointing
 # inverter.service_domain elsewhere is declaring a compatible integration
@@ -283,9 +333,10 @@ class HuaweiController(InverterController):
         First confirms the connected battery is LUNA2000 (via the
         integration-exposed working-mode option list — see
         HomeAssistantAPIController.get_huawei_working_mode_options), then
-        gates the write behind the working-mode select: sets it to
-        time_of_use_luna2000 only when drifted, then writes the full
-        period list (always a full rewrite — no differential update).
+        gates the write behind the working-mode select: sets it to the
+        integration's equivalent Time Of Use option only when drifted, then
+        writes the full period list (always a full rewrite — no differential
+        update).
 
         The whole gate is skipped when no working-mode entity is mapped.
         Installs behind an energy manager (Huawei EMMA, PR #412) expose no
@@ -295,9 +346,10 @@ class HuaweiController(InverterController):
         and surfaced by check_health rather than passing unremarked.
 
         Raises:
-            SystemConfigurationError: If the connected battery does not
-                expose 'time_of_use_luna2000' as a working-mode option
-                (i.e. it's an LG RESU battery, not supported).
+            SystemConfigurationError: If the connected battery exposes a
+                non-empty working-mode option list with no supported Time Of
+                Use option (stock ``time_of_use_luna2000`` or EMMA's
+                ``Time Of Use``) — i.e. it's an LG RESU battery, not supported.
         """
         writes = 0
 
@@ -324,22 +376,17 @@ class HuaweiController(InverterController):
             )
         else:
             available_modes = controller.get_huawei_working_mode_options()
-            if available_modes and WORKING_MODE_TOU not in available_modes:
-                raise SystemConfigurationError(
-                    "Connected Huawei battery does not support "
-                    f"'{WORKING_MODE_TOU}' (available modes: {available_modes}). "
-                    "Only LUNA2000 batteries are supported — LG RESU is not."
-                )
+            target_mode = _resolve_tou_working_mode(available_modes)
 
             current_mode = controller.get_huawei_working_mode()
-            if current_mode != WORKING_MODE_TOU:
+            if current_mode != target_mode:
                 logger.info(
                     "HUAWEI HARDWARE: working mode is %r, setting to %r",
                     current_mode,
-                    WORKING_MODE_TOU,
+                    target_mode,
                 )
                 try:
-                    controller.set_huawei_working_mode(WORKING_MODE_TOU)
+                    controller.set_huawei_working_mode(target_mode)
                     writes += 1
                 except Exception as e:
                     logger.error("FAILED: set_huawei_working_mode: %s", e)

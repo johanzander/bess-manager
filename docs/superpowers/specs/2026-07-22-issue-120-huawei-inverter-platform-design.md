@@ -183,8 +183,12 @@ writes it with the standard `select.select_option` service, not a
 `huawei_solar`-specific call. Options are `StorageWorkingModesC` values
 (`adaptive`, `fixed_charge_discharge`, `maximise_self_consumption`,
 `time_of_use_lg`, `fully_fed_to_grid`, `time_of_use_luna2000`), lowercased.
-BESS sets `time_of_use_luna2000` once (or whenever drifted) before/alongside
-writing periods, mirroring how `GrowattSphController` doesn't need to touch
+BESS sets the integration's equivalent TOU option once (or whenever drifted)
+before/alongside writing periods: `time_of_use_luna2000` for stock
+`huawei_solar`, or `Time Of Use` for EMMA's `EmmaEssControlMode` select.
+The other EMMA options (`Reserved 1`, `Maximum Self Consumption`, `Reserved 3`,
+`Fully Fed To Grid`, `Third Party Dispatch`) are not TOU aliases. This mirrors
+how `GrowattSphController` doesn't need to touch
 a mode entity because SPH's period lists are always active — Huawei's
 period list is gated behind this mode selection, which is the delta.
 
@@ -207,7 +211,7 @@ confirmed present in `select.py`/`number.py`/`sensor.py`):
 | Max charge power | `storage_maximum_charging_power` | number | `number.py:140` |
 | Max discharge power | `storage_maximum_discharging_power` | number | `number.py:148` |
 | Charging cutoff SOC (charge-stop) | `storage_charging_cutoff_capacity` | number | `number.py:156` |
-| Grid-charge cutoff SOC (reserve) | `storage_grid_charge_cutoff_state_of_charge` | number | `number.py:175` |
+| Discharging cutoff SOC (discharge-stop) | `storage_discharging_cutoff_capacity` | number | `number.py` |
 | Grid-charge enable | `storage_charge_from_grid_function` | switch | `switch.py:72` |
 | Working mode (marker + control) | `storage_working_mode_settings` | select | `select.py:301` |
 | Inverter AC output power | `active_power` | sensor | `sensor.py:189` |
@@ -253,7 +257,7 @@ platform on a third integration" case flagged in `INVERTER_PLATFORMS.md`).
   mode entity if not already `time_of_use_luna2000`; (2) `huawei_solar.set_tou_periods`
   with `device_id` + the newline-joined period text.
 - `sync_soc_limits` — `number.set_value` on
-  `storage_charging_cutoff_capacity` / `storage_grid_charge_cutoff_state_of_charge`.
+  `storage_charging_cutoff_capacity` / `storage_discharging_cutoff_capacity`.
 - `compare_schedules`, `active_tou_intervals`, `get_all_tou_segments`,
   `get_daily_TOU_settings`, `log_current_TOU_schedule`,
   `log_detailed_schedule`, `check_health` — same shape as

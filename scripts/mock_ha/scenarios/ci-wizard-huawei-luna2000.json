@@ -155,7 +155,7 @@
         "unit_of_measurement": "%"
       }
     },
-    "number.batteries_grid_charge_cutoff_soc": {
+    "number.batteries_discharging_cutoff_capacity": {
       "state": "10",
       "attributes": {
         "unit_of_measurement": "%"
@@ -474,9 +474,9 @@
       "device_id": "dev-huawei-battery-001"
     },
     {
-      "entity_id": "number.batteries_grid_charge_cutoff_soc",
+      "entity_id": "number.batteries_discharging_cutoff_capacity",
       "platform": "huawei_solar",
-      "unique_id": "SN2024HUAWEI01_storage_grid_charge_cutoff_state_of_charge",
+      "unique_id": "SN2024HUAWEI01_storage_discharging_cutoff_capacity",
       "device_id": "dev-huawei-battery-001"
     },
     {

@@ -62,7 +62,7 @@
       "battery_charging_power_rate": "number.batteries_maximum_charging_power",
       "battery_discharging_power_rate": "number.batteries_maximum_discharging_power",
       "battery_charge_stop_soc": "number.batteries_charging_cutoff_capacity",
-      "battery_discharge_stop_soc": "number.batteries_grid_charge_cutoff_soc",
+      "battery_discharge_stop_soc": "number.batteries_discharging_cutoff_capacity",
       "local_load_power": "sensor.inverter_active_power",
       "pv_power": "sensor.inverter_input_power",
       "import_power": "sensor.power_meter_active_power",

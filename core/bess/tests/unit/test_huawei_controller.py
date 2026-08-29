@@ -90,6 +90,30 @@ class TestWriteSchedule:
         controller.sync_to_hardware(ha, 0)
         ha.set_huawei_working_mode.assert_called_once_with("time_of_use_luna2000")
 
+    def test_emma_time_of_use_mode_allows_schedule_write(
+        self, controller: HuaweiController
+    ) -> None:
+        """Huawei EMMA exposes a localized 'Time Of Use' option instead of the
+        stock 'time_of_use_luna2000' — it must be recognized as equivalent and
+        written back verbatim."""
+        intents = make_intents({18: "LOAD_SUPPORT"})
+        controller.apply_intents(make_schedule_mock(intents))
+        ha = MagicMock()
+        ha.get_huawei_working_mode_options.return_value = [
+            "Reserved 1",
+            "Maximum Self Consumption",
+            "Reserved 3",
+            "Fully Fed To Grid",
+            "Time Of Use",
+            "Third Party Dispatch",
+        ]
+        ha.get_huawei_working_mode.return_value = "Maximum Self Consumption"
+
+        controller.sync_to_hardware(ha, 0)
+
+        ha.set_huawei_working_mode.assert_called_once_with("Time Of Use")
+        ha.write_huawei_tou_periods.assert_called_once()
+
     def test_write_schedule_skips_mode_write_when_already_set(
         self, controller: HuaweiController
     ) -> None:

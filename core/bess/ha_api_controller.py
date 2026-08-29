@@ -911,7 +911,7 @@ class HomeAssistantAPIController:
         "storage_maximum_charging_power": "battery_charging_power_rate",
         "storage_maximum_discharging_power": "battery_discharging_power_rate",
         "storage_charging_cutoff_capacity": "battery_charge_stop_soc",
-        "storage_grid_charge_cutoff_state_of_charge": "battery_discharge_stop_soc",
+        "storage_discharging_cutoff_capacity": "battery_discharge_stop_soc",
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
         "active_power": "local_load_power",

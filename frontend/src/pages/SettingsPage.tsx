@@ -47,6 +47,7 @@ const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'fixed',
   maxFuseCurrent: 25, voltage: 230, safetyMarginFactor: 1.0,
   phaseCount: 3, powerMonitoringEnabled: true,
+  managedLoadSensors: [],
 };
 const EMPTY_PRICING: PricingForm = {
   currency: 'SEK',
@@ -187,6 +188,7 @@ const SettingsPage: React.FC = () => {
         safetyMarginFactor: home_s.safetyMargin ?? 1.0,
         phaseCount: home_s.phaseCount ?? 3,
         powerMonitoringEnabled: home_s.powerMonitoringEnabled ?? true,
+        managedLoadSensors: home_s.managedLoadSensors ?? [],
       };
       setHomeForm(h);
       savedHome.current = JSON.stringify(h);
@@ -396,6 +398,9 @@ const SettingsPage: React.FC = () => {
           safetyMargin: homeForm.safetyMarginFactor,
           phaseCount: homeForm.phaseCount,
           powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
+          // Drop blank rows left by "+ Add managed load sensor" — the API
+          // rejects an empty string as an invalid entity ID.
+          managedLoadSensors: homeForm.managedLoadSensors.filter(Boolean),
           currency: pricingForm.currency,
         },
       });

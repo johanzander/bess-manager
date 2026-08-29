@@ -857,7 +857,8 @@ The optimizer needs a consumption forecast.  Four strategies exist:
   does **not** strip out a regular/nightly EV charging habit — if most of
   the 7 samples for an hour are elevated together, the average stays high
   and the forecast correctly bakes that load in.  Higher during evening
-  peaks, lower overnight.
+  peaks, lower overnight.  A regular habit can be excluded deliberately via
+  **Managed Loads**, below.
 - **influxdb_7d_avg**: Same concept but queries InfluxDB instead of HA.
 - **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
   prediction (same value all day).
@@ -927,6 +928,36 @@ a block removing more load than the base forecast holds clamps that period to
 zero (negative consumption is not physical) and records a
 `CONSUMPTION_OVERLAY_CLAMPED` runtime failure, so it is surfaced rather than
 silent.
+
+
+### Managed Loads (issue #706)
+
+`ha_statistics`'s trimmed mean (above) discounts a one-off spike but bakes in
+a *regular* habit — a nightly EV charge reads as part of "normal" load, so
+the learned baseline overstates typical consumption by however much of that
+habit occurred in the 7-day training window.  Managed Loads is the
+deliberate-exclusion mechanism: the user names the load's own
+cumulative/lifetime energy sensor (`home.managed_load_sensors`, a list), and
+its per-hour energy is subtracted from `lifetime_load_consumption`'s raw HA
+Recorder statistics *before* the hour-of-day buckets are built, so the
+learned "normal" becomes the residual — house load with the managed load
+excluded.  The user then re-declares any expected managed-load energy via
+Planned Consumption Changes (`add` mode), which composes on top of the
+residual exactly as it does on top of any other baseline.
+
+Scoped to `ha_statistics` only: `influxdb_7d_avg` pulls instantaneous power
+samples from InfluxDB, a different data source/shape than HA Recorder's
+cumulative `change` values, and needs its own subtraction mechanism if ever
+added.
+
+**Failure behaviour** (`managed_loads.subtract_managed_loads`): a configured
+managed-load sensor with no statistics data raises `ManagedLoadsError` rather
+than silently forecasting on the un-subtracted baseline — the forecast would
+otherwise quietly overstate consumption by the missing residual. Subtraction
+can only reduce recorded load, never invert it: an hour where the managed
+load's own draw exceeds the total load sensor's (a sensor/entity mismatch) is
+clamped to zero and logged, the same "surface it, don't absorb it" pattern
+the overlay uses for over-subtraction.
 
 
 ## Savings Calculation

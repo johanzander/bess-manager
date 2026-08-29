@@ -1136,6 +1136,7 @@ class APISetupCompletePayload(BaseModel):
     safetyMarginFactor: float | None = None
     phaseCount: int | None = None
     powerMonitoringEnabled: bool | None = None
+    managedLoadSensors: list[str] | None = None
     # Electricity price settings
     area: str | None = None
     markupRate: float | None = None

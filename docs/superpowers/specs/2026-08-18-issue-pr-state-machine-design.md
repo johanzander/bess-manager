@@ -99,6 +99,16 @@ else                      -> Backlog
   `Issue` card whose issue closed → `stale_issue_card` → rhythm `move_card`
   (to *Done*). `pr_board` is joined only against open PRs and `items`
   iterates only open issues, so nothing reconciled either before.
+- **`escalated` on `resume_count >= 2` is suppressed once a fix has merged.**
+  `resume_count` never decrements, so an issue handed back twice before a
+  third reframed attempt landed (#683 → #686) kept firing the escalation on a
+  fix already on `main`.
+- **`In Verification` gets an issue-facing signal.** The column lives only in
+  the Project field, so a reporter reading the issue sees no sign it is
+  fixed. New rhythm action `announce_verification` (rank 1) fires once per
+  issue: the PO comments the fix status and applies an `awaiting-release`
+  label, which suppresses it thereafter. Closing still waits for the
+  graduation PR.
 
 `In Verification` is new. It sits **after merge to main and before release** —
 the fast-forward rule makes `beta/main` strictly downstream of `origin/main`,

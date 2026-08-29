@@ -1157,6 +1157,52 @@ def test_one_handoff_is_not_yet_an_escalation(tmp_path: Path) -> None:
     assert "resume_implementation" in actions
 
 
+def test_two_handoffs_do_not_escalate_once_a_fix_has_merged(tmp_path: Path) -> None:
+    """#707 / #683: `resume_count` never decrements, so an issue handed back
+    twice before a third, reframed attempt merged kept firing `escalated` on a
+    fix already on main. A merged PR means the handbacks are history."""
+    item = _item(
+        683,
+        resume_count=2,
+        merged_pr=686,
+        column="In Verification",
+        board_status="In Verification",
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 683)
+    assert "escalated" not in actions
+
+
+def test_in_verification_with_no_status_signal_fires_announce(tmp_path: Path) -> None:
+    """#707 / #683: In Verification lives only in a Project field. Fire once to
+    put a visible fix-status comment + `awaiting-release` label on the issue,
+    ranked right after escalations."""
+    item = _item(
+        683,
+        column="In Verification",
+        board_status="In Verification",
+        merged_pr=686,
+        labels=["bug", "analyzed"],
+    )
+    result = _run(tmp_path, [item])
+    action = next(
+        a for a in result["actions"] if a["action"] == "announce_verification"
+    )
+    assert action["issue"] == 683
+    assert action["rank"] == 1
+    assert "686" in action["detail"]
+
+
+def test_announce_verification_is_suppressed_once_labelled(tmp_path: Path) -> None:
+    item = _item(
+        683,
+        column="In Verification",
+        board_status="In Verification",
+        merged_pr=686,
+        labels=["bug", "analyzed", "awaiting-release"],
+    )
+    assert "announce_verification" not in _actions_for(_run(tmp_path, [item]), 683)
+
+
 def test_finishing_outranks_starting(tmp_path: Path) -> None:
     """Empty the board from the right. The alphabetical sort put dispatchable
     first and resume_implementation last purely because d < m < r."""

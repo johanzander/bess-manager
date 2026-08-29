@@ -138,7 +138,13 @@ actions=$(printf '%s' "$digest" | jq \
     # A session that died twice is telling you something. Nothing counted
     # before, so `resume_implementation` was re-reported forever on work that
     # had already failed twice.
-    (if .resume_count >= 2
+    #
+    # Unless the work has since LANDED (#707): #683 was handed back twice, then
+    # a third, reframed attempt merged as PR #686. `resume_count` never
+    # decrements, so the escalation kept firing on a fix that is already on
+    # main. A merged PR for the issue means the handbacks are history, not a
+    # live "not implementable" signal.
+    (if .resume_count >= 2 and .merged_pr == null
      then {issue: .number, action: "escalated",
            why: "\(.resume_count) implementation sessions have been handed back",
            detail: "the item is not implementable as specified -- decide, or send it back to Analysis"}
@@ -271,6 +277,20 @@ actions=$(printf '%s' "$digest" | jq \
      then {issue: .number, action: "prune_worktree",
            why: "worktree \(.worktree_branch) already merged",
            detail: "hand to sweep-prs"}
+     else empty end),
+
+    # IN VERIFICATION IS BOARD-ONLY (#707). The column says the fix is on main
+    # and in a beta build, awaiting a stable release -- but that lives in a
+    # Project field the reporter cannot see. #683 sat here for weeks with no
+    # label and no status comment on the issue itself; a reporter reading it
+    # saw only stale WIP notes. Fire ONCE per issue: post the fix-status
+    # comment as the PO and apply `awaiting-release`, which then suppresses
+    # this on every later tick. Closing still waits for the graduation PR.
+    (if .column == "In Verification"
+        and ((.labels | index("awaiting-release")) | not)
+     then {issue: .number, action: "announce_verification",
+           why: "In Verification (fix in #\(.merged_pr // 0) is on main / in beta) but the issue carries no visible fix-status signal",
+           detail: "as the PO, comment the fix status (merged in #\(.merged_pr // 0), shipped in beta, closes on the stable release) and apply the `awaiting-release` label"}
      else empty end),
 
     # An open issue with no labels at all is unfiled. Real and common.
@@ -604,6 +624,10 @@ actions=$(printf '%s' "$digest" | jq \
   # pass with start new work.
   | map(. + {rank:
       (if .action == "escalated" then 0
+       # In Verification sits right after escalations in the flow-policy
+       # ladder ("graduate: cut the release, close the issue") -- landed work,
+       # above the PRs still in flight at rank 2.
+       elif .action == "announce_verification" then 1
        elif .action == "mark_ready" or .action == "awaiting_maintainer"
             or .action == "request_review" or .action == "rework_review"
             or .action == "resolve_conflict" or .action == "undiffable_pr" then 2

@@ -321,7 +321,7 @@ class TestHAStatisticsDispatch:
 class TestManagedLoadsSubtraction:
     """Issue #706: managed_load_sensors excludes a load from the baseline."""
 
-    def test_forecast_reflects_residual_after_subtracting_managed_load(self):
+    def test_forecast_reflects_residual_after_subtracting_managed_load(self) -> None:
         """A flat managed load subtracted from a flat base halves the forecast."""
         hourly_kwh = [2.0] * 24
         ev_hourly_kwh = [1.0] * 24
@@ -346,7 +346,7 @@ class TestManagedLoadsSubtraction:
         assert len(result) == 96
         assert all(v == pytest.approx(0.25) for v in result)
 
-    def test_no_managed_loads_leaves_forecast_unchanged(self):
+    def test_no_managed_loads_leaves_forecast_unchanged(self) -> None:
         """Baseline behaviour is unaffected when managed_load_sensors is empty."""
         hourly_kwh = [2.0] * 24
         stats = _make_hourly_stats(hourly_kwh)
@@ -362,7 +362,7 @@ class TestManagedLoadsSubtraction:
 
         assert all(v == pytest.approx(0.5) for v in result)
 
-    def test_missing_managed_load_statistics_raises(self):
+    def test_missing_managed_load_statistics_raises(self) -> None:
         """A configured managed-load sensor with no statistics data is a hard error,
         not a silent skip -- the residual would otherwise silently overstate load."""
         hourly_kwh = [2.0] * 24

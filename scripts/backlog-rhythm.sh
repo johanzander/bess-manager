@@ -61,6 +61,32 @@ ANALYSIS_WIP_LIMIT="${RHYTHM_ANALYSIS_WIP_LIMIT:-8}"
 # clears on its own -- so this is a loop retry, not a maintainer escalation.
 ANALYZE_STALE_HOURS="${RHYTHM_ANALYZE_STALE_HOURS:-6}"
 
+# TOOLING FRESHNESS. The board data this pass reads is always live (gh API),
+# but the pass ITSELF -- this script, backlog-digest.sh and the backlog
+# SKILL.md -- runs from whatever checkout the loop was started in, and that is
+# never refreshed mid-loop. The local `main` checkout is routinely stale, so a
+# long-running `/loop /backlog` can be executing week-old logic without a hint
+# of it. A read-only fetch plus a behind-count against origin/main for the
+# tooling paths makes it visible on every path, the same way `WIP n/3` does --
+# it never pulls (wrong in a worktree, and swapping the skill under a live tick
+# is worse than running one tick stale). `RHYTHM_SKIP_FETCH=1` skips only the
+# network call and compares against whatever origin/main is already local;
+# `RHYTHM_TOOLING_REF` overrides the ref. Skipped entirely under the test seam.
+TOOLING_REF="${RHYTHM_TOOLING_REF:-origin/main}"
+tooling_behind=null
+if [ -z "${RHYTHM_DIGEST_FILE:-}" ] \
+   && root=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null); then
+    if [ -z "${RHYTHM_SKIP_FETCH:-}" ]; then
+        git -C "$root" fetch --quiet "${TOOLING_REF%%/*}" 2>/dev/null || true
+    fi
+    if git -C "$root" rev-parse --verify --quiet "$TOOLING_REF" >/dev/null 2>&1; then
+        tooling_behind=$(git -C "$root" rev-list --count \
+            "HEAD..$TOOLING_REF" -- \
+            scripts/backlog-digest.sh scripts/backlog-rhythm.sh \
+            .claude/skills/backlog/ 2>/dev/null || echo null)
+    fi
+fi
+
 # `RHYTHM_DIGEST_FILE` and `RHYTHM_PRS_FILE` are test seams, the same shape as
 # `BESS_ENV_FILE` in gh-agent.sh: they let the rules be exercised against
 # fixtures without a network round-trip or a live board. Unset in normal use.
@@ -94,6 +120,8 @@ actions=$(printf '%s' "$digest" | jq \
     --argjson wip_limit "$WIP_LIMIT" \
     --argjson analysis_wip_limit "$ANALYSIS_WIP_LIMIT" \
     --argjson analyze_stale_hours "$ANALYZE_STALE_HOURS" \
+    --argjson tooling_behind "$tooling_behind" \
+    --arg tooling_ref "$TOOLING_REF" \
     --argjson prs "$prs" \
     --arg owner "$owner" '
   # Board cards for PRs, keyed by number. Absent on an older digest, so this
@@ -715,6 +743,11 @@ actions=$(printf '%s' "$digest" | jq \
       # for the same reason as `wip`: when the pass pulls nothing new into
       # analysis, the operator needs to see it is because the column is full.
       analysis: {count: $analysis_wip, limit: $analysis_wip_limit, over: $analysis_over},
+      # Commits on `$tooling_ref` not in HEAD that touch the backlog scripts or
+      # SKILL.md -- i.e. how far behind the logic running right now is. null
+      # when the check was skipped (test seam, not a git repo, ref not present,
+      # or the fetch/rev-list failed). Reported on every path like `wip`.
+      tooling: {behind: $tooling_behind, ref: $tooling_ref},
       # PRs whose diff could not be read this pass -- see $collision_unknown
       # above. Reported the same way $wip is: a count and the list, on every
       # path, because a suppressed dispatch queue that does not say why is
@@ -791,6 +824,15 @@ analysis_line=$(printf '%s' "$actions" | jq -r '.analysis
                   + " -- promote analysed items to Ready for Dev before analysing more"
     else "  ANALYSIS " + (.count|tostring) + "/" + (.limit|tostring) end')
 
+# Also every-path: the logic running this tick is behind origin/main. Empty
+# unless the check ran AND found the backlog tooling stale -- a fresh or
+# skipped check says nothing.
+tooling_line=$(printf '%s' "$actions" | jq -r '.tooling
+  | if (.behind // 0) > 0
+    then "  TOOLING " + (.behind|tostring) + " commit(s) behind " + .ref
+         + " -- restart the loop from an updated checkout"
+    else "" end')
+
 # Also reported on every path, same reasoning as $wip_line: a non-empty
 # undiffable set silently holds every dispatchable action shut, and that is
 # exactly the moment the operator needs to be told why.
@@ -805,6 +847,7 @@ if [ "$due" -eq 0 ]; then
     echo "RHYTHM: nothing due."
     printf '%s\n' "$wip_line"
     printf '%s\n' "$analysis_line"
+    [ -n "$tooling_line" ] && printf '%s\n' "$tooling_line"
     [ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
     [ -n "$deferred_line" ] && printf '%s\n' "$deferred_line"
     exit 0
@@ -813,6 +856,7 @@ fi
 echo "RHYTHM: $due action(s) due"
 printf '%s\n' "$wip_line"
 printf '%s\n' "$analysis_line"
+[ -n "$tooling_line" ] && printf '%s\n' "$tooling_line"
 [ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
 printf '%s' "$actions" | jq -r '
   "",

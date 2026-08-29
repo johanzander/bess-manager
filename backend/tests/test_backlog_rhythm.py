@@ -1386,6 +1386,19 @@ def test_grooming_actions_rank_together_after_dispatchable(tmp_path: Path) -> No
     assert grooming_rank > rank_by_action["dispatchable"]
 
 
+# --- tooling freshness ---------------------------------------------------
+
+
+def test_tooling_freshness_check_is_inert_under_the_test_seam(tmp_path: Path) -> None:
+    """`RHYTHM_DIGEST_FILE` is set here, so the fetch + behind-count is skipped
+    entirely -- `behind` is null and no TOOLING line can print. This pins that
+    `--argjson tooling_behind null` round-trips and the every-path print stays
+    guarded; the live behind-count is exercised by the git plumbing, not here
+    (it would need a network fetch)."""
+    result = _run(tmp_path, [_item(1, labels=["bug"], last_comment=_comment(1))])
+    assert result["tooling"] == {"behind": None, "ref": "origin/main"}
+
+
 # --- the WIP limit --------------------------------------------------------
 
 

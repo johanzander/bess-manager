@@ -281,6 +281,18 @@ comparison over the digest, so a quiet backlog costs one process instead of a
 model pass, and `RHYTHM: nothing due.` is a legitimate noop tick. **Do not
 re-derive these by reading issues; act on what it lists.**
 
+**Board data is always live** (the digest reads `gh`), but the pass *logic* —
+this script, `backlog-digest.sh`, this skill — runs from the checkout the loop
+started in and is never refreshed mid-loop. Each tick does a read-only
+`git fetch` and prints
+
+    TOOLING 6 commit(s) behind origin/main -- restart the loop from an updated checkout
+
+when the backlog tooling paths are behind. It never pulls (wrong in a
+worktree; swapping the skill under a live tick is worse than one stale tick) —
+stop the loop and restart it from an up-to-date checkout. `RHYTHM_SKIP_FETCH=1`
+skips just the network call; `RHYTHM_TOOLING_REF` overrides the ref.
+
 Why it exists: every follow-up rule in this skill had been written down and
 **none had ever fired.** They each needed a model to notice them and nothing
 scheduled one, so the 14-day chase, the 28-day park and the reporter-replied

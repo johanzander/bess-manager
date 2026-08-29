@@ -296,12 +296,22 @@ jq -n \
   # Matches a worktree whose path OR branch contains the issue number in a
   # delimited position: preceded by start-of-string, "-" or "/"; followed by
   # end-of-string, "-" or "_". Covers "issue-542", "fix-542-...",
-  # "fix/issue-542-...", "design-466-..." without matching an unrelated
-  # number that merely contains "542" as a substring (e.g. "15420").
+  # "fix/issue-542-..." without matching an unrelated number that merely
+  # contains "542" as a substring (e.g. "15420").
   def issue_boundary($n): "(^|[-/])\($n)([-_]|$)";
 
+  # Scratch worktrees -- `pin-<n>-...` (scenario pinning), `design-<n>-...`
+  # (design docs) and `bench-...` (benchmarking), optionally under the
+  # `worktree-` prefix EnterWorktree adds -- carry an issue number but are not
+  # implementation branches. Joining them to an issue made a leftover pin
+  # worktree pin the issue to In Progress for good (#602, #707). The number is
+  # matched anywhere after the prefix so `worktree-pin-602-evening-carry` is
+  # caught by its branch as well as its path basename.
+  def is_scratch($s): ($s // "") | test("(^|/)(worktree-)?(pin|design|bench)-");
+
   def matches_issue($w; $n):
-    ($w.path | test(issue_boundary($n))) or ($w.branch | test(issue_boundary($n)));
+    (is_scratch($w.path) or is_scratch($w.branch) | not)
+    and (($w.path | test(issue_boundary($n))) or ($w.branch | test(issue_boundary($n))));
 
   # Returns the whole worktree record, not just its path: the branch is needed
   # to decide whether that worktree is still live (see stale_worktree below).
@@ -453,23 +463,37 @@ jq -n \
   # condition was left out because no board existed and it would have made
   # Ready unreachable. The board exists, and every item carries P1-P4.
   #
-  # PHASE COMES FROM ARTIFACTS. `Status` says what stage the work is at;
-  # `Awaiting` says who is being waited on, and the two are orthogonal -- a
-  # wait no longer rewrites the phase. The safety property survives in
-  # `Ready for Dev` below, which still requires no blocker and no wait, so an
-  # unsettled item cannot be dispatched however far its analysis got.
+  # PHASE COMES FROM ARTIFACTS, with one override a wait DOES rewrite (#707).
+  # `Status` is the stage, `Awaiting` is the wait -- mostly orthogonal, but a
+  # recorded wait (or `blocked`) pulls the item back to Analysis over a bare
+  # worktree or a still-draft PR, because unsettled scope must not read as
+  # progress. It does NOT override In Review -- a PR that is out of draft is
+  # genuinely in the review loop -- and the rhythm pass ranks the wait
+  # separately.
   #
-  # ORDER IS THE CONTENT. Live work outranks landed work: an issue whose
-  # graduation PR is still open is In Review, not In Verification.
+  # DRAFT IS NOT IN REVIEW (#707). An open PR only means In Review once it is
+  # out of draft -- the review loop has actually started. A draft PR is In
+  # Progress: the branch and PR exist, nothing is reviewing them yet. This is
+  # what lets #162 (draft PR, parked for the reporter) read as In Progress, and
+  # as Analysis once an `Awaiting` is set on it.
+  #
+  # ORDER IS THE CONTENT. Active work outranks landed work: In Progress (a live
+  # worktree or an open draft PR) is checked before In Verification, so an
+  # issue with a merged intermediate PR AND an active follow-up branch reads
+  # as In Progress, not as verified. A stray merged-and-done issue with a rot
+  # worktree does not hit this -- scratch worktrees are excluded by
+  # `matches_issue` and a genuinely merged branch is caught by
+  # `worktree_is_stale`, so `$wt_live` is already false for both (#602).
   def column($labels; $open_prs; $merged_pr; $wt_live; $awaiting; $priority; $blocked):
-      if ($open_prs | length) > 0 then "In Review"
-      elif $wt_live then "In Progress"
-      elif $merged_pr != null then "In Verification"
-      elif ($labels | index("analyzed")) and $priority != null
-           and ($blocked | not) and $awaiting == null then "Ready for Dev"
-      elif ($labels | index("analyzed")) then "Analysis"
-      elif $blocked or $awaiting != null then "Analysis"
-      else "Backlog" end;
+      (any($open_prs[]; .isDraft != true)) as $in_review
+      | (($wt_live) or (any($open_prs[]; .isDraft == true))) as $in_progress
+      | if $in_review then "In Review"
+        elif $blocked or $awaiting != null then "Analysis"
+        elif $in_progress then "In Progress"
+        elif $merged_pr != null then "In Verification"
+        elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
+        elif ($labels | index("analyzed")) then "Analysis"
+        else "Backlog" end;
 
   {
     counts: {
@@ -607,6 +631,48 @@ jq -n \
       # Adding it to the board is a triage action, not a bug in the item.
       [ $issues[] | select(board_status(.number) == null)
         | {kind: "issue_no_card", ref: (.number | tostring), detail: .title} ]
+      +
+      # A PullRequest CARD whose PR is no longer open (#707 / #638). A PR card
+      # exists only to carry a deferral decision (`Priority` / `Awaiting`)
+      # while the PR is open -- `backlog-rhythm.sh` joins `pr_board` against
+      # the OPEN-PR list, so once the PR closes or merges its card is
+      # reconciled by nothing: not `items` (issues only), not the rest of
+      # `orphans`, not any rhythm action. It just sits in whatever column it
+      # was last in -- #638, a closed draft, sat in `In Review` indefinitely.
+      # A merged PR card is equally moot unless it has reached `Done`.
+      ( [ $prs[].number ] as $open_pr_nums
+        | [ $merged_prs[].number ] as $merged_pr_nums
+        | [ $board.items[]?
+            | select(.content.type? == "PullRequest")
+            | . as $card
+            | ($card.content.number) as $pn
+            | select(($open_pr_nums | index($pn)) == null)
+            | select(($card.status // "") != "Done")
+            | (($merged_pr_nums | index($pn)) != null) as $is_merged
+            | {kind: "stale_pr_card",
+               ref: ($pn | tostring),
+               detail: (if $is_merged
+                        then "PR #\($pn) has merged; card still in \($card.status // "no status")"
+                        else "PR #\($pn) is closed; card still in \($card.status // "no status")"
+                        end)} ] )
+      +
+      # An Issue CARD whose issue is no longer open (#707). The mirror of
+      # `issue_no_card`: that flags an open issue with no card, this flags a
+      # card whose issue has closed or been deleted. `items` iterates only the
+      # open-issue list, so the card of a closed issue -- which should have
+      # moved to Done -- is reconciled by nothing and sits in whatever column
+      # it held. `Done` cards are the expected resting state and are not flagged.
+      ( [ $issues[].number ] as $open_issue_nums
+        | [ $board.items[]?
+            | select((.content.type? // "Issue") == "Issue")
+            | . as $card
+            | (.content.number?) as $in
+            | select($in != null)
+            | select(($open_issue_nums | index($in)) == null)
+            | select(($card.status // "") != "Done")
+            | {kind: "stale_issue_card",
+               ref: ($in | tostring),
+               detail: "issue #\($in) is closed; card still in \($card.status // "no status")"} ] )
     )
   }
 '

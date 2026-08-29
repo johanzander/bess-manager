@@ -138,7 +138,13 @@ actions=$(printf '%s' "$digest" | jq \
     # A session that died twice is telling you something. Nothing counted
     # before, so `resume_implementation` was re-reported forever on work that
     # had already failed twice.
-    (if .resume_count >= 2
+    #
+    # Unless the work has since LANDED (#707): #683 was handed back twice, then
+    # a third, reframed attempt merged as PR #686. `resume_count` never
+    # decrements, so the escalation kept firing on a fix that is already on
+    # main. A merged PR for the issue means the handbacks are history, not a
+    # live "not implementable" signal.
+    (if .resume_count >= 2 and .merged_pr == null
      then {issue: .number, action: "escalated",
            why: "\(.resume_count) implementation sessions have been handed back",
            detail: "the item is not implementable as specified -- decide, or send it back to Analysis"}
@@ -273,6 +279,20 @@ actions=$(printf '%s' "$digest" | jq \
            detail: "hand to sweep-prs"}
      else empty end),
 
+    # IN VERIFICATION IS BOARD-ONLY (#707). The column says the fix is on main
+    # and in a beta build, awaiting a stable release -- but that lives in a
+    # Project field the reporter cannot see. #683 sat here for weeks with no
+    # label and no status comment on the issue itself; a reporter reading it
+    # saw only stale WIP notes. Fire ONCE per issue: post the fix-status
+    # comment as the PO and apply `awaiting-release`, which then suppresses
+    # this on every later tick. Closing still waits for the graduation PR.
+    (if .column == "In Verification"
+        and ((.labels | index("awaiting-release")) | not)
+     then {issue: .number, action: "announce_verification",
+           why: "In Verification (fix in #\(.merged_pr // 0) is on main / in beta) but the issue carries no visible fix-status signal",
+           detail: "as the PO, comment the fix status (merged in #\(.merged_pr // 0), shipped in beta, closes on the stable release) and apply the `awaiting-release` label"}
+     else empty end),
+
     # An open issue with no labels at all is unfiled. Real and common.
     (if (.labels | length) == 0
      then {issue: .number, action: "triage_labels",
@@ -349,6 +369,25 @@ actions=$(printf '%s' "$digest" | jq \
       | {pr: ., action: "undiffable_pr",
          why: "gh pr diff failed for this PR; the in-flight file set is incomplete",
          detail: "dispatch is held for every Ready for Dev item until this PR diffs cleanly -- rerun the digest"}
+    ]
+
+  # A CARD whose issue or PR is no longer open (#707 / #638). The digest
+  # surfaces these in `orphans` because `items` iterates only the open-issue
+  # list and `pr_board` is joined only against the OPEN-PR list, so a stale
+  # card is reconciled by nothing otherwise -- it just sits in whatever column
+  # it was last in (#638 sat in In Review after its draft closed). Ranked with
+  # the grooming/board actions.
+  + [ (.orphans // [])[]
+      | select(.kind == "stale_pr_card")
+      | {pr: (.ref | tonumber), action: "archive_pr_card",
+         why: .detail,
+         detail: "move the card to Done (merged) or delete it (closed unmerged) -- a PR card only carries a deferral while its PR is open"}
+    ]
+  + [ (.orphans // [])[]
+      | select(.kind == "stale_issue_card")
+      | {issue: (.ref | tonumber), action: "move_card",
+         why: .detail,
+         detail: "move the card to Done -- the issue is closed"}
     ]
 
   # --- the PR half -------------------------------------------------------
@@ -585,6 +624,10 @@ actions=$(printf '%s' "$digest" | jq \
   # pass with start new work.
   | map(. + {rank:
       (if .action == "escalated" then 0
+       # In Verification sits right after escalations in the flow-policy
+       # ladder ("graduate: cut the release, close the issue") -- landed work,
+       # above the PRs still in flight at rank 2.
+       elif .action == "announce_verification" then 1
        elif .action == "mark_ready" or .action == "awaiting_maintainer"
             or .action == "request_review" or .action == "rework_review"
             or .action == "resolve_conflict" or .action == "undiffable_pr" then 2
@@ -596,6 +639,7 @@ actions=$(printf '%s' "$digest" | jq \
             or .action == "autonomous_analyze" then 5
        elif .action == "set_awaiting" or .action == "add_card"
             or .action == "set_priority" or .action == "move_card"
+            or .action == "archive_pr_card"
             or .action == "triage_labels" then 6
        # Rank 9 is not a column. It is the catch-all for an action name
        # this function does not know about -- its rank branch is missing,

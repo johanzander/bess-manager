@@ -74,20 +74,37 @@ string comparison, not a translation.
 
 ## States and transitions
 
-`Status` is the phase; `Awaiting` is the wait; the two are orthogonal. One
-column used to do both jobs — the digest derived it as "if a PR exists, `In
+`Status` is the phase; `Awaiting` is the wait; the two are *mostly* orthogonal.
+One column used to do both jobs — the digest derived it as "if a PR exists, `In
 Review`", first and outranking everything else, so a never-reviewed draft, a
 conflicted draft, an approved-and-waiting PR and a merged-but-unreleased fix
 all reported the same state. Splitting them is what makes each state carry
 exactly one next action.
 
+A wait *does* rewrite the phase (#707): a recorded `Awaiting` (or a `blocked`
+label / open `Blocked by #N`) pulls the item back to `Analysis` over a bare
+worktree, a still-draft PR, **or a merged-but-unreleased fix** — unsettled
+scope must not read as progress. The one artifact it does **not** override is
+`In Review`: a PR that is out of draft is genuinely in the loop, and the
+rhythm pass ranks the wait separately there.
+
+And a **draft PR is not `In Review`** (#707): an open PR only means `In Review`
+once it is out of draft. A draft PR with no review is `In Progress` — the
+branch and PR exist, nothing is reviewing them yet.
+
+Full order, highest first: **non-draft PR** (`In Review`) → **wait/block**
+(`Analysis`) → **draft PR or live worktree** (`In Progress`) → **merged fix**
+(`In Verification`) → analysed+prioritised (`Ready for Dev`) → analysed
+(`Analysis`) → `Backlog`. Active work outranks landed work, so a merged
+intermediate PR plus an active follow-up branch reads as `In Progress`.
+
 | Status | Means | Exit |
 |---|---|---|
 | `Backlog` | captured, not analysed | analysis lands |
-| `Analysis` | scope or approach unsettled | Definition of Ready met and priority set |
+| `Analysis` | scope or approach unsettled, **or a recorded wait over a worktree / draft PR** | Definition of Ready met and priority set |
 | `Ready for Dev` | analysed, prioritised, unblocked | dispatch |
-| `In Progress` | branch exists, no open PR | a PR opens |
-| `In Review` | one or more open PRs, loop running | all its PRs merge |
+| `In Progress` | branch exists — no open PR, or a draft PR with no review | the PR goes out of draft |
+| `In Review` | one or more **non-draft** open PRs, loop running | all its PRs merge |
 | `In Verification` | on main, not yet in a stable release | graduation PR closes the issue |
 | `Done` | shipped stable | — |
 
@@ -158,12 +175,15 @@ caused a real misclassification:
 | `blocked` | `blocked` label, or a `Blocked by #N` whose blocker is **still open**. Fails Ready outright. |
 | `blocked_by` / `blocked_by_open` | Every parsed reference, and the subset still open. Only the latter blocks — a `Blocked by #N` line is never edited out once N lands, so treating the raw scan as unresolved pins an item out of Ready forever. |
 
-**A wait outranks a live worktree, deliberately.** An item with a recorded wait
-reports *Analysis* even when a worktree is checked out for it, because unsettled
-scope must not read as progress. The worktree is still reported on the item
-(`worktree`, `worktree_branch`), so active undelivered code stays visible — the
-wait changes the column, not the evidence. Check those fields before assuming an
-*Analysis* item has no code behind it.
+**A wait outranks a live worktree, a draft PR, and a merged-but-unreleased fix
+— deliberately (#707).** An item with a recorded wait reports *Analysis* even
+when a worktree is checked out, a draft PR is open, or a fix has merged to
+main, because unsettled scope must not read as progress. It does *not* outrank
+a non-draft PR (*In Review*) — that work is genuinely in the review loop. The
+worktree / PR is still reported on the item (`worktree`, `worktree_branch`,
+`prs`, `merged_pr`), so active or landed code stays visible — the wait changes
+the column, not the evidence. Check those fields before assuming an *Analysis*
+item has no code behind it.
 
 **A human comment is not a wait.** `awaiting: discussion` used to be returned
 for any human comment, which pushed items to *Analysis* for ordinary traffic —
@@ -241,9 +261,12 @@ Never auto-park an active conversation, and never chase a reporter for
 something an upstream vendor owns.
 
 Also review the digest's `orphans` list — worktrees with no matching open
-issue, PRs with no `fixes/closes/resolves` reference, and open issues with no
-board card (`issue_no_card`). Hand worktree or PR rot to `sweep-prs`; a missing
-card is yours to add.
+issue, PRs with no `fixes/closes/resolves` reference, open issues with no
+board card (`issue_no_card`), **PullRequest cards whose PR has closed or
+merged** (`stale_pr_card`), and **Issue cards whose issue has closed**
+(`stale_issue_card`). Hand worktree or PR rot to `sweep-prs`; a missing card
+is yours to add; a stale PR card is yours to archive (`archive_pr_card`); a
+stale issue card moves to *Done* (`move_card`).
 
 ## Verb: rhythm — the unattended pass
 
@@ -267,7 +290,8 @@ than sorted alphabetically, and printed in that order. Who does what:
 
 | Action | Do |
 |---|---|
-| `escalated` | **Read first, always** — rank 0, above every other action. Three sources, each meaning something different: `Awaiting: maintainer` on the board (read the open question, decide, or send it back to *Analysis* by clearing `Awaiting` and re-opening the scope); `resume_count >= 2` (two implementation sessions have already been handed back on this issue — it is not implementable as specified, so decide or re-scope it, don't dispatch a third); and, on a PR, 3 `CHANGES_REQUESTED` rounds with no intervening `APPROVED` (the reviewer and the diff disagree about the design, and a fourth round will not settle it) |
+| `escalated` | **Read first, always** — rank 0, above every other action. Three sources, each meaning something different: `Awaiting: maintainer` on the board (read the open question, decide, or send it back to *Analysis* by clearing `Awaiting` and re-opening the scope); `resume_count >= 2` **and no merged PR** (two implementation sessions have already been handed back on this issue — it is not implementable as specified, so decide or re-scope it, don't dispatch a third; suppressed once a fix has merged, since `resume_count` never decrements and the handbacks are then history); and, on a PR, 3 `CHANGES_REQUESTED` rounds with no intervening `APPROVED` (the reviewer and the diff disagree about the design, and a fourth round will not settle it) |
+| `announce_verification` | rank 1, right after escalations. An issue is *In Verification* — its fix is on `main` and in a beta build — but that state lives only in the Project field, so a reporter reading the issue sees no sign it is fixed (#683 sat here for weeks with only stale WIP notes). Fires **once**: as the PO, comment the fix status (merged in #N, shipped in beta, closes on the stable release) and apply the `awaiting-release` label, which suppresses it thereafter. The issue still closes only on the graduation PR |
 | `mark_ready` | Route through `/advance-pr <n>` — its `draft, APPROVED, green` row runs exactly `gh pr ready <n>`, then report it. APPROVED, green, still a draft: the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure, not a priority call |
 | `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line — the maintainer's merge is all that is left |
 | `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>` (what `/advance-pr <n>` would also run). **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
@@ -288,6 +312,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
 | `add_card` | open issue, no card on the board at all — add it to Project #1 first, **then** set `Priority`; until both exist it is unrankable and invisible to every board pass |
 | `move_card` | the card sits somewhere the evidence does not support — always move it to match `column`, never re-derive `column` to match the card |
+| `archive_pr_card` | a **PullRequest** card whose PR has closed or merged (#638). A PR card only carries a deferral while its PR is open; once it merges move the card to *Done*, once it closes unmerged delete it. Also listed under `orphans` as `stale_pr_card` |
 
 **This pass does not drive the review loop, and must not learn to.**
 `implement-issue` owns a PR from its first commit to `gh pr ready`, and now
@@ -387,7 +412,7 @@ first:
 Awaiting: maintainer  ->  read first, always — the escalation valve
 In Verification       ->  graduate: cut the release, close the issue
 In Review              ->  advance-pr toward merge
-In Progress             ->  finish the branch into a PR
+In Progress             ->  finish the branch into a PR, or take that PR out of draft
 Ready for Dev           ->  dispatch  (gated by Rules 2 and 3 below)
 Analysis                ->  groom
 Backlog                 ->  triage

@@ -642,13 +642,15 @@ def test_closed_blocked_by_reference_does_not_block(bin_dir: Path) -> None:
     assert item["column"] == "Ready for Dev"
 
 
-def test_a_wait_no_longer_outranks_a_live_worktree(
+def test_a_wait_outranks_a_live_worktree(
     bin_dir: Path,
 ) -> None:
-    """Supersedes the #623 intent test now that Task 3 makes Status and
-    Awaiting orthogonal (see task-3-brief.md). A live worktree is still real
-    progress even while a wait is recorded — the wait is reported alongside
-    it, not as a phase override.
+    """#707 reverses Task 3's Status/Awaiting orthogonality for the
+    worktree-vs-wait case: a recorded wait (here `needs-debug-log` ->
+    `reporter`) pulls the item back to Analysis even with a worktree checked
+    out, because unsettled scope must not read as progress. The worktree is
+    still reported alongside so active undelivered code stays visible -- the
+    wait changes the column, not the evidence.
     """
     issue = _issue(704, labels=[{"name": "needs-debug-log"}])
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
@@ -658,9 +660,9 @@ def test_a_wait_no_longer_outranks_a_live_worktree(
 
     item = _run(bin_dir)["items"][0]
 
-    assert item["column"] == "In Progress"
+    assert item["column"] == "Analysis"
     assert item["awaiting"] == "reporter"
-    # The code is still visible — the wait is reported, not folded into the column.
+    # The code is still visible — the wait is reported, not the column erasing it.
     assert item["worktree"] == "/repo/wt/704"
     assert item["worktree_branch"] == "fix/issue-704-live"
     assert item["stale_worktree"] is False
@@ -702,6 +704,75 @@ def test_worktree_on_an_unmerged_branch_is_in_progress(bin_dir: Path) -> None:
     assert item["column"] == "In Progress"
 
 
+def test_a_draft_pr_with_no_review_is_in_progress_not_in_review(bin_dir: Path) -> None:
+    """#707 / #162: a draft PR linked to its own issue has not entered the
+    review loop -- the branch and PR exist but nothing is reviewing them, so
+    the issue is In Progress. Only a non-draft PR promotes it to In Review."""
+    issue = _issue(162, labels=[{"name": "enhancement"}])
+    prs = [
+        _pr(
+            167,
+            body="Closes #162",
+            headRefName="feat/external-solar-mode",
+            isDraft=True,
+        )
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, []))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert [p["number"] for p in item["prs"]] == [167]
+    assert item["prs"][0]["isDraft"] is True
+    assert item["column"] == "In Progress"
+
+
+def test_a_scratch_prefixed_worktree_does_not_join_an_issue(bin_dir: Path) -> None:
+    """#707 / #602: `pin-`, `design-` and `bench-` worktrees are scenario
+    pinning and design scratch, not implementation branches. Fuzzy-matching
+    them to an issue by embedded number made a stray pin worktree pin the
+    issue to In Progress for good."""
+    issue = _issue(466, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], []))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/wt/design-466-idle-tie-break", "design-466-idle-tie-break")
+            )
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] is None
+    assert item["column"] == "Backlog"
+
+
+def test_a_merged_fix_outranks_a_stray_pin_worktree(bin_dir: Path) -> None:
+    """#707 / #602: the fix merged, but a leftover `pin-<n>-...` worktree
+    (whose own branch never became a PR, so stale-detection misses it) must
+    not keep reading as live work. With the scratch prefix excluded the merged
+    PR wins and the issue is In Verification."""
+    issue = _issue(602, labels=[{"name": "bug"}])
+    merged = [_pr(693, body="Closes #602", headRefName="fix/issue-602-terminal-value")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(
+                ("/repo/wt/pin-602-evening-carry", "worktree-pin-602-evening-carry")
+            )
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["worktree"] is None
+    assert item["column"] == "In Verification"
+
+
 def test_a_merged_pr_with_the_issue_open_is_in_verification(bin_dir: Path) -> None:
     """Merged to main, not yet in a stable release. The digest used to leave
     this period unnamed, so a fix awaiting real-world confirmation sat in
@@ -711,6 +782,26 @@ def test_a_merged_pr_with_the_issue_open_is_in_verification(bin_dir: Path) -> No
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
 
     assert _run(bin_dir)["items"][0]["column"] == "In Verification"
+
+
+def test_active_follow_up_work_over_a_merged_pr_is_in_progress(bin_dir: Path) -> None:
+    """#707: a merged intermediate PR plus a genuine (non-scratch) live
+    worktree is active follow-up work, not verified work. In Progress is
+    checked before In Verification so the branch does not read as done. The
+    #602 case does not hit this -- its worktree is a `pin-` scratch and is
+    excluded from the join entirely."""
+    issue = _issue(530, labels=[{"name": "bug"}])
+    merged = [_pr(531, body="Part of #530", headRefName="fix/issue-530-a")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(_porcelain(("/repo/wt/530", "fix/issue-530-b"))),
+    )
+
+    item = _run(bin_dir)["items"][0]
+    assert item["worktree"] == "/repo/wt/530"
+    assert item["column"] == "In Progress"
 
 
 def test_a_merged_intermediate_pr_keeps_the_issue_in_verification(
@@ -819,25 +910,41 @@ def test_a_backticked_worked_example_does_not_link_an_open_pr(
 
 
 def test_an_open_pr_outranks_a_merged_one(bin_dir: Path) -> None:
-    """A graduation PR still open means the work is In Review, not verified."""
+    """A graduation PR still open and out of draft means the work is In Review,
+    not verified."""
     issue = _issue(512, labels=[{"name": "bug"}])
-    prs = [_pr(514, body="Closes #512", headRefName="fix/issue-512-b")]
+    prs = [_pr(514, body="Closes #512", headRefName="fix/issue-512-b", isDraft=False)]
     merged = [_pr(513, body="Refs #512", headRefName="fix/issue-512-a")]
     _write_shim(bin_dir, "gh", _gh_shim([issue], prs, [], merged))
 
     assert _run(bin_dir)["items"][0]["column"] == "In Review"
 
 
-def test_a_wait_no_longer_rewrites_the_phase(bin_dir: Path) -> None:
-    """Status is the phase, Awaiting is the wait, and they are orthogonal. An
-    In Review item blocked on the maintainer must not report Analysis."""
+def test_a_non_draft_pr_still_reports_in_review_when_blocked(bin_dir: Path) -> None:
+    """A PR that is out of draft is genuinely in the review loop, so the phase
+    is In Review even with a block recorded -- the block is reported alongside
+    (`blocked`) and the rhythm pass ranks it, it does not erase the column."""
     issue = _issue(515, labels=[{"name": "bug"}, {"name": "blocked"}])
-    prs = [_pr(516, body="Refs #515", headRefName="fix/issue-515")]
+    prs = [_pr(516, body="Refs #515", headRefName="fix/issue-515", isDraft=False)]
     _write_shim(bin_dir, "gh", _gh_shim([issue], prs, []))
 
     item = _run(bin_dir)["items"][0]
     assert item["column"] == "In Review"
     assert item["blocked"] is True
+
+
+def test_a_draft_pr_carrying_a_wait_is_pulled_back_to_analysis(bin_dir: Path) -> None:
+    """#707 / #162: a draft PR has not entered review, so a recorded wait
+    (here the `blocked` label) outranks it and the issue reports Analysis. The
+    PR is still reported so the branch stays visible."""
+    issue = _issue(521, labels=[{"name": "bug"}, {"name": "blocked"}])
+    prs = [_pr(522, body="Refs #521", headRefName="fix/issue-521", isDraft=True)]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, []))
+
+    item = _run(bin_dir)["items"][0]
+    assert item["column"] == "Analysis"
+    assert item["blocked"] is True
+    assert [p["number"] for p in item["prs"]] == [522]
 
 
 def test_merged_pr_does_not_close_an_open_issue(bin_dir: Path) -> None:
@@ -1401,6 +1508,110 @@ def test_pr_board_is_empty_when_no_prs_are_carded(bin_dir: Path) -> None:
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
 
     assert _run(bin_dir)["pr_board"] == []
+
+
+def test_a_closed_prs_card_is_flagged_as_a_stale_pr_card(bin_dir: Path) -> None:
+    """#707 / #638: a PR card exists only to carry a deferral decision while
+    the PR is open. When the PR is closed unmerged it is in neither the open
+    nor the merged list, and nothing -- not `items`, not the rest of
+    `orphans` -- ever reconciles it, so its card sits in whatever column it
+    was last in. Surface it so the board verb can archive it."""
+    issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 638, "type": "PullRequest"}, "status": "In Review"},
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], cards))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_pr_card"]
+    assert [o["ref"] for o in orphans] == ["638"]
+    assert "closed" in orphans[0]["detail"]
+
+
+def test_a_merged_prs_card_not_marked_done_is_a_stale_pr_card(bin_dir: Path) -> None:
+    """#707: a PR card whose PR has merged is equally stale unless the card is
+    already in Done -- the deferral it recorded is moot once the PR lands."""
+    issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 640, "type": "PullRequest"}, "status": "In Review"},
+    ]
+    merged = [_pr(640, body="Closes #601", headRefName="fix/issue-601")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], cards, merged))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_pr_card"]
+    assert [o["ref"] for o in orphans] == ["640"]
+    assert "merged" in orphans[0]["detail"]
+
+
+def test_an_open_prs_card_is_not_a_stale_pr_card(bin_dir: Path) -> None:
+    """The carve-out: while the PR is genuinely open its card is doing its job
+    (carrying a Priority / Awaiting decision) and must not be flagged."""
+    issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 642, "type": "PullRequest"}, "status": "In Review"},
+    ]
+    prs = [_pr(642, body="Refs #601", headRefName="fix/issue-601")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], prs, cards))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_pr_card"]
+    assert orphans == []
+
+
+def test_a_pr_card_already_in_done_is_not_flagged(bin_dir: Path) -> None:
+    """Done is the terminal resting column -- neither a merged nor a
+    closed-unmerged PR card there is noise worth surfacing."""
+    issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 644, "type": "PullRequest"}, "status": "Done"},
+        {"content": {"number": 645, "type": "PullRequest"}, "status": "Done"},
+    ]
+    merged = [_pr(644, body="Closes #601", headRefName="fix/issue-601")]
+    # #645 is neither open nor merged -> closed unmerged, but it is already in Done.
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], cards, merged))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_pr_card"]
+    assert orphans == []
+
+
+def test_a_card_for_a_closed_issue_is_a_stale_issue_card(bin_dir: Path) -> None:
+    """#707: the mirror of `issue_no_card`. `items` iterates only open issues,
+    so the card of a closed issue is reconciled by nothing and sits in
+    whatever column it held -- surface it so the board verb can move it to
+    Done."""
+    open_issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 555, "type": "Issue"}, "status": "In Review"},
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([open_issue], [], cards))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_issue_card"]
+    assert [o["ref"] for o in orphans] == ["555"]
+    assert "closed" in orphans[0]["detail"]
+
+
+def test_a_closed_issue_card_already_in_done_is_not_flagged(bin_dir: Path) -> None:
+    open_issue = _issue(601)
+    cards = [
+        {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"},
+        {"content": {"number": 556, "type": "Issue"}, "status": "Done"},
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([open_issue], [], cards))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_issue_card"]
+    assert orphans == []
+
+
+def test_an_open_issue_card_is_not_a_stale_issue_card(bin_dir: Path) -> None:
+    issue = _issue(601)
+    card = {"content": {"number": 601, "type": "Issue"}, "status": "Backlog"}
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [card]))
+
+    orphans = [o for o in _run(bin_dir)["orphans"] if o["kind"] == "stale_issue_card"]
+    assert orphans == []
 
 
 def test_a_locked_worktree_is_reported_as_locked(bin_dir: Path) -> None:

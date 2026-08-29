@@ -149,8 +149,41 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       # own fix with the literal line `- Blocked by #100 -- part of #409` and
       # that example bounced issue #409 to In Verification. A real linkage
       # declaration is never in code markup.
-      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ]
+      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ],
+      # Any `#N` LEFT in the body once code spans and the cross-reference
+      # phrases ("Related to", "See also", "Blocked by", ...) are stripped --
+      # the same phrase list `linkage_body` uses in the digest program. Used
+      # ONLY to corroborate a branch-convention match in `merged_pr_for`: the
+      # branch name alone is not trusted to flip a column (a merged PR on
+      # `fix/issue-403-logging` whose body says "Related to #403. Not closing
+      # it" must not), but branch convention PLUS a non-cross-ref body mention
+      # of the same number is the #428/#705 case -- a merged PR that genuinely
+      # implemented the issue but, under the no-auto-close rule, carries no
+      # closing verb.
+      mentions: [ (.body // "")
+                  | strip_code_spans
+                  | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "")
+                  | scan("#([0-9]+)") | .[0] | tonumber ]
     } ]')
+
+# Closed-but-UNMERGED PRs, by branch. A worktree whose own branch is the exact
+# head of a PR the maintainer closed without merging is an ABANDONED attempt,
+# not resumable work: #428 shipped via merged PR #705 while its earlier branch
+# `feat/issue-428-consumption-forecast-series` -- the head of closed PR #437 --
+# still sat on disk, so `worktree_is_stale` (merged-only) read it as live and
+# the rhythm pass proposed `/implement-issue 428` against the dead branch on
+# every tick. Exact `headRefName` comparison only, the same discipline
+# `worktree_is_stale` applies to the merged list and for the same reason -- a
+# fuzzy issue-number match would strand a live follow-up branch the moment any
+# same-issue PR closed.
+#
+# `--state closed` returns BOTH closed-unmerged and merged PRs, so the
+# `mergedAt == null` filter is load-bearing: without it every merged branch
+# would also land here and `stale_worktree_reason` would misreport why a
+# worktree is dead.
+closed_prs=$(gh pr list --repo "$repo" --state closed --limit 200 \
+  --json number,headRefName,mergedAt \
+  | jq -c '[ .[] | select(.mergedAt == null) | {number, headRefName} ]')
 
 # Emits, per worktree, a JSON object of {path, branch, locked}. `git worktree
 # list` always emits the main checkout as its first record, and it is excluded
@@ -221,6 +254,7 @@ jq -n \
   --argjson issues "$issues" \
   --argjson prs "$prs" \
   --argjson merged_prs "$merged_prs" \
+  --argjson closed_prs "$closed_prs" \
   --argjson worktrees "$worktrees" \
   --argjson sessions "$sessions" \
   --argjson board "$board" \
@@ -319,23 +353,32 @@ jq -n \
     ([ $worktrees[] | select(matches_issue(.; $n)) ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0] end;
 
-  # A worktree is STALE when its own branch has already been merged. This is an
-  # exact branch-name comparison against the merged-PR list, deliberately not
-  # the fuzzy issue-number match used to associate a worktree with an issue:
+  # A worktree is STALE when the PR for its own branch is GONE -- merged, or
+  # closed without merging. Either way the branch will never produce a merge from
+  # here, so the worktree is rot for `sweep-prs` to prune and never resumable
+  # work. Both are an exact branch-name comparison against a PR list,
+  # deliberately not the fuzzy issue-number match used to associate a worktree
+  # with an issue:
   #
   #   - fuzzy matching is right for "which issue does this worktree belong to",
   #     since branch names embed the issue number in several shapes
-  #   - it is WRONG for "has this work landed", because a merged PR whose branch
-  #     merely mentions the issue number proves nothing about THIS branch
+  #   - it is WRONG for "has the work on THIS branch ended", because another PR whose
+  #     branch merely mentions the issue number proves nothing about THIS branch
   #
   # Getting that distinction wrong reclassified 7 open issues as Done, including
   # #118, #120 and #403 whose fixes had not shipped. It also contradicts this
   # project`s rule that a beta PR never carries `Closes #N` — an open issue with
   # a merged PR is the NORMAL state during beta graduation, not a finished one.
+  # (A stale worktree does NOT by itself close its issue -- it only stops the
+  # worktree reading as live work; the column still comes from the merged-PR
+  # scan and the labels.)
+  def worktree_dead_pr($wt):
+    if $wt == null or ($wt.branch // "") == "" then null
+    else ( [ $merged_prs[] | select(.headRefName == $wt.branch) | {number, why: "merged in #\(.number)"} ]
+         + [ $closed_prs[] | select(.headRefName == $wt.branch) | {number, why: "was the head of closed-unmerged PR #\(.number)"} ]
+         )[0] // null end;
   def worktree_is_stale($wt):
-    $wt != null
-    and ($wt.branch // "") != ""
-    and ([ $merged_prs[] | select(.headRefName == $wt.branch) ] | length) > 0;
+    worktree_dead_pr($wt) != null;
 
   def session_for($n):
     ([ $sessions[] | select(.name? == "issue-\($n)") | .name ]) as $matches
@@ -392,6 +435,25 @@ jq -n \
       }
       end;
 
+  # The most recent `@claude-bot analyze` trigger on the issue, and how long ago
+  # it was posted. Stage 2 normally finishes in minutes and stamps `analyzed` or
+  # `needs-human-review` (removing `ready-for-analysis`); a trigger that is hours
+  # old with the item still `ready-for-analysis` and unstamped means the run
+  # never completed -- most often because the workflow had no API credit. The
+  # rhythm pass reads this two ways: `autonomous_analyze` stands down while ANY
+  # analyze comment exists (so it never double-spends), and `refire_analyze`
+  # re-posts the trigger once this ages past its staleness window. Matched on the
+  # comment BODY, any author, since the PO identity posts it via gh-agent.sh.
+  def last_analyze_comment($comments):
+    ([ $comments[]? | select((.body // "") | test("@claude-bot[[:space:]]+analyze"; "i")) ]
+     | sort_by(.createdAt) | last) as $c
+    | if $c == null then null
+      else {
+        days: days_since($c.createdAt),
+        hours: ((($now | tonumber) - ($c.createdAt | fromdateiso8601)) / 3600 | floor)
+      }
+      end;
+
   # BLOCKING waits, derived from labels. Each of these means development
   # genuinely cannot start, so each one holds an item in Analysis.
   #
@@ -445,13 +507,36 @@ jq -n \
   # A worktree only means work-in-progress while nothing has superseded it.
   # A merged PR for the same issue means the branch already landed and the
   # worktree is just un-pruned rot.
-  # Merged PRs that explicitly CLOSE this issue. Matches only on the extracted
-  # closing references, never on a branch name — see worktree_is_stale for why
-  # branch-name matching is unsafe here. Reported for information; it does not
-  # move a column, because an open issue with a merged fix is the expected state
-  # until the fix graduates to a stable release.
+  #
+  # A merged PR belongs to an issue when EITHER:
+  #   (a) its body carries a work-verb reference (`fixes|closes|resolves|refs|
+  #       part of|tracking` #N -- the `refs` list), OR
+  #   (b) its head branch follows the dispatch convention `.../issue-<n>-...`
+  #       (which `run-agent.sh` and implement-issue Step 4 enforce) AND the
+  #       body still mentions `#n` once cross-reference phrases are stripped
+  #       (the `mentions` list).
+  #
+  # (b) exists because dropping the branch signal the instant a PR merges is
+  # the bug that left #428 reading `Backlog` after PR #705
+  # (`feat/issue-428-consumption-overlay`) shipped it to beta -- #705 links the
+  # issue only as a bare `#428` and a comment URL, no work verb, which is
+  # legitimate under the no-auto-close rule. The `mentions` half is what keeps
+  # (b) narrow: a merged PR on `fix/issue-403-logging` whose body says "Related
+  # to #403. Not closing it" still must NOT flip #403 -- the branch matches but
+  # the only body reference is a cross-ref phrase, which `mentions` has
+  # stripped. `prs_for` trusts the bare branch convention for OPEN PRs; the
+  # merged path is deliberately one notch stricter, because a merged PR moves a
+  # column and an open one does not.
+  #
+  # It still does not CLOSE the issue -- an open issue with a merged fix is the
+  # expected state through beta graduation. It drives the `In Verification`
+  # column and the `merged_prs` visibility list.
+  def merged_matches_issue($p; $n):
+    (($p.refs | index($n)) != null)
+    or (((($p.headRefName // "") | test("issue-\($n)(\\D|$)")))
+        and (($p.mentions | index($n)) != null));
   def merged_pr_for($n):
-    ([ $merged_prs[] | select((.refs | index($n)) != null) ]) as $matches
+    ([ $merged_prs[] | select(merged_matches_issue(.; $n)) ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0].number end;
 
   # Column names match the board`s Status options exactly (Backlog, Analysis,
@@ -465,11 +550,20 @@ jq -n \
   #
   # PHASE COMES FROM ARTIFACTS, with one override a wait DOES rewrite (#707).
   # `Status` is the stage, `Awaiting` is the wait -- mostly orthogonal, but a
-  # recorded wait (or `blocked`) pulls the item back to Analysis over a bare
+  # recorded wait (or `blocked`) pulls the item BACK to Analysis over a bare
   # worktree or a still-draft PR, because unsettled scope must not read as
   # progress. It does NOT override In Review -- a PR that is out of draft is
   # genuinely in the review loop -- and the rhythm pass ranks the wait
   # separately.
+  #
+  # "Back" is literal: the wait is a FLOOR-LOWER, never a set. It can only move
+  # an item LEFT (toward Analysis), never right. A `discussion` / `blocked` tag
+  # on a raw Backlog musing (no worktree, no PR, no `analyzed` label -- #703)
+  # must NOT be promoted to Analysis: that manufactured a `board_status` !=
+  # `column` mismatch every pass, so `move_card` yanked the card to Analysis
+  # minutes after a human moved it to Backlog, forever. The artifact/label
+  # column is computed first as `$natural`; the wait only rewrites it when
+  # `$natural` is already right of Analysis.
   #
   # DRAFT IS NOT IN REVIEW (#707). An open PR only means In Review once it is
   # out of draft -- the review loop has actually started. A draft PR is In
@@ -487,13 +581,21 @@ jq -n \
   def column($labels; $open_prs; $merged_pr; $wt_live; $awaiting; $priority; $blocked):
       (any($open_prs[]; .isDraft != true)) as $in_review
       | (($wt_live) or (any($open_prs[]; .isDraft == true))) as $in_progress
-      | if $in_review then "In Review"
-        elif $blocked or $awaiting != null then "Analysis"
-        elif $in_progress then "In Progress"
-        elif $merged_pr != null then "In Verification"
-        elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
-        elif ($labels | index("analyzed")) then "Analysis"
-        else "Backlog" end;
+      # The column the artifacts and labels imply, before any wait override.
+      | (if $in_review then "In Review"
+         elif $in_progress then "In Progress"
+         elif $merged_pr != null then "In Verification"
+         elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
+         elif ($labels | index("analyzed")) then "Analysis"
+         else "Backlog" end) as $natural
+      # A recorded wait / block pulls back to Analysis -- but only from a column
+      # right of Analysis, and never out of In Review (#707). From Backlog it is
+      # a no-op: a wait cannot promote un-analysed work.
+      | if ($blocked or $awaiting != null)
+           and $natural != "In Review"
+           and $natural != "Backlog"
+        then "Analysis"
+        else $natural end;
 
   {
     counts: {
@@ -550,16 +652,24 @@ jq -n \
                             else "label" end),
           awaiting_suggested: $aw_label,
           last_comment: last_comment(.comments; .author.login),
+          # The last `@claude-bot analyze` trigger and its age -- `{days, hours}`
+          # or null. Drives `refire_analyze` (re-post a Stage 2 run that never
+          # completed) and stands `autonomous_analyze` down while any analyze
+          # comment exists.
+          last_analyze_comment: last_analyze_comment(.comments),
           priority: $prio,
           prs: $open_prs,
-          # Every merged PR whose body references this issue with a WORK verb
-          # (`fixes/closes/resolves/refs/part of/tracking`) -- the visibility
-          # list. `merged_pr` above is the first in the order `gh` returns
-          # (the most recent merge) and drives the In Verification column; this
-          # plural exposes all of them, sorted, so a merged
+          # Every merged PR that belongs to this issue -- a WORK-verb body
+          # reference (`fixes/closes/resolves/refs/part of/tracking`) OR the
+          # `issue-<n>` dispatch branch convention, the same association
+          # `merged_pr_for` uses. `merged_pr` above is the first in the order
+          # `gh` returns (the most recent merge) and drives the In Verification
+          # column; this plural exposes all of them, sorted, so a merged
           # intermediate PR (`Part of #N`, which must not close the issue)
           # stays visible even alongside later PRs.
-          merged_prs: ([ $merged_prs[] | select((.refs | index($i.number)) != null) | .number ] | sort),
+          merged_prs: ([ $merged_prs[]
+                         | select(merged_matches_issue(.; $i.number))
+                         | .number ] | sort),
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),
@@ -567,12 +677,16 @@ jq -n \
           # what says whether anyone is on the item — see the note where the
           # worktree list is built.
           worktree_locked: ($wt.locked // false),
-          # A worktree whose own branch has already merged is rot, and
-          # `sweep-prs` is what removes it. Flagged so a board pass reports it
-          # instead of reading it as active work: #593, #571, #542 and #466 all
-          # showed "In progress" for exactly this reason while their PRs (#618,
-          # #579, #591, #517) had already merged.
+          # A worktree whose branch has no live PR -- merged, OR closed
+          # unmerged -- is rot, and `sweep-prs` is what removes it. Flagged so a
+          # board pass reports it instead of reading it as active work: #593,
+          # #571, #542 and #466 all showed "In progress" for exactly this reason
+          # while their PRs (#618, #579, #591, #517) had already merged; #428
+          # showed it while its abandoned branch sat behind closed PR #437.
           stale_worktree: $wt_stale,
+          # Why it is stale, ready for the rhythm pass to quote verbatim:
+          # "merged in #N" or "was the head of closed-unmerged PR #N".
+          stale_worktree_reason: ((worktree_dead_pr($wt)).why // null),
           session: session_for(.number),
           resume_count: resume_count(.comments),
           blocked_by: $bb,

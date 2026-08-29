@@ -118,13 +118,17 @@ def _gh_shim(
     merged_prs: list | None = None,
     pr_files: dict[int, list[str]] | None = None,
     fail_pr_diff: list[int] | None = None,
+    closed_prs: list | None = None,
 ) -> str:
     """A `gh` that answers the subcommands the digest calls.
 
-    `pr list` is called twice with different `--state` values, so this shim
-    branches on the whole argument string rather than just `$1 $2`. Matching
-    only the subcommand returned the OPEN list for both calls, which made every
-    open PR look merged and reported every issue as having landed.
+    `pr list` is called three times with different `--state` values (open,
+    merged, closed), so this shim branches on the whole argument string rather
+    than just `$1 $2`. Matching only the subcommand returned the OPEN list for
+    every call, which made every open PR look merged and reported every issue as
+    having landed. `closed_prs` feeds the `--state closed` call that
+    `worktree_is_stale` reads to spot a worktree abandoned behind a
+    closed-unmerged PR.
 
     `pr diff <n> --name-only` answers from `pr_files`, keyed by PR number. The
     match requires `--name-only` literally in the call -- a shim that answered
@@ -142,6 +146,10 @@ def _gh_shim(
     return f"""
 merged=$(cat <<'EOF'
 {json.dumps(merged_prs or [])}
+EOF
+)
+closed=$(cat <<'EOF'
+{json.dumps(closed_prs or [])}
 EOF
 )
 pr_files_json=$(cat <<'EOF'
@@ -163,6 +171,7 @@ EOF
     ;;
   *"pr diff"*) echo "gh pr diff missing --name-only: $*" >&2; exit 1 ;;
   *"pr list"*"--state merged"*) printf '%s\\n' "$merged" ;;
+  *"pr list"*"--state closed"*) printf '%s\\n' "$closed" ;;
   *"pr list"*) cat <<'EOF'
 {json.dumps(prs)}
 EOF
@@ -426,6 +435,7 @@ EOF
     ;;
   *"pr diff "*"--name-only"*) : ;;
   *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*"--state closed"*) printf '%s\\n' '[]' ;;
   *"pr list"*)
     case "$*" in
       *isDraft*) : ;;
@@ -528,6 +538,32 @@ def test_board_awaiting_overrides_analyzed(bin_dir: Path) -> None:
     assert item["column"] == "Analysis"
     assert item["awaiting"] == "discussion"
     assert item["awaiting_source"] == "board"
+
+
+def test_board_awaiting_does_not_promote_a_backlog_item(bin_dir: Path) -> None:
+    """#703: a raw "to consider" enhancement with `Awaiting: discussion` on its
+    card and nothing else -- no worktree, no PR, no `analyzed` label. The wait
+    is a floor-lower, not a set (#707 says "pulls BACK to Analysis"), so from
+    Backlog it is a no-op. Before this, `column` came back `Analysis`, which did
+    not match the card's `Backlog`, so `move_card` yanked the card to Analysis
+    minutes after a human moved it back -- forever.
+    """
+    issue = _issue(703, labels=[{"name": "enhancement"}])
+    board = [
+        {
+            "content": {"number": 703},
+            "status": "Backlog",
+            "priority": "P3",
+            "awaiting": "discussion",
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["column"] == "Backlog"
+    assert item["board_status"] == "Backlog"  # no mismatch -> no move_card fight
+    assert item["awaiting"] == "discussion"  # the wait is still recorded
 
 
 def test_analyzed_with_priority_is_ready_for_dev(bin_dir: Path) -> None:
@@ -702,6 +738,111 @@ def test_worktree_on_an_unmerged_branch_is_in_progress(bin_dir: Path) -> None:
 
     assert item["stale_worktree"] is False
     assert item["column"] == "In Progress"
+
+
+def test_worktree_abandoned_behind_a_closed_unmerged_pr_is_stale(
+    bin_dir: Path,
+) -> None:
+    """#428: the branch never merged, but its PR (#437) was closed unmerged and
+    a differently-named branch shipped the issue. A worktree left on that dead
+    branch is an abandoned attempt, not resumable work -- the same as a merged
+    branch for staleness, with a reason string that says which."""
+    issue = _issue(428, labels=[{"name": "enhancement"}])
+    closed = [
+        {
+            "number": 437,
+            "headRefName": "feat/issue-428-consumption-forecast-series",
+            "mergedAt": None,
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], [], closed_prs=closed))
+    _write_shim(
+        bin_dir,
+        "git",
+        _git_shim(
+            _porcelain(("/repo/wt/428", "feat/issue-428-consumption-forecast-series"))
+        ),
+    )
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["stale_worktree"] is True
+    assert item["stale_worktree_reason"] == "was the head of closed-unmerged PR #437"
+    assert item["column"] != "In Progress"
+
+
+def test_a_merged_pr_on_the_issue_branch_reads_as_in_verification(
+    bin_dir: Path,
+) -> None:
+    """#428/#705: the shipping PR merged on `feat/issue-428-consumption-overlay`
+    and, under the no-auto-close rule, its body links the issue only as a bare
+    `#428` -- no work verb. Branch convention plus a non-cross-ref body mention
+    of the same number is enough to place the issue In Verification, so a board
+    pass stops reading a shipped-to-beta issue as un-started."""
+    issue = _issue(428, labels=[{"name": "enhancement"}])
+    merged = [
+        {
+            "number": 705,
+            "headRefName": "feat/issue-428-consumption-overlay",
+            "body": "Redesign from the discussion on #428. Ships the overlay.",
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] == 705
+    assert item["merged_prs"] == [705]
+    assert item["column"] == "In Verification"
+
+
+def test_a_merged_pr_on_the_issue_branch_with_only_a_cross_ref_does_not_flip(
+    bin_dir: Path,
+) -> None:
+    """The `mentions` guard: a merged PR on `fix/issue-403-logging` whose body
+    only cross-references #403 ("Related to #403. Not closing it") still must
+    not move #403 -- branch convention alone is not trusted on the merged path,
+    the same caution `test_a_merged_cross_ref_does_not_move_an_issue...` pins."""
+    issue = _issue(403, labels=[{"name": "bug"}])
+    merged = [
+        {
+            "number": 453,
+            "headRefName": "fix/issue-403-logging",
+            "body": "Related to #403. Not closing it -- leaving it open until "
+            "#456 and #457 land.",
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] is None
+    assert item["column"] != "In Verification"
+
+
+def test_last_analyze_comment_reports_the_trigger_age(bin_dir: Path) -> None:
+    """`refire_analyze` and the no-double-spend guard on `autonomous_analyze`
+    both read this: the most recent `@claude-bot analyze` comment and how long
+    ago it landed. Absent when the issue was never analyzed."""
+    never = _issue(600, labels=[{"name": "bug"}])
+    _write_shim(bin_dir, "gh", _gh_shim([never], [], []))
+    assert _run(bin_dir)["items"][0]["last_analyze_comment"] is None
+
+    fired = _issue(
+        601,
+        labels=[{"name": "bug"}],
+        comments=[
+            {
+                "body": "@claude-bot analyze",
+                "author": {"login": "bess-product-owner"},
+                "createdAt": "2000-01-01T00:00:00Z",
+            }
+        ],
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([fired], [], []))
+    lac = _run(bin_dir)["items"][0]["last_analyze_comment"]
+    assert lac is not None
+    assert lac["hours"] > 24 and lac["days"] > 1
 
 
 def test_a_draft_pr_with_no_review_is_in_progress_not_in_review(bin_dir: Path) -> None:
@@ -978,7 +1119,12 @@ def test_needs_debug_log_is_awaiting_reporter(bin_dir: Path) -> None:
 
     digest = _run(bin_dir)
 
-    assert digest["items"][0]["column"] == "Analysis"
+    # `needs-debug-log` sets `awaiting: reporter`. It does NOT move the column:
+    # the wait override is a floor-lower (#707 says "pulls BACK to Analysis"),
+    # and there is nothing to pull back -- no worktree, no PR, no `analyzed`
+    # label -- so the item stays in Backlog. The nudge/park timers key off
+    # `.awaiting`, not the column, so nothing downstream regresses.
+    assert digest["items"][0]["column"] == "Backlog"
     assert digest["items"][0]["awaiting"] == "reporter"
 
 
@@ -1051,6 +1197,7 @@ EOF
     ;;
   *"pr diff "*"--name-only"*) : ;;
   *"pr list"*"--state merged"*) printf '%s\\n' '[]' ;;
+  *"pr list"*"--state closed"*) printf '%s\\n' '[]' ;;
   *"pr list"*)
     if [ -f '{counter}' ]; then
       cat <<'EOF'

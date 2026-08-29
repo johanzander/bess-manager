@@ -88,6 +88,13 @@ scope must not read as progress. The one artifact it does **not** override is
 `In Review`: a PR that is out of draft is genuinely in the loop, and the
 rhythm pass ranks the wait separately there.
 
+"Back" is literal — the wait is a **floor-lower, never a promotion**. It only
+moves an item *left*, toward `Analysis`; it never moves one *right*. A
+`discussion` / `blocked` tag on a raw `Backlog` musing (no worktree, no PR, no
+`analyzed` label — #703) stays in `Backlog`. Promoting it manufactured a
+`board_status` ≠ `column` mismatch every pass, so `move_card` yanked the card
+back to `Analysis` minutes after a human moved it to `Backlog`, forever.
+
 And a **draft PR is not `In Review`** (#707): an open PR only means `In Review`
 once it is out of draft. A draft PR with no review is `In Progress` — the
 branch and PR exist, nothing is reviewing them yet.
@@ -101,7 +108,7 @@ intermediate PR plus an active follow-up branch reads as `In Progress`.
 | Status | Means | Exit |
 |---|---|---|
 | `Backlog` | captured, not analysed | analysis lands |
-| `Analysis` | scope or approach unsettled, **or a recorded wait over a worktree / draft PR** | Definition of Ready met and priority set |
+| `Analysis` | scope or approach unsettled, **or a recorded wait pulling an item back from a column right of Analysis** (not from Backlog) | Definition of Ready met and priority set |
 | `Ready for Dev` | analysed, prioritised, unblocked | dispatch |
 | `In Progress` | branch exists — no open PR, or a draft PR with no review | the PR goes out of draft |
 | `In Review` | one or more **non-draft** open PRs, loop running | all its PRs merge |
@@ -171,7 +178,7 @@ caused a real misclassification:
 | `awaiting_source` | `board` or `label`. A `label` source with no board value is a triage action: set the field. |
 | `awaiting_suggested` | What the labels imply, so an unset field can be reconciled without guessing. |
 | `last_comment` | `{author, days, is_reporter, is_bot}`. **The reporter-replied signal.** A comment count and a last-activity date cannot tell "the reporter answered us" from "we posted a nudge", which is why the follow-up chase never fired. |
-| `stale_worktree` | The worktree's own branch has already merged, so it is rot, not progress. Hand it to `sweep-prs`. |
+| `stale_worktree` | The worktree's own branch is dead — already merged, **or its PR was closed unmerged** (an abandoned attempt, #428) — so it is rot, not progress. `stale_worktree_reason` says which. Hand it to `sweep-prs`. |
 | `blocked` | `blocked` label, or a `Blocked by #N` whose blocker is **still open**. Fails Ready outright. |
 | `blocked_by` / `blocked_by_open` | Every parsed reference, and the subset still open. Only the latter blocks — a `Blocked by #N` line is never edited out once N lands, so treating the raw scan as unresolved pins an item out of Ready forever. |
 
@@ -179,8 +186,9 @@ caused a real misclassification:
 — deliberately (#707).** An item with a recorded wait reports *Analysis* even
 when a worktree is checked out, a draft PR is open, or a fix has merged to
 main, because unsettled scope must not read as progress. It does *not* outrank
-a non-draft PR (*In Review*) — that work is genuinely in the review loop. The
-worktree / PR is still reported on the item (`worktree`, `worktree_branch`,
+a non-draft PR (*In Review*) — that work is genuinely in the review loop — and
+it does *not* promote a bare *Backlog* item (nothing to pull back from; #703).
+The worktree / PR is still reported on the item (`worktree`, `worktree_branch`,
 `prs`, `merged_pr`), so active or landed code stays visible — the wait changes
 the column, not the evidence. Check those fields before assuming an *Analysis*
 item has no code behind it.
@@ -246,8 +254,9 @@ nothing needs a second `gh project item-list` call. Act on each mismatch:
 |---|---|
 | `board_status: null` | the issue has **no card at all**. It carries no Priority, and *Ready for Dev* requires one — so it can never become dispatchable however well it is analysed, while reading as an ordinary Backlog item. Add the card, then triage it normally. Also listed under `orphans` as `issue_no_card` |
 | card *In Progress*, no worktree, no PR | abandoned — move to *Ready for Dev*, report it |
-| `stale_worktree: true` | the branch already merged; the worktree is rot, not work. Hand to `sweep-prs`, and do not read it as progress |
-| worktree present, no session, no PR | the session died mid-issue. The branch's commits survive — resuming is `/implement-issue <n>`, whose Step 0 detects the prior work and re-enters at the right step. **Never silently relaunch**: a session that died twice is telling you something, and a background dispatch that reports `working` may have written nothing at all — verify by work product (`git -C <wt> log`, file mtimes), never by session state |
+| `stale_worktree: true` | the branch is dead — merged, or its PR closed unmerged (`stale_worktree_reason` says which); the worktree is rot, not work. Hand to `sweep-prs`, and do not read it as progress |
+| worktree present, no session, no PR, **not `stale_worktree`** | the session died mid-issue. The branch's commits survive — resuming is `/implement-issue <n>`, whose Step 0 detects the prior work and re-enters at the right step. **Never silently relaunch**: a session that died twice is telling you something, and a background dispatch that reports `working` may have written nothing at all — verify by work product (`git -C <wt> log`, file mtimes), never by session state |
+| worktree present but `stale_worktree: true` | its branch is dead (merged, or its PR closed unmerged — `stale_worktree_reason`). Not resumable — `prune_worktree` / hand to `sweep-prs`. #428 sat here: an abandoned branch behind closed PR #437 while a different branch shipped the issue |
 | `last_comment.is_reporter` and `awaiting: reporter` | the reporter answered. Re-check the Definition of Ready — this wait may be satisfied, and it is the transition nothing used to notice |
 | PR `CONFLICTING`, draft | hand to `/advance-pr <n>` — it owns the board write for a conflict escalation |
 | PR `CONFLICTING`, not a draft | hand to `sweep-prs` |
@@ -280,6 +289,18 @@ comparison over the digest, so a quiet backlog costs one process instead of a
 model pass, and `RHYTHM: nothing due.` is a legitimate noop tick. **Do not
 re-derive these by reading issues; act on what it lists.**
 
+**Board data is always live** (the digest reads `gh`), but the pass *logic* —
+this script, `backlog-digest.sh`, this skill — runs from the checkout the loop
+started in and is never refreshed mid-loop. Each tick does a read-only
+`git fetch` and prints
+
+    TOOLING 6 commit(s) behind origin/main -- restart the loop from an updated checkout
+
+when the backlog tooling paths are behind. It never pulls (wrong in a
+worktree; swapping the skill under a live tick is worse than one stale tick) —
+stop the loop and restart it from an up-to-date checkout. `RHYTHM_SKIP_FETCH=1`
+skips just the network call; `RHYTHM_TOOLING_REF` overrides the ref.
+
 Why it exists: every follow-up rule in this skill had been written down and
 **none had ever fired.** They each needed a model to notice them and nothing
 scheduled one, so the 14-day chase, the 28-day park and the reporter-replied
@@ -298,8 +319,10 @@ than sorted alphabetically, and printed in that order. Who does what:
 | `rework_review` | out of draft with changes requested: hand back to `/implement-issue <n>` — the issue that PR belongs to, resolved from its linked issue — to address them, then a fresh review |
 | `resolve_conflict` | `CONFLICTING`, which also means the PR produced **no CI run at all**. A conflicted **draft** routes to `/advance-pr <n>` — only it performs the board write that records a semantic-conflict escalation, where `sweep-prs` would only report into a chat transcript and write nothing. A conflicted **non-draft** PR has already left the review loop, so it still goes to `sweep-prs`, or resolve directly if the diff is ours |
 | `undiffable_pr` | `gh pr diff` failed for this PR, so the in-flight file set is incomplete. Dispatch is held **fleet-wide** until it clears — not just for this PR's own issue. Re-run the digest; if it recurs, the PR itself needs attention (deleted fork head, rate limit) |
-| `resume_implementation` | One action name, three shapes, routed to the cheapest tool that is actually safe. A **worktree with no PR** (a session died mid-issue) is `/implement-issue <n>` — a real session, because the implementation itself is unfinished, and Step 0 resumes the branch from the earliest incomplete step. A **draft PR whose next step is mechanical** — no review yet, a review still in flight, or an approved draft with checks not yet green — is `/advance-pr <n>` directly: request the review, resolve a conflict, or flip it ready, in one cheap step, no session. A **draft PR carrying `CHANGES_REQUESTED`** is `/implement-issue <n>` — the one PR shape that stays there, because only that session holds the Step 2 diagnosis and Step 3 scope assessment needed to tell a real review finding apart from a decision Step 3 already made and rejected on purpose; `advance-pr` itself always hands a `CHANGES_REQUESTED` draft straight back to `/implement-issue <n>` too, whatever caller invoked it, so dispatching there directly from here just skips the redundant round trip through `advance-pr`. Never restart any of the three, the branch commits are the only copy |
-| `prune_worktree` | the worktree's own branch already merged; it is rot, not progress. Hand to `sweep-prs` |
+| `resume_implementation` | One action name, three shapes, routed to the cheapest tool that is actually safe. A **live worktree with no PR** (a session died mid-issue — and `stale_worktree` is false; a dead branch is `prune_worktree`, not this) is `/implement-issue <n>` — a real session, because the implementation itself is unfinished, and Step 0 resumes the branch from the earliest incomplete step. A **draft PR whose next step is mechanical** — no review yet, a review still in flight, or an approved draft with checks not yet green — is `/advance-pr <n>` directly: request the review, resolve a conflict, or flip it ready, in one cheap step, no session. A **draft PR carrying `CHANGES_REQUESTED`** is `/implement-issue <n>` — the one PR shape that stays there, because only that session holds the Step 2 diagnosis and Step 3 scope assessment needed to tell a real review finding apart from a decision Step 3 already made and rejected on purpose; `advance-pr` itself always hands a `CHANGES_REQUESTED` draft straight back to `/implement-issue <n>` too, whatever caller invoked it, so dispatching there directly from here just skips the redundant round trip through `advance-pr`. Never restart any of the three, the branch commits are the only copy |
+| `prune_worktree` | the worktree's own branch is dead — merged, or its PR closed unmerged (the `why` line quotes `stale_worktree_reason`); it is rot, not progress. Hand to `sweep-prs` |
+| `refire_analyze` | a `@claude-bot analyze` trigger is on the issue but Stage 2 never completed — still `ready-for-analysis`, no `analyzed` / `needs-human-review` label, and the trigger is older than the staleness window (`RHYTHM_ANALYZE_STALE_HOURS`, default 6h). The usual cause is the workflow being out of API credit at the time. Under `/loop` this is a plain retry: re-post `@claude-bot analyze` as the PO. **Not** a maintainer escalation. A trigger younger than the window is a run that may still be working — the pass fires neither this nor `autonomous_analyze` and just waits |
+| `analysis_deferred` | a tier-1 bug is ready to analyse but the Analysis column is at its WIP limit (`RHYTHM_ANALYSIS_WIP_LIMIT`, default 8). Do **not** fire Stage 2 — groom Analysis toward *Ready for Dev* first; the item is still counted and listed, and `autonomous_analyze` re-proposes once Analysis is back under the limit |
 | `dispatchable` | propose for dispatch — needs the maintainer's go-ahead, and only fires when `predicted_files` is set (see the touch-set gate under Dispatch) |
 | `queued_behind` | do nothing; it is correctly waiting on an in-flight PR that already touches one of its predicted files. Recheck once that PR lands |
 | `cluster` | dispatch the named items as **one** unit of work — one branch, one PR. Two Ready items that predict overlapping files cost less merged into one dispatch than as two PRs plus a conflict |
@@ -308,7 +331,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | `surface_discussion` | summarise the thread, put the open question to the maintainer. **Never auto-park an open conversation** |
 | `nudge_reporter` | one nudge, as the PO identity |
 | `park` | move to *Backlog* — the chase went unanswered |
-| `autonomous_analyze` | the tier-1 carve-out, computed from evidence not the board field: post `@claude-bot analyze` as the PO (`scripts/gh-agent.sh --as po issue comment <n> --body "@claude-bot analyze"`), after confirming no prior analyze on the issue. Fires even when a stale `Awaiting` would otherwise quiet the item, because `ready-for-analysis` already proves the log is in; stands down when the item has Stage 2 history (`analyzed` / `needs-human-review`) or the card holds `Awaiting: maintainer` (see Autonomous spend) |
+| `autonomous_analyze` | the tier-1 carve-out, computed from evidence not the board field: post `@claude-bot analyze` as the PO (`scripts/gh-agent.sh --as po issue comment <n> --body "@claude-bot analyze"`). The no-prior-analyze check is now **in the script** (`last_analyze_comment`) — this fires only when the issue has *never* been analyzed; a stalled prior run is `refire_analyze` instead. Fires even when a stale `Awaiting` would otherwise quiet the item, because `ready-for-analysis` already proves the log is in; stands down when the item has Stage 2 history (`analyzed` / `needs-human-review`), the card holds `Awaiting: maintainer` (see Autonomous spend), or the Analysis column is at its WIP limit (`analysis_deferred`) |
 | `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label |
 | `add_card` | open issue, no card on the board at all — add it to Project #1 first, **then** set `Priority`; until both exist it is unrankable and invisible to every board pass |
 | `move_card` | the card sits somewhere the evidence does not support — always move it to match `column`, never re-derive `column` to match the card |
@@ -453,6 +476,24 @@ anything new starts. A limit low enough to hold also makes same-file
 collisions rare on its own, without the touch-set gate having to catch every
 one of them.
 
+### The Analysis WIP limit: 8
+
+The same rule one column to the left. Analysis is only worth anything once its
+output reaches *Ready for Dev*, so an Analysis column holding 18 items is 18
+pieces of half-finished work, not progress — and every tick the pass was still
+pulling a new bug in for Stage 2 on top of them. At or above
+`RHYTHM_ANALYSIS_WIP_LIMIT` (default 8), `autonomous_analyze` is suppressed —
+the held bugs surface as `analysis_deferred`, counted and listed, never
+dropped — and the pass reports it on every path:
+
+    ANALYSIS 18/8 -- promote analysed items to Ready for Dev before analysing more
+
+It does **not** gate `refire_analyze`: re-poking a Stage 2 run that stalled
+finishes an item already in Analysis rather than adding one. And `bug` still
+pre-empts `feature` — the WIP limit only decides *whether* new analysis starts;
+Rule 2 and `Verb: next` decide *what* does when it can. Do not propose a
+feature request for analysis while Analysis is over the limit.
+
 ## Verb: next
 
 Rank Backlog and Ready items in this order:
@@ -562,12 +603,19 @@ stale wait values (`reporter`, `upstream`, `discussion`) but stands down on
 `Awaiting: maintainer`, where the loop is deliberately held for your
 decision; and the same evidence makes the `park` / `nudge_reporter` /
 `surface_discussion` chases stand down, so the pass never tells the PO to
-bury what it just un-hid. Still confirm there is no prior `@claude-bot
-analyze` comment already on the issue before posting — check by reading the
-issue's comments from the digest (or `gh issue view` if the digest's comment
-count needs confirming), never a local file: an in-flight analyze keeps
-`ready-for-analysis` until it completes, so the action may re-propose during
-that window. This is a check against the item itself, not a ranking pass: an
+bury what it just un-hid.
+
+The no-prior-analyze guard is now **in the script**: `last_analyze_comment`
+carries the most recent `@claude-bot analyze` trigger and its age.
+`autonomous_analyze` fires only when that is absent — the issue has never been
+analyzed. A trigger younger than `RHYTHM_ANALYZE_STALE_HOURS` (default 6h) is
+an analyze that may still be running: the pass fires neither `autonomous_analyze`
+nor `refire_analyze` and waits. Once it ages past that window with the item
+still `ready-for-analysis` and unstamped, the run is treated as failed —
+almost always an out-of-credit workflow — and `refire_analyze` re-posts the
+trigger. Under `/loop` that just retries until Stage 2 lands; it is never a
+maintainer escalation. This is a check against the item itself, not a ranking
+pass: an
 item entering Analysis is never a member of the Backlog/Ready list that
 `next` ranks, so it cannot "rank" into a tier. Every other item entering
 Analysis gets a proposal instead.

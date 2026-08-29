@@ -44,6 +44,49 @@ PARK_DAYS="${RHYTHM_PARK_DAYS:-28}"
 # variable so the tests can drive the boundary.
 WIP_LIMIT="${RHYTHM_WIP_LIMIT:-3}"
 
+# FLOW POLICY: the Analysis WIP limit. The same "empty the board from the right"
+# rule one column further left -- analysis is only useful once its output
+# reaches Ready for Dev, so an Analysis column carrying 18 items is 18 pieces of
+# half-finished work, not progress. At or above this, the pass stops pulling new
+# items in: `autonomous_analyze` is suppressed (still counted and listed, like a
+# deferred PR) and the pass reports `ANALYSIS n/limit` on every path. It does
+# NOT gate `refire_analyze` -- re-poking a Stage 2 run that never completed
+# finishes an item already in Analysis rather than adding one.
+ANALYSIS_WIP_LIMIT="${RHYTHM_ANALYSIS_WIP_LIMIT:-8}"
+
+# How long a `@claude-bot analyze` trigger may sit with the item still
+# `ready-for-analysis` and unstamped before the pass treats the run as failed
+# and re-fires it. Stage 2 normally completes in minutes; the common cause of a
+# no-op run is the workflow being out of API credit, which a later re-fire
+# clears on its own -- so this is a loop retry, not a maintainer escalation.
+ANALYZE_STALE_HOURS="${RHYTHM_ANALYZE_STALE_HOURS:-6}"
+
+# TOOLING FRESHNESS. The board data this pass reads is always live (gh API),
+# but the pass ITSELF -- this script, backlog-digest.sh and the backlog
+# SKILL.md -- runs from whatever checkout the loop was started in, and that is
+# never refreshed mid-loop. The local `main` checkout is routinely stale, so a
+# long-running `/loop /backlog` can be executing week-old logic without a hint
+# of it. A read-only fetch plus a behind-count against origin/main for the
+# tooling paths makes it visible on every path, the same way `WIP n/3` does --
+# it never pulls (wrong in a worktree, and swapping the skill under a live tick
+# is worse than running one tick stale). `RHYTHM_SKIP_FETCH=1` skips only the
+# network call and compares against whatever origin/main is already local;
+# `RHYTHM_TOOLING_REF` overrides the ref. Skipped entirely under the test seam.
+TOOLING_REF="${RHYTHM_TOOLING_REF:-origin/main}"
+tooling_behind=null
+if [ -z "${RHYTHM_DIGEST_FILE:-}" ] \
+   && root=$(git -C "$here" rev-parse --show-toplevel 2>/dev/null); then
+    if [ -z "${RHYTHM_SKIP_FETCH:-}" ]; then
+        git -C "$root" fetch --quiet "${TOOLING_REF%%/*}" 2>/dev/null || true
+    fi
+    if git -C "$root" rev-parse --verify --quiet "$TOOLING_REF" >/dev/null 2>&1; then
+        tooling_behind=$(git -C "$root" rev-list --count \
+            "HEAD..$TOOLING_REF" -- \
+            scripts/backlog-digest.sh scripts/backlog-rhythm.sh \
+            .claude/skills/backlog/ 2>/dev/null || echo null)
+    fi
+fi
+
 # `RHYTHM_DIGEST_FILE` and `RHYTHM_PRS_FILE` are test seams, the same shape as
 # `BESS_ENV_FILE` in gh-agent.sh: they let the rules be exercised against
 # fixtures without a network round-trip or a live board. Unset in normal use.
@@ -75,6 +118,10 @@ actions=$(printf '%s' "$digest" | jq \
     --argjson nudge "$NUDGE_DAYS" \
     --argjson park "$PARK_DAYS" \
     --argjson wip_limit "$WIP_LIMIT" \
+    --argjson analysis_wip_limit "$ANALYSIS_WIP_LIMIT" \
+    --argjson analyze_stale_hours "$ANALYZE_STALE_HOURS" \
+    --argjson tooling_behind "$tooling_behind" \
+    --arg tooling_ref "$TOOLING_REF" \
     --argjson prs "$prs" \
     --arg owner "$owner" '
   # Board cards for PRs, keyed by number. Absent on an older digest, so this
@@ -87,6 +134,13 @@ actions=$(printf '%s' "$digest" | jq \
   # and its PR. Counting them separately would silently double the limit.
   ([ .items[] | select(.column == "In Progress" or .column == "In Review") ] | length) as $wip
   | ($wip >= $wip_limit) as $over_wip
+  |
+
+  # The Analysis column, counted the same way -- one flow-policy step to the
+  # left of the dispatch WIP limit. At or above the limit, no new item enters
+  # analysis until analysed ones are promoted to Ready for Dev.
+  ([ .items[] | select(.column == "Analysis") ] | length) as $analysis_wip
+  | ($analysis_wip >= $analysis_wip_limit) as $analysis_over
   |
 
   # The collision gate. $in_flight is the EXACT half -- every open PRs
@@ -230,13 +284,40 @@ actions=$(printf '%s' "$digest" | jq \
     # the pass entirely -- the #681/#680 failure, where the carve-out was only
     # ever evaluated on items the pass surfaced. Stage 2 removes
     # `ready-for-analysis` when it runs, so this fires at most until analysis
-    # lands; confirming there is no prior `@claude-bot analyze` comment stays
-    # a PO-time check in the backlog skill before the spend, which is also
-    # what catches an analyze that is still in flight.
-    (if tier1_ready
+    # lands.
+    #
+    # The no-prior-analyze check is now IN THE SCRIPT (`last_analyze_comment`),
+    # not left to the PO to remember: `autonomous_analyze` fires only when the
+    # issue has never been analyzed. A prior trigger that is still in flight
+    # (younger than the staleness window) means neither this nor `refire_analyze`
+    # fires -- the pass simply waits. `$analysis_over` suppresses it too: the
+    # Analysis column is full, so nothing new is pulled in until analysed items
+    # reach Ready for Dev (the item stays visible in `analysis_wip` below).
+    (if tier1_ready and .last_analyze_comment == null and ($analysis_over | not)
      then {issue: .number, action: "autonomous_analyze",
-           why: "tier-1 bug: \(.author), debug log attached, no analyzed/needs-human-review label",
-           detail: "fire Stage 2 as the PO, after confirming no prior @claude-bot analyze comment: scripts/gh-agent.sh --as po issue comment \(.number) --body \"@claude-bot analyze\""}
+           why: "tier-1 bug: \(.author), debug log attached, no analyzed/needs-human-review label, never analyzed",
+           detail: "fire Stage 2 as the PO: scripts/gh-agent.sh --as po issue comment \(.number) --body \"@claude-bot analyze\""}
+     elif tier1_ready and .last_analyze_comment == null and $analysis_over
+     then {issue: .number, action: "analysis_deferred",
+           why: "tier-1 bug ready to analyse, held: Analysis WIP \($analysis_wip)/\($analysis_wip_limit)",
+           detail: "do not fire Stage 2 -- promote an analysed item to Ready for Dev first; this re-proposes once Analysis is under the limit"}
+     else empty end),
+
+    # A Stage 2 run that never landed. `tier1_ready` still holds (Stage 2 would
+    # have removed `ready-for-analysis` and stamped a label), a `@claude-bot
+    # analyze` trigger is on the issue, and it has aged past the staleness
+    # window -- so the workflow accepted the trigger and produced nothing,
+    # almost always because it had no API credit at the time. Under `/loop`
+    # this is a plain retry: re-post the trigger as the PO. NOT a maintainer
+    # escalation, and not gated by `$analysis_over` -- the item is already in
+    # Analysis, this finishes it rather than adding new work.
+    (if tier1_ready
+        and .last_analyze_comment != null
+        and (.last_analyze_comment.hours >= $analyze_stale_hours)
+        and ((.prs | length) == 0)
+     then {issue: .number, action: "refire_analyze",
+           why: "@claude-bot analyze fired \(.last_analyze_comment.hours)h ago, still ready-for-analysis with no analyzed/needs-human-review label -- Stage 2 did not complete",
+           detail: "re-fire as the PO (a no-op run is usually an out-of-credit workflow; the loop retries): scripts/gh-agent.sh --as po issue comment \(.number) --body \"@claude-bot analyze\""}
      else empty end),
 
     # Grooming debt: the board field is unset while a label implies a wait, so
@@ -272,10 +353,12 @@ actions=$(printf '%s' "$digest" | jq \
            detail: "move the card to \(.column)"}
      else empty end),
 
-    # Un-pruned worktrees are what made four issues read as In Progress.
+    # Un-pruned worktrees are what made four issues read as In Progress. The
+    # branch is dead either because it merged or because its PR was closed
+    # unmerged -- `stale_worktree_reason` from the digest says which.
     (if .stale_worktree
      then {issue: .number, action: "prune_worktree",
-           why: "worktree \(.worktree_branch) already merged",
+           why: "worktree \(.worktree_branch) \(.stale_worktree_reason // "already landed")",
            detail: "hand to sweep-prs"}
      else empty end),
 
@@ -634,12 +717,16 @@ actions=$(printf '%s' "$digest" | jq \
        elif .action == "resume_implementation" or .action == "prune_worktree" then 3
        elif .action == "dispatchable" or .action == "queued_behind"
             or .action == "cluster" or .action == "needs_touch_set" then 4
+       # refire_analyze finishes an Analysis item that stalled; it ranks with
+       # the other Analysis-column actions. (A given item is either this or
+       # autonomous_analyze, never both -- a prior analyze comment decides.)
        elif .action == "recheck_ready" or .action == "surface_discussion"
             or .action == "nudge_reporter" or .action == "park"
+            or .action == "refire_analyze"
             or .action == "autonomous_analyze" then 5
        elif .action == "set_awaiting" or .action == "add_card"
             or .action == "set_priority" or .action == "move_card"
-            or .action == "archive_pr_card"
+            or .action == "archive_pr_card" or .action == "analysis_deferred"
             or .action == "triage_labels" then 6
        # Rank 9 is not a column. It is the catch-all for an action name
        # this function does not know about -- its rank branch is missing,
@@ -652,6 +739,15 @@ actions=$(printf '%s' "$digest" | jq \
   | {
       due: length,
       wip: {count: $wip, limit: $wip_limit, over: $over_wip},
+      # The Analysis column against its own WIP limit, reported the same way and
+      # for the same reason as `wip`: when the pass pulls nothing new into
+      # analysis, the operator needs to see it is because the column is full.
+      analysis: {count: $analysis_wip, limit: $analysis_wip_limit, over: $analysis_over},
+      # Commits on `$tooling_ref` not in HEAD that touch the backlog scripts or
+      # SKILL.md -- i.e. how far behind the logic running right now is. null
+      # when the check was skipped (test seam, not a git repo, ref not present,
+      # or the fetch/rev-list failed). Reported on every path like `wip`.
+      tooling: {behind: $tooling_behind, ref: $tooling_ref},
       # PRs whose diff could not be read this pass -- see $collision_unknown
       # above. Reported the same way $wip is: a count and the list, on every
       # path, because a suppressed dispatch queue that does not say why is
@@ -721,6 +817,22 @@ wip_line=$(printf '%s' "$actions" | jq -r '.wip
                   + " -- finish before starting; dispatch suppressed"
     else "  WIP " + (.count|tostring) + "/" + (.limit|tostring) end')
 
+# Same contract as $wip_line: printed on every path, including "nothing due", so
+# a pass that pulls nothing new into analysis says why.
+analysis_line=$(printf '%s' "$actions" | jq -r '.analysis
+  | if .over then "  ANALYSIS " + (.count|tostring) + "/" + (.limit|tostring)
+                  + " -- promote analysed items to Ready for Dev before analysing more"
+    else "  ANALYSIS " + (.count|tostring) + "/" + (.limit|tostring) end')
+
+# Also every-path: the logic running this tick is behind origin/main. Empty
+# unless the check ran AND found the backlog tooling stale -- a fresh or
+# skipped check says nothing.
+tooling_line=$(printf '%s' "$actions" | jq -r '.tooling
+  | if (.behind // 0) > 0
+    then "  TOOLING " + (.behind|tostring) + " commit(s) behind " + .ref
+         + " -- restart the loop from an updated checkout"
+    else "" end')
+
 # Also reported on every path, same reasoning as $wip_line: a non-empty
 # undiffable set silently holds every dispatchable action shut, and that is
 # exactly the moment the operator needs to be told why.
@@ -734,6 +846,8 @@ due=$(printf '%s' "$actions" | jq -r '.due')
 if [ "$due" -eq 0 ]; then
     echo "RHYTHM: nothing due."
     printf '%s\n' "$wip_line"
+    printf '%s\n' "$analysis_line"
+    [ -n "$tooling_line" ] && printf '%s\n' "$tooling_line"
     [ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
     [ -n "$deferred_line" ] && printf '%s\n' "$deferred_line"
     exit 0
@@ -741,6 +855,8 @@ fi
 
 echo "RHYTHM: $due action(s) due"
 printf '%s\n' "$wip_line"
+printf '%s\n' "$analysis_line"
+[ -n "$tooling_line" ] && printf '%s\n' "$tooling_line"
 [ -n "$undiffable_line" ] && printf '%s\n' "$undiffable_line"
 printf '%s' "$actions" | jq -r '
   "",

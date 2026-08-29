@@ -346,6 +346,16 @@ Requires the `lifetime_load_consumption` sensor configured in the **Sensors** ta
 
 This is the recommended strategy for most users — it adapts to your actual usage patterns with no extra integrations or configuration beyond a cumulative load sensor.
 
+#### Managed Loads — excluding a regular habit from the baseline
+
+The trimmed mean above filters out an occasional spike, but not a *regular* one — if you charge your EV most nights, `ha_statistics` learns that as part of your normal pattern and forecasts it every night, whether or not you're actually charging. **Managed Loads** is how you tell BESS to exclude a load entirely and announce it yourself instead.
+
+In the **Home** settings tab, under `ha_statistics`, add the load's own cumulative/lifetime energy sensor (e.g. `sensor.ev_charger_energy_total` — most EV chargers expose one; tools like evcc can synthesize one for chargers that don't) to **Managed load sensors**. BESS subtracts that sensor's energy from the historical data before computing the baseline, so the learned "normal" becomes the residual — your house load with the managed load excluded.
+
+With the load excluded, it simply isn't forecast at all unless you say otherwise — the recommended setup is to exclude it here, then announce expected sessions via **Planned Consumption Changes** below (e.g. "EV needs 8 kWh by 06:30"). This is the same residual-plus-announcement pattern EMHASS uses for controllable loads.
+
+Only `ha_statistics` supports this today — `influxdb_7d_avg` draws from a different data source and would need its own mechanism.
+
 #### Comparing Strategies
 
 The **Insights** page includes a **Consumption Forecast Comparison** section that evaluates all available strategies against your actual consumption. Each strategy shows its hourly profile overlaid on actual data, along with a Mean Absolute Error (MAE) metric. Use this to verify which strategy best matches your real consumption patterns before committing to one.

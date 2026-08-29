@@ -215,6 +215,7 @@ class HomeSettings:
     currency: str = DEFAULT_CURRENCY
     consumption_strategy: str = "fixed"
     power_monitoring_enabled: bool = False
+    managed_load_sensors: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         assert self.phase_count in (

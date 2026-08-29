@@ -50,17 +50,55 @@ action, and so that almost every action is a script rather than a session.
 ## 1. Two lifecycles, one card
 
 One column was doing two jobs. Split them: **`Status` is the phase, `Awaiting`
-is the wait, and the two are orthogonal.**
+is the wait, and the two are mostly orthogonal.**
 
 | Status | Means | Exit |
 |---|---|---|
 | `Backlog` | captured, not analysed | analysis lands |
-| `Analysis` | scope or approach unsettled | Definition of Ready met and priority set |
+| `Analysis` | scope or approach unsettled, or a recorded wait over a worktree / draft PR | Definition of Ready met and priority set |
 | `Ready for Dev` | analysed, prioritised, unblocked | dispatch |
-| `In Progress` | branch exists, no open PR | a PR opens |
-| `In Review` | one or more open PRs, loop running | all its PRs merge |
+| `In Progress` | branch exists — no open PR, or a draft PR with no review | the PR goes out of draft |
+| `In Review` | one or more **non-draft** open PRs, loop running | all its PRs merge |
 | `In Verification` | on main, not yet in a stable release | graduation PR closes the issue |
 | `Done` | shipped stable | — |
+
+**#707 amendment.** Refinements to the orthogonality above, from four real
+mis-columned cards. The derived-column order is now, highest first:
+
+```
+non-draft open PR        -> In Review
+blocked / awaiting != null -> Analysis
+draft PR OR live worktree  -> In Progress
+merged closing PR          -> In Verification
+analysed + priority        -> Ready for Dev
+analysed                   -> Analysis
+else                      -> Backlog
+```
+
+- **A wait is not fully orthogonal.** A recorded `Awaiting` (or a `blocked`
+  label / open `Blocked by #N`) pulls the item back to `Analysis` over a bare
+  worktree, a still-draft PR, **or a merged-but-unreleased fix** — unsettled
+  scope must not read as progress. It does *not* override `In Review`. This
+  reverses the original "a wait never rewrites the phase" for every phase
+  except `In Review`.
+- **A draft PR is `In Progress`, not `In Review`.** `In Review` requires a
+  PR that is out of draft — the loop has actually started. A draft PR with no
+  review is a branch-plus-PR that nothing is reviewing yet.
+- **Active work outranks landed work.** `In Progress` (a live worktree or an
+  open draft PR) is checked before `In Verification`, so an issue with a
+  merged intermediate `Part of #N` PR **and** an active follow-up branch
+  reads as `In Progress`, not verified.
+- **`matches_issue` ignores scratch worktrees.** `pin-<n>-…`, `design-<n>-…`
+  and `bench-…` worktrees (optionally under the `worktree-` prefix) carry an
+  issue number but are pinning / design scratch, not implementation branches;
+  joining them pinned an issue to `In Progress` for good (#602). This, plus
+  `worktree_is_stale` for genuinely merged branches, is why the rot-worktree
+  case does not need `In Verification` ranked above `In Progress`.
+- **A stale board card is surfaced in `orphans`.** A `PullRequest` card whose
+  PR closed or merged → `stale_pr_card` → rhythm `archive_pr_card`; an
+  `Issue` card whose issue closed → `stale_issue_card` → rhythm `move_card`
+  (to *Done*). `pr_board` is joined only against open PRs and `items`
+  iterates only open issues, so nothing reconciled either before.
 
 `In Verification` is new. It sits **after merge to main and before release** —
 the fast-forward rule makes `beta/main` strictly downstream of `origin/main`,

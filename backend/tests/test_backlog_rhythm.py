@@ -75,6 +75,7 @@ def _run(
     pr_board: list | None = None,
     in_flight_files: dict | None = None,
     undiffable_prs: list | None = None,
+    orphans: list | None = None,
     **env: str,
 ) -> dict:
     digest = tmp_path / "digest.json"
@@ -83,7 +84,7 @@ def _run(
             {
                 "counts": {},
                 "items": items,
-                "orphans": [],
+                "orphans": orphans or [],
                 # Board cards for PRs. Defaults to empty, which is also what an
                 # older digest produces -- the script tolerates its absence, so
                 # every pre-existing test exercises the no-deferral path.
@@ -1430,3 +1431,62 @@ def test_no_undiffable_prs_does_not_suppress_dispatch(tmp_path: Path) -> None:
     )
     result = _run(tmp_path, [ready], undiffable_prs=[])
     assert "dispatchable" in _actions_for(result, 1011)
+
+
+def test_a_stale_pr_card_orphan_becomes_an_archive_action(tmp_path: Path) -> None:
+    """#707 / #638: a PullRequest card whose PR has closed or merged is
+    reconciled by nothing else -- the digest surfaces it in `orphans` and the
+    rhythm pass turns it into a board action so it does not sit forever in
+    whatever column it was last in."""
+    result = _run(
+        tmp_path,
+        [],
+        orphans=[
+            {
+                "kind": "stale_pr_card",
+                "ref": "638",
+                "detail": "PR #638 is closed; card still in In Review",
+            }
+        ],
+    )
+    actions = [a for a in result["actions"] if a["action"] == "archive_pr_card"]
+    assert [a["pr"] for a in actions] == [638]
+    assert actions[0]["rank"] == 6
+    assert "closed" in actions[0]["why"]
+
+
+def test_other_orphan_kinds_do_not_become_archive_actions(tmp_path: Path) -> None:
+    result = _run(
+        tmp_path,
+        [],
+        orphans=[
+            {"kind": "worktree_no_issue", "ref": "/wt/x", "detail": "x"},
+            {"kind": "issue_no_card", "ref": "700", "detail": "y"},
+        ],
+    )
+    assert [a for a in result["actions"] if a["action"] == "archive_pr_card"] == []
+
+
+def test_a_stale_issue_card_orphan_becomes_a_move_card_action(tmp_path: Path) -> None:
+    """#707: a card whose issue has closed is reconciled by nothing else --
+    the digest surfaces it in `orphans` and the rhythm pass turns it into a
+    move to Done."""
+    result = _run(
+        tmp_path,
+        [],
+        orphans=[
+            {
+                "kind": "stale_issue_card",
+                "ref": "555",
+                "detail": "issue #555 is closed; card still in In Review",
+            }
+        ],
+    )
+    actions = [
+        a
+        for a in result["actions"]
+        if a["action"] == "move_card" and a.get("issue") == 555
+    ]
+    assert len(actions) == 1
+    assert "Done" in actions[0]["detail"]
+    assert actions[0]["rank"] == 6

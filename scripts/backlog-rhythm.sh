@@ -351,6 +351,25 @@ actions=$(printf '%s' "$digest" | jq \
          detail: "dispatch is held for every Ready for Dev item until this PR diffs cleanly -- rerun the digest"}
     ]
 
+  # A CARD whose issue or PR is no longer open (#707 / #638). The digest
+  # surfaces these in `orphans` because `items` iterates only the open-issue
+  # list and `pr_board` is joined only against the OPEN-PR list, so a stale
+  # card is reconciled by nothing otherwise -- it just sits in whatever column
+  # it was last in (#638 sat in In Review after its draft closed). Ranked with
+  # the grooming/board actions.
+  + [ (.orphans // [])[]
+      | select(.kind == "stale_pr_card")
+      | {pr: (.ref | tonumber), action: "archive_pr_card",
+         why: .detail,
+         detail: "move the card to Done (merged) or delete it (closed unmerged) -- a PR card only carries a deferral while its PR is open"}
+    ]
+  + [ (.orphans // [])[]
+      | select(.kind == "stale_issue_card")
+      | {issue: (.ref | tonumber), action: "move_card",
+         why: .detail,
+         detail: "move the card to Done -- the issue is closed"}
+    ]
+
   # --- the PR half -------------------------------------------------------
   #
   # This pass does NOT drive the review loop. `implement-issue` owns a PR from
@@ -596,6 +615,7 @@ actions=$(printf '%s' "$digest" | jq \
             or .action == "autonomous_analyze" then 5
        elif .action == "set_awaiting" or .action == "add_card"
             or .action == "set_priority" or .action == "move_card"
+            or .action == "archive_pr_card"
             or .action == "triage_labels" then 6
        # Rank 9 is not a column. It is the catch-all for an action name
        # this function does not know about -- its rank branch is missing,

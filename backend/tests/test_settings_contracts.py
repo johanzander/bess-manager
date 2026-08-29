@@ -349,9 +349,10 @@ _BATTERY_OPTIONAL_FIELDS = frozenset(
     }
 )
 # min_valid is an internal algorithm parameter, never read from the settings
-# store or written by the wizard — the one field HOME_MODEL_ATTRS has that
-# HOME_REQUIRED_FIELDS doesn't.
-_HOME_OPTIONAL_FIELDS = frozenset({"min_valid"})
+# store or written by the wizard. managed_load_sensors defaults to an empty
+# list and must stay absent-tolerant for every settings.json persisted before
+# issue #706 — requiring it at startup would break every existing install.
+_HOME_OPTIONAL_FIELDS = frozenset({"min_valid", "managed_load_sensors"})
 
 
 @pytest.mark.parametrize(

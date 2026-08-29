@@ -102,3 +102,14 @@ class ConsumptionOverlayError(BESSException):
     EV session and got half of it applied is worse off than one told their
     template is wrong.
     """
+
+
+class ManagedLoadsError(BESSException):
+    """A managed-load sensor's historical statistics could not be fetched.
+
+    Raised rather than silently forecasting on the un-subtracted baseline: a
+    user who excluded their EV charger from "normal" load and got no
+    subtraction applied is worse off than one told their sensor is
+    unreadable, since the forecast would silently overstate consumption by
+    the missing residual.
+    """

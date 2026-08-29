@@ -27,6 +27,7 @@ from .exceptions import (
     ConsumptionOverlayError,
     HAStatisticsUnavailableError,
     HistoricalDataUnavailableError,
+    ManagedLoadsError,
     SystemConfigurationError,
 )
 from .execution_model import PlatformCapabilities, intra_period_discharge_gate
@@ -42,6 +43,7 @@ from .historical_data_store import HistoricalDataStore
 from .huawei_controller import HuaweiController
 from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
+from .managed_loads import subtract_managed_loads
 from .models import (
     DecisionData,
     EconomicData,
@@ -1339,7 +1341,7 @@ class BatterySystemManager:
                     "HA_STATISTICS_FALLBACK"
                 )
                 return result
-            except HAStatisticsUnavailableError as e:
+            except (HAStatisticsUnavailableError, ManagedLoadsError) as e:
                 quarterly = self.home_settings.default_hourly / 4.0
                 logger.warning(
                     "HA statistics unavailable (%s), falling back to fixed "
@@ -1431,6 +1433,53 @@ class BatterySystemManager:
 
         return avg_profile
 
+    def _fetch_recorder_change_stats(
+        self, entity_id: str, start_dt: datetime, end_dt: datetime
+    ) -> tuple[str, list[dict]]:
+        """Fetch one entity's raw hourly 'change' statistics for [start_dt, end_dt).
+
+        Shared by the main load-consumption sensor and each managed-load
+        sensor in _fetch_ha_statistics_raw — both are HA Recorder long-term
+        statistics reads with the same discovery fallback.
+
+        Returns:
+            (statistic_id, stats) — stats is the raw HA Recorder list of
+            {"start": ..., "change": ...} entries, or [] if none exist.
+        """
+        if not entity_id.startswith("sensor."):
+            entity_id = f"sensor.{entity_id}"
+
+        # Try direct entity_id first, then discover the correct statistic_id
+        # (external integrations may register statistics under a different ID)
+        statistic_id = entity_id
+        result = self._controller.get_statistics_during_period(
+            statistic_ids=[statistic_id],
+            start_time=start_dt.isoformat(),
+            end_time=end_dt.isoformat(),
+            period="hour",
+            types=["change"],
+        )
+        stats = result.get(statistic_id, [])
+        if not stats:
+            discovered_id = self._controller.find_statistic_id(entity_id)
+            if discovered_id and discovered_id != statistic_id:
+                logger.info(
+                    "Statistic ID for %s is %s (differs from entity_id)",
+                    entity_id,
+                    discovered_id,
+                )
+                statistic_id = discovered_id
+                result = self._controller.get_statistics_during_period(
+                    statistic_ids=[statistic_id],
+                    start_time=start_dt.isoformat(),
+                    end_time=end_dt.isoformat(),
+                    period="hour",
+                    types=["change"],
+                )
+                stats = result.get(statistic_id, [])
+
+        return statistic_id, stats
+
     def _fetch_ha_statistics_raw(self) -> tuple[str, list[dict]]:
         """Resolve the load-consumption statistic_id and fetch its raw 7-day stats.
 
@@ -1438,12 +1487,20 @@ class BatterySystemManager:
         time-of-day profile) and get_ha_statistics_for_debug_export (which
         exports it verbatim for exact-fidelity mock replay).
 
+        If managed_load_sensors is configured, each one's own 7-day stats are
+        fetched the same way and subtracted before returning — the residual
+        is what both callers see, so the debug export stays consistent with
+        what the forecast actually uses (issue #706).
+
         Returns:
             (statistic_id, stats) — stats is the raw HA Recorder
-            list of {"start": ..., "change": ...} entries.
+            list of {"start": ..., "change": ...} entries, residual of any
+            configured managed loads.
 
         Raises:
             HAStatisticsUnavailableError: sensor not configured, or no
+                statistics data available for it in the past 7 days.
+            ManagedLoadsError: a configured managed-load sensor has no
                 statistics data available for it in the past 7 days.
         """
         from datetime import time
@@ -1470,42 +1527,39 @@ class BatterySystemManager:
         start_dt = datetime.combine(start_date, time(0, 0), tzinfo=tz)
         end_dt = datetime.combine(today_date, time(0, 0), tzinfo=tz)
 
-        # Try direct entity_id first, then discover the correct statistic_id
-        # (external integrations may register statistics under a different ID)
-        statistic_id = target_sensor
-        result = self._controller.get_statistics_during_period(
-            statistic_ids=[statistic_id],
-            start_time=start_dt.isoformat(),
-            end_time=end_dt.isoformat(),
-            period="hour",
-            types=["change"],
+        statistic_id, stats = self._fetch_recorder_change_stats(
+            target_sensor, start_dt, end_dt
         )
-
-        stats = result.get(statistic_id, [])
-        if not stats:
-            # Entity_id didn't match — discover the correct statistic_id
-            discovered_id = self._controller.find_statistic_id(target_sensor)
-            if discovered_id and discovered_id != statistic_id:
-                logger.info(
-                    "Statistic ID for %s is %s (differs from entity_id)",
-                    target_sensor,
-                    discovered_id,
-                )
-                statistic_id = discovered_id
-                result = self._controller.get_statistics_during_period(
-                    statistic_ids=[statistic_id],
-                    start_time=start_dt.isoformat(),
-                    end_time=end_dt.isoformat(),
-                    period="hour",
-                    types=["change"],
-                )
-                stats = result.get(statistic_id, [])
-
         if not stats:
             raise HAStatisticsUnavailableError(
                 f"No statistics data returned for {target_sensor} "
                 f"(statistic_id: {statistic_id}) in the past 7 days"
             )
+
+        managed_load_sensors = self.home_settings.managed_load_sensors
+        if managed_load_sensors:
+            managed_stats = []
+            for sensor_entity_id in managed_load_sensors:
+                _, m_stats = self._fetch_recorder_change_stats(
+                    sensor_entity_id, start_dt, end_dt
+                )
+                if not m_stats:
+                    raise ManagedLoadsError(
+                        f"No statistics data returned for managed-load sensor "
+                        f"'{sensor_entity_id}' in the past 7 days"
+                    )
+                managed_stats.append(m_stats)
+
+            stats, clamped_hours = subtract_managed_loads(stats, managed_stats)
+            if clamped_hours:
+                logger.warning(
+                    "Managed-load subtraction clamped %d/%d hours to 0 for %s "
+                    "(a managed load's own historical draw exceeded the total "
+                    "load sensor's for those hours)",
+                    clamped_hours,
+                    len(stats),
+                    target_sensor,
+                )
 
         return statistic_id, stats
 
@@ -1523,7 +1577,7 @@ class BatterySystemManager:
             return None
         try:
             statistic_id, stats = self._fetch_ha_statistics_raw()
-        except HAStatisticsUnavailableError:
+        except (HAStatisticsUnavailableError, ManagedLoadsError):
             return None
         return {"statistic_id": statistic_id, "stats": stats}
 

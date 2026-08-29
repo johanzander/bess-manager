@@ -6,7 +6,7 @@ from unittest.mock import patch
 import pytest
 
 from core.bess.battery_system_manager import BatterySystemManager
-from core.bess.exceptions import HAStatisticsUnavailableError
+from core.bess.exceptions import HAStatisticsUnavailableError, ManagedLoadsError
 from core.bess.runtime_failure_tracker import RuntimeFailureTracker
 from core.bess.settings import BatterySettings, HomeSettings
 from core.bess.tests.conftest import MockHomeAssistantController
@@ -316,3 +316,66 @@ class TestHAStatisticsDispatch:
 
         assert len(result) == 96
         assert all(v == 4.0 / 4.0 for v in result)
+
+
+class TestManagedLoadsSubtraction:
+    """Issue #706: managed_load_sensors excludes a load from the baseline."""
+
+    def test_forecast_reflects_residual_after_subtracting_managed_load(self):
+        """A flat managed load subtracted from a flat base halves the forecast."""
+        hourly_kwh = [2.0] * 24
+        ev_hourly_kwh = [1.0] * 24
+
+        base_stats = _make_hourly_stats(hourly_kwh)
+        ev_stats = _make_hourly_stats(ev_hourly_kwh)
+
+        controller = MockHomeAssistantController()
+        stat_id = "sensor.load_energy_total"
+        ev_stat_id = "sensor.ev_charger_energy_total"
+        manager = _create_manager_with_stats(
+            controller, {stat_id: base_stats, ev_stat_id: ev_stats}
+        )
+        manager.home_settings.managed_load_sensors = [ev_stat_id]
+
+        with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
+            mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
+            mock_tu.TIMEZONE = TIMEZONE
+            result = manager._get_ha_statistics_forecast()
+
+        # 2.0 kWh/h base - 1.0 kWh/h EV = 1.0 kWh/h residual = 0.25 kWh/quarter
+        assert len(result) == 96
+        assert all(v == pytest.approx(0.25) for v in result)
+
+    def test_no_managed_loads_leaves_forecast_unchanged(self):
+        """Baseline behaviour is unaffected when managed_load_sensors is empty."""
+        hourly_kwh = [2.0] * 24
+        stats = _make_hourly_stats(hourly_kwh)
+        controller = MockHomeAssistantController()
+        stat_id = "sensor.load_energy_total"
+        manager = _create_manager_with_stats(controller, {stat_id: stats})
+        assert manager.home_settings.managed_load_sensors == []
+
+        with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
+            mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
+            mock_tu.TIMEZONE = TIMEZONE
+            result = manager._get_ha_statistics_forecast()
+
+        assert all(v == pytest.approx(0.5) for v in result)
+
+    def test_missing_managed_load_statistics_raises(self):
+        """A configured managed-load sensor with no statistics data is a hard error,
+        not a silent skip -- the residual would otherwise silently overstate load."""
+        hourly_kwh = [2.0] * 24
+        base_stats = _make_hourly_stats(hourly_kwh)
+
+        controller = MockHomeAssistantController()
+        stat_id = "sensor.load_energy_total"
+        # No entry for the EV sensor's statistic_id in the mock response.
+        manager = _create_manager_with_stats(controller, {stat_id: base_stats})
+        manager.home_settings.managed_load_sensors = ["sensor.ev_charger_energy_total"]
+
+        with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
+            mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
+            mock_tu.TIMEZONE = TIMEZONE
+            with pytest.raises(ManagedLoadsError):
+                manager._get_ha_statistics_forecast()

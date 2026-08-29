@@ -582,6 +582,10 @@ test.describe('Setup Wizard — undetected inverter platform', () => {
 
     await fillAllUndetectedSensors(page);
 
+    // Huawei LUNA2000 gates step completion on a battery Device ID — it
+    // targets huawei_solar.set_tou_periods, so setup can't finish without one.
+    await page.getByPlaceholder('Huawei battery device ID').fill('1');
+
     await expect(
       page.getByRole('button', { name: /Next: Electricity Pricing/i }),
     ).toBeEnabled();

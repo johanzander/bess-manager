@@ -6,6 +6,7 @@ internally. Tests use a temporary directory so they never touch /data/.
 
 import json
 import os
+from pathlib import Path
 
 import pytest
 from api_dataclasses import (
@@ -858,8 +859,8 @@ class TestSignedPairAliasing:
 
 
 def test_migrate_schema_clears_stale_huawei_grid_charge_cutoff_mapping(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """An existing install mapped battery_discharge_stop_soc to the grid-charge
     cutoff register; the migration clears it so a re-scan repoints it."""
     _patch_path(tmp_path, monkeypatch)
@@ -883,8 +884,8 @@ def test_migrate_schema_clears_stale_huawei_grid_charge_cutoff_mapping(
 
 
 def test_migrate_schema_keeps_repointed_huawei_discharge_stop_soc(
-    tmp_path, monkeypatch
-):
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """A mapping already on the discharging-cutoff entity is left untouched."""
     _patch_path(tmp_path, monkeypatch)
     store = SettingsStore()

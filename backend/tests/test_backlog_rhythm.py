@@ -45,7 +45,13 @@ def _item(number: int, **over: object) -> dict:
         # pre-existing stalled-work tests keep asserting what they always did.
         "worktree_locked": False,
         "stale_worktree": False,
+        # Why a worktree is stale ("merged in #N" / "was the head of
+        # closed-unmerged PR #N"); None unless stale_worktree is True.
+        "stale_worktree_reason": None,
         "session": None,
+        # The last `@claude-bot analyze` trigger and its age, or None. None =
+        # never analyzed, which is what lets autonomous_analyze fire.
+        "last_analyze_comment": None,
         "blocked_by": [],
         "blocked_by_open": [],
         "blocked": False,
@@ -371,6 +377,31 @@ def test_a_stale_worktree_is_pruned_not_resumed(tmp_path: Path) -> None:
     assert "resume_implementation" not in actions
 
 
+def test_a_worktree_abandoned_behind_a_closed_pr_is_pruned_not_resumed(
+    tmp_path: Path,
+) -> None:
+    """#428: its branch never merged, but its PR (#437) was closed unmerged and
+    a different branch shipped the issue. The leftover worktree is an abandoned
+    attempt -- prune it, do not propose `/implement-issue` against the dead
+    branch. The digest sets `stale_worktree` for this now; the why-line quotes
+    the reason so the pass says closed-unmerged rather than merged."""
+    item = _item(
+        428,
+        worktree="/repo/wt/428",
+        worktree_branch="feat/issue-428-consumption-forecast-series",
+        stale_worktree=True,
+        stale_worktree_reason="was the head of closed-unmerged PR #437",
+        session=None,
+        last_comment=_comment(1),
+    )
+    result = _run(tmp_path, [item])
+    actions = _actions_for(result, 428)
+    assert "prune_worktree" in actions
+    assert "resume_implementation" not in actions
+    prune = next(a for a in result["actions"] if a["action"] == "prune_worktree")
+    assert "closed-unmerged PR #437" in prune["why"]
+
+
 def test_work_with_a_pr_is_reported_once_by_the_pr_branch(tmp_path: Path) -> None:
     """Both halves could fire on the same work. The PR branch owns the handoff
     once a PR exists, so the issue rule stands down to avoid listing it twice."""
@@ -565,6 +596,72 @@ def test_a_tier1_bug_in_discussion_is_analyzed_not_surfaced(tmp_path: Path) -> N
     actions = _actions_for(_run(tmp_path, [item]), 692)
     assert "autonomous_analyze" in actions
     assert "surface_discussion" not in actions
+
+
+def test_a_stalled_stage2_run_is_refired_not_escalated(tmp_path: Path) -> None:
+    """#704: `@claude-bot analyze` was posted ~34h ago, the item is still
+    `ready-for-analysis` with no analyzed/needs-human-review label -- the run
+    never completed (commonly: the workflow had no API credit). Under the loop
+    that is a plain retry: `refire_analyze`, not a maintainer escalation.
+    `autonomous_analyze` stands down because a prior analyze comment exists."""
+    item = _item(
+        704,
+        labels=["bug", "ready-for-analysis"],
+        author="valexi7",
+        column="Analysis",
+        board_status="Analysis",
+        last_analyze_comment={"days": 1, "hours": 34},
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 704)
+    assert "refire_analyze" in actions
+    assert "autonomous_analyze" not in actions
+    assert "escalated" not in actions
+
+
+def test_an_analyze_still_in_flight_fires_neither(tmp_path: Path) -> None:
+    """A trigger younger than the staleness window is a run that may still be
+    working. Neither re-fire it nor start a fresh one -- wait."""
+    item = _item(
+        705,
+        labels=["bug", "ready-for-analysis"],
+        author="valexi7",
+        column="Analysis",
+        board_status="Analysis",
+        last_analyze_comment={"days": 0, "hours": 2},
+    )
+    actions = _actions_for(_run(tmp_path, [item]), 705)
+    assert "refire_analyze" not in actions
+    assert "autonomous_analyze" not in actions
+
+
+def test_analysis_wip_limit_holds_new_autonomous_analysis(tmp_path: Path) -> None:
+    """Empty the board from the right, one column further left: an Analysis
+    column already at its WIP limit does not pull a new bug in for analysis.
+    The tier-1 bug is still counted and listed (`analysis_deferred`), never
+    dropped, and `autonomous_analyze` does not fire until Analysis drains."""
+    fillers = [
+        _item(100 + n, column="Analysis", board_status="Analysis") for n in range(8)
+    ]
+    bug = _item(
+        720,
+        labels=["bug", "ready-for-analysis"],
+        author="valexi7",
+    )
+    result = _run(tmp_path, [*fillers, bug], RHYTHM_ANALYSIS_WIP_LIMIT="8")
+    assert result["analysis"] == {"count": 8, "limit": 8, "over": True}
+    actions = _actions_for(result, 720)
+    assert "autonomous_analyze" not in actions
+    assert "analysis_deferred" in actions
+
+
+def test_analysis_under_the_limit_still_analyses(tmp_path: Path) -> None:
+    fillers = [
+        _item(100 + n, column="Analysis", board_status="Analysis") for n in range(3)
+    ]
+    bug = _item(721, labels=["bug", "ready-for-analysis"], author="valexi7")
+    result = _run(tmp_path, [*fillers, bug], RHYTHM_ANALYSIS_WIP_LIMIT="8")
+    assert result["analysis"]["over"] is False
+    assert "autonomous_analyze" in _actions_for(result, 721)
 
 
 # --- the PR half: reaching a READY PR ------------------------------------

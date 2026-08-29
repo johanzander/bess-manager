@@ -550,11 +550,20 @@ jq -n \
   #
   # PHASE COMES FROM ARTIFACTS, with one override a wait DOES rewrite (#707).
   # `Status` is the stage, `Awaiting` is the wait -- mostly orthogonal, but a
-  # recorded wait (or `blocked`) pulls the item back to Analysis over a bare
+  # recorded wait (or `blocked`) pulls the item BACK to Analysis over a bare
   # worktree or a still-draft PR, because unsettled scope must not read as
   # progress. It does NOT override In Review -- a PR that is out of draft is
   # genuinely in the review loop -- and the rhythm pass ranks the wait
   # separately.
+  #
+  # "Back" is literal: the wait is a FLOOR-LOWER, never a set. It can only move
+  # an item LEFT (toward Analysis), never right. A `discussion` / `blocked` tag
+  # on a raw Backlog musing (no worktree, no PR, no `analyzed` label -- #703)
+  # must NOT be promoted to Analysis: that manufactured a `board_status` !=
+  # `column` mismatch every pass, so `move_card` yanked the card to Analysis
+  # minutes after a human moved it to Backlog, forever. The artifact/label
+  # column is computed first as `$natural`; the wait only rewrites it when
+  # `$natural` is already right of Analysis.
   #
   # DRAFT IS NOT IN REVIEW (#707). An open PR only means In Review once it is
   # out of draft -- the review loop has actually started. A draft PR is In
@@ -572,13 +581,21 @@ jq -n \
   def column($labels; $open_prs; $merged_pr; $wt_live; $awaiting; $priority; $blocked):
       (any($open_prs[]; .isDraft != true)) as $in_review
       | (($wt_live) or (any($open_prs[]; .isDraft == true))) as $in_progress
-      | if $in_review then "In Review"
-        elif $blocked or $awaiting != null then "Analysis"
-        elif $in_progress then "In Progress"
-        elif $merged_pr != null then "In Verification"
-        elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
-        elif ($labels | index("analyzed")) then "Analysis"
-        else "Backlog" end;
+      # The column the artifacts and labels imply, before any wait override.
+      | (if $in_review then "In Review"
+         elif $in_progress then "In Progress"
+         elif $merged_pr != null then "In Verification"
+         elif ($labels | index("analyzed")) and $priority != null then "Ready for Dev"
+         elif ($labels | index("analyzed")) then "Analysis"
+         else "Backlog" end) as $natural
+      # A recorded wait / block pulls back to Analysis -- but only from a column
+      # right of Analysis, and never out of In Review (#707). From Backlog it is
+      # a no-op: a wait cannot promote un-analysed work.
+      | if ($blocked or $awaiting != null)
+           and $natural != "In Review"
+           and $natural != "Backlog"
+        then "Analysis"
+        else $natural end;
 
   {
     counts: {

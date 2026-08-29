@@ -88,6 +88,13 @@ scope must not read as progress. The one artifact it does **not** override is
 `In Review`: a PR that is out of draft is genuinely in the loop, and the
 rhythm pass ranks the wait separately there.
 
+"Back" is literal — the wait is a **floor-lower, never a promotion**. It only
+moves an item *left*, toward `Analysis`; it never moves one *right*. A
+`discussion` / `blocked` tag on a raw `Backlog` musing (no worktree, no PR, no
+`analyzed` label — #703) stays in `Backlog`. Promoting it manufactured a
+`board_status` ≠ `column` mismatch every pass, so `move_card` yanked the card
+back to `Analysis` minutes after a human moved it to `Backlog`, forever.
+
 And a **draft PR is not `In Review`** (#707): an open PR only means `In Review`
 once it is out of draft. A draft PR with no review is `In Progress` — the
 branch and PR exist, nothing is reviewing them yet.
@@ -101,7 +108,7 @@ intermediate PR plus an active follow-up branch reads as `In Progress`.
 | Status | Means | Exit |
 |---|---|---|
 | `Backlog` | captured, not analysed | analysis lands |
-| `Analysis` | scope or approach unsettled, **or a recorded wait over a worktree / draft PR** | Definition of Ready met and priority set |
+| `Analysis` | scope or approach unsettled, **or a recorded wait pulling an item back from a column right of Analysis** (not from Backlog) | Definition of Ready met and priority set |
 | `Ready for Dev` | analysed, prioritised, unblocked | dispatch |
 | `In Progress` | branch exists — no open PR, or a draft PR with no review | the PR goes out of draft |
 | `In Review` | one or more **non-draft** open PRs, loop running | all its PRs merge |
@@ -179,8 +186,9 @@ caused a real misclassification:
 — deliberately (#707).** An item with a recorded wait reports *Analysis* even
 when a worktree is checked out, a draft PR is open, or a fix has merged to
 main, because unsettled scope must not read as progress. It does *not* outrank
-a non-draft PR (*In Review*) — that work is genuinely in the review loop. The
-worktree / PR is still reported on the item (`worktree`, `worktree_branch`,
+a non-draft PR (*In Review*) — that work is genuinely in the review loop — and
+it does *not* promote a bare *Backlog* item (nothing to pull back from; #703).
+The worktree / PR is still reported on the item (`worktree`, `worktree_branch`,
 `prs`, `merged_pr`), so active or landed code stays visible — the wait changes
 the column, not the evidence. Check those fields before assuming an *Analysis*
 item has no code behind it.

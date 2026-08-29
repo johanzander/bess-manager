@@ -540,6 +540,32 @@ def test_board_awaiting_overrides_analyzed(bin_dir: Path) -> None:
     assert item["awaiting_source"] == "board"
 
 
+def test_board_awaiting_does_not_promote_a_backlog_item(bin_dir: Path) -> None:
+    """#703: a raw "to consider" enhancement with `Awaiting: discussion` on its
+    card and nothing else -- no worktree, no PR, no `analyzed` label. The wait
+    is a floor-lower, not a set (#707 says "pulls BACK to Analysis"), so from
+    Backlog it is a no-op. Before this, `column` came back `Analysis`, which did
+    not match the card's `Backlog`, so `move_card` yanked the card to Analysis
+    minutes after a human moved it back -- forever.
+    """
+    issue = _issue(703, labels=[{"name": "enhancement"}])
+    board = [
+        {
+            "content": {"number": 703},
+            "status": "Backlog",
+            "priority": "P3",
+            "awaiting": "discussion",
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], board))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["column"] == "Backlog"
+    assert item["board_status"] == "Backlog"  # no mismatch -> no move_card fight
+    assert item["awaiting"] == "discussion"  # the wait is still recorded
+
+
 def test_analyzed_with_priority_is_ready_for_dev(bin_dir: Path) -> None:
     issue = _issue(700, labels=[{"name": "analyzed"}])
     board = [{"content": {"number": 700}, "priority": "P1"}]
@@ -1093,7 +1119,12 @@ def test_needs_debug_log_is_awaiting_reporter(bin_dir: Path) -> None:
 
     digest = _run(bin_dir)
 
-    assert digest["items"][0]["column"] == "Analysis"
+    # `needs-debug-log` sets `awaiting: reporter`. It does NOT move the column:
+    # the wait override is a floor-lower (#707 says "pulls BACK to Analysis"),
+    # and there is nothing to pull back -- no worktree, no PR, no `analyzed`
+    # label -- so the item stays in Backlog. The nudge/park timers key off
+    # `.awaiting`, not the column, so nothing downstream regresses.
+    assert digest["items"][0]["column"] == "Backlog"
     assert digest["items"][0]["awaiting"] == "reporter"
 
 

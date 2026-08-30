@@ -8,6 +8,13 @@
 **Description**: `sample_live_power()` early-returns on `if not self.power_sensors`, but `power_sensors` comes from `_resolve_power_sensor_ids()`, which deliberately *excludes* shared signed entities (their direction is unrecoverable from an InfluxDB period mean). The sampling loop itself never touches `power_sensors` — it calls the sign-splitting getters, which handle those entities fine. So an install whose only mapped power sensors are the shared signed ones gets no live sampling at all, silently disabling the `PowerSampleBuffer` path that `_shared_signed_power_entities()`'s docstring names as the covering fallback for exactly those installs. The guard should test the flow map / getters instead. Pre-existing; found during the #604 review, which widens the set of installs hitting the exclusion.
 
 
+### **`ha_recorder_helper.get_sensor_data_batch` rescans each sample list per period**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/ha_recorder_helper.py`
+
+**Description**: `get_sensor_data_batch` loops `for period in range(96)` and, inside, re-walks each entity's full sorted sample list to find the last value at/before the period boundary — O(96·S) per sensor. A single forward-merge pass (advance one pointer through the sorted samples as `period` increases) is O(S+96). Verbatim port of `influxdb_helper._parse_batch_response`'s existing nested loop; not a regression. Matters once PR 2 of #722 wires this into cold-start backfill over up to ~10 days of state changes. Raised in the PR 1 (#722) code review.
+
+
 ### **`describe_failing_checks()` is dead code after the device-grouping banner**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `health_check.py`, `test_describe_failing_checks.py`

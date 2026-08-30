@@ -452,6 +452,61 @@ async def get_state(entity_id: str) -> JSONResponse:
     return JSONResponse(_make_state_response(entity_id, value))
 
 
+@app.get("/api/history/period/{start_time:path}")
+async def get_history_period(start_time: str, request: Request) -> JSONResponse:
+    """Synthesize recorder history for ``ha_recorder_helper`` (issue #722).
+
+    Returns HA's ``list[list[dict]]`` shape — one entry list per requested
+    entity, in request order, with ``minimal_response`` semantics (only the
+    first entry carries ``entity_id``). Each series is the entity's current
+    scenario value replayed at hourly timestamps across the window; that is a
+    structurally faithful stand-in, not a real per-period reconstruction.
+    """
+    params = request.query_params
+    entity_csv = params.get("filter_entity_id", "")
+    entity_ids = [e for e in entity_csv.split(",") if e]
+
+    try:
+        start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
+    except ValueError:
+        return JSONResponse([], status_code=400)
+    end_raw = params.get("end_time")
+    try:
+        end_dt = (
+            datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
+            if end_raw
+            else start_dt + timedelta(days=1)
+        )
+    except ValueError:
+        end_dt = start_dt + timedelta(days=1)
+
+    result: list[list[dict]] = []
+    for entity_id in entity_ids:
+        value = _sensors.get(entity_id)
+        if value is None:
+            result.append([])
+            continue
+        state = value.get("state") if isinstance(value, dict) else value
+        stamps: list[datetime] = []
+        cursor = start_dt
+        while cursor <= end_dt:
+            stamps.append(cursor)
+            cursor += timedelta(hours=1)
+        series = [
+            {
+                "state": str(state),
+                "last_changed": ts.isoformat(),
+                "last_updated": ts.isoformat(),
+            }
+            for ts in stamps
+        ]
+        if series:
+            series[0]["entity_id"] = entity_id
+        result.append(series)
+
+    return JSONResponse(result)
+
+
 # ---------------------------------------------------------------------------
 # Home Assistant service API
 # ---------------------------------------------------------------------------

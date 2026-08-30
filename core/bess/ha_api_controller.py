@@ -3090,6 +3090,51 @@ class HomeAssistantAPIController:
                 return entity_id
         return None
 
+    def get_history_period(
+        self,
+        entity_ids: list[str],
+        start_time: str,
+        end_time: str,
+    ) -> list[list[dict]]:
+        """Fetch raw state history for entities via the REST history endpoint.
+
+        Wraps ``GET /api/history/period/<start_time>`` — Home Assistant's
+        recorder-backed history API. Used by ``ha_recorder_helper`` to
+        reconstruct per-period energy actuals without an external time-series
+        database.
+
+        The response is one list of state entries per requested entity, in the
+        request's entity order. ``minimal_response`` means only the first entry
+        of each list carries ``entity_id``; later entries carry just ``state``
+        and ``last_changed`` / ``last_updated``. HA also prepends the state as
+        it was at ``start_time``, so a caller does not need a separate "value
+        before the window" query.
+
+        Args:
+            entity_ids: Full entity IDs to fetch (e.g. ``["sensor.x", ...]``).
+            start_time: ISO 8601 timestamp for range start.
+            end_time: ISO 8601 timestamp for range end.
+
+        Returns:
+            List of per-entity state-entry lists. Empty list if HA returned no
+            content.
+        """
+        path = f"/api/history/period/{start_time}"
+        params = {
+            "filter_entity_id": ",".join(entity_ids),
+            "end_time": end_time,
+            "minimal_response": "",
+            "no_attributes": "",
+        }
+        result = self._api_request(
+            "get",
+            path,
+            operation="Fetch recorder history period",
+            category="historical_data",
+            params=params,
+        )
+        return result or []
+
     def discover_ha_metadata(
         self,
         entity_registry: list[dict] | None = None,

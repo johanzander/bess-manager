@@ -36,6 +36,7 @@ from core.bess.dp_battery_algorithm import (
 )
 from core.bess.settings import BatterySettings
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+from core.bess.vpp_load_tracking import budget_for_period
 
 
 @dataclass(frozen=True)
@@ -44,6 +45,18 @@ class VppCommand:
 
     power_pct: int  # -100..100; negative discharge/export, positive charge
     remote_control_enabled: bool
+    # Energy this period's load-tracking loop may spend, or None when the
+    # period is not tracked (#520). None is not "zero budget": it means the
+    # command is one of the pre-#520 ones and is executed by the branches
+    # below exactly as before, which is what keeps the flag-off corpus and
+    # the #539/#540 baseline valid without re-pinning.
+    #
+    # Present on the *command* rather than passed alongside it because it is
+    # part of what the period was told to do -- `simulate_vpp` returns the
+    # command list as its record of what production would write, and a bound
+    # that lived outside it would leave that record unable to explain the
+    # power the model applied.
+    tracking_budget_kwh: float | None = None
 
 
 def derive_vpp_commands(
@@ -79,12 +92,12 @@ def derive_vpp_commands(
     `.get(intent, IDLE)` fallback where `_map_intent_to_rates` raises on an
     unknown intent, so a typo would have silently simulated IDLE.
 
-    Deliberately does not pass the intra-period discharge decision: that
-    parameter does not exist on `_intent_to_vpp` yet -- it arrives with #537,
-    which is blocked on this harness. That ordering is the point. This
-    baseline captures behaviour *without* the gate, so when #537 rebases onto
-    it and wires the argument through, the pinned deltas show exactly what
-    the gate changes.
+    Deliberately does not pass the intra-period discharge decision, so it
+    always derives the pre-#520 command for a period (`load_tracking_active`
+    defaults False on `_intent_to_vpp`). It is the gate-free baseline the
+    #539/#540 pins are captured from. The load-tracking path (#520) needs the
+    running SoE and the period length to bound a budget, so it lives only in
+    `simulate_vpp`, which carries both; there is no correct eager form of it.
     """
     if len(intents) != len(actions_kw):
         # The loop below iterates `actions_kw` and indexes `intents`, so a
@@ -128,9 +141,17 @@ def _derive_vpp_command(
     period: int,
     action_kw: float,
     at_reserve_floor: bool,
+    tracking_budget_kwh: float | None = None,
 ) -> VppCommand:
     """One period's command, via the same two production calls
-    `BatterySystemManager._apply_period_schedule` makes."""
+    `BatterySystemManager._apply_period_schedule` makes.
+
+    `tracking_budget_kwh` is decided by the caller, not here: it comes from
+    `vpp_load_tracking.budget_for_period`, which needs the gate decision and
+    the plan -- neither of which `_intent_to_vpp` sees. Passing it in keeps
+    the controller a stateless mapper, which is the same ownership split
+    production uses (BSM drives, controller maps).
+    """
     grid_charge, discharge_rate, block_passive_charging = (
         controller.compute_rates_for_period(period, action_kw)
     )
@@ -140,11 +161,51 @@ def _derive_vpp_command(
         block_passive_charging,
         controller.strategic_intents[period],
         at_reserve_floor,
+        load_tracking_active=tracking_budget_kwh is not None,
     )
     return VppCommand(
         power_pct=power_pct,
         remote_control_enabled=remote_control_enabled,
+        tracking_budget_kwh=tracking_budget_kwh,
     )
+
+
+def _tracking_budgets(
+    intents: list[str],
+    actions_kw: list[float],
+    settings: BatterySettings,
+    dt: float,
+    intra_period_discharge_allowed: list[bool] | None,
+) -> list[float | None]:
+    """Per-period tracking budget, or None where the period is not tracked.
+
+    Every period is None unless all four conditions hold: the user opted in,
+    the intent is LOAD_SUPPORT, the gate is closed, and a gate decision was
+    actually supplied. `simulate_vpp` is called both ways -- the corpus
+    baseline and the #539/#540 pin pass no gate decisions, and for them the
+    correct answer is the pre-#520 behaviour, not a guess -- so a missing
+    `intra_period_discharge_allowed` is a real "do not track" signal here, not
+    a defended-against error.
+    """
+    if not settings.vpp_load_tracking_enabled:
+        return [None] * len(actions_kw)
+    if intra_period_discharge_allowed is None:
+        return [None] * len(actions_kw)
+    if len(intra_period_discharge_allowed) != len(actions_kw):
+        raise ValueError(
+            f"plan is inconsistent: {len(intra_period_discharge_allowed)} gate "
+            f"decisions for {len(actions_kw)} actions"
+        )
+    return [
+        (
+            budget_for_period(action_kw * dt, allowed)
+            if intents[period] == "LOAD_SUPPORT"
+            else None
+        )
+        for period, (action_kw, allowed) in enumerate(
+            zip(actions_kw, intra_period_discharge_allowed, strict=True)
+        )
+    ]
 
 
 def vpp_command_to_power(
@@ -184,6 +245,37 @@ def vpp_command_to_power(
     )
     available = max(0.0, soe - settings.min_soe_kwh)
     deficit = max(0.0, home - solar)
+
+    if command.tracking_budget_kwh is not None:
+        # Load tracking (#520): the battery follows the *measured* deficit,
+        # stopping once the period's planned energy is spent.
+        #
+        # In production this is a 10 s loop rewriting `vpp_power` against live
+        # sensors; here the period's load and solar are single figures, so the
+        # deficit is constant across it and the loop's whole 15 minutes
+        # collapse to one `min`. That is not a simplification of the control
+        # law -- it is the same law evaluated on constant inputs.
+        #
+        # The budget sits alongside the physical bounds rather than replacing
+        # them: a reservation cannot license a discharge the inverter, the SoE
+        # floor or the AC stage would not deliver anyway.
+        delivered = min(
+            deficit,
+            command.tracking_budget_kwh,
+            settings.max_discharge_power_kw * dt,
+            available * settings.efficiency_discharge,
+            ac_headroom_kwh,
+        )
+        # Budget exhausted, no deficit, or nothing deliverable -- all three are
+        # the hold, and the hold must return None rather than -0.0 for the same
+        # reason the other branches do: `_state_transition` reads a
+        # not-quite-negative power as IDLE and absorbs solar surplus into the
+        # battery. Here that would be a *charge* under a command whose entire
+        # purpose is to stop spending, and the hold's own solar absorption is
+        # applied by that IDLE branch anyway (see VPP_HOLD_POWER_PCT).
+        if delivered <= 0:
+            return None
+        return -delivered / dt
 
     if not command.remote_control_enabled:
         # load_first self-use: the inverter covers the home deficit itself,
@@ -317,6 +409,7 @@ def simulate_vpp(
     settings: BatterySettings,
     dt: float,
     currency: str = "SEK",
+    intra_period_discharge_allowed: list[bool] | None = None,
 ) -> VppSimulationResult:
     """Execute a VPP command sequence, carrying SoE forward, using the
     optimizer's own flow and accounting primitives -- same arrangement as
@@ -339,9 +432,16 @@ def simulate_vpp(
         )
 
     controller = _vpp_controller(intents, settings)
+    budgets = _tracking_budgets(
+        intents, actions_kw, settings, dt, intra_period_discharge_allowed
+    )
     return _simulate(
         lambda t, soe: _derive_vpp_command(
-            controller, t, actions_kw[t], at_reserve_floor=soe <= settings.min_soe_kwh
+            controller,
+            t,
+            actions_kw[t],
+            at_reserve_floor=soe <= settings.min_soe_kwh,
+            tracking_budget_kwh=budgets[t],
         ),
         len(actions_kw),
         solar_production,

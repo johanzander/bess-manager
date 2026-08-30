@@ -346,6 +346,8 @@ _BATTERY_OPTIONAL_FIELDS = frozenset(
         "inverter_ac_power_margin",
         "export_curtailment_enabled",
         "export_curtailment_price_floor",
+        "vpp_load_tracking_enabled",
+        "vpp_load_tracking_tick_seconds",
     }
 )
 # min_valid is an internal algorithm parameter, never read from the settings

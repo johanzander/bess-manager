@@ -10,6 +10,7 @@ from core.bess.simulation.inverter_simulator import (
 from core.bess.terminal_value import (
     curve_from_knee,
     knee_kwh_from_trailing_darkness,
+    pv_covers_load,
 )
 
 
@@ -121,7 +122,7 @@ def realized_under_solar_error(
         sell_price,
         knee_kwh_from_trailing_darkness(home, forecast_solar, settings),
         pv_refills=any(
-            solar >= consumption
+            pv_covers_load(consumption, solar)
             for consumption, solar in zip(home, forecast_solar, strict=True)
         ),
         battery_settings=settings,

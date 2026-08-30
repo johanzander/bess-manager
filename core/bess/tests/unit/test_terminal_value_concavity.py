@@ -150,6 +150,76 @@ def test_knee_is_the_load_carried_until_pv_takes_over() -> None:
     assert knee == pytest.approx(covered / settings.efficiency_discharge)
 
 
+@pytest.mark.parametrize("zero_at", [0, 3, 12])
+def test_a_zero_consumption_hour_is_not_a_pv_crossover(zero_at: int) -> None:
+    """#715: a forecast period with no load is a data gap, not "PV took over".
+
+    An empty HA-statistics bucket and a managed-load clamp both leave a
+    forecast hour at exactly 0.0 kWh. During pre-dawn darkness solar is also
+    0.0, so the raw ``solar >= consumption`` scan reads ``0.0 >= 0.0`` as the
+    PV crossover, breaks there, and collapses the knee -- to 0.0 if the gap is
+    at the terminal boundary itself. The scan must skip a no-load period and
+    keep accumulating until PV genuinely covers a real load.
+    """
+    settings = BatterySettings(total_capacity=20.0, min_soc=10, max_soc=100)
+    consumption = [0.25] * 96
+    consumption[zero_at] = 0.0
+    solar = [0.0] * 28 + [1.0] * 68  # PV covers load from period 28 (07:00)
+
+    knee = knee_kwh_from_forecast(consumption, solar, settings)
+
+    covered = 0.25 * 27  # periods 0..27 less the single zeroed period
+    assert knee == pytest.approx(covered / settings.efficiency_discharge)
+
+
+def test_a_no_load_hour_with_concurrent_solar_is_skipped_not_subtracted() -> None:
+    """#715: a no-load period must not pull the running net load negative.
+
+    A daylight data gap (empty Recorder bucket, managed-load clamp) can land on
+    a period where the solar sensor already reports production. Suppressing the
+    crossover break is not enough: the scan must also not run
+    ``net += consumption - solar`` for that period, or it subtracts the stray
+    solar and understates -- or, with an early gap, negates -- the knee.
+    """
+    settings = BatterySettings(total_capacity=20.0, min_soc=10, max_soc=100)
+    consumption = [0.25] * 96
+    consumption[20] = 0.0  # 05:00 data gap
+    # period 20 already shows a solar spike; real crossover is at period 28
+    solar = [0.0] * 20 + [1.5] + [0.0] * 7 + [1.0] * 68
+
+    knee = knee_kwh_from_forecast(consumption, solar, settings)
+
+    covered = 0.25 * 27  # periods 0..27 less period 20; its 1.5 solar is ignored
+    assert knee == pytest.approx(covered / settings.efficiency_discharge)
+
+
+def test_a_zero_consumption_hour_does_not_fake_pv_refills() -> None:
+    """#715: the same zero/zero period must not flip ``pv_refills`` either.
+
+    ``calculate_terminal_curve`` derives ``pv_refills`` from the same
+    ``solar >= consumption`` test. On a genuinely sunless winter day a single
+    zero-load pre-dawn hour makes ``any(...)`` true, which keeps the day on the
+    concave branch with an empty head segment -- every terminal kWh then priced
+    at ``tail_rate = min(sell) * efficiency``, below the export floor. The
+    sunless day must still take the capped scalar.
+    """
+    settings = BatterySettings(total_capacity=15.0, min_soc=10, max_soc=100)
+    buy = [0.21] * 10 + [0.30] * 18 + [0.38] * 10
+    sell = [0.10] * 22 + [0.16] * 8 + [0.12] * 8
+    consumption = [0.0] + [0.3] * 37  # hour 0 has no forecast load
+    solar = [0.0] * 38  # no sun anywhere
+
+    curve = calculate_terminal_curve(buy, sell, consumption, solar, settings)
+
+    assert curve.knee_kwh == float("inf"), (
+        "a zero-consumption pre-dawn hour is missing data, not a PV crossover; "
+        "a sunless day must still take the capped scalar"
+    )
+    assert (
+        curve.head_rate < max(sell) * settings.efficiency_discharge
+    ), "the capped scalar must hold the rate under the export alternative"
+
+
 def test_a_sunless_day_keeps_the_capped_scalar() -> None:
     """No PV crossover means no knee, so the row stays the pre-#602 one.
 

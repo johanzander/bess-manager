@@ -34,6 +34,7 @@ from .execution_model import PlatformCapabilities, intra_period_discharge_gate
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
+from .ha_recorder_helper import get_power_sensor_data_batch
 from .health_check import (
     resolve_component_device,
     run_system_health_checks,
@@ -41,7 +42,6 @@ from .health_check import (
 from .health_recovery_tracker import HealthRecovery, HealthRecoveryTracker
 from .historical_data_store import HistoricalDataStore
 from .huawei_controller import HuaweiController
-from .influxdb_helper import get_power_sensor_data_batch, is_influxdb_configured
 from .inverter_controller import InverterController
 from .managed_loads import subtract_managed_loads
 from .models import (
@@ -241,7 +241,7 @@ class BatterySystemManager:
         # own plan doesn't call for export (see _apply_period_schedule).
         self._export_limit_curtailed: bool = False
 
-        # Consumption forecast cache. Only used for the 'influxdb_7d_avg'
+        # Consumption forecast cache. Only used for the 'load_power_7d_avg'
         # and 'ha_statistics' strategies, whose value is a window of full
         # calendar days ending at today's midnight and so provably can't
         # change intraday — the cache is invalidated on date rollover, not
@@ -330,7 +330,7 @@ class BatterySystemManager:
     # today's midnight — the value can't change intraday, so it's cached
     # until the date rolls over instead of refetched every quarterly cycle.
     _DATE_CACHED_CONSUMPTION_STRATEGIES: ClassVar[set[str]] = {
-        "influxdb_7d_avg",
+        "load_power_7d_avg",
         "ha_statistics",
     }
 
@@ -670,7 +670,7 @@ class BatterySystemManager:
                 )
 
     def reinitialize_historical_data(self) -> None:
-        """Re-run the historical InfluxDB backfill.
+        """Re-run the historical recorder backfill.
 
         Called after the setup wizard configures sensors so that today's
         history is available for the first optimization run.
@@ -958,7 +958,7 @@ class BatterySystemManager:
     def _load_historical_seed(self, current_period: int) -> bool:
         """Seed the historical store from BESS_HISTORICAL_SEED_FILE if set.
 
-        Returns True if seeding succeeded and InfluxDB backfill should be skipped.
+        Returns True if seeding succeeded and the recorder backfill should be skipped.
         """
         seed_file = os.environ.get("BESS_HISTORICAL_SEED_FILE", "")
         if not seed_file:
@@ -992,7 +992,7 @@ class BatterySystemManager:
         Only periods marked data_source == "actual" are trusted as real
         recovered data. Periods the file marked "predicted" or "missing"
         (e.g. a period a scheduler tick never got around to recording, see
-        issue #403) are deliberately left unseeded so the InfluxDB backfill
+        issue #403) are deliberately left unseeded so the recorder backfill
         that runs after this can still attempt them.
         """
         view = self.daily_view_store.load_day(time_utils.today())
@@ -1223,7 +1223,7 @@ class BatterySystemManager:
             hours without complete actual data).
         """
         active_strategy = self.home_settings.consumption_strategy
-        strategy_names = ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        strategy_names = ["sensor", "fixed", "load_power_7d_avg", "ha_statistics"]
         results = []
 
         for name in strategy_names:
@@ -1241,10 +1241,8 @@ class BatterySystemManager:
                 elif name == "fixed":
                     quarterly = self.home_settings.default_hourly / 4.0
                     forecast = [quarterly] * 96
-                elif name == "influxdb_7d_avg":
-                    if not is_influxdb_configured():
-                        raise ValueError("InfluxDB not configured")
-                    forecast = self._get_influxdb_7d_avg_forecast()
+                elif name == "load_power_7d_avg":
+                    forecast = self._get_load_power_7d_avg_forecast()
                 elif name == "ha_statistics":
                     forecast = self._get_ha_statistics_forecast()
                 else:
@@ -1394,8 +1392,8 @@ class BatterySystemManager:
             quarterly = self.home_settings.default_hourly / 4.0
             return [quarterly] * 96
 
-        if strategy == "influxdb_7d_avg":
-            return self._get_influxdb_7d_avg_forecast()
+        if strategy == "load_power_7d_avg":
+            return self._get_load_power_7d_avg_forecast()
 
         if strategy == "ha_statistics":
             # Data-insufficiency or missing-sensor errors are handled the same
@@ -1432,23 +1430,22 @@ class BatterySystemManager:
 
         raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
 
-    def _get_influxdb_7d_avg_forecast(self) -> list[float]:
-        """Get consumption forecast from InfluxDB 7-day average profile.
+    def _get_load_power_7d_avg_forecast(self) -> list[float]:
+        """Consumption forecast: 7-day average of the local_load_power sensor.
 
-        Queries InfluxDB for the past 7 days of the local_load_power sensor
-        and returns the 96-value weekly average profile (kWh per 15-min period).
+        Reads the past 7 days of the local_load_power sensor from Home
+        Assistant's recorder and returns the 96-value weekly average profile
+        (kWh per 15-min period).
         """
-        target_sensor = (
-            self._controller.sensors.get("local_load_power", "")
-            if self._controller
-            else ""
-        )
+        if self._controller is None:
+            raise ValueError("load_power_7d_avg strategy requires a controller")
+        target_sensor = self._controller.sensors.get("local_load_power", "")
         if not target_sensor:
             raise ValueError(
-                "influxdb_7d_avg strategy requires 'local_load_power' sensor configured"
+                "load_power_7d_avg strategy requires 'local_load_power' sensor configured"
             )
 
-        # Strip 'sensor.' prefix if present — get_power_sensor_data_batch adds it
+        # Strip 'sensor.' prefix if present — the recorder helper re-adds it
         if target_sensor.startswith("sensor."):
             target_sensor = target_sensor[len("sensor.") :]
 
@@ -1457,7 +1454,9 @@ class BatterySystemManager:
 
         for days_back in range(1, 8):
             target_date = today - timedelta(days=days_back)
-            result = get_power_sensor_data_batch([target_sensor], target_date)
+            result = get_power_sensor_data_batch(
+                self._controller, [target_sensor], target_date
+            )
 
             if result["status"] != "success":
                 logger.warning(
@@ -1482,7 +1481,7 @@ class BatterySystemManager:
 
         if not day_profiles:
             raise ValueError(
-                "influxdb_7d_avg strategy: no valid historical data found in InfluxDB "
+                "load_power_7d_avg strategy: no valid recorder history found "
                 f"for the past 7 days of sensor '{target_sensor}'"
             )
 
@@ -1493,7 +1492,7 @@ class BatterySystemManager:
 
         total_kwh = sum(avg_profile)
         logger.info(
-            "InfluxDB 7-day average profile: %.1f kWh/day from %d days of data",
+            "Recorder 7-day average load profile: %.1f kWh/day from %d days of data",
             total_kwh,
             len(day_profiles),
         )
@@ -1793,8 +1792,8 @@ class BatterySystemManager:
             )
 
             # Use sensor collector to get complete energy data with detailed flows.
-            # Uses live sensors for current data; reconstructs from InfluxDB during
-            # startup/restart backfill. InfluxDB historical reconstruction is an
+            # Uses live sensors for current data; reconstructs from the HA
+            # recorder during startup/restart backfill. Recorder reconstruction is an
             # optional enhancement (it only backfills the actuals/savings view) —
             # if it is unavailable we surface it and skip this period's actuals,
             # because the optimization itself runs on live SOC + the configured
@@ -1988,7 +1987,7 @@ class BatterySystemManager:
         # --- Fetch predictions (issue #395) ---
         # 'sensor'/'fixed' read a cheap, continuously-updating source, so
         # they refetch every quarterly cycle (same as solar, below).
-        # 'influxdb_7d_avg'/'ha_statistics' average a window of full
+        # 'load_power_7d_avg'/'ha_statistics' average a window of full
         # calendar days ending at today's midnight — that value can't
         # change intraday, so it's only refetched once the date rolls over,
         # instead of only at startup/23:55.
@@ -3701,7 +3700,7 @@ class BatterySystemManager:
 
         Write-through cache for HistoricalDataStore: called on every tick
         that may have recorded new actuals, so a mid-day restart can seed
-        from disk instead of relying solely on InfluxDB backfill. No-op
+        from disk instead of relying solely on the recorder backfill. No-op
         until the first schedule of the day exists (build_daily_view raises
         ValueError otherwise) — this mirrors the is_first_run skip that used
         to gate the old 23:55-only save call.
@@ -3884,7 +3883,7 @@ class BatterySystemManager:
         """Log the current battery configuration - reproduces original functionality."""
         try:
             # Use already-fetched predictions — avoids triggering a heavy pipeline
-            # (InfluxDB query or ML inference) just for a log message
+            # (recorder query or ML inference) just for a log message
             assert self._consumption_predictions is not None
             predictions_consumption = self._consumption_predictions
 

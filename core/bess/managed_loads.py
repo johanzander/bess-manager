@@ -11,9 +11,9 @@ excluded). The user then re-declares any expected managed-load energy via
 Planned Consumption Changes (`consumption_overlay`), which composes on top
 of this residual baseline exactly as it does today.
 
-Scoped to `ha_statistics` only: `influxdb_7d_avg` pulls instantaneous power
-samples from InfluxDB, a different data source/shape than HA Recorder's
-cumulative `change` values, and needs its own subtraction mechanism.
+Scoped to `ha_statistics` only: `load_power_7d_avg` averages instantaneous
+power samples, a different data source/shape than HA Recorder's cumulative
+`change` values, and needs its own subtraction mechanism.
 """
 
 from .exceptions import ManagedLoadsError

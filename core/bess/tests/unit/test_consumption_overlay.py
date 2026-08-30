@@ -335,7 +335,7 @@ def test_editing_the_overlay_takes_effect_without_waiting_for_tomorrow(
 ) -> None:
     """A date-cached strategy must not bake the overlay into its cached day.
 
-    'ha_statistics' and 'influxdb_7d_avg' average whole calendar days, so
+    'ha_statistics' and 'load_power_7d_avg' average whole calendar days, so
     their forecast is cached until the date rolls over. The overlay is not
     that kind of value: the user edits it precisely because today changed.
     Applying it inside _get_consumption_forecast would trap it in that cache.

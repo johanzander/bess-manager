@@ -541,12 +541,23 @@ Two limits to keep in mind when analysing this:
   SOLAR_EXPORT/SOLAR_STORAGE that cost is zero (planned deficit is zero), which
   is why the simulator does mirror the gate for those.
 
-**VPP platforms are still excluded** (`discharge_rate_is_load_following` is
-False there): their `discharge_rate` is an immediate forced power command, not
-a load-following ceiling (#324), so opening the gate would command a full-power
-discharge rather than permit a gentle cover. The VPP half of #520 maps the
-gate's *decision* (release control / hold) rather than its rate, and is
-deferred to candidate-scoring work.
+**VPP platforms are still excluded from the ceiling-raising form**
+(`discharge_rate_is_load_following` is False there): their `discharge_rate` is
+an immediate forced power command, not a load-following ceiling (#324), so
+opening the gate would command a full-power discharge rather than permit a
+gentle cover. The VPP half of #520 instead expresses the same economic test as
+an **energy budget** (`core/bess/vpp_load_tracking.py`): a closed gate on a
+`LOAD_SUPPORT` period yields a budget equal to that period's planned discharge
+energy (`budget_for_period`), and an opt-in
+(`vpp_load_tracking_enabled`, default off) tick loop rewrites `vpp_power`
+against the measured house deficit until the budget is spent, then holds
+(`VPP_HOLD_POWER_PCT` — `battery_first` at +1%). An open gate returns no budget
+and control is released exactly as #413 does today. The earlier proposal to map
+only the gate's release/hold *decision* (draft PR #537) was withdrawn: on VPP a
+bare hold abandons the planned discharge entirely (118.11 kWh across the
+corpus), where TOU's closed gate still delivers it. `simulation/vpp_simulator.py`
+models the budget-capped branch; with the opt-in off the VPP corpus stays
+byte-identical.
 
 The `shadow_price == 0.0` ambiguity that #520's TOU half would otherwise have
 inherited (an uncomputed bottom-grid-level value opening the ceiling

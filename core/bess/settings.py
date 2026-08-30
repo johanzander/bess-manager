@@ -17,6 +17,8 @@ For production configuration, all user-facing values must be properly configured
 from dataclasses import dataclass, field, fields
 from typing import Any
 
+from .vpp_load_tracking import VPP_LOAD_TRACKING_TICK_SECONDS
+
 # Price settings defaults
 DEFAULT_AREA = ""
 MARKUP_RATE = 0.08  # per kWh in configured currency
@@ -131,6 +133,12 @@ class BatterySettings:
     # CT/smart meter and a platform with supports_export_limit_control.
     export_curtailment_enabled: bool = False
     export_curtailment_price_floor: float = 0.0
+    # VPP load tracking (#520) -- opt-in, Growatt VPP control mode only.
+    # Requires a resolvable local load sensor; opting in without one is a
+    # configuration error surfaced in health, never a quiet fall back to
+    # #413's release behaviour. See core/bess/vpp_load_tracking.py.
+    vpp_load_tracking_enabled: bool = False
+    vpp_load_tracking_tick_seconds: int = VPP_LOAD_TRACKING_TICK_SECONDS
     reserved_capacity: float = field(init=False)
     min_soe_kwh: float = field(init=False)
     max_soe_kwh: float = field(init=False)

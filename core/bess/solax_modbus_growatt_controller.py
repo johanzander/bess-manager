@@ -72,6 +72,7 @@ from .dp_schedule import DPSchedule
 from .growatt_min_controller import GrowattMinController
 from .health_check import perform_health_check
 from .settings import BatterySettings
+from .vpp_load_tracking import VPP_HOLD_POWER_PCT
 
 logger = logging.getLogger(__name__)
 
@@ -347,6 +348,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        load_tracking_active: bool = False,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate, block_passive_charging,
         strategic_intent, at_reserve_floor) to
@@ -414,6 +416,21 @@ class SolaxModbusGrowattController(GrowattMinController):
           inverter. `vpp_simulator` models the release as a hold at
           min_soe_kwh (available == 0), i.e. it assumes the two floors agree.
           Flagged for real-hardware confirmation with #592's reporter.
+        - grid_charge=False, intent=LOAD_SUPPORT, load_tracking_active=True
+          -> +1%, remote control ENABLED (#520). The boundary command for a
+          tracked period: the hold, with remote control armed so the tick loop
+          can rewrite `vpp_power` between boundaries without re-running the
+          full arm sequence. It is deliberately the *hold* rather than a
+          computed rate, because this function is a stateless mapper with no
+          access to a live load reading -- BSM ticks immediately after the
+          boundary write and replaces it with the measured deficit.
+
+          Starting from the hold rather than the release is what makes the
+          period bounded: a released period cannot be reined back in, since
+          remote control is off and the inverter is following load on its own.
+          Reached only when the user has opted in AND the gate is closed --
+          an open gate passes load_tracking_active=False and falls through to
+          #413's release below, unchanged. See core/bess/vpp_load_tracking.py.
         - grid_charge=False, rate=0, block=False  -> 0%, remote control DISABLED
           (load_first self-use -- SOLAR_STORAGE, battery may absorb solar)
         - grid_charge=False, rate>0 (otherwise, i.e. BATTERY_EXPORT)
@@ -422,6 +439,8 @@ class SolaxModbusGrowattController(GrowattMinController):
         if grid_charge:
             return 100, True
         if strategic_intent == "LOAD_SUPPORT":
+            if load_tracking_active:
+                return VPP_HOLD_POWER_PCT, True
             return 0, False
         if discharge_rate == 0:
             if strategic_intent == "IDLE":

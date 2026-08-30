@@ -7,7 +7,7 @@ import json
 import logging
 import os
 import traceback
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta, tzinfo
 from typing import Any, ClassVar
 
 import requests
@@ -79,6 +79,69 @@ from .time_utils import (
 from .weather import fetch_temperature_forecast
 
 logger = logging.getLogger(__name__)
+
+
+def ha_statistics_quarterly_profile(
+    stats: list[dict], tz: tzinfo
+) -> tuple[list[float], int]:
+    """Hour-of-day trimmed-mean consumption profile, as 96 quarter-hour values.
+
+    Returns ``(profile, hours_with_data)``. The caller owns what to do when
+    too few hours carry data, because only it knows which sensor to name in
+    the error -- the transformation itself has no opinion.
+
+    Module-level so ``scripts/knee_oracle.py`` can rebuild the exact profile
+    production fed the DP from a debug bundle's captured statistics, rather
+    than from a second implementation of the trimming rule. That distinction
+    is load-bearing for the oracle: scoring the terminal knee (#602/#687)
+    against metered actuals only measures anything if the forecast side is
+    the forecast production actually held.
+
+    The trimmed mean drops the min and max at >=5 samples (max only at >=3)
+    for outlier robustness -- an EV charge or a one-off boiler cycle should
+    not become the household's baseline. Note this makes it a *central*
+    estimate, which is the right target for predicting a day's cost and the
+    wrong one for sizing an overnight reserve, whose loss is asymmetric
+    (see #381). Hours with no samples stay 0.0 and are not counted in
+    ``hours_with_data``.
+    """
+    hourly_buckets: dict[int, list[float]] = {h: [] for h in range(24)}
+    for entry in stats:
+        change = entry.get("change")
+        if change is None:
+            continue
+        start_val = entry.get("start")
+        if start_val is None:
+            continue
+        try:
+            if isinstance(start_val, (int, float)):
+                # HA returns millisecond epoch timestamps
+                ts = start_val / 1000 if start_val > 1e12 else start_val
+                dt = datetime.fromtimestamp(ts, tz=UTC).astimezone(tz)
+            else:
+                dt = datetime.fromisoformat(str(start_val)).astimezone(tz)
+            hourly_buckets[dt.hour].append(float(change))
+        except (ValueError, TypeError, OverflowError):
+            continue
+
+    hourly_avg = [0.0] * 24
+    hours_with_data = 0
+    for hour in range(24):
+        values = hourly_buckets[hour]
+        if values:
+            if len(values) >= 5:
+                trimmed = sorted(values)[1:-1]  # drop min and max
+            elif len(values) >= 3:
+                trimmed = sorted(values)[:-1]  # drop max only
+            else:
+                trimmed = values
+            hourly_avg[hour] = sum(trimmed) / len(trimmed)
+            hours_with_data += 1
+
+    quarterly_profile: list[float] = []
+    for hour_kwh in hourly_avg:
+        quarterly_profile.extend([hour_kwh / 4.0] * 4)
+    return quarterly_profile, hours_with_data
 
 
 class BatterySystemManager:
@@ -1591,57 +1654,16 @@ class BatterySystemManager:
         """
 
         target_sensor, stats = self._fetch_ha_statistics_raw()
-        tz = time_utils.TIMEZONE
 
-        # Group hourly change values by hour-of-day (0-23)
-        hourly_buckets: dict[int, list[float]] = {h: [] for h in range(24)}
-        for entry in stats:
-            change = entry.get("change")
-            if change is None:
-                continue
-            start_val = entry.get("start")
-            if start_val is None:
-                continue
-            try:
-                if isinstance(start_val, (int, float)):
-                    # HA returns millisecond epoch timestamps
-                    ts = start_val / 1000 if start_val > 1e12 else start_val
-                    dt = datetime.fromtimestamp(ts, tz=UTC).astimezone(tz)
-                else:
-                    dt = datetime.fromisoformat(str(start_val)).astimezone(tz)
-                hourly_buckets[dt.hour].append(float(change))
-            except (ValueError, TypeError, OverflowError):
-                continue
-
-        # Compute per-hour-of-day averages using trimmed mean for outlier
-        # robustness (e.g. EV charging spikes).  Drop the min and max when
-        # there are enough samples; with fewer samples, drop only the max
-        # (spikes are the main concern).
-        hourly_avg = [0.0] * 24
-        hours_with_data = 0
-        for hour in range(24):
-            values = hourly_buckets[hour]
-            if values:
-                if len(values) >= 5:
-                    trimmed = sorted(values)[1:-1]  # drop min and max
-                elif len(values) >= 3:
-                    trimmed = sorted(values)[:-1]  # drop max only
-                else:
-                    trimmed = values
-                hourly_avg[hour] = sum(trimmed) / len(trimmed)
-                hours_with_data += 1
+        quarterly_profile, hours_with_data = ha_statistics_quarterly_profile(
+            stats, time_utils.TIMEZONE
+        )
 
         if hours_with_data < 12:
             raise HAStatisticsUnavailableError(
                 f"Insufficient statistics data: only {hours_with_data}/24 hours "
                 f"have data for {target_sensor}"
             )
-
-        # Expand 24 hourly values to 96 quarter-hourly values
-        quarterly_profile = []
-        for hour_kwh in hourly_avg:
-            quarter_kwh = hour_kwh / 4.0
-            quarterly_profile.extend([quarter_kwh] * 4)
 
         total_kwh = sum(quarterly_profile)
         logger.info(

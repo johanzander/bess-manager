@@ -12,6 +12,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from core.bess import ha_recorder_helper, time_utils
+from core.bess.ha_api_controller import HomeAssistantAPIController
 
 UTC = ZoneInfo("UTC")
 DAY = date(2026, 8, 20)
@@ -36,7 +37,14 @@ def _entry(state: str, ts_iso: str, entity_id: str | None = None) -> dict:
     return entry
 
 
-class FakeController:
+class FakeController(HomeAssistantAPIController):
+    """A stand-in for the real controller — only ``get_history_period`` is used.
+
+    Subclasses the concrete controller (rather than a Protocol) so the helper
+    can be typed against ``HomeAssistantAPIController`` directly;
+    ``__init__`` is deliberately not chained.
+    """
+
     def __init__(
         self,
         payload: list | None = None,
@@ -48,7 +56,7 @@ class FakeController:
 
     def get_history_period(
         self, entity_ids: list[str], start_time: str, end_time: str
-    ) -> list:
+    ) -> list[list[dict]]:
         self.calls.append((tuple(entity_ids), start_time, end_time))
         if self._raises is not None:
             raise self._raises

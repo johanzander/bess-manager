@@ -21,22 +21,17 @@ Not yet wired into any production path — see issue #722, PR 2.
 
 import logging
 from datetime import date, datetime, timedelta, tzinfo
-from typing import Protocol
+from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
 from core.bess import time_utils
 
+if TYPE_CHECKING:  # avoid a runtime import cycle once PR 2 wires this in
+    from core.bess.ha_api_controller import HomeAssistantAPIController
+
 _LOGGER = logging.getLogger(__name__)
 
 _Series = dict[str, list[tuple[datetime, float]]]
-
-
-class _HistoryClient(Protocol):
-    """The slice of HAApiController this module needs."""
-
-    def get_history_period(
-        self, entity_ids: list[str], start_time: str, end_time: str
-    ) -> list[list[dict]]: ...
 
 
 # Instantaneous-power readings above this (W) are treated as sensor glitches
@@ -73,7 +68,7 @@ def _parse_timestamp(entry: dict, local_tz: tzinfo) -> datetime | None:
 
 
 def _fetch_series(
-    controller: _HistoryClient,
+    controller: "HomeAssistantAPIController",
     entity_ids: list[str],
     start: datetime,
     end: datetime,
@@ -116,25 +111,19 @@ def _fetch_series(
     return series
 
 
-class _NoData(Exception):
-    """Carries a ready-to-return ``{"status": "error", ...}`` payload."""
-
-    def __init__(self, payload: dict) -> None:
-        super().__init__(payload["message"])
-        self.payload = payload
-
-
 def _load_series(
-    controller: _HistoryClient, names: list[str], target_date: date | datetime
-) -> tuple[_Series, datetime]:
+    controller: "HomeAssistantAPIController",
+    names: list[str],
+    target_date: date | datetime,
+) -> tuple[_Series, datetime] | dict:
     """Shared preamble for both batch entry points.
 
-    Returns ``(series, day_start)``. Raises ``_NoData`` — whose ``payload`` is
-    the dict the caller should return — for an empty sensor list, a fetch
-    exception, or a window with no recorder data.
+    Returns ``(series, day_start)`` on success, or a ready-to-return
+    ``{"status": "error", "message": ...}`` dict for an empty sensor list, a
+    fetch exception, or a window with no recorder data.
     """
     if not names:
-        raise _NoData({"status": "error", "message": "No sensors configured"})
+        return {"status": "error", "message": "No sensors configured"}
 
     start, end = _day_bounds(target_date)
     entity_ids = [f"sensor.{name}" for name in names]
@@ -143,28 +132,26 @@ def _load_series(
         series = _fetch_series(controller, entity_ids, start, end)
     except Exception as e:  # mirror influxdb_helper's catch-all
         _LOGGER.error("Recorder history fetch failed: %s", e)
-        raise _NoData(
-            {"status": "error", "message": f"Recorder history error: {e!s}"}
-        ) from e
+        return {"status": "error", "message": f"Recorder history error: {e!s}"}
 
     if not any(series.values()):
-        raise _NoData(
-            {
-                "status": "error",
-                "message": f"No recorder history for {start.date().isoformat()}",
-            }
-        )
+        return {
+            "status": "error",
+            "message": f"No recorder history for {start.date().isoformat()}",
+        }
 
     return series, start
 
 
 def get_sensor_data_batch(
-    controller: _HistoryClient, sensors_list: list[str], target_date: date | datetime
+    controller: "HomeAssistantAPIController",
+    sensors_list: list[str],
+    target_date: date | datetime,
 ) -> dict:
     """Last value of each cumulative sensor at all 96 period boundaries.
 
     Args:
-        controller: an HAApiController exposing ``get_history_period``.
+        controller: an HomeAssistantAPIController exposing ``get_history_period``.
         sensors_list: entity IDs without the ``sensor.`` prefix.
         target_date: date (or datetime) to fetch.
 
@@ -173,10 +160,10 @@ def get_sensor_data_batch(
         ``{"status": "error", "message": str}``. Periods with no data are
         omitted.
     """
-    try:
-        series, start = _load_series(controller, sensors_list, target_date)
-    except _NoData as nd:
-        return nd.payload
+    loaded = _load_series(controller, sensors_list, target_date)
+    if isinstance(loaded, dict):
+        return loaded
+    series, start = loaded
 
     period_data: dict[int, dict[str, float]] = {}
     for period in range(_PERIODS_PER_DAY):
@@ -205,7 +192,9 @@ def get_sensor_data_batch(
 
 
 def get_power_sensor_data_batch(
-    controller: _HistoryClient, power_sensors: list[str], target_date: date | datetime
+    controller: "HomeAssistantAPIController",
+    power_sensors: list[str],
+    target_date: date | datetime,
 ) -> dict:
     """Mean power (W) per 15-minute period, converted to energy (kWh).
 
@@ -214,10 +203,10 @@ def get_power_sensor_data_batch(
 
     Args / Returns: as ``get_sensor_data_batch``.
     """
-    try:
-        series, start = _load_series(controller, power_sensors, target_date)
-    except _NoData as nd:
-        return nd.payload
+    loaded = _load_series(controller, power_sensors, target_date)
+    if isinstance(loaded, dict):
+        return loaded
+    series, start = loaded
 
     # {entity_id: {period: [watt readings]}}
     readings: dict[str, dict[int, list[float]]] = {}

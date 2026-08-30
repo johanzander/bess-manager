@@ -1261,7 +1261,7 @@ class TestLoadPower7dAvgStrategy:
         import core.bess.battery_system_manager as bsm
 
         # The InfluxDB gate is gone from this module entirely.
-        assert not hasattr(bsm, "is_influxdb_configured")
+        assert "is_influxdb_configured" not in vars(bsm)
 
         assert system._controller is not None
         system._controller.sensors = {"local_load_power": "sensor.house_load"}
@@ -1280,6 +1280,8 @@ class TestLoadPower7dAvgStrategy:
         # controller threaded as the first positional arg
         assert mock_batch.call_args.args[0] is system._controller
 
+
+class TestNotApplyBranchRefreshesCurrentSchedule:
     """Regression for issue #369 finding 1.
 
     _apply_period_schedule (called every cycle, apply or not) reads
@@ -1637,7 +1639,7 @@ class TestBackfillNotGatedOnInfluxDB:
         import core.bess.battery_system_manager as bsm
 
         # The InfluxDB config gate is gone from this module entirely.
-        assert not hasattr(bsm, "is_influxdb_configured")
+        assert "is_influxdb_configured" not in vars(bsm)
 
         with (
             patch.object(

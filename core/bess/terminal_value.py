@@ -183,6 +183,28 @@ class TerminalValueCurve:
         return head * self.head_rate + (usable - head) * self.tail_rate
 
 
+def pv_covers_load(consumption: float, solar: float) -> bool:
+    """Whether this period is a genuine PV crossover: real PV meeting a real load.
+
+    Every knee derivation in this module scans a net-load series and stops at
+    the first period where "PV has taken over the house". The bare test for
+    that -- ``solar >= consumption`` -- also fires on ``0.0 >= 0.0``, i.e. on a
+    period with *no forecast load at all*. Those are not rare: an empty HA
+    Recorder statistics bucket and a managed-load subtraction clamped at zero
+    (`managed_loads.subtract_managed_loads`) both leave a forecast hour at
+    exactly 0.0 kWh, and overnight -- where solar is also 0.0 -- is where they
+    are most likely. Read as a crossover, one such period at the terminal
+    boundary collapses the whole terminal row (#715).
+
+    A no-load period is missing data, not a takeover: it must not end the scan
+    (this predicate) and it must not contribute net load either (the scanners
+    ``continue`` past ``consumption <= 0`` before accumulating). Requiring
+    ``consumption > 0`` here also implies ``solar > 0`` at a real crossover,
+    since ``solar >= consumption > 0``.
+    """
+    return consumption > 0 and solar >= consumption
+
+
 def knee_kwh_from_forecast(
     consumption_forecast: list[float],
     solar_forecast: list[float],
@@ -225,7 +247,13 @@ def knee_kwh_from_forecast(
     # the zip.
     net = 0.0
     for consumption, solar in zip(consumption_forecast, solar_forecast, strict=False):
-        if solar >= consumption:
+        if consumption <= 0:
+            # No forecast load: a data gap, not a period. It is neither the PV
+            # crossover nor real net load, so skip it entirely -- accumulating
+            # `consumption - solar` here would subtract any stray solar and
+            # understate the knee (#715).
+            continue
+        if pv_covers_load(consumption, solar):
             break
         net += consumption - solar
     return net / battery_settings.efficiency_discharge
@@ -321,7 +349,7 @@ def calculate_terminal_curve(
         sell_prices,
         knee_kwh_from_forecast(consumption_forecast, solar_forecast, battery_settings),
         pv_refills=any(
-            solar >= consumption
+            pv_covers_load(consumption, solar)
             for consumption, solar in zip(
                 consumption_forecast, solar_forecast, strict=False
             )
@@ -356,7 +384,8 @@ def knee_kwh_from_trailing_darkness(
     a single 0.003 kWh dusk crumb stop it immediately and zero the whole
     terminal row: `realworld_2026_04_27_184643` recorded `knee = 0.0` against a
     head rate of 1.863 that way, i.e. no terminal row at all across the entire
-    battery.
+    battery. It uses `pv_covers_load` for the same reason the forward scan does
+    -- a zero-load period is a data gap, not a crossover (#715).
 
     Two limits, neither fixable from the data these callers have. The mirror
     assumption is weakest exactly where it is used -- a boundary at midnight has
@@ -366,7 +395,9 @@ def knee_kwh_from_trailing_darkness(
     """
     net = 0.0
     for consumed, produced in zip(reversed(consumption), reversed(solar), strict=True):
-        if produced >= consumed:
+        if consumed <= 0:
+            continue  # no-load period: a data gap, skip it entirely (#715)
+        if pv_covers_load(consumed, produced):
             break
         net += consumed - produced
     return net / battery_settings.efficiency_discharge

@@ -26,6 +26,7 @@ from core.bess.terminal_value import (
     TerminalValueCurve,
     curve_from_knee,
     knee_kwh_from_trailing_darkness,
+    pv_covers_load,
 )
 
 
@@ -167,7 +168,7 @@ def scenario_terminal_curve(scenario: dict) -> TerminalValueCurve:
         inputs["sell_price"][-periods_per_day:],
         knee_kwh_from_trailing_darkness(consumption, solar, settings),
         pv_refills=any(
-            produced >= consumed
+            pv_covers_load(consumed, produced)
             for consumed, produced in zip(consumption, solar, strict=True)
         ),
         battery_settings=settings,

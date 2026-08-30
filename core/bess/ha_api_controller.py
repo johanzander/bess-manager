@@ -51,6 +51,39 @@ def run_request(http_method, *args, **kwargs):
         raise
 
 
+def solcast_detailed_hourly_to_quarterly(hourly_data: list) -> list[float]:
+    """Expand a Solcast ``detailedHourly`` payload to 96 quarter-hour values.
+
+    Module-level so that anything replaying a captured forecast -- notably
+    ``scripts/knee_oracle.py``, which scores the #602/#687 terminal knee
+    against metered actuals -- prices the boundary off the *same* parse
+    production used. A second, hand-written copy of this is how an oracle
+    comes to grade a forecast the optimizer never saw: the hour is taken
+    from the raw string with no timezone conversion, so a reimplementation
+    that helpfully calls ``astimezone`` agrees only while the feed happens
+    to serialize in local time, and silently shifts by the UTC offset
+    otherwise.
+
+    Missing hours stay 0.0 rather than raising -- Solcast omits pre-dawn and
+    post-dusk hours, which are genuinely zero.
+    """
+    hourly_values = [0.0] * 24
+    for entry in hourly_data:
+        period_start = entry["period_start"]
+        if isinstance(period_start, str):
+            # Deliberately naive: the hour is whatever the payload says it
+            # is, in the payload's own offset. See the docstring.
+            hour = int(period_start.split("T")[1].split(":")[0])
+        else:
+            hour = period_start.hour
+        hourly_values[hour] = float(entry["pv_estimate"])
+
+    quarterly_values: list[float] = []
+    for hourly_value in hourly_values:
+        quarterly_values.extend([hourly_value / 4.0] * 4)
+    return quarterly_values
+
+
 class HomeAssistantAPIController:
     """A class for interacting with Inverter controls via Home Assistant REST API."""
 
@@ -2622,31 +2655,7 @@ class HomeAssistantAPIController:
                 f"No hourly data found in solar forecast sensor {entity_id}"
             )
 
-        # Parse hourly values from Solcast
-        hourly_values = [0.0] * 24
-        pv_field = "pv_estimate"
-
-        for entry in hourly_data:
-            # Handle period_start
-            period_start = entry["period_start"]
-
-            # If period_start is a string, parse the hour
-            if isinstance(period_start, str):
-                hour = int(period_start.split("T")[1].split(":")[0])
-            else:
-                # Assume it's already a datetime object
-                hour = period_start.hour
-
-            hourly_values[hour] = float(entry[pv_field])
-
-        # Convert hourly to quarterly resolution
-        # Each hourly value is divided by 4 to get per-quarter-hour energy
-        quarterly_values = []
-        for hourly_value in hourly_values:
-            quarter_value = hourly_value / 4.0
-            quarterly_values.extend([quarter_value] * 4)
-
-        return quarterly_values
+        return solcast_detailed_hourly_to_quarterly(hourly_data)
 
     def get_solar_forecast(self):
         """Get solar forecast data in quarterly resolution (96 periods).

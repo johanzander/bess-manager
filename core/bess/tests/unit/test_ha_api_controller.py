@@ -12,7 +12,10 @@ import pytest
 import requests
 
 from core.bess.exceptions import SystemConfigurationError
-from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.ha_api_controller import (
+    HomeAssistantAPIController,
+    solcast_detailed_hourly_to_quarterly,
+)
 from core.bess.runtime_failure_tracker import RuntimeFailureTracker
 from core.bess.settings_store import SettingsStore
 
@@ -1374,3 +1377,52 @@ class TestGetDeviceMaps:
         second = ctrl.get_device_maps()
         assert ws.call_count == 1
         assert second is first
+
+
+class TestSolcastDetailedHourlyToQuarterly:
+    """The pure Solcast parse, shared with scripts/knee_oracle.py.
+
+    Module-level so a forecast replayed from a debug bundle is parsed by the
+    same code that parsed it live (#602/#687/#381).
+    """
+
+    def test_expands_hours_to_96_quarters(self) -> None:
+        quarterly = solcast_detailed_hourly_to_quarterly(
+            [{"period_start": "2026-08-07T12:00:00+02:00", "pv_estimate": 4.0}]
+        )
+
+        assert len(quarterly) == 96
+        assert quarterly[48:52] == pytest.approx([1.0] * 4)
+
+    def test_missing_hours_stay_zero(self) -> None:
+        """Solcast omits pre-dawn hours; absence means no sun, not no data."""
+        quarterly = solcast_detailed_hourly_to_quarterly(
+            [{"period_start": "2026-08-07T12:00:00+02:00", "pv_estimate": 4.0}]
+        )
+
+        assert quarterly[:48] == pytest.approx([0.0] * 48)
+        assert quarterly[52:] == pytest.approx([0.0] * 44)
+
+    def test_hour_is_read_naively_from_the_payload_offset(self) -> None:
+        """Pinned because it is surprising and a reimplementation got it wrong.
+
+        The hour is taken from the string as written, with no conversion to
+        local time. A copy that helpfully called `astimezone` would agree only
+        while the feed serialises in local time and shift by the UTC offset
+        otherwise -- silently moving sunrise in anything replaying this.
+        """
+        quarterly = solcast_detailed_hourly_to_quarterly(
+            [{"period_start": "2026-08-07T06:00:00+00:00", "pv_estimate": 2.0}]
+        )
+
+        assert quarterly[24:28] == pytest.approx([0.5] * 4)  # hour 6, not hour 8
+        assert quarterly[32:36] == pytest.approx([0.0] * 4)
+
+    def test_accepts_datetime_period_start(self) -> None:
+        from datetime import datetime
+
+        quarterly = solcast_detailed_hourly_to_quarterly(
+            [{"period_start": datetime(2026, 8, 7, 9), "pv_estimate": 1.2}]
+        )
+
+        assert quarterly[36:40] == pytest.approx([0.3] * 4)

@@ -43,15 +43,17 @@ from core.bess.battery_system_manager import (
 from core.bess.ha_api_controller import (
     solcast_detailed_hourly_to_quarterly,
 )
+from core.bess.terminal_value import pv_covers_load
 from core.bess.time_utils import TIMEZONE
 
-# A crossover needs PV that actually exists. On *metered* data a dark quarter
-# can read `0.0 >= 0.0` and register as sunrise at 00:45, censoring the oracle
-# to near zero -- and a quantization tie (0.1 vs 0.1, with solar back to 0.0 the
-# next quarter) can register one 30 minutes early. Requiring real PV sustained
-# across two consecutive periods is what "the sun took over" means physically.
-# The production scan has neither guard, which is its own defect (#715); this
-# constant is about scoring honestly, not about proposing that shape.
+# `pv_covers_load` rejects the `0.0 >= 0.0` reading of a no-load period (#715),
+# which is enough for a forecast. Metered data needs one thing more: a
+# quantization tie (0.1 vs 0.1, with solar back to 0.0 the next quarter) is a
+# real load meeting real PV and passes the predicate, yet reads sunrise ~30
+# minutes early. Requiring coverage sustained across two consecutive periods is
+# what "the sun took over" means on a meter. Scoped to the oracle on purpose:
+# production forecasts are smooth and have no such ties, so this is about
+# scoring honestly, not a shape the production scan should copy.
 _SUSTAINED_PERIODS = 2
 
 
@@ -101,13 +103,17 @@ def knee_from_forecast(
     """`knee_kwh_from_forecast`'s scan, reporting where it stopped.
 
     The production function returns only the quantity; the crossover index is
-    what makes a miss legible as timing rather than level, so it is recomputed
-    here. Kept deliberately identical in shape -- if the production scan gains
-    the #715 guard, this must follow it.
+    what makes a miss legible as timing rather than level, so the scan is
+    repeated here. The *decision* is not repeated -- `pv_covers_load` is
+    imported, so a change to what counts as a crossover reaches the oracle
+    without anyone remembering to update it. A local copy of that predicate is
+    how a harness comes to grade a scan production no longer runs.
     """
     net = 0.0
     for index, (consumed, produced) in enumerate(zip(consumption, solar, strict=False)):
-        if produced >= consumed:
+        if consumed <= 0:
+            continue  # no forecast load: a data gap, not a period (#715)
+        if pv_covers_load(consumed, produced):
             return net / efficiency_discharge, index
         net += consumed - produced
     return net / efficiency_discharge, None
@@ -120,15 +126,17 @@ def oracle_knee(
     net = 0.0
     for index, (consumed, produced) in enumerate(zip(consumption, solar, strict=False)):
         covered = [
-            produced_n >= consumed_n
+            pv_covers_load(consumed_n, produced_n)
             for consumed_n, produced_n in zip(
                 consumption[index : index + _SUSTAINED_PERIODS],
                 solar[index : index + _SUSTAINED_PERIODS],
                 strict=False,
             )
         ]
-        if produced > 0 and len(covered) == _SUSTAINED_PERIODS and all(covered):
+        if len(covered) == _SUSTAINED_PERIODS and all(covered):
             return net / efficiency_discharge, index
+        if consumed <= 0:
+            continue  # metered no-load quarter: a gap, same as the forecast side
         net += consumed - produced
     return net / efficiency_discharge, None
 

@@ -292,6 +292,45 @@ describe('SystemStatusCard', () => {
     expect(screen.getByText('Load First')).toBeInTheDocument();
   });
 
+  it('keeps the curtailment marker out of the Strategic Intent headline so it cannot overflow the card', async () => {
+    // Issue #676: when the current period is a curtailed SOLAR_STORAGE hour,
+    // the headline was the single string "Storing Solar — Curtailed (No
+    // Export)" rendered at text-3xl on one non-wrapping line, which overflows
+    // the card. The intent name stays in the headline; curtailment moves to
+    // its own smaller badge element.
+    // The component resolves the current period from wall-clock time
+    // (period === new Date().getHours()), so mark every hour curtailed
+    // SOLAR_STORAGE to stay time-independent.
+    vi.mocked(useDashboardData).mockReturnValue({
+      data: {
+        ...mockDashboardData,
+        hourlyData: mockDashboardData.hourlyData.map((h) => ({
+          ...h,
+          strategicIntent: 'SOLAR_STORAGE',
+          curtailed: true,
+        })),
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+
+    render(<SystemStatusCard systemMode="live" />);
+
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+
+    // The big headline is only the intent name...
+    expect(screen.getByText('Storing Solar')).toBeInTheDocument();
+    // ...the curtailment note renders as its own separate element...
+    expect(screen.getByText('Curtailed (No Export)')).toBeInTheDocument();
+    // ...and the long concatenated string is gone.
+    expect(
+      screen.queryByText('Storing Solar — Curtailed (No Export)')
+    ).not.toBeInTheDocument();
+  });
+
   it('hides the Battery Mode metric when controlModel is not tou_register', async () => {
     vi.mocked(api.get).mockResolvedValue({
       data: { controlModel: 'vpp_power' },

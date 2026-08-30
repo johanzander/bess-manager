@@ -12,7 +12,10 @@ import pytest
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
-from core.bess.exceptions import SystemConfigurationError
+from core.bess.exceptions import (
+    HistoricalDataUnavailableError,
+    SystemConfigurationError,
+)
 from core.bess.models import (
     EconomicSummary,
     EnergyData,
@@ -1548,10 +1551,6 @@ class TestBackfillSkipsDiskSeededPeriods:
         system.daily_view_store.save_day(view)
 
         with (
-            patch(
-                "core.bess.battery_system_manager.is_influxdb_configured",
-                return_value=True,
-            ),
             patch.object(
                 system.sensor_collector, "collect_energy_data"
             ) as mock_collect,
@@ -1570,6 +1569,75 @@ class TestBackfillSkipsDiskSeededPeriods:
         collected_periods = [call.args[0] for call in mock_collect.call_args_list]
         assert 0 not in collected_periods
         assert 1 in collected_periods
+
+
+class TestBackfillNotGatedOnInfluxDB:
+    """PR 2 of #722: cold-start backfill now reads HA Recorder, so it must run
+    even when the legacy ``influxdb`` add-on is not configured — previously
+    ``_fetch_and_initialize_historical_data`` early-returned in that case."""
+
+    def test_backfill_runs_and_never_consults_influxdb_config(
+        self, system: BatterySystemManager
+    ) -> None:
+        with (
+            patch(
+                "core.bess.battery_system_manager.is_influxdb_configured"
+            ) as mock_gate,
+            patch.object(
+                system.sensor_collector, "collect_energy_data"
+            ) as mock_collect,
+            patch.object(
+                system.price_manager,
+                "get_available_prices",
+                return_value=([1.0] * 96, [0.5] * 96),
+            ),
+            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+        ):
+            mock_now.return_value = datetime(2026, 7, 27, 1, 0)  # current_period = 4
+            system._fetch_and_initialize_historical_data()
+
+        # The backfill path no longer branches on the legacy InfluxDB config.
+        mock_gate.assert_not_called()
+        collected_periods = [call.args[0] for call in mock_collect.call_args_list]
+        assert collected_periods, "backfill must attempt periods via HA Recorder"
+        assert 0 in collected_periods
+
+    def test_cold_start_gap_logs_at_debug_not_warning(
+        self,
+        system: BatterySystemManager,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A fresh install part-way through the day has no recorder history for
+        earlier periods — that gap is expected and must not spam WARNING once
+        per period (the un-gated loop now reaches every period)."""
+        with (
+            patch.object(
+                system.sensor_collector,
+                "collect_energy_data",
+                side_effect=HistoricalDataUnavailableError("no recorder history"),
+            ),
+            patch.object(
+                system.price_manager,
+                "get_available_prices",
+                return_value=([1.0] * 96, [0.5] * 96),
+            ),
+            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+        ):
+            mock_now.return_value = datetime(2026, 7, 27, 1, 0)  # current_period = 4
+            with caplog.at_level(
+                logging.DEBUG, logger="core.bess.battery_system_manager"
+            ):
+                system._fetch_and_initialize_historical_data()
+
+        period_warnings = [
+            r.message
+            for r in caplog.records
+            if r.levelno >= logging.WARNING and "period" in r.message.lower()
+        ]
+        assert not period_warnings, f"cold-start gap should not warn: {period_warnings}"
+        assert any(
+            "No recorder history yet for period" in r.message for r in caplog.records
+        )
 
 
 class TestQuietCycleReconcilesHardware:

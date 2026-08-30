@@ -1033,12 +1033,6 @@ class BatterySystemManager:
             if current_period > 0:
                 self._load_today_from_disk(current_period)
 
-            if not is_influxdb_configured():
-                logger.info(
-                    "InfluxDB is not configured — skipping historical data backfill"
-                )
-                return
-
             if current_period > 0:
                 # Get prices once for all periods (fetch outside loop to avoid repeated API calls)
                 try:
@@ -1115,6 +1109,16 @@ class BatterySystemManager:
                             f"SOC={period_energy_data.battery_soe_start:.1f}%→{period_energy_data.battery_soe_end:.1f}%"
                         )
 
+                    except HistoricalDataUnavailableError as e:
+                        # Expected on a cold start before the recorder has
+                        # history for this period (fresh install part-way
+                        # through the day, or recorder retention shorter than
+                        # the gap). The period stays predicted and fills in
+                        # once data exists — not a warning-level event.
+                        logger.debug(
+                            f"No recorder history yet for period {period} "
+                            f"({format_period(period)}): {e}"
+                        )
                     except Exception as e:
                         logger.warning(
                             f"Failed to collect/store data for period {period} ({format_period(period)}): {e}"

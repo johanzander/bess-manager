@@ -116,7 +116,8 @@ Dependency-ordered. Each references `#722`; only PR 6 carries `Closes #722`.
 - `core/bess/debug_findings.py` (drop / retarget the "No InfluxDB data"
   regex), `core/bess/debug_data_exporter.py` (remove the `influxdb`
   cred-stripping block), `core/bess/exceptions.py` (reword
-  `HistoricalDataUnavailableError`), `sensor_collector.py` log strings.
+  `HistoricalDataUnavailableError`). (`sensor_collector.py`'s log/comment
+  strings were already swept in PR 2, when the file was rewired.)
 - `.claude/agents/bess-analyst.md`: replace the InfluxQL/Chronograf section
   with `/api/history` + `statistics_during_period` guidance.
 

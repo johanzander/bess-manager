@@ -1,5 +1,9 @@
 """
-Robust SensorCollector - Clean sensor data collection from InfluxDB with strategic intent reconstruction.
+Robust SensorCollector - Clean sensor data collection with strategic intent reconstruction.
+
+Historical per-period data is read from Home Assistant's recorder via
+``ha_recorder_helper`` (#722). Runtime collection uses live sensors plus the
+in-process ``PowerSampleBuffer`` (#387).
 """
 
 import logging
@@ -9,8 +13,8 @@ from typing import ClassVar
 from . import time_utils
 from .energy_flow_calculator import EnergyFlowCalculator
 from .exceptions import HistoricalDataUnavailableError
+from .ha_recorder_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .health_check import perform_health_check
-from .influxdb_helper import get_power_sensor_data_batch, get_sensor_data_batch
 from .models import EnergyData
 from .power_sample_buffer import PowerSampleBuffer
 from .settings import BatterySettings
@@ -19,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class SensorCollector:
-    """Collects sensor data from InfluxDB and calculates energy flows with strategic intent reconstruction."""
+    """Collects sensor data from Home Assistant and calculates energy flows with strategic intent reconstruction."""
 
     def __init__(self, ha_controller, battery_settings: BatterySettings):
         """Initialize sensor collector.
@@ -43,7 +47,7 @@ class SensorCollector:
         # Simple cache: last known cumulative sensor readings (for current - previous = delta)
         self._last_readings: dict[str, float] | None = None
 
-        # Cumulative sensors we track from InfluxDB.
+        # Cumulative sensors we track from the HA recorder.
         # Only the 5 core energy sensors + battery_soc are collected.
         # load_consumption, system_production, and self_consumption are
         # derived by EnergyFlowCalculator from these 5 core sensors.
@@ -56,7 +60,7 @@ class SensorCollector:
             "battery_soc",
         ]
 
-        # Resolve to actual entity IDs for InfluxDB queries
+        # Resolve to actual entity IDs for recorder queries
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
 
         # Power sensors (W) for high-resolution gap-filling
@@ -73,13 +77,13 @@ class SensorCollector:
         self._power_batch_cache: dict = {}  # {date: {period: {sensor: kwh_value}}}
         self._power_batch_cache_loaded_on: dict = {}
 
-        # Live power-sample buffer for InfluxDB-free runtime gap-fill (#387)
+        # Live power-sample buffer for in-process runtime gap-fill (#387)
         self._power_sample_buffer = PowerSampleBuffer()
 
     def _resolve_sensor_entity_ids(self) -> list[str]:
         """Resolve sensor keys to entity IDs using the controller's abstraction layer.
 
-        Returns entity IDs in the format expected by InfluxDB (without 'sensor.' prefix).
+        Returns entity IDs without the 'sensor.' prefix, as the recorder helper expects.
         """
         resolved_ids = []
         for sensor_key in self.cumulative_sensor_keys:
@@ -92,7 +96,7 @@ class SensorCollector:
                 logger.debug(f"Sensor key '{sensor_key}' not configured")
                 continue
         logger.info(
-            f"Resolved {len(resolved_ids)} sensor entity IDs for InfluxDB queries"
+            f"Resolved {len(resolved_ids)} sensor entity IDs for recorder queries"
         )
         return resolved_ids
 
@@ -100,7 +104,7 @@ class SensorCollector:
         """Re-resolve sensor entity IDs from the controller.
 
         Called after wizard setup applies new sensor configuration so that
-        InfluxDB backfill uses the correct entity IDs instead of the empty
+        recorder backfill uses the correct entity IDs instead of the empty
         lists built at startup before sensors were configured.
         """
         self.cumulative_sensors = self._resolve_sensor_entity_ids()
@@ -115,10 +119,10 @@ class SensorCollector:
         grid power on Solis / Huawei (#475/#438) — so both keys resolve to the
         same entity and HAApiController splits the live reading by sign.
 
-        That split is impossible here: InfluxDB returns a period *mean* of the
+        That split is impossible here: the recorder returns a period *mean* of the
         entity, in which charge and discharge (or import and export) have
         already cancelled into one number. Such entities are therefore
-        excluded from the InfluxDB power path entirely rather than being
+        excluded from the recorder power path entirely rather than being
         attributed to whichever flow ``power_sensor_flow_map`` happens to
         iterate last. The live PowerSampleBuffer path (#387) still covers
         these installs — it samples through the sign-splitting getters.
@@ -131,7 +135,7 @@ class SensorCollector:
         return {entity_id for entity_id, count in seen.items() if count > 1}
 
     def _resolve_power_sensor_ids(self) -> list[str]:
-        """Resolve power sensor keys to entity IDs for InfluxDB.
+        """Resolve power sensor keys to entity IDs for the recorder.
 
         Returns list of entity IDs (without 'sensor.' prefix).
         """
@@ -142,7 +146,7 @@ class SensorCollector:
             if entity_id in shared:
                 logger.info(
                     "Power sensor key '%s' resolves to shared signed entity "
-                    "'%s' — excluded from InfluxDB gap-fill (direction is not "
+                    "'%s' — excluded from HA recorder gap-fill (direction is not "
                     "recoverable from a period mean); live sampling still "
                     "covers it",
                     sensor_key,
@@ -164,7 +168,7 @@ class SensorCollector:
         """Collect sensor data for a period and create EnergyData with automatic detailed flows.
 
         Uses simple cache approach for runtime: current_live - cached_last = delta.
-        During startup (cache empty), uses InfluxDB for both current and previous readings.
+        During startup (cache empty), uses the HA recorder for both current and previous readings.
 
         Args:
             period: Period index (0-95 for normal day, can be 0-91 or 0-99 for DST)
@@ -194,19 +198,19 @@ class SensorCollector:
         )
 
         if is_historical_backfill:
-            # HISTORICAL BACKFILL: Use InfluxDB for both current and previous readings
+            # HISTORICAL BACKFILL: Use the HA recorder for both current and previous readings
             logger.debug(
-                f"Period {period}: Historical backfill (period < current-1) - using InfluxDB for both"
+                f"Period {period}: Historical backfill (period < current-1) - using the HA recorder for both"
             )
 
-            # Get current period readings from InfluxDB
+            # Get current period readings from the HA recorder
             current_readings = self._get_period_readings(period, date_offset=0)
             if not current_readings:
                 raise HistoricalDataUnavailableError(
-                    f"No InfluxDB data available for period {period}. Cannot calculate energy flows."
+                    f"No recorder history available for period {period}. Cannot calculate energy flows."
                 )
 
-            # Get previous period readings from InfluxDB
+            # Get previous period readings from the HA recorder
             if period == 0:
                 # Period 0 needs yesterday's last period
                 prev_period = 95
@@ -221,7 +225,7 @@ class SensorCollector:
             )
             if not previous_readings:
                 raise HistoricalDataUnavailableError(
-                    f"No InfluxDB data available for period {prev_period} (date_offset={date_offset}). "
+                    f"No recorder history available for period {prev_period} (date_offset={date_offset}). "
                     f"Cannot calculate delta for period {period}."
                 )
         else:
@@ -237,10 +241,10 @@ class SensorCollector:
                     f"No live sensor readings available for period {period}"
                 )
 
-            # Get previous readings: use cache if available, otherwise query InfluxDB
+            # Get previous readings: use cache if available, otherwise query the HA recorder
             if self._last_readings is None:
                 logger.info(
-                    f"Period {period}: First runtime collection, querying InfluxDB for previous period"
+                    f"Period {period}: First runtime collection, querying the HA recorder for previous period"
                 )
                 if period == 0:
                     prev_period = 95
@@ -253,7 +257,7 @@ class SensorCollector:
                 )
                 if not previous_readings:
                     raise HistoricalDataUnavailableError(
-                        f"No InfluxDB data available for period {prev_period} (date_offset={date_offset})"
+                        f"No recorder history available for period {prev_period} (date_offset={date_offset})"
                     )
             else:
                 # Use cached readings from previous period (START of period)
@@ -268,9 +272,9 @@ class SensorCollector:
 
         # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
         # use power (W) sensors which report every ~5 minutes for much higher resolution.
-        # Historical backfill sources this from InfluxDB (below); runtime collection uses
+        # Historical backfill sources this from the HA recorder (below); runtime collection uses
         # a live PowerSampleBuffer instead (see the runtime branch further down in this
-        # method) so the 15-minute production path never depends on InfluxDB (#387).
+        # method) so the 15-minute production path never depends on the recorder (#387).
         energy_flow_keys = [
             "solar_production",
             "load_consumption",
@@ -290,7 +294,7 @@ class SensorCollector:
                     if key in power_flows and power_flows[key] > 0.001:
                         flow_dict[key] = power_flows[key]
                 logger.info(
-                    "Period %d: Gap-filled from InfluxDB power sensors: %s",
+                    "Period %d: Gap-filled from HA recorder power sensors: %s",
                     period,
                     {k: f"{v:.4f}" for k, v in power_flows.items() if v > 0.001},
                 )
@@ -347,21 +351,21 @@ class SensorCollector:
             ) from e
 
         # SOC Fallback Strategy:
-        # InfluxDB returns None when SOC hasn't changed for a very long time, because InfluxDB
+        # The recorder returns no sample when SOC hasn't changed for a very long time, because the recorder
         # only stores data points when values change. If SOC has been stable, there's no new
         # data point in the requested time range. Without fallback, this would cause all
         # historical data collection to fail (since SOC is critical).
         #
-        # Solution: When SOC is missing from InfluxDB, use the current live value from Home Assistant.
-        # This is safe because if InfluxDB has no data, it means SOC hasn't changed, so the
+        # Solution: When SOC is missing from the HA recorder, use the current live value from Home Assistant.
+        # This is safe because if the recorder has no data, it means SOC hasn't changed, so the
         # current value IS the historical value.
         #
-        # Impact: For periods where InfluxDB has no SOC data, all will use the same current value,
+        # Impact: For periods where the recorder has no SOC data, all will use the same current value,
         # meaning battery_soe_start == battery_soe_end for those periods (which is correct when
         # SOC is stable).
         if battery_soc_end_key not in current_readings:
             logger.warning(
-                f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from InfluxDB, "
+                f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from the HA recorder, "
                 "attempting to read current value from Home Assistant as fallback"
             )
             try:
@@ -379,7 +383,7 @@ class SensorCollector:
         # Check for SOC in previous readings, fallback to current value if missing
         if battery_soc_end_key not in previous_readings:
             logger.warning(
-                f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from previous InfluxDB readings, "
+                f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from previous recorder readings, "
                 "using current value from Home Assistant as fallback"
             )
             try:
@@ -477,7 +481,7 @@ class SensorCollector:
                     return True
             else:
                 # For today, invalidate empty caches so we retry after
-                # transient InfluxDB failures (e.g. first boot).
+                # transient recorder failures (e.g. first boot).
                 if not self._batch_cache.get(target_date):
                     logger.info(
                         "Invalidating empty batch cache for today %s",
@@ -496,14 +500,16 @@ class SensorCollector:
             len(self.cumulative_sensors),
         )
 
-        result = get_sensor_data_batch(self.cumulative_sensors, target_date)
+        result = get_sensor_data_batch(
+            self.ha_controller, self.cumulative_sensors, target_date
+        )
 
         if result.get("status") == "success":
             data = result.get("data", {})
             if not data:
                 logger.warning(
-                    "Batch data for %s returned no periods — InfluxDB query matched "
-                    "no sensor data (check sensor names, bucket, and time range).",
+                    "Batch data for %s returned no periods — the recorder has "
+                    "no history for these sensors in that range.",
                     target_date.strftime("%Y-%m-%d"),
                 )
                 # Cache the empty result so we don't retry the same failing
@@ -527,7 +533,7 @@ class SensorCollector:
                 target_date.strftime("%Y-%m-%d"),
                 result.get("message", "Unknown error"),
             )
-            # Cache the failure so we don't hammer InfluxDB on every period.
+            # Cache the failure so we don't hammer the recorder on every period.
             self._batch_cache[target_date] = {}
             self._batch_cache_loaded_on[target_date] = today
             return False
@@ -562,7 +568,9 @@ class SensorCollector:
             len(self.power_sensors),
         )
 
-        result = get_power_sensor_data_batch(self.power_sensors, target_date)
+        result = get_power_sensor_data_batch(
+            self.ha_controller, self.power_sensors, target_date
+        )
 
         if result.get("status") == "success":
             data = result.get("data", {})
@@ -636,7 +644,7 @@ class SensorCollector:
     def _get_period_readings(
         self, period: int, date_offset: int = 0
     ) -> dict[str, float] | None:
-        """Get sensor readings for specific period from InfluxDB.
+        """Get sensor readings for a specific period from the HA recorder.
 
         Args:
             period: Period index (0-95 for normal day)
@@ -649,7 +657,7 @@ class SensorCollector:
             logger.error("Invalid period: %d", period)
             return None
 
-        # Use InfluxDB batch mode
+        # Use recorder batch mode
         now = time_utils.now()
         target_date = now.date() + timedelta(days=date_offset)
 
@@ -789,7 +797,7 @@ class SensorCollector:
 
         Call this after pre-seeding the historical store (e.g. from a debug log
         replay) so that the first runtime collection has a valid baseline to
-        compute deltas against, instead of falling back to InfluxDB.
+        compute deltas against, instead of falling back to the recorder.
         """
         readings = self._get_period_readings_from_live_sensors()
         if readings:
@@ -800,7 +808,7 @@ class SensorCollector:
             )
         else:
             logger.warning(
-                "warm_readings_cache: no live sensor readings available — runtime collection will fall back to InfluxDB"
+                "warm_readings_cache: no live sensor readings available — runtime collection will fall back to the recorder"
             )
 
     def _normalize_sensor_readings(self, data: dict) -> dict[str, float]:

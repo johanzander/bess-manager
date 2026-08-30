@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Groundwork for VPP load tracking** — adds the opt-in `vpp_load_tracking_enabled` setting (default off) and the energy-budget model behind it; the live tracking loop follows separately. ([#520](https://github.com/johanzander/bess-manager/issues/520))
 - **Managed Loads — exclude a regular habit like EV charging from the `ha_statistics` baseline** — name the load's own cumulative energy sensor and BESS learns your normal usage without it, so you can announce it separately via Planned Consumption Changes. ([#706](https://github.com/johanzander/bess-manager/issues/706))
 
+### Changed
+
+- **Cold-start history now comes from Home Assistant's recorder** — a fresh install, or one restarting after a long outage, backfills today's actual energy flows from HA's own history instead of requiring the InfluxDB add-on. ([#722](https://github.com/johanzander/bess-manager/issues/722))
+
 ### Fixed
 
 - **Tomorrow's prices no longer get stuck at an inflated value on the HACS Nordpool integration** — before Nordpool publishes next-day prices, BESS now waits for the sensor's `tomorrow_valid` flag instead of trusting a `tomorrow` array that still mirrors today, and it strips VAT from that array like every other price path. ([#704](https://github.com/johanzander/bess-manager/issues/704))

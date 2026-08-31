@@ -590,4 +590,35 @@ test.describe('Setup Wizard — undetected inverter platform', () => {
       page.getByRole('button', { name: /Next: Electricity Pricing/i }),
     ).toBeEnabled();
   });
+
+  // #730: Huawei (EMMA) and Solis both expose a native lifetime
+  // load-consumption entity, but the wizard's platform definitions offered no
+  // field to map it — so their users could never enable the HA Statistics
+  // consumption strategy, which needs a Recorder-tracked lifetime-consumption
+  // sensor. The Lifetime Energy group must now render the field for both.
+  test('Huawei Lifetime Energy group includes a load-consumption field', async ({
+    page,
+  }) => {
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    await page.getByRole('tab', { name: /Huawei/i }).click();
+    await expect(page.getByText('Lifetime Energy')).toBeVisible();
+    await expect(
+      page.getByText('Total Energy Consumption (EMMA)'),
+    ).toBeVisible();
+  });
+
+  test('Solis Lifetime Energy group includes a load-consumption field', async ({
+    page,
+  }) => {
+    await page.goto('/setup');
+    await expectActiveStep(page, 1);
+
+    await page.getByRole('tab', { name: /Solis Modbus/i }).click();
+    await expect(page.getByText('Lifetime Energy')).toBeVisible();
+    await expect(
+      page.getByText('Total Energy Consumption', { exact: true }),
+    ).toBeVisible();
+  });
 });

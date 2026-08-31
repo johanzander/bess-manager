@@ -410,6 +410,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_solar_energy', label: 'PV Total Energy Generation', required: true },
           { key: 'lifetime_import_from_grid', label: 'Total Energy Imported From Grid', required: true },
           { key: 'lifetime_export_to_grid', label: 'Total Energy Fed Into Grid', required: true },
+          { key: 'lifetime_load_consumption', label: 'Total Energy Consumption', required: false },
         ],
       },
       {
@@ -504,6 +505,9 @@ export const INTEGRATIONS: IntegrationDef[] = [
           { key: 'lifetime_battery_discharged', label: 'Battery Total Discharge', required: true },
           { key: 'lifetime_export_to_grid', label: 'Grid Exported Energy (power meter)', required: true },
           { key: 'lifetime_import_from_grid', label: 'Grid Accumulated Energy (power meter)', required: true },
+          // EMMA-only, disabled by default in HA — enable "Total Energy
+          // Consumption" on the EMMA device, then re-run discovery (#730).
+          { key: 'lifetime_load_consumption', label: 'Total Energy Consumption (EMMA)', required: false },
         ],
       },
     ],

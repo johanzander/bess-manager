@@ -376,6 +376,15 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             "huawei_solar",
             f"{serial}_power_meter_active_power",
         ),
+        # EMMA-only "Total Energy Consumption" register (#730). Present only on
+        # installs with an EMMA energy manager; entity_registry_enabled_default
+        # is False upstream, so a real registry often carries it disabled — see
+        # test_huawei_emma_consumption_disabled_by_default_is_reported.
+        _entity(
+            "sensor.huawei_emma_total_energy_consumption",
+            "huawei_solar",
+            f"{serial}_total_energy_consumption",
+        ),
     ]
 
 
@@ -809,6 +818,17 @@ def _solis_registry() -> list[dict]:
             "solis_modbus",
             _solis_dict_embedded_unique_id(
                 "solis_modbus_inverter_total_energy_fed_into_grid"
+            ),
+        ),
+        # Native meter-measured whole-home consumption counter (#730):
+        # registers 33177/33178, kWh, TOTAL_INCREASING (solis_modbus
+        # hybrid_sensors.py). Same dict-embedded unique_id bug as the other
+        # lifetime totals above.
+        _entity(
+            "sensor.solis_total_energy_consumption",
+            "solis_modbus",
+            _solis_dict_embedded_unique_id(
+                "solis_modbus_inverter_total_energy_consumption"
             ),
         ),
     ]
@@ -1338,6 +1358,10 @@ class TestDiscoverSensorsFromRegistry:
         assert (
             solis["lifetime_export_to_grid"]
             == "sensor.solis_total_energy_fed_into_grid"
+        )
+        assert (
+            solis["lifetime_load_consumption"]
+            == "sensor.solis_total_energy_consumption"
         )
 
         # TOU v2 charge/discharge time + enable entities (6 slots each)
@@ -2382,7 +2406,7 @@ class TestHuaweiDiscovery:
             result["battery_discharge_stop_soc"]
             == "number.huawei_battery_discharging_cutoff_capacity"
         )
-        assert len(result) == 16
+        assert len(result) == 17
 
     def test_huawei_power_monitoring_sensors_mapped(self):
         """issue #438: real-time PV power and signed grid power (single
@@ -2416,6 +2440,40 @@ class TestHuaweiDiscovery:
         assert (
             result["lifetime_import_from_grid"]
             == "sensor.huawei_meter_grid_accumulated_energy"
+        )
+        assert (
+            result["lifetime_load_consumption"]
+            == "sensor.huawei_emma_total_energy_consumption"
+        )
+
+    def test_huawei_emma_consumption_disabled_by_default_is_reported(self) -> None:
+        """The EMMA 'Total Energy Consumption' entity is
+        entity_registry_enabled_default=False upstream (wlcrs/huawei_solar
+        sensor.py). When the user has not enabled it, discovery must surface it
+        in the disabled bucket (#549) so the wizard prompts "enable it, then
+        re-run discovery" — never persist a mapping to a stateless entity.
+        """
+        registry = [
+            e
+            for e in _huawei_registry()
+            if not e["unique_id"].endswith("_total_energy_consumption")
+        ]
+        disabled = _entity(
+            "sensor.huawei_emma_total_energy_consumption",
+            "huawei_solar",
+            "HW2024ABCDEF_total_energy_consumption",
+        )
+        disabled["disabled_by"] = "integration"
+        registry.append(disabled)
+
+        result, disabled_only = self.ctrl._map_registry_entities(
+            registry, ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+
+        assert "lifetime_load_consumption" not in result
+        assert (
+            disabled_only["lifetime_load_consumption"]
+            == "sensor.huawei_emma_total_energy_consumption"
         )
 
     def test_huawei_solar_energy_is_pv_input_not_inverter_yield(self):

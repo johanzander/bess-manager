@@ -20,6 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **The HA Statistics consumption strategy is now available on Huawei (EMMA) and Solis** — the setup wizard exposes their lifetime load-consumption sensor, and discovery auto-maps it where present. ([#730](https://github.com/johanzander/bess-manager/issues/730))
 - **A slow or failing electricity-price fetch no longer delays or skips the top-of-hour battery mode switch** — price fetching moved to its own scheduler job off the control path, and the optimizer reads a cache that a dedicated job keeps warm. ([#709](https://github.com/johanzander/bess-manager/issues/709))
 - **The "Strategic Intent" dashboard card no longer overflows when the current period is curtailed** — the "Curtailed (No Export)" note now renders as a small badge under the headline instead of being appended to the large headline text. ([#676](https://github.com/johanzander/bess-manager/issues/676))
 - **Tomorrow's prices no longer get stuck at an inflated value on the HACS Nordpool integration** — before Nordpool publishes next-day prices, BESS now waits for the sensor's `tomorrow_valid` flag instead of trusting a `tomorrow` array that still mirrors today, and it strips VAT from that array like every other price path. ([#704](https://github.com/johanzander/bess-manager/issues/704))

@@ -935,10 +935,12 @@ own flaw is untouched here and still awaits a fix.
 unavailable, or malformed raises `ConsumptionOverlayError` rather than being
 skipped — a user who declared an EV session is worse served by an
 optimization that quietly ignored it.  The one exception is over-subtraction:
-a block removing more load than the base forecast holds clamps that period to
-zero (negative consumption is not physical) and records a
+a block removing more load than the base forecast holds *in that period*
+clamps it to zero (negative consumption is not physical) and records a
 `CONSUMPTION_OVERLAY_CLAMPED` runtime failure, so it is surfaced rather than
-silent.
+silent.  Only periods the overlay itself drove negative count towards that
+failure — a negative the base forecast already carried is floored the same
+way but is not blamed on the overlay (issue #734).
 
 
 ### Managed Loads (issue #706)

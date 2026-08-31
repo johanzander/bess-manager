@@ -1,6 +1,13 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **A negative base consumption forecast is floored silently when an overlay is configured**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/consumption_overlay.py`, `core/bess/battery_system_manager.py`
+
+**Description**: After the #734 fix, `apply_overlay` still floors every negative in the composed forecast to zero, but only attributes a period to `clamped_periods` when the overlay itself drove it negative. A negative the configured consumption strategy emitted (net-metering / bad-recorder artifact) is therefore floored with no log line and no runtime failure — but only when an overlay entity is configured; without one, `_apply_consumption_overlay` returns early and the negative reaches the DP unchanged. Pre-#734 it produced a (misattributed) `CONSUMPTION_OVERLAY_CLAMPED` warning. The reporter's own suggestion: validate/report a negative base forecast separately from overlay over-subtraction, so the data-quality problem surfaces regardless of overlay config. Raised in the #734 code review.
+
+
 ### **`sample_live_power()` gates on the wrong sensor list**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `sensor_collector.py`

@@ -914,6 +914,9 @@ class HomeAssistantAPIController:
         "solis_modbus_inverter_pv_total_generation": "lifetime_solar_energy",  # :155
         "solis_modbus_inverter_total_energy_imported_from_grid": "lifetime_import_from_grid",  # :871
         "solis_modbus_inverter_total_energy_fed_into_grid": "lifetime_export_to_grid",  # :901
+        # Meter-measured whole-home consumption, registers 33177/33178 (#730).
+        # Enabled by default; needs a grid CT/meter, standard on Solis hybrids.
+        "solis_modbus_inverter_total_energy_consumption": "lifetime_load_consumption",  # :1023
     }
 
     SOLCAST_SUFFIX_MAP: ClassVar[dict[str, str]] = {
@@ -963,6 +966,15 @@ class HomeAssistantAPIController:
         "storage_total_discharge": "lifetime_battery_discharged",
         "grid_exported_energy": "lifetime_export_to_grid",
         "grid_accumulated_energy": "lifetime_import_from_grid",
+        # EMMA-only whole-home consumption counter, register key
+        # total_energy_consumption (#730). Only present on installs with an
+        # EMMA energy manager, and its HA entity is
+        # entity_registry_enabled_default=False (sensor.py EMMA_SENSOR_DESCRIPTIONS)
+        # — so unlike emma_tou_periods below it is safe to map here: an
+        # optional lifetime sensor left disabled is surfaced by
+        # _map_registry_entities' #549 disabled-bucket (the wizard prompts the
+        # user to enable it), not read at startup.
+        "total_energy_consumption": "lifetime_load_consumption",
         "input_power": "pv_power",
         "power_meter_active_power": "import_power",
         # TOU period readback (#431). The integration publishes the configured
@@ -2823,10 +2835,12 @@ class HomeAssistantAPIController:
 
         Falls through to the derived path whenever the direct reading is
         missing — the gate is the runtime value, not the platform, so an
-        unmapped *or* momentarily unavailable entity reaches it. SolaX native,
-        Solis and Huawei are the platforms with no native load register at
-        all, so they take it on every call; any other platform lands here only
-        while its own load sensor is unreadable.
+        unmapped *or* momentarily unavailable entity reaches it. SolaX native
+        has no native load register at all and always takes the derived path.
+        Solis exposes one natively (solis_modbus register 33177) and Huawei
+        does on EMMA installs with the entity enabled (#730); both take the
+        derived path only when that sensor is absent or unreadable, as any
+        other platform does.
 
         The derived value comes from the energy balance (see
         :func:`core.bess.energy_balance.derive_load_consumption`), which needs

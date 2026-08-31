@@ -464,7 +464,7 @@ SPH controls charge power globally via `write_ac_charge_times(charge_power=100%)
 The frontend disables UI features based on **sensor presence**, which correlates with platform capabilities: if the platform lacks charge rate control, the corresponding sensor entity won't exist after discovery. This avoids needing a dedicated capabilities API endpoint — the sensor config already carries the signal.
 
 - Fuse protection toggle: disabled when `battery_charging_power_rate` sensor is not configured
-- InfluxDB consumption strategy: disabled when `local_load_power` sensor is not configured
+- load_power_7d_avg consumption strategy: disabled when `local_load_power` sensor is not configured
 - HA Statistics strategy: disabled when `lifetime_load_consumption` sensor is not configured
 
 Sensor-based gating is the right default. A dedicated capabilities API should only be introduced when the frontend needs to gate on something that doesn't map to sensor presence.

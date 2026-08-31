@@ -886,7 +886,7 @@ class SensorCollector:
 
         Only validates the ``get_estimated_consumption`` sensor when the
         ``sensor`` strategy is active — other strategies (fixed,
-        influxdb_7d_avg, ha_statistics) do not rely on that HA sensor.
+        load_power_7d_avg, ha_statistics) do not rely on that HA sensor.
 
         Under the ``sensor`` strategy that sensor is *required*: every
         optimization run reads it and aborts without it, so no schedule can

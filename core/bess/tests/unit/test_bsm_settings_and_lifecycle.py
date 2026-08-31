@@ -1157,7 +1157,7 @@ class TestConsumptionForecastFreshness:
 
     The refresh policy is strategy-aware, not a blanket timer: 'sensor' and
     'fixed' read a cheap, continuously-updating source, so they refetch
-    every quarterly cycle (matching solar). 'influxdb_7d_avg' and
+    every quarterly cycle (matching solar). 'load_power_7d_avg' and
     'ha_statistics' average a window of full calendar days ending at
     today's midnight, so their value is provably unchanged intraday - they
     only need to refetch once the date rolls over.
@@ -1191,8 +1191,8 @@ class TestConsumptionForecastFreshness:
             )
             assert mock_fetch.call_count == 2
 
-    def test_influxdb_7d_avg_strategy_caches_until_date_rollover(self, system):
-        system.home_settings.consumption_strategy = "influxdb_7d_avg"
+    def test_load_power_7d_avg_strategy_caches_until_date_rollover(self, system):
+        system.home_settings.consumption_strategy = "load_power_7d_avg"
         system._consumption_predictions = [1.0] * 96
         system._consumption_predictions_date = date(2026, 7, 27)
 
@@ -1222,6 +1222,63 @@ class TestConsumptionForecastFreshness:
             )
             assert data["full_consumption"][5] == 2.0
             assert mock_fetch.call_count == 1
+
+
+class TestLoadPower7dAvgStrategy:
+    """PR 3 of #722: the 7-day load-power average strategy is renamed
+    ``influxdb_7d_avg`` -> ``load_power_7d_avg`` and sourced from HA Recorder."""
+
+    def test_legacy_influxdb_7d_avg_config_value_is_canonicalized(self) -> None:
+        from core.bess.settings import HomeSettings
+
+        settings = HomeSettings().from_ha_config(
+            {
+                "home": {
+                    "consumption_strategy": "influxdb_7d_avg",
+                    "power_monitoring_enabled": False,
+                }
+            }
+        )
+        assert settings.consumption_strategy == "load_power_7d_avg"
+
+    def test_new_name_and_unrelated_values_pass_through(self) -> None:
+        from core.bess.settings import HomeSettings
+
+        for value in ("load_power_7d_avg", "fixed", "sensor", "ha_statistics"):
+            settings = HomeSettings().from_ha_config(
+                {
+                    "home": {
+                        "consumption_strategy": value,
+                        "power_monitoring_enabled": False,
+                    }
+                }
+            )
+            assert settings.consumption_strategy == value
+
+    def test_forecast_reads_recorder_and_threads_the_controller(
+        self, system: BatterySystemManager
+    ) -> None:
+        import core.bess.battery_system_manager as bsm
+
+        # The InfluxDB gate is gone from this module entirely.
+        assert "is_influxdb_configured" not in vars(bsm)
+
+        assert system._controller is not None
+        system._controller.sensors = {"local_load_power": "sensor.house_load"}
+        recorder_result = {
+            "status": "success",
+            "data": {p: {"sensor.house_load": 0.2} for p in range(96)},
+        }
+        with patch(
+            "core.bess.battery_system_manager.get_power_sensor_data_batch",
+            return_value=recorder_result,
+        ) as mock_batch:
+            forecast = system._get_load_power_7d_avg_forecast()
+
+        assert len(forecast) == 96
+        assert all(v == pytest.approx(0.2) for v in forecast)
+        # controller threaded as the first positional arg
+        assert mock_batch.call_args.args[0] is system._controller
 
 
 class TestNotApplyBranchRefreshesCurrentSchedule:
@@ -1579,10 +1636,12 @@ class TestBackfillNotGatedOnInfluxDB:
     def test_backfill_runs_and_never_consults_influxdb_config(
         self, system: BatterySystemManager
     ) -> None:
+        import core.bess.battery_system_manager as bsm
+
+        # The InfluxDB config gate is gone from this module entirely.
+        assert "is_influxdb_configured" not in vars(bsm)
+
         with (
-            patch(
-                "core.bess.battery_system_manager.is_influxdb_configured"
-            ) as mock_gate,
             patch.object(
                 system.sensor_collector, "collect_energy_data"
             ) as mock_collect,
@@ -1596,8 +1655,6 @@ class TestBackfillNotGatedOnInfluxDB:
             mock_now.return_value = datetime(2026, 7, 27, 1, 0)  # current_period = 4
             system._fetch_and_initialize_historical_data()
 
-        # The backfill path no longer branches on the legacy InfluxDB config.
-        mock_gate.assert_not_called()
         collected_periods = [call.args[0] for call in mock_collect.call_args_list]
         assert collected_periods, "backfill must attempt periods via HA Recorder"
         assert 0 in collected_periods

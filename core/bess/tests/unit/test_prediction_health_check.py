@@ -228,20 +228,20 @@ class TestFixedStrategy:
 
 
 # ---------------------------------------------------------------------------
-# check_prediction_health — influxdb_7d_avg strategy
+# check_prediction_health — load_power_7d_avg strategy
 # ---------------------------------------------------------------------------
 
 
-class TestInfluxdb7dAvgStrategy:
+class TestLoadPower7dAvgStrategy:
     def test_ok_without_consumption_sensor(self):
         controller = _make_controller(estimated_consumption_ok=False)
         collector = _make_collector(controller)
-        result = collector.check_prediction_health("influxdb_7d_avg")
+        result = collector.check_prediction_health("load_power_7d_avg")
         assert result["status"] == "OK"
 
     def test_does_not_check_estimated_consumption(self):
         collector = _make_collector()
-        result = collector.check_prediction_health("influxdb_7d_avg")
+        result = collector.check_prediction_health("load_power_7d_avg")
         method_names = [c["method_name"] for c in result["checks"]]
         assert "get_estimated_consumption" not in method_names
 
@@ -274,7 +274,7 @@ class TestHaStatisticsStrategy:
 
 class TestSolarForecastAlwaysChecked:
     @pytest.mark.parametrize(
-        "strategy", ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        "strategy", ["sensor", "fixed", "load_power_7d_avg", "ha_statistics"]
     )
     def test_solar_forecast_included_for_all_strategies(self, strategy):
         collector = _make_collector()
@@ -283,7 +283,7 @@ class TestSolarForecastAlwaysChecked:
         assert "get_solar_forecast" in method_names
 
     @pytest.mark.parametrize(
-        "strategy", ["sensor", "fixed", "influxdb_7d_avg", "ha_statistics"]
+        "strategy", ["sensor", "fixed", "load_power_7d_avg", "ha_statistics"]
     )
     def test_warning_when_solar_forecast_unavailable(self, strategy):
         controller = _make_controller(solar_forecast_ok=False)

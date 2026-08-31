@@ -7,7 +7,7 @@ away from home.
 
 It is a post-processing stage on whichever consumption strategy is
 configured, not a strategy of its own — so it composes with ``ha_statistics``,
-``influxdb_7d_avg``, ``sensor`` and ``fixed`` identically, and an install with
+``load_power_7d_avg``, ``sensor`` and ``fixed`` identically, and an install with
 no overlay entity keeps exactly the forecast it has today.
 """
 

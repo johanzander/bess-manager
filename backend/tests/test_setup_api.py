@@ -1464,13 +1464,18 @@ class TestSetupCompleteRejectsUnusableConsumptionStrategy:
 
         assert resp.status_code == 200
 
-    @pytest.mark.parametrize("strategy", ["fixed", "ha_statistics", "influxdb_7d_avg"])
+    @pytest.mark.parametrize(
+        "strategy",
+        ["fixed", "ha_statistics", "load_power_7d_avg", "influxdb_7d_avg"],
+    )
     def test_other_strategies_do_not_need_that_sensor(
         self, complete_controller, strategy
     ):
-        """Only "sensor" has no fallback. ha_statistics and influxdb_7d_avg
+        """Only "sensor" has no fallback. ha_statistics and load_power_7d_avg
         degrade to the fixed profile and report it, so rejecting them here
-        would invent a failure the optimizer does not have."""
+        would invent a failure the optimizer does not have. The legacy id
+        ``influxdb_7d_avg`` is still accepted (normalised to
+        ``load_power_7d_avg``)."""
         payload = self._strip_48h(_full_wizard_payload(consumptionStrategy=strategy))
 
         resp = _client.post("/api/setup/complete", json=payload)

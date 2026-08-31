@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Changed
 
 - **Cold-start history now comes from Home Assistant's recorder** — a fresh install, or one restarting after a long outage, backfills today's actual energy flows from HA's own history instead of requiring the InfluxDB add-on. ([#722](https://github.com/johanzander/bess-manager/issues/722))
+- **The 7-day load-power consumption forecast reads the recorder, not InfluxDB** — the strategy is renamed `influxdb_7d_avg` → `load_power_7d_avg` (the old value keeps working), needs no InfluxDB, and now also works on platforms with no lifetime load-energy sensor (SolaX Native, Solis). ([#722](https://github.com/johanzander/bess-manager/issues/722))
 
 ### Fixed
 

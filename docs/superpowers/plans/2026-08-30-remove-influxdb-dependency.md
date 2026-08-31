@@ -84,12 +84,16 @@ Dependency-ordered. Each references `#722`; only PR 6 carries `Closes #722`.
   `lifetime_load_consumption` is derived rather than a real entity (SolaX
   Native, Solis); the Recorder-backed `local_load_power` average gives those
   installs a history-based forecast for the first time.
-- Decision for the PR: keep the `influxdb_7d_avg` strategy id with a
-  back-compat alias, or rename to `load_power_7d_avg`. Lean rename + alias in
-  the settings loader — the name is a lie once InfluxDB is gone.
-- Touches `backend/api.py` `_CONSUMPTION_STRATEGIES`, the strategy lists in
-  `battery_system_manager` (2 sites), the frontend dropdown, `USER_GUIDE.md`,
-  `INSTALLATION.md`, `SOFTWARE_DESIGN.md`.
+- Decided: renamed `influxdb_7d_avg` → `load_power_7d_avg`, with
+  `canonicalize_consumption_strategy()` in `core/bess/settings.py` accepting
+  the old id on load and in the API validator so existing installs keep
+  working with no migration.
+- Touched `backend/api.py` `_CONSUMPTION_STRATEGIES` + validator, the strategy
+  lists in `battery_system_manager` (2 sites) + `_DATE_CACHED_...` set + the
+  renamed `_get_load_power_7d_avg_forecast`, the frontend dropdown /
+  comparison chart / types, and `USER_GUIDE.md` / `INSTALLATION.md` (strategy
+  section only — the InfluxDB *setup* section is PR 4/6) / `SOFTWARE_DESIGN.md`
+  / `bess-knowledge.md`.
 
 ### PR 4 — deprecation banner + migration note  *(starts the clock)*
 

@@ -8,6 +8,8 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
+from typing import Any
+
 from core.bess.dp_battery_algorithm import (
     _period_flows,
     optimize_battery_schedule,
@@ -438,7 +440,7 @@ def make_battery_settings(**overrides):
 
     Accepts keyword overrides for any BatterySettings field.
     """
-    defaults = {
+    defaults: dict[str, Any] = {
         "total_capacity": 20.0,
         "min_soc": 11.0,
         "max_soc": 100.0,

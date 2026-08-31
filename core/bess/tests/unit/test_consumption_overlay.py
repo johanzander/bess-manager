@@ -107,6 +107,34 @@ def test_over_subtraction_clamps_at_zero_and_is_reported() -> None:
     assert result.clamped_periods == 4
 
 
+def test_clamped_count_ignores_negatives_the_overlay_did_not_cause() -> None:
+    """A positive add block is not blamed for pre-existing negative base periods.
+
+    Issue #734: ``clamped_periods`` counted every negative in the composed
+    array, including negatives the base forecast already held. A positive-only
+    ``add`` block that touches unrelated periods would then be reported as
+    having "subtracted more than the forecast held". Only periods the overlay
+    itself drove negative should be attributed to it; the composed forecast is
+    still floored to zero either way.
+    """
+    starts = _period_starts(datetime(2026, 9, 1, 0, 0, tzinfo=TZ), 96)
+    base = [1.0] * 96
+    for i in range(10, 16):  # the forecast source produced negatives here
+        base[i] = -0.05
+
+    block = OverlayBlock(
+        start=datetime(2026, 9, 1, 6, 0, tzinfo=TZ),  # periods 24..27, disjoint
+        end=datetime(2026, 9, 1, 7, 0, tzinfo=TZ),
+        energy_kwh=0.25,
+        mode="add",
+    )
+
+    result = apply_overlay(base, starts, [block])
+
+    assert result.clamped_periods == 0
+    assert result.values[10:16] == [0.0] * 6  # base negatives still floored
+
+
 def test_set_block_covering_part_of_a_period_only_replaces_that_part() -> None:
     """A set block that starts or ends mid-period must not erase the whole period.
 

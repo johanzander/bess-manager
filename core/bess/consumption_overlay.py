@@ -203,9 +203,15 @@ def apply_overlay(
             else:
                 values[index] += share
 
-    clamped_periods = sum(1 for value in values if value < 0)
-    if clamped_periods:
-        values = [max(0.0, value) for value in values]
+    # Attribute a clamp to the overlay only where the overlay itself drove the
+    # period below zero. A negative the base forecast already held (and the
+    # overlay left alone, or nudged upward) is not the overlay over-subtracting
+    # — counting it produced a false "subtracted more than the forecast held"
+    # warning for positive-only blocks (issue #734).
+    clamped_periods = sum(
+        1 for index, value in enumerate(values) if value < 0.0 and value < base[index]
+    )
+    values = [max(0.0, value) for value in values]
 
     return OverlayResult(values=values, clamped_periods=clamped_periods)
 

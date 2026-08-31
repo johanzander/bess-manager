@@ -701,15 +701,15 @@ def test_refresh_cache_fetches_tomorrow_after_market_publication_time() -> None:
     assert tomorrow in source.fetched_dates
 
 
-def test_cached_today_served_after_midnight_from_yesterdays_tomorrow_fetch() -> None:
-    """Midnight rollover must not blank the optimizer's price cache.
+def test_cache_only_read_serves_today_in_the_0000_to_0005_gap() -> None:
+    """The 00:00 quarterly cycle must not abort while waiting for the :05 job.
 
-    Yesterday's "tomorrow" fetch IS today's data after midnight. get_price_data
-    already serves it via the _tomorrow_date shortcut, but before the #709
-    fix that shortcut never promoted it into the today slot, so the new
-    cache-only accessor get_cached_today_prices() returned [] every quarterly
-    cycle until a fresh today fetch — which the shortcut itself prevents —
-    finally happened around noon.
+    Yesterday's "tomorrow" fetch IS today's data after midnight, but it sits
+    in the _tomorrow_* slot. The optimizer reads cache-only accessors that
+    never call get_price_data(), and the refresh job that would promote it
+    fires at :05 — 5 min after the optimizer's :00 tick. So the read path
+    itself (via _cached_today_prices) must do the promotion, with no
+    refresh_cache() call in between.
     """
     source = _DateTrackingSource(
         [1.0] * 96
@@ -718,21 +718,27 @@ def test_cached_today_served_after_midnight_from_yesterdays_tomorrow_fetch() -> 
 
     day_n_afternoon = datetime(2026, 8, 30, 15, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
     with patch("core.bess.price_manager.time_utils.now", return_value=day_n_afternoon):
-        pm.refresh_cache()  # caches today=Aug30 and tomorrow=Aug31
+        pm.refresh_cache()  # caches today=Aug30, tomorrow=Aug31
         assert pm._tomorrow_date == date(2026, 8, 31)
 
     source.fetched_dates.clear()
-    # 06:00 the next morning — before the 12:00 Oslo publication gate, so
-    # refresh_cache() will not fetch Sep 1, and Aug 31 must come from cache.
-    next_morning = datetime(2026, 8, 31, 6, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
-    with patch("core.bess.price_manager.time_utils.now", return_value=next_morning):
-        pm.refresh_cache()
+    # 00:00 Aug 31 — rollover has happened, the :05 refresh job has NOT run.
+    midnight = datetime(2026, 8, 31, 0, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=midnight):
         assert len(pm.get_cached_today_prices()) == 96
-        assert pm._today_date == date(2026, 8, 31)
+        assert pm.get_cached_tomorrow_prices() == []  # Sep 1 not fetched yet
+        assert pm._today_date == date(2026, 8, 31)  # promotion persisted
 
-    assert (
-        source.fetched_dates == []
-    ), "should have served today from the tomorrow cache"
+    # ...and it survives the noon refresh that overwrites the _tomorrow_* slot.
+    noon = datetime(2026, 8, 31, 13, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=noon):
+        pm.refresh_cache()  # fetches Sep 1 into _tomorrow_*
+        assert pm._tomorrow_date == date(2026, 9, 1)
+        assert len(pm.get_cached_today_prices()) == 96  # Aug 31 still there
+
+    assert source.fetched_dates == [
+        date(2026, 9, 1)
+    ], "only Sep 1 should have been fetched; Aug 31 came from the promoted cache"
 
 
 def test_official_nordpool_and_octopus_declare_publication_times() -> None:

@@ -518,18 +518,10 @@ class PriceManager:
             if cached_today is not None:
                 return cached_today
 
-        # Use cached values for tomorrow if available. Deliberately keyed on
-        # the stored _tomorrow_date (not today()+1): right after midnight this
-        # still serves yesterday's "tomorrow" fetch as the new today.
+        # Use cached values for tomorrow if available. The after-midnight case
+        # (target_date is now "today" but still sits in the _tomorrow_* slot)
+        # is handled by _cached_today_prices() above, which promotes it.
         if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
-            # After midnight rollover the "tomorrow" entry IS today. Promote it
-            # into the today slot so _cached_today_prices() — and the cache-only
-            # accessors the optimizer now reads (#709) — see it too; otherwise
-            # get_cached_today_prices() returns [] every cycle until a fresh
-            # today fetch happens, which the shortcut itself prevents.
-            if target_date == time_utils.today():
-                self._today_prices = self._tomorrow_prices
-                self._today_date = target_date
             return self._tomorrow_prices
 
         try:
@@ -805,8 +797,22 @@ class PriceManager:
             self._logger.warning(f"Failed to log price information: {e}")
 
     def _cached_today_prices(self) -> list | None:
-        """Return today's cached price entries, or None if the cache is cold."""
-        if self._today_date == time_utils.today() and self._today_prices is not None:
+        """Return today's cached price entries, or None if the cache is cold.
+
+        The single funnel for every today-cache read — get_price_data() and the
+        cache-only accessors the optimizer uses (#709) both go through here.
+        After midnight rollover, yesterday's "tomorrow" fetch IS today's data
+        but still sits in the _tomorrow_* slot; promote it into the today slot
+        (before the next tomorrow fetch overwrites it) so the read succeeds
+        without waiting for refresh_cache() to run — the quarterly optimizer
+        fires at :00 and the refresh job only at :05.
+        """
+        today = time_utils.today()
+        if self._today_date == today and self._today_prices is not None:
+            return self._today_prices
+        if self._tomorrow_date == today and self._tomorrow_prices is not None:
+            self._today_prices = self._tomorrow_prices
+            self._today_date = today
             return self._today_prices
         return None
 

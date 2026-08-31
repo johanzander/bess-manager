@@ -50,6 +50,13 @@ test.describe('Health-check recovery banner (#215)', () => {
     // One banner line per device: detail names the component, not the sensor.
     expect(issue.detail).toContain('Battery Control');
 
+    // ci-options.json carries an influxdb block, so the #722 deprecation
+    // banner (which has its own dismiss button) is on the dashboard. Suppress
+    // it so the "active issues are not dismissible" assertion below is only
+    // about the critical banner.
+    await page.addInitScript(() =>
+      localStorage.setItem('bess.influxdbDeprecationDismissed', '1'),
+    );
     await page.goto('/');
     await expect(page.getByText('Critical System Issues Detected')).toBeVisible({ timeout: 15_000 });
     // The outage collapses to one banner line per device: the device label and

@@ -7,6 +7,7 @@ instead of sensor attributes, providing compatibility with the core integration.
 
 import logging
 from datetime import date, timedelta
+from typing import ClassVar
 
 from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
@@ -21,6 +22,10 @@ class OfficialNordpoolSource(PriceSource):
     Uses the nordpool.get_prices_for_date service action instead of sensor attributes.
     The official integration was added to HA Core and provides different API than custom components.
     """
+
+    # Nord Pool day-ahead auction clears ~12:42 CET, prices generally
+    # available by 13:00 CET (Europe/Oslo tracks the market timezone).
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (12, 0, "Europe/Oslo")
 
     def __init__(
         self, ha_controller, config_entry_id: str, vat_multiplier: float, area: str = ""

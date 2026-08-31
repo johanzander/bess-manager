@@ -665,15 +665,29 @@ def sample_solar_data():
 _DEFAULT_TEST_ADDON_OPTIONS: dict = {"inverter": {"platform": "growatt_server_min"}}
 
 
+def _warm_price_cache(system: BatterySystemManager) -> BatterySystemManager:
+    """Populate the price cache, mirroring BatterySystemManager.start().
+
+    Since #709 the quarterly optimizer reads prices cache-only (never fetches
+    on the scheduler thread); the running system warms the cache once at
+    startup. Fixtures that build a BSM directly must do the same or every
+    update_battery_schedule() call aborts at "No price data available".
+    """
+    system._price_manager.refresh_cache()
+    return system
+
+
 @pytest.fixture
 def base_system(mock_controller):
     """Provide a clean system instance with mock controller."""
     from core.bess.price_manager import MockSource
 
-    return BatterySystemManager(
-        controller=mock_controller,
-        price_source=MockSource([1.0] * 96),
-        addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
+    return _warm_price_cache(
+        BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource([1.0] * 96),
+            addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
+        )
     )
 
 
@@ -798,7 +812,7 @@ def battery_system_integration(mock_controller, monkeypatch):
         addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
     )
 
-    return system
+    return _warm_price_cache(system)
 
 
 @pytest.fixture
@@ -820,7 +834,7 @@ def battery_system_with_arbitrage(mock_controller, arbitrage_prices, monkeypatch
         addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
     )
 
-    return system
+    return _warm_price_cache(system)
 
 
 @pytest.fixture(
@@ -852,7 +866,7 @@ def platform_system(request, mock_controller, arbitrage_prices, monkeypatch):
         price_source=price_source,
         addon_options=addon_options,
     )
-    return system
+    return _warm_price_cache(system)
 
 
 @pytest.fixture
@@ -917,7 +931,7 @@ def quarterly_battery_system(mock_controller, quarterly_arbitrage_prices, monkey
         addon_options=_DEFAULT_TEST_ADDON_OPTIONS,
     )
 
-    return system
+    return _warm_price_cache(system)
 
 
 # QUARTERLY RESOLUTION TEST UTILITIES

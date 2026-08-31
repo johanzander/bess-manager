@@ -25,6 +25,7 @@ expanded to the system-wide 96 quarterly (15-minute) period model.
 
 import logging
 from datetime import date, datetime, timedelta
+from typing import ClassVar
 
 from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
@@ -41,6 +42,10 @@ class EntsoeSource(PriceSource):
     quarterly periods. Prices are VAT-exclusive spot prices, so ``prices_are_final``
     stays False and PriceManager applies the buy-price calculation.
     """
+
+    # ENTSO-e day-ahead (SDAC) clears in the same auction as Nord Pool,
+    # published ~12:42-13:00 CET across European zones (Europe/Oslo).
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (12, 0, "Europe/Oslo")
 
     def __init__(self, ha_controller, entity: str) -> None:
         """Initialize with Home Assistant controller and the ENTSO-e sensor entity.

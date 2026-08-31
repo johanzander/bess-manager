@@ -599,6 +599,13 @@ class BatterySystemManager:
 
         try:
             if self._controller:
+                # Warm the price cache once, synchronously, before the first
+                # optimization runs — the quarterly cycle reads cache-only and
+                # never fetches on the scheduler thread (#709). The recurring
+                # refresh is a dedicated scheduler job (app.py).
+                _status("Fetching electricity prices...")
+                self._price_manager.refresh_cache()
+
                 # Initialize power monitor only when feature is enabled and
                 # the platform has per-period charge rate control
                 if (
@@ -1722,15 +1729,18 @@ class BatterySystemManager:
         tomorrow's data for improved end-of-day optimization. The extended
         horizon is capped at 192 periods (2 days).
         """
+        # Cache-only reads: the quarterly cycle must never fetch prices on the
+        # scheduler thread (#709). The cache is kept warm by the dedicated
+        # refresh job (app.py) and the startup warm-up in start().
         try:
             if prepare_next_day:
-                price_entries = self._price_manager.get_tomorrow_prices()
-                logger.info("Fetched tomorrow's price data")
+                price_entries = self._price_manager.get_cached_tomorrow_prices()
+                logger.info("Using cached tomorrow price data")
             else:
-                price_entries = self._price_manager.get_today_prices()
+                price_entries = self._price_manager.get_cached_today_prices()
 
                 # Extend with tomorrow's prices when available
-                tomorrow_entries = self._price_manager.get_tomorrow_prices()
+                tomorrow_entries = self._price_manager.get_cached_tomorrow_prices()
                 if tomorrow_entries:
                     price_entries = price_entries + tomorrow_entries
                     logger.info(
@@ -3660,6 +3670,15 @@ class BatterySystemManager:
     def price_manager(self) -> PriceManager:
         """Getter for price_manager to ensure API compatibility."""
         return self._price_manager
+
+    def refresh_prices(self) -> None:
+        """Refresh the electricity-price cache off the optimizer's critical path.
+
+        Public wrapper for the dedicated price-refresh scheduler job (app.py).
+        The quarterly optimizer reads the cache only and never fetches on the
+        scheduler thread (#709).
+        """
+        self._price_manager.refresh_cache()
 
     def get_current_daily_view(self, current_period: int | None = None) -> DailyView:
         """Get daily view for specified or current period.

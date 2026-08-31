@@ -51,6 +51,10 @@ def _make_system(
         price_source=price_source,
         addon_options={"inverter": {"platform": "growatt_server_min"}},
     )
+    # Since #709 the optimizer reads prices cache-only; the running system
+    # warms the cache once in start(). Mirror that so _get_price_data() has
+    # data to return (a cold cache aborts the cycle at "No price data").
+    system._price_manager.refresh_cache()
     return system
 
 

@@ -5,6 +5,7 @@ using MockHomeAssistantController from conftest.
 """
 
 import logging
+from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -1581,7 +1582,7 @@ class TestQuietCycleReconcilesHardware:
     """
 
     @pytest.fixture(autouse=True)
-    def _pin_time_of_day(self):
+    def _pin_time_of_day(self, system: BatterySystemManager) -> Iterator[None]:
         """Pin the clock past period 10, keeping today's date.
 
         Both tests drive `update_battery_schedule(current_period=10)` while the
@@ -1593,9 +1594,15 @@ class TestQuietCycleReconcilesHardware:
         day between local midnight and 02:30, which is why it passed in CI on
         the way in (21:49 UTC = 23:49 local) and failed on the next PR
         (22:30 UTC = 00:30 local).
+
+        The cache warm-up mirrors what BatterySystemManager.start() now does
+        before the first optimization: since #709 the quarterly cycle reads
+        prices cache-only and never fetches, so a cold cache would abort the
+        cycle at "No price data available" before reconcile_hardware.
         """
         pinned = time_utils.now().replace(hour=15, minute=0, second=0, microsecond=0)
         with patch("core.bess.time_utils.now", return_value=pinned):
+            system._price_manager.refresh_cache()
             yield
 
     def test_quiet_cycle_reconciles(self, system):
@@ -1630,3 +1637,36 @@ class TestQuietCycleReconcilesHardware:
         assert (
             system._hardware_write_pending is True
         ), "A failed re-assert was swallowed with nothing scheduled to retry it"
+
+
+class TestOptimizerReadsPriceCacheOnly:
+    """Issue #709: the quarterly optimizer must never fetch prices itself.
+
+    _get_price_data used to call get_today_prices()/get_tomorrow_prices(),
+    which fetch on a cache miss. Before tomorrow's prices publish (~13:00 CET)
+    that ran a full synchronous retry loop every 15-minute cycle on the
+    scheduler thread — the source of ridax67's late/skipped period switches
+    when the HA Nordpool integration 500'd at the top of the hour. Fetching is
+    now the dedicated refresh job's job; the optimizer reads cache-only.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _pin_afternoon(self) -> Iterator[None]:
+        pinned = time_utils.now().replace(hour=15, minute=0, second=0, microsecond=0)
+        with patch("core.bess.time_utils.now", return_value=pinned):
+            yield
+
+    def test_quarterly_cycle_does_not_fetch_when_tomorrow_is_uncached(
+        self, system: BatterySystemManager
+    ) -> None:
+        # Today warm, tomorrow deliberately cold (pre-publication state).
+        system._price_manager.get_price_data(time_utils.today())
+        assert system._price_manager.get_cached_tomorrow_prices() == []
+        system._current_schedule = MagicMock()  # type: ignore[assignment]
+
+        with patch.object(
+            system._price_manager.price_source, "get_prices_for_date"
+        ) as fetch:
+            system.update_battery_schedule(current_period=60)
+
+        assert not fetch.called, "optimizer fetched prices instead of reading the cache"

@@ -2,12 +2,18 @@
 Test the PriceManager implementation.
 """
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 from core.bess import time_utils
 from core.bess.exceptions import PriceDataUnavailableError
-from core.bess.price_manager import HomeAssistantSource, MockSource, PriceManager
+from core.bess.price_manager import (
+    HomeAssistantSource,
+    MockSource,
+    PriceManager,
+    PriceSource,
+)
 
 
 def test_direct_price_initialization() -> None:
@@ -588,3 +594,118 @@ def test_health_check_reports_error_when_the_cold_probe_fails() -> None:
 
     assert result[0]["status"] == "ERROR"
     assert source.probe_count == 1
+
+
+# ── #709: price fetching moves off the optimizer's critical path ──────────────
+#
+# The optimizer (update_battery_schedule -> _get_price_data) used to call
+# get_today_prices()/get_tomorrow_prices(), which fetch on a cache miss. Before
+# tomorrow's prices publish (~13:00 CET) that meant a full 4-attempt retry loop
+# every 15-minute cycle, synchronously on the scheduler thread, delaying or
+# skipping the per-period hardware write whenever the HA Nordpool integration
+# 500'd at the top of the hour. Fetching now happens only in a dedicated
+# refresh job (PriceManager.refresh_cache) and a one-shot startup warm-up; the
+# optimizer reads cache-only accessors that never fetch.
+
+
+class _DateTrackingSource(MockSource):
+    """MockSource that records the dates it was asked to fetch."""
+
+    # A non-permissive publication time so the market-time gating in
+    # refresh_cache() is actually exercised (base PriceSource is (0, 0, "UTC"),
+    # i.e. always reached).
+    TOMORROW_EARLIEST = (12, 0, "Europe/Oslo")
+
+    def __init__(self, test_prices: list, unavailable_dates: set | None = None) -> None:
+        super().__init__(test_prices)
+        self.fetched_dates: list[date] = []
+        self._unavailable = unavailable_dates or set()
+
+    def get_prices_for_date(self, target_date: date) -> list:
+        self.fetched_dates.append(target_date)
+        if target_date in self._unavailable:
+            raise PriceDataUnavailableError(
+                date=target_date, message="not published yet"
+            )
+        return self.test_prices
+
+
+def _tracking_price_manager(source: _DateTrackingSource) -> PriceManager:
+    return PriceManager(
+        price_source=source,
+        markup_rate=0.0,
+        vat_multiplier=1.0,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE4",
+    )
+
+
+def test_cached_accessors_return_empty_on_cold_cache_without_fetching() -> None:
+    source = _DateTrackingSource([1.0] * 96)
+    pm = _tracking_price_manager(source)
+
+    assert pm.get_cached_today_prices() == []
+    assert pm.get_cached_tomorrow_prices() == []
+    assert source.fetched_dates == []
+
+
+def test_refresh_cache_populates_today_then_serves_it_from_cache() -> None:
+    source = _DateTrackingSource([1.0] * 96)
+    pm = _tracking_price_manager(source)
+
+    pm.refresh_cache()
+
+    today = time_utils.today()
+    assert source.fetched_dates.count(today) == 1
+    assert len(pm.get_cached_today_prices()) == 96
+
+    # A second refresh with today already cached does not re-fetch today.
+    pm.refresh_cache()
+    assert source.fetched_dates.count(today) == 1
+
+
+def test_refresh_cache_swallows_source_failure() -> None:
+    today = time_utils.today()
+    source = _DateTrackingSource([1.0] * 96, unavailable_dates={today})
+    pm = _tracking_price_manager(source)
+
+    pm.refresh_cache()  # must not raise
+
+    assert today in source.fetched_dates
+    assert pm.get_cached_today_prices() == []
+
+
+def test_refresh_cache_skips_tomorrow_before_market_publication_time() -> None:
+    source = _DateTrackingSource([1.0] * 96)
+    pm = _tracking_price_manager(source)
+
+    # 09:00 Stockholm == 09:00 Oslo, before the 12:00 threshold.
+    before_noon = datetime(2026, 8, 31, 9, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=before_noon):
+        pm.refresh_cache()
+        tomorrow = time_utils.today() + timedelta(days=1)
+
+    assert tomorrow not in source.fetched_dates
+
+
+def test_refresh_cache_fetches_tomorrow_after_market_publication_time() -> None:
+    source = _DateTrackingSource([1.0] * 96)
+    pm = _tracking_price_manager(source)
+
+    after_noon = datetime(2026, 8, 31, 13, 30, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=after_noon):
+        pm.refresh_cache()
+        tomorrow = time_utils.today() + timedelta(days=1)
+
+    assert tomorrow in source.fetched_dates
+
+
+def test_official_nordpool_and_octopus_declare_publication_times() -> None:
+    from core.bess.octopus_energy_source import OctopusEnergySource
+    from core.bess.official_nordpool_source import OfficialNordpoolSource
+
+    assert OfficialNordpoolSource.TOMORROW_EARLIEST == (12, 0, "Europe/Oslo")
+    assert OctopusEnergySource.TOMORROW_EARLIEST == (15, 30, "Europe/London")
+    # Base class stays permissive so an unknown source is never gated out.
+    assert PriceSource.TOMORROW_EARLIEST == (0, 0, "UTC")

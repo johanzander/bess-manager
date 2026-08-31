@@ -43,6 +43,7 @@ from core.bess.health_check import (
     run_system_health_checks,
 )
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
+from core.bess.settings import canonicalize_consumption_strategy
 from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
 from core.bess.time_utils import get_period_count
 
@@ -163,7 +164,7 @@ def _validate_power_monitoring_sensors(
         )
 
 
-_CONSUMPTION_STRATEGIES = ("fixed", "sensor", "influxdb_7d_avg", "ha_statistics")
+_CONSUMPTION_STRATEGIES = ("fixed", "sensor", "load_power_7d_avg", "ha_statistics")
 
 
 def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> None:
@@ -175,12 +176,17 @@ def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> 
     strategy with no fallback, so without ``48h_avg_grid_import`` every
     optimization run aborts, no schedule is ever built, and the dashboard
     sits on "Initializing" forever (#558). ``ha_statistics`` and
-    ``influxdb_7d_avg`` are left alone — they degrade to the fixed profile
+    ``load_power_7d_avg`` are left alone — they degrade to the fixed profile
     and report it, rather than stalling.
+
+    The legacy id ``influxdb_7d_avg`` is accepted and normalised to
+    ``load_power_7d_avg`` so a persisted or client-supplied old value still
+    validates.
     """
-    strategy = home_section.get("consumption_strategy")
-    if strategy is None:
+    raw_strategy = home_section.get("consumption_strategy")
+    if raw_strategy is None:
         return
+    strategy = canonicalize_consumption_strategy(raw_strategy)
     if strategy not in _CONSUMPTION_STRATEGIES:
         raise HTTPException(
             status_code=422,

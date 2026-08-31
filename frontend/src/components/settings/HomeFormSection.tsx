@@ -17,7 +17,7 @@ export interface HomeForm {
 
 /** Add/remove list of managed-load sensor entity IDs. Only shown for the
  * ha_statistics strategy, since it is the only baseline this subtracts from
- * today (issue #706) — influxdb_7d_avg needs its own mechanism. */
+ * today (issue #706) — load_power_7d_avg needs its own mechanism. */
 function ManagedLoadSensorsField({
   sensors,
   onChange,
@@ -96,7 +96,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
           [
             { value: 'fixed', label: 'Fixed value' },
             { value: 'sensor', label: 'Home Assistant sensor', disabled: !avgGridImportSensorConfigured },
-            { value: 'influxdb_7d_avg', label: 'InfluxDB (requires InfluxDB integration)', disabled: !localLoadSensorConfigured },
+            { value: 'load_power_7d_avg', label: 'Load Power 7-day Avg', disabled: !localLoadSensorConfigured },
             { value: 'ha_statistics', label: 'HA Statistics (7-day hourly profile)', disabled: !haStatsSensorConfigured },
           ],
           form.consumptionStrategy,
@@ -104,7 +104,7 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
         )}
         {!localLoadSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400 pt-1">
-            InfluxDB requires the <strong>Local Load Power</strong> sensor to be configured in the{' '}
+            Load Power 7-day Avg requires the <strong>Local Load Power</strong> sensor to be configured in the{' '}
             <strong>Sensors</strong> tab. This sensor is not available on all inverter platforms (e.g. Growatt SPH).
           </p>
         )}
@@ -134,11 +134,11 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             Configure the sensor entity ID in the <strong>Sensors</strong> tab under Consumption Forecast.
           </p>
         )}
-        {form.consumptionStrategy === 'influxdb_7d_avg' && (
+        {form.consumptionStrategy === 'load_power_7d_avg' && (
           <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
-            Queries InfluxDB directly for the past 7 days of local load power and uses the hourly average
-            profile. Requires the InfluxDB integration to be configured.
-            Configure the local load power sensor entity ID in the <strong>Sensors</strong> tab under Growatt Server.
+            Reads the past 7 days of the local load power sensor from Home Assistant's recorder and uses
+            the weekly average profile. Works on any platform that exposes a local load power sensor.
+            Configure that sensor's entity ID in the <strong>Sensors</strong> tab under Consumption Forecast.
           </p>
         )}
         {form.consumptionStrategy === 'ha_statistics' && (

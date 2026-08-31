@@ -209,13 +209,13 @@ The logs show:
 **Causes**:
 
 - Sensor timing differences
-- InfluxDB data gaps
+- Recorder history gaps for the affected hours
 - Battery efficiency losses
 
 **Solutions**:
 
 - Check all sensors are reporting correctly
-- Verify InfluxDB integration is working
+- Verify Home Assistant's recorder is retaining these sensors (not excluded, `purge_keep_days` ≥ 2)
 - Small imbalances (<5%) are normal due to efficiency losses
 
 ### "Battery not following schedule"
@@ -323,17 +323,15 @@ The 48h window is a sensible default. If your consumption varies strongly with s
 
 Uses a single fixed kWh/hour value set in `home.default_hourly`. No sensor required. Useful as a fallback or for very predictable consumption, but does not adapt to actual usage.
 
-#### Strategy 3: `influxdb_7d_avg`
+#### Strategy 3: `load_power_7d_avg`
 
-Queries InfluxDB for the past 7 days of your local load power sensor and builds a 96-period average profile (one value per 15-minute slot, averaged across the same slot for the last 7 days). This gives a time-of-day shaped forecast — higher during evening peaks, lower overnight — rather than a flat value.
+Reads the past 7 days of your local load power sensor from Home Assistant's recorder and builds a 96-period average profile (one value per 15-minute slot, averaged across the same slot for the last 7 days). This gives a time-of-day shaped forecast — higher during evening peaks, lower overnight — rather than a flat value.
 
-Requires `local_load_power` sensor configured in your add-on sensor settings and InfluxDB access.
-
-This should give the best prediction of the three options, but require an influxdb to be set up.
+Requires the `local_load_power` sensor configured in your add-on sensor settings. Unlike `ha_statistics` it does **not** need a `lifetime_load_consumption` entity, so it works on platforms (e.g. SolaX Native, Solis) that only derive that value. (Was named `influxdb_7d_avg` before it moved to the recorder; the old id is still accepted.)
 
 #### Strategy 4: `ha_statistics`
 
-Uses Home Assistant's built-in Recorder long-term statistics to build a 96-period time-of-day consumption profile from the past 7 days. Like `influxdb_7d_avg`, this produces a shaped forecast — higher during evening peaks, lower overnight — but without requiring an external database.
+Uses Home Assistant's built-in Recorder long-term statistics to build a 96-period time-of-day consumption profile from the past 7 days. Like `load_power_7d_avg`, this produces a shaped forecast — higher during evening peaks, lower overnight — but from the cumulative load-energy statistics rather than instantaneous power samples.
 
 Requires the `lifetime_load_consumption` sensor configured in the **Sensors** tab (under Consumption Forecast). This should be a cumulative energy sensor (kWh) tracked by HA's long-term statistics — for example `sensor.load_energy_total` from your inverter integration.
 
@@ -354,7 +352,7 @@ In the **Home** settings tab, under `ha_statistics`, add the load's own cumulati
 
 With the load excluded, it simply isn't forecast at all unless you say otherwise — the recommended setup is to exclude it here, then announce expected sessions via **Planned Consumption Changes** below (e.g. "EV needs 8 kWh by 06:30"). This is the same residual-plus-announcement pattern EMHASS uses for controllable loads.
 
-Only `ha_statistics` supports this today — `influxdb_7d_avg` draws from a different data source and would need its own mechanism.
+Only `ha_statistics` supports this today — `load_power_7d_avg` draws from a different data source and would need its own mechanism.
 
 #### Comparing Strategies
 

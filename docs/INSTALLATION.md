@@ -169,7 +169,7 @@ manual sensor setup — see below.
 | Strategy | Accuracy | What you must configure |
 |----------|----------|-------------------------|
 | **`ha_statistics`** ✅ recommended | High — real home consumption (incl. solar self-use), time-of-day shaped | Nothing beyond selecting it. Needs the inverter's lifetime load-consumption sensor (auto-discovered) and ~7 days of HA history |
-| `influxdb_7d_avg` | High — same data source, 15-min resolution | Requires an InfluxDB instance (Step 2) and the `local_load_power` sensor |
+| `load_power_7d_avg` | High — 15-min resolution, works without a lifetime load-energy entity | Requires the `local_load_power` sensor and ~7 days of HA recorder history |
 | `fixed` | Low — a single flat number, does not adapt | Manually enter a kWh/hour value (`home.default_hourly`) |
 | `sensor` (legacy) | Low — grid-import proxy that ignores solar self-consumption, so it under-estimates load on sunny days | Requires a hand-written template sensor in `configuration.yaml` (see below) |
 
@@ -194,12 +194,14 @@ HA has accumulated enough statistics, BESS temporarily falls back to the fixed
 > stays on the fixed fallback. Allow ~7 days after setup for enough history to
 > accumulate.
 
-#### `influxdb_7d_avg`
+#### `load_power_7d_avg`
 
-Same idea, but reads the `local_load_power` sensor from InfluxDB at 15-minute
-resolution. Equally accurate; choose this over `ha_statistics` only if you
-already run InfluxDB and want the finer resolution. Requires Step 2 and the
-`local_load_power` sensor configured.
+Same idea, but reads the `local_load_power` sensor from Home Assistant's
+recorder at 15-minute resolution. Equally accurate, and the only history-based
+option on platforms that have no lifetime load-consumption entity for
+`ha_statistics` to read (e.g. SolaX Native, Solis). Requires the
+`local_load_power` sensor configured and ~7 days of recorder history. (Formerly
+`influxdb_7d_avg`; the old id is still accepted in settings.)
 
 #### `fixed`
 

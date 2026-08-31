@@ -280,7 +280,8 @@ export default function DashboardPage({
                   Missing data for {historicalDataStatus.totalMissing} hour{historicalDataStatus.totalMissing !== 1 ? 's' : ''}: {historicalDataStatus.missingHours.join(', ')}
                 </p>
                 <p className="mt-2 text-xs">
-                  This usually happens after system restart when InfluxDB is not configured.
+                  This usually happens on a fresh install part-way through the day, before
+                  Home Assistant's recorder has history for the earlier hours.
                   The dashboard will skip these hours and only show data from the current hour onwards.
                   Optimization continues to work normally starting from the current hour.
                 </p>

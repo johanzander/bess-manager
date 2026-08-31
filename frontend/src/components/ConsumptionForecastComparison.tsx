@@ -15,14 +15,14 @@ interface ChartDataPoint {
 const STRATEGY_LABELS: Record<string, string> = {
   sensor: '48h Avg Sensor',
   fixed: 'Fixed Value',
-  influxdb_7d_avg: 'InfluxDB 7-day Avg',
+  load_power_7d_avg: 'Load Power 7-day Avg',
   ha_statistics: 'HA Statistics',
 };
 
 const STRATEGY_COLORS: Record<string, string> = {
   sensor: '#ef4444',
   fixed: '#f59e0b',
-  influxdb_7d_avg: '#3b82f6',
+  load_power_7d_avg: '#3b82f6',
   ha_statistics: '#8b5cf6',
 };
 

@@ -870,7 +870,7 @@ The optimizer needs a consumption forecast.  Four strategies exist:
   and the forecast correctly bakes that load in.  Higher during evening
   peaks, lower overnight.  A regular habit can be excluded deliberately via
   **Managed Loads**, below.
-- **influxdb_7d_avg**: Same concept but queries InfluxDB instead of HA.
+- **load_power_7d_avg**: Same concept, from the past 7 days of the `local_load_power` sensor in HA's recorder — 15-min resolution, and works on platforms with no lifetime load-energy entity.
 - **sensor**: Reads a 48-hour rolling average sensor.  Produces a flat
   prediction (same value all day).
 - **fixed**: A single fixed kWh/hour value.  Does not adapt.
@@ -879,7 +879,7 @@ The optimizer needs a consumption forecast.  Four strategies exist:
 min) refreshes the consumption forecast on a strategy-aware basis, not just
 at startup/23:55.  `sensor` and `fixed` refetch every quarterly cycle — cheap
 and, for `sensor`, actually intraday-moving.  `ha_statistics` and
-`influxdb_7d_avg` average a window of full calendar days ending at today's
+`load_power_7d_avg` average a window of full calendar days ending at today's
 midnight, so that value is provably unchanged until the date rolls over —
 they're cached and only refetched once the date changes, not on a clock
 timer.  Solar has no cache at all: it's fetched live from the HA forecast
@@ -895,7 +895,7 @@ declares what differs from normal, and BESS composes it onto whichever
 strategy is configured.
 
 It is **not a fifth strategy**.  It is a post-processing stage, so it applies
-identically on top of `ha_statistics`, `influxdb_7d_avg`, `sensor` and
+identically on top of `ha_statistics`, `load_power_7d_avg`, `sensor` and
 `fixed`.  An install with no overlay entity configured keeps precisely the
 forecast it would have had — "no overlay" is a supported configuration, not a
 degraded one, which is why the feature has no cold-start step.
@@ -956,10 +956,10 @@ excluded.  The user then re-declares any expected managed-load energy via
 Planned Consumption Changes (`add` mode), which composes on top of the
 residual exactly as it does on top of any other baseline.
 
-Scoped to `ha_statistics` only: `influxdb_7d_avg` pulls instantaneous power
-samples from InfluxDB, a different data source/shape than HA Recorder's
-cumulative `change` values, and needs its own subtraction mechanism if ever
-added.
+Scoped to `ha_statistics` only: `load_power_7d_avg` averages instantaneous
+`local_load_power` samples from the recorder, a different data source/shape
+than HA Recorder's cumulative `change` values, and needs its own subtraction
+mechanism if ever added.
 
 **Failure behaviour** (`managed_loads.subtract_managed_loads`): a configured
 managed-load sensor with no statistics data raises `ManagedLoadsError` rather

@@ -24,6 +24,10 @@ export interface StatusCardProps {
   keyValue: number | string;
   keyUnit: string;
   keyAnnotation?: string[];
+  // Small marker rendered under the headline (e.g. "Curtailed (No Export)").
+  // Kept separate from keyValue so a long marker can't widen the text-3xl
+  // headline past the card edge -- issue #676.
+  keyBadge?: string;
   metrics: Array<{
     label: string;
     value: number | string;
@@ -48,6 +52,7 @@ export const StatusCard: React.FC<StatusCardProps> = ({
   keyValue,
   keyUnit,
   keyAnnotation,
+  keyBadge,
   metrics,
   className = "",
   systemMode,
@@ -114,6 +119,11 @@ export const StatusCard: React.FC<StatusCardProps> = ({
           {keyValue}
           {keyUnit && <span className="text-lg font-normal text-gray-600 dark:text-gray-400 ml-2">{keyUnit}</span>}
         </p>
+        {keyBadge && (
+          <span className="col-start-1 justify-self-start -mt-1 inline-flex items-center rounded-md bg-stone-100 px-2 py-0.5 text-xs font-medium text-stone-600 dark:bg-stone-800 dark:text-stone-300">
+            {keyBadge}
+          </span>
+        )}
         {keyAnnotation && keyAnnotation.length > 0 && (
           <div className="col-start-2 justify-self-center flex flex-col items-end">
             {keyAnnotation.map((line) => (
@@ -288,14 +298,15 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     };
     const rawIntent = getIntent(currentHourData).toUpperCase().replace(/ /g, '_');
     // Curtailment doesn't replace the intent (a curtailed period can still
-    // be charging, e.g. SOLAR_STORAGE) -- keep the intent and mark it.
-    const intentName = intentDisplayNames[rawIntent] ?? rawIntent;
-    const strategicIntent = isCurtailed(currentHourData)
-      ? `${intentName} — Curtailed (No Export)`
-      : intentName;
+    // be charging, e.g. SOLAR_STORAGE) -- keep the intent as the headline and
+    // surface curtailment as its own badge (issue #676: appending
+    // " — Curtailed (No Export)" made the text-3xl headline overflow the card).
+    const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
+    const strategicIntentCurtailed = isCurtailed(currentHourData);
 
     return {
       strategicIntent,
+      strategicIntentCurtailed,
       costAndSavings: {
         todaysCost: (() => {
           if (!dashboardData.summary?.netGridCost) {
@@ -409,6 +420,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyValue: statusData.realTimePower?.solarPower?.text || '0 W',
       keyUnit: "",
       keyAnnotation: undefined as string[] | undefined,
+      keyBadge: undefined as string | undefined,
       metrics: [
         {
           label: "Home Usage",
@@ -446,6 +458,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       keyValue: statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
       keyAnnotation: undefined as string[] | undefined,
+      keyBadge: (statusData.strategicIntentCurtailed
+        ? 'Curtailed (No Export)'
+        : undefined) as string | undefined,
       metrics: [
         {
           label: "State of Charge",
@@ -508,6 +523,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
             `Tomorrow: ${statusData.costAndSavings?.tomorrowCostText}`,
           ]
         : undefined,
+      keyBadge: undefined as string | undefined,
       metrics: [
         {
           label: "Grid-Only Cost",
@@ -558,6 +574,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
           keyValue={card.keyValue}
           keyUnit={card.keyUnit}
           keyAnnotation={card.keyAnnotation}
+          keyBadge={card.keyBadge}
           metrics={card.metrics}
           systemMode={systemMode}
         />

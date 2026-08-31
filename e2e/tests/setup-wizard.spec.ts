@@ -293,7 +293,7 @@ test.describe('Setup Wizard', () => {
     // SPH lacks local_load_power; SolaX native has it (as house_load)
     const platformsWithoutLocalLoad = ['growatt_server_sph'];
     const platformsWithoutChargeRate = ['growatt_server_sph', 'solax_modbus_native', 'solis_modbus'];
-    const expectInfluxDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
+    const expectLoadPowerAvgDisabled = platformsWithoutLocalLoad.includes(expected.inverterPlatform);
     // Fuse protection also needs phase-current sensors (current_l1/l2/l3) discovered,
     // independent of the platform's charge-rate-control capability — a platform that
     // supports charge rate control can still lack phase sensors on an install with no
@@ -313,12 +313,12 @@ test.describe('Setup Wizard', () => {
     await page.getByRole('button', { name: /Next: Home/i }).click();
     await expectActiveStep(page, 4);
 
-    // InfluxDB radio should be disabled on platforms without local_load_power
-    const influxRadio = radioByLabel(page, 'InfluxDB (requires InfluxDB integration)');
-    if (expectInfluxDisabled) {
-      await expect(influxRadio).toBeDisabled();
+    // Load Power 7-day Avg radio should be disabled on platforms without local_load_power
+    const loadPowerAvgRadio = radioByLabel(page, 'Load Power 7-day Avg');
+    if (expectLoadPowerAvgDisabled) {
+      await expect(loadPowerAvgRadio).toBeDisabled();
     } else {
-      await expect(influxRadio).toBeEnabled();
+      await expect(loadPowerAvgRadio).toBeEnabled();
     }
 
     // Fuse protection toggle should be disabled on platforms without charge rate control

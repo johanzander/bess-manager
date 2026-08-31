@@ -701,6 +701,40 @@ def test_refresh_cache_fetches_tomorrow_after_market_publication_time() -> None:
     assert tomorrow in source.fetched_dates
 
 
+def test_cached_today_served_after_midnight_from_yesterdays_tomorrow_fetch() -> None:
+    """Midnight rollover must not blank the optimizer's price cache.
+
+    Yesterday's "tomorrow" fetch IS today's data after midnight. get_price_data
+    already serves it via the _tomorrow_date shortcut, but before the #709
+    fix that shortcut never promoted it into the today slot, so the new
+    cache-only accessor get_cached_today_prices() returned [] every quarterly
+    cycle until a fresh today fetch — which the shortcut itself prevents —
+    finally happened around noon.
+    """
+    source = _DateTrackingSource(
+        [1.0] * 96
+    )  # _DateTrackingSource pins 12:00 Europe/Oslo
+    pm = _tracking_price_manager(source)
+
+    day_n_afternoon = datetime(2026, 8, 30, 15, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=day_n_afternoon):
+        pm.refresh_cache()  # caches today=Aug30 and tomorrow=Aug31
+        assert pm._tomorrow_date == date(2026, 8, 31)
+
+    source.fetched_dates.clear()
+    # 06:00 the next morning — before the 12:00 Oslo publication gate, so
+    # refresh_cache() will not fetch Sep 1, and Aug 31 must come from cache.
+    next_morning = datetime(2026, 8, 31, 6, 0, tzinfo=ZoneInfo("Europe/Stockholm"))
+    with patch("core.bess.price_manager.time_utils.now", return_value=next_morning):
+        pm.refresh_cache()
+        assert len(pm.get_cached_today_prices()) == 96
+        assert pm._today_date == date(2026, 8, 31)
+
+    assert (
+        source.fetched_dates == []
+    ), "should have served today from the tomorrow cache"
+
+
 def test_official_nordpool_and_octopus_declare_publication_times() -> None:
     from core.bess.octopus_energy_source import OctopusEnergySource
     from core.bess.official_nordpool_source import OfficialNordpoolSource

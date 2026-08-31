@@ -522,6 +522,14 @@ class PriceManager:
         # the stored _tomorrow_date (not today()+1): right after midnight this
         # still serves yesterday's "tomorrow" fetch as the new today.
         if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
+            # After midnight rollover the "tomorrow" entry IS today. Promote it
+            # into the today slot so _cached_today_prices() — and the cache-only
+            # accessors the optimizer now reads (#709) — see it too; otherwise
+            # get_cached_today_prices() returns [] every cycle until a fresh
+            # today fetch happens, which the shortcut itself prevents.
+            if target_date == time_utils.today():
+                self._today_prices = self._tomorrow_prices
+                self._today_date = target_date
             return self._tomorrow_prices
 
         try:

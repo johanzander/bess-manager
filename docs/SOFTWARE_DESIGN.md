@@ -258,12 +258,19 @@ sell_price = spot_price * export_rate - tax_reduction
    └── SensorCollector queries the HA recorder for today's data
    └── Rebuild HistoricalDataStore with actual measurements
 
-3. Initial Optimization
+3. Price cache warm-up
+
+   └── PriceManager.refresh_cache() fetches today (+ tomorrow, once the
+       market has published it) into the cache, synchronously, once
+   └── The optimizer thereafter reads prices cache-only; a dedicated
+       scheduler job keeps the cache warm off the control path (#709)
+
+4. Initial Optimization
 
    └── First scheduled update runs fresh optimization
    └── Apply schedule to hardware
 
-4. Service Start
+5. Service Start
 
    └── Begin hourly update cycle
    └── Start power monitoring and charging adjustment

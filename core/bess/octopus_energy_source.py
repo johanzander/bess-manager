@@ -9,6 +9,7 @@ to match the system-wide period model.
 
 import logging
 from datetime import date, datetime, timedelta
+from typing import ClassVar
 
 from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
@@ -33,6 +34,10 @@ class OctopusEnergySource(PriceSource):
     - Prices are already VAT-inclusive final prices in GBP/kWh
     - Data comes from HA event entity attributes (rates list)
     """
+
+    # Octopus publishes next-day Agile unit rates ~16:00 UK time; start
+    # polling a little earlier to catch an early drop (Europe/London).
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (15, 30, "Europe/London")
 
     def __init__(
         self,

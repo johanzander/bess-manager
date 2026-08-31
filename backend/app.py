@@ -401,6 +401,19 @@ class BESSController:
         )
         self.scheduler.add_listener(self._on_job_missed, EVENT_JOB_MISSED)
 
+        # Electricity price cache refresh (every 15 minutes, offset from the
+        # optimizer's :00/:15/:30/:45 so the quarterly cycle always reads a
+        # cache populated ~5 min earlier and never races the fetch). Fetching
+        # lives here, off the scheduler's hardware-control path, so a slow or
+        # 500-ing HA price integration can no longer delay or skip a period
+        # switch (#709). The job is a no-op once each day's prices are cached.
+        self.scheduler.add_job(
+            self.system.refresh_prices,
+            CronTrigger(minute="5,20,35,50"),
+            id="refresh_prices",
+            misfire_grace_time=30,
+        )
+
         # Next day preparation (daily at 23:55)
         def prepare_next_day():
             now = time_utils.now()

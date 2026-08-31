@@ -6,7 +6,8 @@ inversion.
 
 import logging
 from datetime import date, datetime, timedelta
-from typing import Any
+from typing import Any, ClassVar
+from zoneinfo import ZoneInfo
 
 from . import time_utils
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
@@ -19,6 +20,15 @@ class PriceSource:
 
     This defines the interface that all price sources must implement.
     """
+
+    # Earliest wall-clock at which this market publishes the next day's
+    # day-ahead prices, as (hour, minute, IANA tz). The dedicated price
+    # refresh job (PriceManager.refresh_cache) will not attempt a
+    # tomorrow fetch before this time — the prices provably do not exist
+    # yet, and the failing call only adds load to a sometimes-flaky HA
+    # integration (#709). A published market fact, not a tuning knob.
+    # Base default is permissive so an unrecognised source is never gated.
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (0, 0, "UTC")
 
     @property
     def period_duration_hours(self) -> float:
@@ -132,6 +142,10 @@ class HomeAssistantSource(PriceSource):
     It removes VAT from prices before returning them, ensuring all price sources
     consistently return VAT-exclusive prices.
     """
+
+    # Nord Pool day-ahead auction clears ~12:42 CET, prices generally
+    # available by 13:00 CET (Europe/Oslo tracks the market timezone).
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (12, 0, "Europe/Oslo")
 
     def __init__(
         self,
@@ -504,7 +518,9 @@ class PriceManager:
             if cached_today is not None:
                 return cached_today
 
-        # Use cached values for tomorrow if available
+        # Use cached values for tomorrow if available. The after-midnight case
+        # (target_date is now "today" but still sits in the _tomorrow_* slot)
+        # is handled by _cached_today_prices() above, which promotes it.
         if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
             return self._tomorrow_prices
 
@@ -581,6 +597,61 @@ class PriceManager:
             return self.get_price_data(tomorrow)
         except (ValueError, PriceDataUnavailableError):
             return []  # Return empty list instead of raising error
+
+    def get_cached_today_prices(self) -> list:
+        """Today's price entries if already cached, else an empty list.
+
+        Unlike get_today_prices(), this never triggers a fetch. The quarterly
+        optimizer reads prices through here so a slow or failing price source
+        can never block or skip the per-period hardware write (#709). The
+        cache is kept warm by refresh_cache(), run off the critical path.
+        """
+        cached = self._cached_today_prices()
+        return cached if cached is not None else []
+
+    def get_cached_tomorrow_prices(self) -> list:
+        """Tomorrow's price entries if already cached, else an empty list.
+
+        Never fetches — see get_cached_today_prices().
+        """
+        cached = self._cached_tomorrow_prices()
+        return cached if cached is not None else []
+
+    def _tomorrow_publication_reached(self) -> bool:
+        """Whether the active market has published tomorrow's day-ahead prices.
+
+        Compared against the source's declared TOMORROW_EARLIEST in that
+        market's own timezone, so it is correct regardless of the user's
+        configured timezone.
+        """
+        hour, minute, tzname = self.price_source.TOMORROW_EARLIEST
+        market_now = time_utils.now().astimezone(ZoneInfo(tzname))
+        return (market_now.hour, market_now.minute) >= (hour, minute)
+
+    def refresh_cache(self) -> None:
+        """Populate the today/tomorrow price cache off the optimizer's path.
+
+        Called by the dedicated refresh scheduler job and once synchronously
+        at startup. Every failure is swallowed: the optimizer reads whatever
+        is cached via get_cached_*_prices() and never fetches on its own
+        thread (#709). get_price_data() is a no-op when the day is already
+        cached, so a warm day is not re-fetched. Tomorrow is skipped until
+        the market's publication time to avoid pointless calls against a
+        sometimes-flaky HA integration.
+        """
+        today = time_utils.today()
+        try:
+            self.get_price_data(today)
+        except Exception as e:
+            self._logger.warning("Price refresh: today's prices unavailable: %s", e)
+
+        if self._tomorrow_publication_reached():
+            try:
+                self.get_price_data(today + timedelta(days=1))
+            except Exception as e:
+                self._logger.debug(
+                    "Price refresh: tomorrow's prices not yet available: %s", e
+                )
 
     def get_prices(self, target_date: date | None = None) -> list:
         """Get raw price data for a specified date.
@@ -726,9 +797,30 @@ class PriceManager:
             self._logger.warning(f"Failed to log price information: {e}")
 
     def _cached_today_prices(self) -> list | None:
-        """Return today's cached price entries, or None if the cache is cold."""
-        if self._today_date == time_utils.today() and self._today_prices is not None:
+        """Return today's cached price entries, or None if the cache is cold.
+
+        The single funnel for every today-cache read — get_price_data() and the
+        cache-only accessors the optimizer uses (#709) both go through here.
+        After midnight rollover, yesterday's "tomorrow" fetch IS today's data
+        but still sits in the _tomorrow_* slot; promote it into the today slot
+        (before the next tomorrow fetch overwrites it) so the read succeeds
+        without waiting for refresh_cache() to run — the quarterly optimizer
+        fires at :00 and the refresh job only at :05.
+        """
+        today = time_utils.today()
+        if self._today_date == today and self._today_prices is not None:
             return self._today_prices
+        if self._tomorrow_date == today and self._tomorrow_prices is not None:
+            self._today_prices = self._tomorrow_prices
+            self._today_date = today
+            return self._today_prices
+        return None
+
+    def _cached_tomorrow_prices(self) -> list | None:
+        """Return tomorrow's cached price entries, or None if the cache is cold."""
+        tomorrow = time_utils.today() + timedelta(days=1)
+        if self._tomorrow_date == tomorrow and self._tomorrow_prices is not None:
+            return self._tomorrow_prices
         return None
 
     def check_health(self) -> list:

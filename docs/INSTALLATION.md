@@ -195,6 +195,28 @@ sensor:
 > friendly name containing `48h` and `grid import` so BESS still auto-discovers
 > it. This is the cleaner way to do it if you must use `sensor`.
 
+### Adjusting the forecast: Managed Loads and Planned Consumption Changes
+
+The strategy you pick above describes your *normal* consumption. Two optional
+settings adjust it — neither is needed for a working install:
+
+- **Managed Loads** (`ha_statistics` only) — name a metered recurring load (in
+  practice, an EV charger) and BESS subtracts its history before building the
+  profile. Use it when a load you run most days would otherwise be averaged
+  into *every* day's forecast.
+- **Planned Consumption Changes** — a template sensor that declares what
+  deviates from normal on a given day ("the EV needs 40 kWh by 06:00", "away
+  all week", "skip the pool pump today"). It is not a fifth strategy; it
+  applies on top of whichever one you use, and does nothing until you
+  configure it.
+
+The recommended EV setup combines both: exclude the charger under Managed
+Loads, then announce each session under Planned Consumption Changes, so the
+only EV energy in the plan is the amount you declared. Both are configured in
+the web interface (**Settings → Home** and **Settings → Sensors**); see the
+[User Guide](USER_GUIDE.md#managed-loads--excluding-a-regular-habit-from-the-baseline)
+for the template sensor format and worked examples.
+
 ## Step 4: Configure BESS Manager
 
 Battery, pricing, home, and sensor settings are all configured through the **web interface**.

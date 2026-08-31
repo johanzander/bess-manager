@@ -14,7 +14,7 @@ Coverage goals
 
 import sys
 from copy import deepcopy
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 from api import router
@@ -183,6 +183,19 @@ class TestGetSettings:
         battery = resp.json()["battery"]
         assert "totalCapacity" in battery
         assert "total_capacity" not in battery
+
+    def test_influxdb_config_present_reflects_helper(
+        self, mock_controller: MagicMock
+    ) -> None:
+        """The frontend deprecation banner (#722) keys off this flag — it must
+        mirror is_influxdb_configured()."""
+        with patch("api.is_influxdb_configured", return_value=True):
+            resp = _client.get("/api/settings")
+        assert resp.json()["influxdbConfigPresent"] is True
+
+        with patch("api.is_influxdb_configured", return_value=False):
+            resp = _client.get("/api/settings")
+        assert resp.json()["influxdbConfigPresent"] is False
 
 
 # ===========================================================================

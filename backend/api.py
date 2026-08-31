@@ -42,6 +42,7 @@ from core.bess.health_check import (
     group_components_by_device,
     run_system_health_checks,
 )
+from core.bess.influxdb_helper import is_influxdb_configured
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import canonicalize_consumption_strategy
 from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
@@ -316,6 +317,15 @@ async def get_settings():
             bess_controller.settings_store.get_service_domain()
         )
         data["inverter"] = inverter
+
+        # Deprecation nudge (#722): true while this install has real
+        # (non-placeholder) InfluxDB credentials configured — i.e. it actually
+        # relied on the InfluxDB read path. config.yaml ships the `influxdb`
+        # options block with placeholder creds for everyone, so mere presence
+        # of the block is not a useful signal; is_influxdb_configured() is.
+        # BESS no longer reads InfluxDB; the frontend shows a one-time banner
+        # pointing at the migration note. Removed with the option in PR 6.
+        data["influxdb_config_present"] = is_influxdb_configured()
 
         # Return the full per-platform sensors structure from the store.
         # Also include a flat "activeSensors" view for backwards compatibility.

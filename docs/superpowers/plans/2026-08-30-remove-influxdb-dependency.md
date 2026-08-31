@@ -97,16 +97,15 @@ Dependency-ordered. Each references `#722`; only PR 6 carries `Closes #722`.
 
 ### PR 4 — deprecation banner + migration note  *(starts the clock)*
 
-- Backend: surface `influxdb_config_present: bool` on an existing
-  status/health endpoint (from `/data/options.json` carrying a non-empty
-  `influxdb` block).
-- Frontend: dismissible banner when that flag is set — "BESS now reads history
-  from Home Assistant's recorder. Direct InfluxDB support is deprecated and
-  will be removed around <date>. Check that `recorder:` does not `exclude`
-  your BESS sensors and keeps >= 2 days. Your InfluxDB database and the
-  `influxdb:` write integration are unaffected." Links to the migration note.
-- Docs: rewrite `INSTALLATION.md` Step 2 as "Historical data (automatic via HA
-  recorder)" + a "Migrating from the InfluxDB add-on" subsection.
+- Backend: `/api/settings` now returns `influxdbConfigPresent` (= the
+  existing `is_influxdb_configured()`).
+- Frontend: `DeprecationBanner.tsx` — a dismissible (per-browser localStorage)
+  amber banner on the Dashboard when the flag is set. Links to the
+  `INSTALLATION.md` migration section. Component test + a `dashboard.spec.ts`
+  E2E case (`ci-options.json` still carries an `influxdb` block).
+- Docs: `INSTALLATION.md` Step 2 rewritten to "Historical Data (Automatic)"
+  with a "Migrating from the InfluxDB add-on" subsection; the
+  "Troubleshooting InfluxDB" section flagged legacy.
 - **PRs 5-6 must not merge until a stable release carrying PR 4 has been out
   >= 1 month.**
 

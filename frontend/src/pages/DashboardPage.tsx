@@ -7,6 +7,7 @@ import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
 import AlertBanner from '../components/AlertBanner';
+import DeprecationBanner from '../components/DeprecationBanner';
 import { RuntimeFailureAlerts } from '../components/RuntimeFailureAlerts';
 import api from '../lib/api';
 import { useUserPreferences } from '../hooks/useUserPreferences';
@@ -99,6 +100,7 @@ export default function DashboardPage({
   const [healthSummary, setHealthSummary] = useState<HealthSummary | null>(null);
   const [isRecheckingHealth, setIsRecheckingHealth] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [influxdbConfigPresent, setInfluxdbConfigPresent] = useState(false);
 
   // Runtime failures state
   const { failures, dismissFailure, dismissAllFailures } = useRuntimeFailures();
@@ -187,6 +189,7 @@ export default function DashboardPage({
       if (settingsResponse?.data) {
         const dm = settingsResponse.data.demoMode || settingsResponse.data.demo_mode || {};
         setDemoMode(dm.enabled === true);
+        setInfluxdbConfigPresent(settingsResponse.data.influxdbConfigPresent === true);
       }
 
       setLastUpdate(new Date());
@@ -232,6 +235,9 @@ export default function DashboardPage({
 
   return (
     <div className="space-y-6">
+      {/* InfluxDB deprecation notice (#722) — shown while an influxdb config block remains */}
+      <DeprecationBanner show={influxdbConfigPresent} />
+
       {/* Warning Banner for Incomplete Data */}
       {hasPartialData && (
         <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 mb-4 rounded">

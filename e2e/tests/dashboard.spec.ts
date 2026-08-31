@@ -14,6 +14,23 @@ test.describe('Dashboard', () => {
     await expect(page.getByText('Something went wrong')).not.toBeVisible();
   });
 
+  test('shows the InfluxDB deprecation banner and it dismisses (#722)', async ({ page }) => {
+    // ci-options.json still carries an `influxdb` block, so
+    // /api/settings reports influxdbConfigPresent: true.
+    await page.goto('/');
+
+    const banner = page.getByText('InfluxDB support is going away');
+    await expect(banner).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole('link', { name: /Migration notes/i })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Dismiss' }).first().click();
+    await expect(banner).not.toBeVisible();
+
+    // Dismissal persists (localStorage) across a reload.
+    await page.reload();
+    await expect(banner).not.toBeVisible({ timeout: 15_000 });
+  });
+
   test('dashboard does not show setup wizard redirect when configured', async ({ page }) => {
     await page.goto('/');
     // With a properly configured scenario, we should stay on dashboard, not redirect to /setup

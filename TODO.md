@@ -15,6 +15,13 @@
 **Description**: `get_sensor_data_batch` loops `for period in range(96)` and, inside, re-walks each entity's full sorted sample list to find the last value at/before the period boundary — O(96·S) per sensor. A single forward-merge pass (advance one pointer through the sorted samples as `period` increases) is O(S+96). Verbatim port of `influxdb_helper._parse_batch_response`'s existing nested loop; not a regression. Matters once PR 2 of #722 wires this into cold-start backfill over up to ~10 days of state changes. Raised in the PR 1 (#722) code review.
 
 
+### **Dashboard banners re-implement the same amber/red shell four times**
+
+**Impact**: Low | **Effort**: Low-Medium | **Dependencies**: `frontend/src/components/*Banner*`, `DashboardPage.tsx`
+
+**Description**: `AlertBanner`, `RuntimeFailureAlerts`, the inline yellow partial-data `<div>` in `DashboardPage.tsx`, and now `DeprecationBanner` (#722 PR 4) each hand-roll the same Tailwind shell — `bg-amber-50 dark:bg-amber-900/20 border …`, `flex items-start space-x-3` + icon + `h3` + `aria-label="Dismiss"` X button, same action-link classes. Styling/dark-mode/spacing changes have to be made in every copy and will drift. A shared presentational `<BannerShell variant tone>` carrying the shell + dismiss button once would collapse them. Raised in the #722 PR 4 review; `DeprecationBanner` is self-contained and removed in PR 6, so this is only worth doing if the shell is extracted for the others too.
+
+
 ### **`describe_failing_checks()` is dead code after the device-grouping banner**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `health_check.py`, `test_describe_failing_checks.py`

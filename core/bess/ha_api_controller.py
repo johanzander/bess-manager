@@ -26,6 +26,23 @@ logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
 
 
+def _describe_request_error(e: requests.RequestException) -> str:
+    """str(e) plus the HTTP response body when one is present.
+
+    The default ``HTTPError`` string is just "500 Server Error: ... for url:
+    ...", which omits the body — and the body is where the real reason lives
+    (e.g. a Growatt cloud rate-limit message, or InfluxDB's "no database").
+    Logging only the status turned one-line misconfigurations into opaque
+    failures; including the body makes them diagnosable from the log alone.
+    """
+    message = str(e)
+    if isinstance(e, requests.HTTPError) and e.response is not None:
+        body = e.response.text[:500].strip()
+        if body:
+            message = f"{message} — {body}"
+    return message
+
+
 def run_request(http_method, *args, **kwargs):
     """Log the request and response for debugging purposes."""
     try:
@@ -1276,7 +1293,7 @@ class HomeAssistantAPIController:
                         url,
                         attempt + 1,
                         self.max_attempts,
-                        str(e),
+                        _describe_request_error(e),
                         delay,
                     )
                     time.sleep(delay)
@@ -1287,7 +1304,7 @@ class HomeAssistantAPIController:
                         path,
                         attempt + 1,
                         self.max_attempts,
-                        str(e),
+                        _describe_request_error(e),
                     )
 
                     # Record runtime failure if failure tracker is available.

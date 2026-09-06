@@ -184,6 +184,7 @@ class InverterController(ABC):
         # (always write). Left unset on a failed write so the next call retries.
         self._last_written_grid_charge: bool | None = None
         self._last_written_discharge_rate: int | None = None
+        self._last_written_charge_rate: int | None = None
 
     # ── Period utility ────────────────────────────────────────────────────────
 
@@ -1104,6 +1105,26 @@ class InverterController(ABC):
         if errors:
             return False, "; ".join(errors)
         return True, ""
+
+    def write_charge_rate_if_changed(self, controller, charge_rate: int) -> None:
+        """Write the charge-power-rate register, skipping the write when the
+        value already matches the last one successfully written.
+
+        The charge rate is written from BatterySystemManager.adjust_charging_power
+        (power monitor disabled), outside _write_period_to_hardware's #402 dedup,
+        so without this it re-sends an unchanged rate every scheduler tick and
+        spends Growatt cloud writes toward the daily quota for no effect (#741).
+        Same dedupe_register_writes policy as the register writes; on a failed
+        write the exception propagates (adjust_charging_power's own handler logs
+        it) and _last_written is left unset so the next call retries.
+        """
+        if (
+            self.dedupe_register_writes
+            and charge_rate == self._last_written_charge_rate
+        ):
+            return
+        controller.set_charging_power_rate(charge_rate)
+        self._last_written_charge_rate = charge_rate
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

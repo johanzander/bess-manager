@@ -3763,8 +3763,12 @@ class BatterySystemManager:
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a
-                # preceding LOAD_SUPPORT or BATTERY_EXPORT period).
-                self.controller.set_charging_power_rate(int(charge_rate))
+                # preceding LOAD_SUPPORT or BATTERY_EXPORT period). Deduped so an
+                # unchanged rate isn't re-sent every tick, which spends Growatt
+                # cloud writes toward the daily quota for no effect (#741).
+                self._inverter_controller.write_charge_rate_if_changed(
+                    self.controller, int(charge_rate)
+                )
 
         except (
             AttributeError,

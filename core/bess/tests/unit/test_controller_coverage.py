@@ -477,6 +477,43 @@ class TestApplyPeriod:
         assert mock_controller.calls["grid_charge"] == [True]
 
 
+class TestChargeRateWriteOnChange:
+    """#741: the charge-power-rate register is written by
+    BatterySystemManager.adjust_charging_power (power monitor disabled),
+    which bypasses apply_period's #402 dedup. Re-sending an unchanged rate
+    every scheduler tick spends Growatt cloud writes toward the daily quota
+    for no effect. write_charge_rate_if_changed applies the same
+    dedupe_register_writes policy as the register writes."""
+
+    def test_repeat_call_with_unchanged_rate_skips_write(
+        self, min_ctrl, mock_controller
+    ):
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+
+        assert mock_controller.calls["charge_rate"] == [100]
+
+    def test_changed_rate_is_still_written(self, min_ctrl, mock_controller):
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 0)
+
+        assert mock_controller.calls["charge_rate"] == [100, 0]
+
+    def test_failed_write_is_retried_next_call(self, min_ctrl, mock_controller):
+        mock_controller.set_charging_power_rate = lambda _: (_ for _ in ()).throw(
+            RuntimeError("fail")
+        )
+        with pytest.raises(RuntimeError):
+            min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+
+        mock_controller.set_charging_power_rate = lambda rate: mock_controller.calls[
+            "charge_rate"
+        ].append(rate)
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+
+        assert mock_controller.calls["charge_rate"] == [100]
+
+
 class TestSolaxModbusGrowattTouWritesUnconditionally:
     """#402: unlike GrowattMinController (cloud), the solax_modbus TOU path
     must keep writing every period regardless of whether the value changed

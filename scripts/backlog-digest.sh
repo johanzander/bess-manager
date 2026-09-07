@@ -125,7 +125,7 @@ done
 # Inline-code spans carry EXAMPLES, never linkage declarations, so a `#N`
 # inside backticks must not associate a PR with an issue. Defined once, here,
 # because BOTH linkage scans need it and they are separate jq programs -- the
-# merged-PR scan immediately below, and `linkage_body` in the digest program
+# merged-PR scan immediately below, and `linkage_refs` in the digest program
 # further down. Fixing only one of them is how PR #684 shipped: it stripped
 # code spans in the merged scan while its own body, quoting
 # `- Blocked by #100 -- part of #409` as the worked example, went on linking
@@ -141,20 +141,21 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       # spellings (`Part of`, `tracking`, `Refs`). Deliberately NOT bare `#N`:
       # a merged PR body can name other issues without working on them
       # ("until #456 and #457 are also resolved"), and a merged PR must not
-      # flip an unrelated issue to In Verification. Drives both `merged_pr`
-      # (the column) and `merged_prs` (the visibility list).
+      # flip an unrelated issue to In Verification. `(?<!not )` drops a negated
+      # "Not part of #N". This regex is kept BYTE-IDENTICAL to `linkage_refs`
+      # in the digest program -- one linkage rule, two jq programs (#684). Drives
+      # both `merged_pr` (the column) and `merged_prs` (the visibility list).
       #
       # Inline-code spans are stripped BEFORE scanning, so `#N` inside a
       # backticked worked example cannot flip an issue: PR #679 explained its
       # own fix with the literal line `- Blocked by #100 -- part of #409` and
       # that example bounced issue #409 to In Verification. A real linkage
       # declaration is never in code markup.
-      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ],
+      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?<!not )(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ],
       # Any `#N` LEFT in the body once code spans and the cross-reference
-      # phrases ("Related to", "See also", "Blocked by", ...) are stripped --
-      # the same phrase list `linkage_body` uses in the digest program. Used
-      # ONLY to corroborate a branch-convention match in `merged_pr_for`: the
-      # branch name alone is not trusted to flip a column (a merged PR on
+      # phrases ("Related to", "See also", "Blocked by", ...) are stripped.
+      # Used ONLY to corroborate a branch-convention match in `merged_pr_for`:
+      # the branch name alone is not trusted to flip a column (a merged PR on
       # `fix/issue-403-logging` whose body says "Related to #403. Not closing
       # it" must not), but branch convention PLUS a non-cross-ref body mention
       # of the same number is the #428/#705 case -- a merged PR that genuinely
@@ -279,40 +280,38 @@ jq -n \
   def resume_count($comments):
     [ $comments[]? | select((.body // "") | contains("<!-- resume-handoff -->")) ] | length;
 
-  # LINKAGE is any `#N` reference in the body, not just the closing verbs. The
-  # no-auto-close rule forbids `Closes #N` on an intermediate PR -- it says
-  # `Part of #N`, `tracking #N`, `Refs #N`, or a bare `#N` -- so a digest that
-  # links by closing keyword only makes that PR invisible (the #409/#490
-  # defect). Whether the work has LANDED is the merged-PR scan above, which is
-  # deliberately narrower (work verbs only) so a merged PR that merely names
-  # another issue cannot flip it to In Verification; linkage here is the broad
-  # any-`#N` net for OPEN PRs. The number is bounded on both sides so `#2409`
-  # does not match issue 409 and `#4095` does not match 409.
+  # LINKAGE for an OPEN PR is a WORK-VERB reference to the issue -- the SAME
+  # set the merged-PR `refs` scan above uses: fixes|closes|resolves|refs|
+  # part of|tracking|tracks. The no-auto-close rule forbids `Closes #N` on an
+  # intermediate PR, but every spelling it leaves -- `Part of #N`, `tracking
+  # #N`, `Refs #N` -- still carries a work verb, so a beta PR stays visible.
+  # A closing-keyword-only linker made those PRs invisible (the #409/#490
+  # defect, #652); the previous fix over-corrected to "any `#N`", which linked
+  # a PR to every issue it merely NAMED.
   #
-  # Cross-references that name an issue WITHOUT claiming to work on it are
-  # stripped before matching, so they neither link nor orphan-claim: the
-  # documented `Blocked by #N` convention, `Depends on`, `Unblocks`,
-  # `Related to` (and `unrelated to`), `Relationship to`, `Follow-up to`,
-  # `See also`. Real bodies use these -- "Related to #403. Not closing it",
-  # "unblocks #485", "unrelated to #402" -- and linking on them would flip an
-  # unrelated issue to In Review. Stripping the PHRASE, not the whole
-  # line, keeps a combined reference like "- Blocked by #100 -- part of #409"
-  # working: only the blocker phrase disappears and #409 still links. The
-  # remaining test is still any `#N`, so the no-auto-close spellings
-  # (`Part of #N`, `tracking #N`, `Refs #N`, bare `#N`) all link.
+  # A `#N` with NO work verb is CONTEXT, not linkage: a `Related: #a, #b, #c`
+  # label, a prose mention ("the pre-#602 scalar", "the #602 entry already
+  # covers it"). The digest linked those and pulled shipped issues back to
+  # In Progress on every rhythm pass -- and on PR #720 the `#602` mentions
+  # were meaningful text that could not be reworded away (#721). Matching a
+  # work verb, and nothing else, is the rule that satisfies both #652 and #721.
+  #
+  # The reference is bounded by integer equality after the scan, so `#2409`
+  # cannot match issue 409 and `#4095` cannot match 409.
   #
   # Inline-code spans go first, for the same reason the merged scan strips
-  # them: a backticked worked example is not a declaration. The phrase list
-  # below cannot cover this on its own -- `part of #N` is REAL linkage and so
-  # is deliberately absent from it, which means a quoted example carrying that
-  # phrase links unless the markup is removed before matching.
-  def linkage_body($body):
-    ($body // "")
-    | strip_code_spans
-    | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "");
+  # them: a backticked worked example ("- Blocked by #100 -- part of #409") is
+  # not a linkage declaration. `(?<!not )` drops a negated "Not part of #N".
+  # The regex is BYTE-IDENTICAL to the `refs` scan in the merged-PR program
+  # above -- one linkage rule, two jq programs, and fixing only one is #684.
+  def linkage_refs($body):
+    [ ($body // "")
+      | strip_code_spans
+      | scan("(?i)(?<!not )(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)")
+      | .[0] | tonumber ];
 
   def pr_matches_issue($p; $n):
-    (linkage_body($p.body) | test("(?i)(^|[^0-9])#\($n)\\b"))
+    ((linkage_refs($p.body) | index($n)) != null)
     or ($p.headRefName | test("issue-\($n)(\\D|$)"));
 
   # Returns EVERY matching PR, ascending. Taking `[0]` discarded the rest, and

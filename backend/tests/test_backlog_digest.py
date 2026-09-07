@@ -279,12 +279,13 @@ def test_an_issue_with_several_prs_reports_all_of_them(bin_dir: Path) -> None:
 
 def test_a_part_of_pr_is_linked_to_its_issue(bin_dir: Path) -> None:
     """The no-auto-close rule forbids `Closes #N` on an intermediate PR, so a
-    beta PR says `Part of #N` (or `tracking #N`, or nothing but a bare `#N`)
-    instead. A digest that links by closing keyword only therefore makes that
-    PR invisible: #409 reported In Progress while its PR #490 sat approved,
+    beta PR says `Part of #N` (or `tracking #N`, or `Refs #N`) instead. A
+    digest that links by the closing keywords alone therefore makes that PR
+    invisible: #409 reported In Progress while its PR #490 sat approved,
     because `prs_for` resolved to nothing and the column fell through to the
-    live worktree. Linkage must match any `#N` reference, not just
-    `fixes/closes/resolves/refs`.
+    live worktree. Linkage matches the full work-verb set
+    (`fixes/closes/resolves/refs/part of/tracking/tracks`), not the closing
+    keywords only -- and not a bare `#N` with no work verb (#721).
 
     The branch name deliberately carries no issue number, so the association
     is proved by the body reference alone -- the headRefName fallback is
@@ -317,9 +318,10 @@ def test_a_part_of_pr_is_linked_to_its_issue(bin_dir: Path) -> None:
     assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] == []
 
 
-def test_a_bare_number_reference_links_a_pr_to_its_issue(bin_dir: Path) -> None:
-    """`tracking #N` and a bare `#N` are the other spellings the no-auto-close
-    rule leaves an intermediate PR with. Any `#N` in the body must link."""
+def test_a_tracking_reference_links_a_pr_to_its_issue(bin_dir: Path) -> None:
+    """`tracking #N` is a work verb (like `Part of`, `Refs`) — the spellings the
+    no-auto-close rule leaves an intermediate PR with. It links even though the
+    branch carries no issue number."""
     issue = _issue(633, labels=[{"name": "bug"}])
     pr = _pr(
         634,
@@ -333,6 +335,68 @@ def test_a_bare_number_reference_links_a_pr_to_its_issue(bin_dir: Path) -> None:
 
     assert [p["number"] for p in item["prs"]] == [634]
     assert item["column"] == "In Review"
+
+
+def test_a_truly_bare_number_does_not_link_a_pr_to_its_issue(
+    bin_dir: Path,
+) -> None:
+    """#721: a `#N` that carries no work verb is CONTEXT, not linkage — a prose
+    mention (`the pre-#602 scalar`, `the #602 entry already covers it`) names
+    the issue without claiming to work on it. Linking on it pulled shipped
+    issue #602 back to In Progress on every rhythm pass, and the references
+    could not be reworded away because they were meaningful text. Only the
+    work-verb set (`fixes|closes|resolves|refs|part of|tracking|tracks`) links,
+    matching the merged-PR scan; the no-auto-close rule never requires a truly
+    bare `#N`."""
+    issue = _issue(602, labels=[{"name": "bug"}])
+    pr = _pr(
+        720,
+        body=(
+            "Worse than the pre-#602 capped scalar it replaced. "
+            "The #602 entry already covers the reserve behaviour."
+        ),
+        headRefName="fix/reserve-scalar",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] != "In Review"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
+def test_a_related_colon_comma_list_does_not_link_the_listed_issues(
+    bin_dir: Path,
+) -> None:
+    """#721: `Refs #381` links the PR to #381, but the `Related: #381, #602,
+    #687` label that follows is a cross-reference list — the digest linked the
+    PR to all three and pulled shipped #602 to In Progress. The `Related:`
+    colon form is not a stripped phrase and a comma list defeats the one-`#N`
+    phrase stripper, so the only robust rule is: link on the work verb, ignore
+    the rest."""
+    issues = [
+        _issue(381, labels=[{"name": "bug"}]),
+        _issue(602, labels=[{"name": "bug"}]),
+        _issue(687, labels=[{"name": "bug"}]),
+    ]
+    pr = _pr(
+        718,
+        body="Refs #381\n\nRelated: #381, #602, #687",
+        headRefName="fix/scalar-followup",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim(issues, [pr], []))
+
+    items = {i["number"]: i for i in _run(bin_dir)["items"]}
+
+    assert [p["number"] for p in items[381]["prs"]] == [718]
+    assert items[602]["prs"] == []
+    assert items[687]["prs"] == []
 
 
 def test_a_blocked_by_reference_does_not_link_a_pr_to_its_issue(bin_dir: Path) -> None:
@@ -983,6 +1047,29 @@ def test_a_merged_cross_ref_does_not_move_an_issue_to_in_verification(
             body="Related to #403. Not closing it -- leaving it open until "
             "#456 and #457 are also resolved.",
             headRefName="fix/issue-403-logging",
+        )
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["merged_pr"] is None
+    assert item["merged_prs"] == []
+    assert item["column"] != "In Verification"
+
+
+def test_a_merged_negated_part_of_does_not_flip_an_issue(bin_dir: Path) -> None:
+    """`(?<!not )` on the `refs` scan: "Not part of #403 anymore" reads as
+    `part of #403` to a bare work-verb scan and would flip #403 to
+    In Verification for work the PR explicitly disclaims. The branch carries no
+    issue number, so this isolates the body scan -- the same guard the
+    open-PR linker gets, kept byte-identical between the two scans."""
+    issue = _issue(403, labels=[{"name": "bug"}])
+    merged = [
+        _pr(
+            454,
+            body="Not part of #403 anymore -- split out to its own change.",
+            headRefName="fix/logging-cleanup",
         )
     ]
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))

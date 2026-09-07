@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Tell BESS what consumption is coming with Planned Consumption Changes** — declare an EV session or a skipped pool pump in a template sensor, and it applies on top of whichever consumption forecast you already use. ([#428](https://github.com/johanzander/bess-manager/issues/428))
 - **Groundwork for VPP load tracking** — adds the opt-in `vpp_load_tracking_enabled` setting (default off) and the energy-budget model behind it; the live tracking loop follows separately. ([#520](https://github.com/johanzander/bess-manager/issues/520))
 - **Managed Loads — exclude a regular habit like EV charging from the `ha_statistics` baseline** — name the load's own cumulative energy sensor and BESS learns your normal usage without it, so you can announce it separately via Planned Consumption Changes. ([#706](https://github.com/johanzander/bess-manager/issues/706))
+- **A debug bundle now shows the charge/discharge power-rate and stop-SOC values BESS commanded** — each write logs its value at INFO, so a bundle can confirm what was sent without needing the failure that used to be the only trace. ([#719](https://github.com/johanzander/bess-manager/issues/719))
 
 ### Changed
 

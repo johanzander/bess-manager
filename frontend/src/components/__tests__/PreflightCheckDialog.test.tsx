@@ -23,7 +23,7 @@ describe('PreflightCheckDialog', () => {
       data: {
         checks: [
           { name: 'Battery Control', status: 'OK', required: true },
-          { name: 'Historical Data Access', status: 'NOT_CONFIGURED', required: false },
+          { name: 'Optional Integration', status: 'NOT_CONFIGURED', required: false },
         ],
       },
     })
@@ -81,7 +81,7 @@ describe('PreflightCheckDialog', () => {
       data: {
         checks: [
           { name: 'Battery Control', status: 'ERROR', required: true },
-          { name: 'Historical Data Access', status: 'NOT_CONFIGURED', required: false },
+          { name: 'Optional Integration', status: 'NOT_CONFIGURED', required: false },
         ],
       },
     })
@@ -111,13 +111,13 @@ describe('PreflightCheckDialog', () => {
   })
 
   it('does not show an optional component in ERROR as passing', async () => {
-    // check_historical_data_access() reports required:false with status ERROR
-    // when InfluxDB is configured but unreachable/misconfigured.
+    // An optional component (required:false) can still report status ERROR —
+    // that must render as a fault, not a green check.
     mockGet.mockResolvedValueOnce({
       data: {
         checks: [
           { name: 'Battery Control', status: 'OK', required: true },
-          { name: 'Historical Data Access', status: 'ERROR', required: false },
+          { name: 'Optional Integration', status: 'ERROR', required: false },
         ],
       },
     })
@@ -127,7 +127,7 @@ describe('PreflightCheckDialog', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Historical Data Access')).toBeInTheDocument()
+      expect(screen.getByText('Optional Integration')).toBeInTheDocument()
     })
 
     // Exactly one green check (Battery Control) — the failing optional
@@ -141,7 +141,7 @@ describe('PreflightCheckDialog', () => {
       data: {
         checks: [
           { name: 'Battery Control', status: 'OK', required: true },
-          { name: 'Historical Data Access', status: 'ERROR', required: false },
+          { name: 'Optional Integration', status: 'ERROR', required: false },
         ],
       },
     })
@@ -160,7 +160,7 @@ describe('PreflightCheckDialog', () => {
       data: {
         checks: [
           { name: 'Battery Control', status: 'OK', required: true },
-          { name: 'Historical Data Access', status: 'NOT_CONFIGURED', required: false },
+          { name: 'Optional Integration', status: 'NOT_CONFIGURED', required: false },
         ],
       },
     })

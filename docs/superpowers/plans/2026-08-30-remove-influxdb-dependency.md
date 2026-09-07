@@ -109,13 +109,16 @@ Dependency-ordered. Each references `#722`; only PR 6 carries `Closes #722`.
 - **PRs 5-6 must not merge until a stable release carrying PR 4 has been out
   >= 1 month.**
 
-### PR 5 — delete the InfluxDB client + health check  *(after the window)*
+### PR 5 — delete the InfluxDB client  *(after the window)*
 
 - Delete `core/bess/influxdb_helper.py`,
   `core/bess/tests/unit/test_influxdb_helper.py`.
-- `core/bess/health_check.py`: remove `check_historical_data_access` + its
-  registration. `backend/app.py`: remove the 5-minute
-  `test_influxdb_connection` cron job.
+- `core/bess/health_check.py`: ~~remove `check_historical_data_access` + its
+  registration~~ — **done early**, out of the gate, once PRs 1–3 made the
+  read path Recorder-only: on a migrated install the probe reported a
+  `WARNING` for a subsystem nothing reads, and an `OK` on one that hadn't
+  migrated meant nothing either. `backend/app.py` had no InfluxDB-specific
+  cron to remove — only the generic `refresh_health_check`.
 - `core/bess/debug_findings.py` (drop / retarget the "No InfluxDB data"
   regex), `core/bess/debug_data_exporter.py` (remove the `influxdb`
   cred-stripping block), `core/bess/exceptions.py` (reword

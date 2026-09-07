@@ -431,8 +431,9 @@ The DoD is already factored into the warranty cycle count, so you don't need to 
 > only applies to older setups still pointing BESS at an InfluxDB instance, and is removed once
 > the `influxdb` option is.
 
-If the **Historical Data Access** health check shows WARNING or the energy balance chart is empty,
-follow these steps in order.
+If you still point BESS at InfluxDB and the energy balance chart is empty, follow these steps in
+order. (BESS no longer surfaces a dedicated InfluxDB health check — the migration prompt is the
+dashboard deprecation banner described in [Step 2](#migrating-from-the-influxdb-add-on).)
 
 #### Step 1: Verify HA is writing data to InfluxDB
 

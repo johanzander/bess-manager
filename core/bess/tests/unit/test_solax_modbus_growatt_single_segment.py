@@ -141,6 +141,36 @@ class TestApplyPeriod:
         self._apply_at_period(controller, mock_ha, 4, "IDLE")
         assert len(mock_ha.calls["tou_segments"]) == initial_writes
 
+    def test_unchanged_mode_logs_skip_at_info(
+        self,
+        controller: SolaxModbusGrowattController,
+        mock_ha: MockHomeAssistantController,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """#717: a period that leaves the TOU mode unchanged must still leave an
+        INFO trace. The 2026-08-19 report had load_first already active on the
+        neighbouring periods, so no segment write was issued and the bundle
+        showed nothing at all about the TOU mode for that hour."""
+        import logging
+
+        intents = hourly_to_quarterly({0: "IDLE"})
+        schedule = make_schedule(intents)
+        controller.apply_intents(schedule, current_period=0)
+        controller._last_written_tou_mode = "load_first"  # already at target
+
+        with caplog.at_level(
+            logging.INFO, logger="core.bess.solax_modbus_growatt_controller"
+        ):
+            self._apply_at_period(controller, mock_ha, 4, "IDLE")
+
+        assert len(mock_ha.calls["tou_segments"]) == 0  # no write, as expected
+        assert any(
+            r.levelno == logging.INFO
+            and "tou segment 1 mode" in r.getMessage().lower()
+            and "unchanged" in r.getMessage().lower()
+            for r in caplog.records
+        )
+
     def test_grid_first_mode(self, controller, mock_ha):
         """BATTERY_EXPORT should set grid_first mode."""
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})

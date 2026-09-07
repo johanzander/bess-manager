@@ -323,6 +323,16 @@ class SolaxModbusGrowattController(GrowattMinController):
                 except Exception as e:
                     logger.error("FAILED: set TOU segment mode to %s: %s", mode, e)
                     errors.append(str(e))
+            else:
+                # #717: a period whose intent leaves the mode unchanged issues
+                # no segment write. Log the skip so a debug bundle still shows
+                # what TOU mode was in force for the period.
+                logger.info(
+                    "TOU segment 1 mode: %s unchanged (period %d, intent %s) - no write",
+                    mode,
+                    current_period,
+                    intent,
+                )
 
         # #166 added a gate here to skip writing discharge_rate=0 in load_first
         # mode, on the theory that it disables the inverter's native self-use

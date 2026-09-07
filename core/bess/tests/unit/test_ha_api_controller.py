@@ -1200,6 +1200,104 @@ class TestSetTouSegmentViaEntities:
         assert enabled_call.args[:2] == ("select", "select_option")
         assert enabled_call.kwargs["option"] == "Enabled"
 
+    def test_logs_commanded_mode_at_info(
+        self,
+        tou_ctrl: HomeAssistantAPIController,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """#717: the solax_modbus TOU write emitted no INFO trace on success —
+        its sub-calls only pass operation= strings used on failure. A debug
+        bundle could not show the mode/window that was commanded."""
+        with (
+            patch.object(tou_ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            tou_ctrl.set_tou_segment_via_entities(
+                segment_id=1,
+                batt_mode="grid_first",
+                start_time="07:00",
+                end_time="08:59",
+                enabled=True,
+            )
+        assert any(
+            r.levelno == logging.INFO
+            and "tou segment" in r.getMessage().lower()
+            and "grid_first" in r.getMessage()
+            and "07:00" in r.getMessage()
+            for r in caplog.records
+        )
+
+
+class TestSetInverterTimeSegment:
+    """#717: the growatt_server / SPH cloud TOU-segment write ('mode' in the
+    issue's control-write list) left no INFO trace on success."""
+
+    def test_logs_commanded_mode_at_info(
+        self,
+        ctrl: HomeAssistantAPIController,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with (
+            patch.object(ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            ctrl.set_inverter_time_segment(
+                segment_id=2,
+                batt_mode="battery_first",
+                start_time="01:00",
+                end_time="05:00",
+                enabled=True,
+            )
+        assert any(
+            r.levelno == logging.INFO
+            and "tou segment" in r.getMessage().lower()
+            and "battery_first" in r.getMessage()
+            and "01:00" in r.getMessage()
+            for r in caplog.records
+        )
+
+
+class TestWriteSolisPeriod:
+    """#717: the Solis Grid TOU v2 period write left no INFO trace on success —
+    only a FAILED: line on exception."""
+
+    @pytest.fixture
+    def solis_ctrl(
+        self, ctrl: HomeAssistantAPIController
+    ) -> HomeAssistantAPIController:
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "solis_charge_start_1": "time.solis_charge_start_1",
+            "solis_charge_end_1": "time.solis_charge_end_1",
+            "solis_charge_enable_1": "switch.solis_charge_enable_1",
+        }
+        return ctrl
+
+    def test_logs_commanded_period_at_info(
+        self,
+        solis_ctrl: HomeAssistantAPIController,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        with (
+            patch.object(solis_ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            solis_ctrl.write_solis_period(
+                direction="charge",
+                slot=1,
+                start_time="02:00",
+                end_time="04:00",
+                enabled=True,
+            )
+        assert any(
+            r.levelno == logging.INFO
+            and "solis" in r.getMessage().lower()
+            and "charge" in r.getMessage().lower()
+            and "slot 1" in r.getMessage().lower()
+            and "02:00" in r.getMessage()
+            for r in caplog.records
+        )
+
 
 class TestGridChargeEnabled:
     def test_switch_on(self, ctrl):

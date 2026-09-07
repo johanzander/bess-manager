@@ -3,8 +3,13 @@ handling of required-but-unmapped sensors (see TODO.md "Health check silently
 skips genuinely-required-but-unmapped sensors")."""
 
 from typing import ClassVar
+from unittest.mock import MagicMock
 
-from core.bess.health_check import determine_health_status, perform_health_check
+from core.bess.health_check import (
+    determine_health_status,
+    perform_health_check,
+    run_system_health_checks,
+)
 
 
 class _FakeController:
@@ -130,3 +135,22 @@ def test_perform_health_check_ok_when_required_sensor_configured_and_working():
     )
 
     assert result["status"] == "OK"
+
+
+def test_run_system_health_checks_omits_influxdb_historical_data_component() -> None:
+    """The InfluxDB historical-data probe was removed once the read path moved
+    to HA Recorder (#722): a torn-down InfluxDB add-on is now the expected
+    post-migration state, so probing it only produced a misleading warning.
+    run_system_health_checks() must no longer emit that component at all."""
+    system_manager = MagicMock()
+    system_manager._price_manager.check_health.return_value = []
+    system_manager._inverter_controller.check_health.return_value = []
+    system_manager.sensor_collector.check_health.return_value = []
+    system_manager._power_monitor = None
+    system_manager._controller.sensors.get.return_value = None
+    system_manager._runtime_failure_tracker.get_failure_stats.return_value = {}
+
+    result = run_system_health_checks(system_manager)
+
+    component_names = [component["name"] for component in result["checks"]]
+    assert "Historical Data Access" not in component_names

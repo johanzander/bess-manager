@@ -2,12 +2,6 @@ import logging
 import math
 from datetime import datetime
 
-from .influxdb_helper import (
-    get_influxdb_config,
-    is_influxdb_configured,
-    test_influxdb_connection,
-)
-
 logger = logging.getLogger(__name__)
 
 
@@ -489,10 +483,6 @@ def run_system_health_checks(system_manager):
         )
         all_component_checks.append(discharge_check)
 
-    # 7. Historic data access
-    history_checks = check_historical_data_access()
-    all_component_checks.extend(history_checks)
-
     # Failure statistics from runtime tracker
     failure_stats = system_manager._runtime_failure_tracker.get_failure_stats()
 
@@ -503,97 +493,3 @@ def run_system_health_checks(system_manager):
         "checks": all_component_checks,
         "failure_stats": failure_stats,
     }
-
-
-def check_historical_data_access():
-    """Check if the system can access historical data from InfluxDB.
-
-    Returns:
-        dict: Health check result for historical data access
-    """
-
-    result = {
-        "name": "Historical Data Access",
-        "description": "Provides past energy flow data for analysis and optimization",
-        "required": False,
-        "status": "UNKNOWN",
-        "checks": [],
-        "last_run": datetime.now().isoformat(),
-    }
-
-    # Check InfluxDB configuration
-    config_check = {
-        "name": "InfluxDB Configuration",
-        "key": None,
-        "entity_id": None,
-        "status": "UNKNOWN",
-        "value": None,
-        "formatted_value": "N/A",
-        "error": None,
-    }
-
-    if not is_influxdb_configured():
-        config_check["status"] = "NOT_CONFIGURED"
-        config_check["formatted_value"] = "Not configured (optional)"
-        logger.info("InfluxDB is not configured — skipping (optional component)")
-        result["checks"].append(config_check)
-        result["status"] = "NOT_CONFIGURED"
-        return [result]
-
-    try:
-        config = get_influxdb_config()
-        config_check["status"] = "OK"
-        config_check["value"] = f"URL: {config['url']}"
-        config_check["formatted_value"] = f"URL: {config['url']}"
-        logger.info("InfluxDB credentials configured")
-    except Exception as e:
-        config_check["status"] = "ERROR"
-        config_check["error"] = f"Failed to load InfluxDB configuration: {e}"
-
-    if isinstance(config_check, dict):
-        result["checks"].append(config_check)
-    else:
-        logger.error(
-            f"Non-dict config_check encountered in historical data access: {config_check} (type: {type(config_check)})"
-        )
-
-    # Test data retrieval if configuration is OK
-    if config_check["status"] == "OK":
-        data_check = {
-            "name": "Data Retrieval",
-            "key": None,
-            "entity_id": None,
-            "status": "UNKNOWN",
-            "value": None,
-            "formatted_value": "N/A",
-            "error": None,
-        }
-
-        try:
-            connection_result = test_influxdb_connection()
-
-            if connection_result["status"] == "ok":
-                data_check["status"] = "OK"
-                data_check["value"] = connection_result["message"]
-                data_check["formatted_value"] = connection_result["message"]
-            elif connection_result["status"] == "misconfigured":
-                data_check["status"] = "WARNING"
-                data_check["error"] = connection_result["message"]
-            else:
-                data_check["status"] = "WARNING"
-                data_check["error"] = connection_result["message"]
-        except Exception as e:
-            data_check["status"] = "ERROR"
-            data_check["error"] = f"Failed to connect to InfluxDB: {e}"
-
-        result["checks"].append(data_check)
-
-    # Determine overall status
-    if all(check["status"] == "OK" for check in result["checks"]):
-        result["status"] = "OK"
-    elif any(check["status"] == "ERROR" for check in result["checks"]):
-        result["status"] = "ERROR"
-    else:
-        result["status"] = "WARNING"
-
-    return [result]

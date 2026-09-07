@@ -12,9 +12,9 @@ interface PreflightCheck {
  *
  * Only `error` blocks live control. Optional components (`required === false`)
  * can never block, but a genuinely failing one still has to look different
- * from a healthy one — `check_historical_data_access()` reports
- * `required: false` with `status: "ERROR"` when InfluxDB is misconfigured, and
- * that used to render as a green check.
+ * from a healthy one — an optional component that reports `status: "ERROR"`
+ * or `"WARNING"` (rather than `"NOT_CONFIGURED"`) used to render as a green
+ * check.
  *
  * A required component reporting WARNING does not block: `determine_health_status`
  * returns ERROR whenever any required method is not working, so WARNING on a

@@ -141,17 +141,19 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
       # spellings (`Part of`, `tracking`, `Refs`). Deliberately NOT bare `#N`:
       # a merged PR body can name other issues without working on them
       # ("until #456 and #457 are also resolved"), and a merged PR must not
-      # flip an unrelated issue to In Verification. `(?<!not )` drops a negated
-      # "Not part of #N". This regex is kept BYTE-IDENTICAL to `linkage_refs`
-      # in the digest program -- one linkage rule, two jq programs (#684). Drives
-      # both `merged_pr` (the column) and `merged_prs` (the visibility list).
+      # flip an unrelated issue to In Verification. `\b` before the verb keeps
+      # it from matching a verb-shaped SUBSTRING ("counterpart of #6",
+      # "encloses #6"); `(?<!not )` drops a negated "Not part of #N". This
+      # regex is kept BYTE-IDENTICAL to `linkage_refs` in the digest program --
+      # one linkage rule, two jq programs (#684). Drives both `merged_pr` (the
+      # column) and `merged_prs` (the visibility list).
       #
       # Inline-code spans are stripped BEFORE scanning, so `#N` inside a
       # backticked worked example cannot flip an issue: PR #679 explained its
       # own fix with the literal line `- Blocked by #100 -- part of #409` and
       # that example bounced issue #409 to In Verification. A real linkage
       # declaration is never in code markup.
-      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?<!not )(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ],
+      refs: [ (.body // "") | strip_code_spans | scan("(?i)(?<!not )\\b(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)") | .[0] | tonumber ],
       # Any `#N` LEFT in the body once code spans and the cross-reference
       # phrases ("Related to", "See also", "Blocked by", ...) are stripped.
       # Used ONLY to corroborate a branch-convention match in `merged_pr_for`:
@@ -296,8 +298,11 @@ jq -n \
   # were meaningful text that could not be reworded away (#721). Matching a
   # work verb, and nothing else, is the rule that satisfies both #652 and #721.
   #
-  # The reference is bounded by integer equality after the scan, so `#2409`
-  # cannot match issue 409 and `#4095` cannot match 409.
+  # The `#N` side is bounded by integer equality after the scan, so `#2409`
+  # cannot match issue 409 and `#4095` cannot match 409. The VERB side is
+  # bounded by `\b`, so "counterpart of #602" does not match `part of #602`
+  # and "encloses #602" does not match `closes #602` -- the same prose
+  # false-positive this fix removes, just on the other edge of the match.
   #
   # Inline-code spans go first, for the same reason the merged scan strips
   # them: a backticked worked example ("- Blocked by #100 -- part of #409") is
@@ -307,7 +312,7 @@ jq -n \
   def linkage_refs($body):
     [ ($body // "")
       | strip_code_spans
-      | scan("(?i)(?<!not )(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)")
+      | scan("(?i)(?<!not )\\b(?:fixes|closes|resolves|refs|part of|tracking|tracks) #([0-9]+)")
       | .[0] | tonumber ];
 
   def pr_matches_issue($p; $n):

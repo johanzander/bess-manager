@@ -399,6 +399,41 @@ def test_a_related_colon_comma_list_does_not_link_the_listed_issues(
     assert items[687]["prs"] == []
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        "This is a counterpart of #602 -- not working it.",
+        "This change encloses #602's old behaviour.",
+        "A precursor of #602 landed earlier.",
+    ],
+)
+def test_a_verb_shaped_substring_does_not_link_a_pr_to_its_issue(
+    bin_dir: Path, body: str
+) -> None:
+    """#721: the work verb needs a left `\\b` too. "counterpart of #602"
+    contains the substring "part of #602" and "encloses #602" contains
+    "closes #602" -- the identical prose false-positive as a `Related:` list,
+    reached through an ordinary English word instead of a comma list. The
+    `#N` side is bounded by integer equality; the verb side is bounded by
+    `\\b`."""
+    issue = _issue(602, labels=[{"name": "bug"}])
+    pr = _pr(
+        721,
+        body=body,
+        headRefName="fix/reserve-wording",
+        isDraft=False,
+        mergeable="MERGEABLE",
+    )
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [pr], []))
+
+    digest = _run(bin_dir)
+    item = digest["items"][0]
+
+    assert item["prs"] == []
+    assert item["column"] != "In Review"
+    assert [o for o in digest["orphans"] if o["kind"] == "pr_no_issue"] != []
+
+
 def test_a_blocked_by_reference_does_not_link_a_pr_to_its_issue(bin_dir: Path) -> None:
     """`Blocked by #N` is a documented convention -- a PR that waits on issue N
     is not part of N's work. The widened `any #N` linkage must not grab it, or

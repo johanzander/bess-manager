@@ -1033,6 +1033,72 @@ class TestSetOperations:
             ctrl.set_charge_stop_soc(90)
             assert mock.call_args[0][:2] == ("number", "set_value")
 
+    # #719: a successful number-like control write must leave an INFO trace
+    # carrying the commanded value, so a debug bundle (which ships the
+    # INFO-level log) shows what was commanded, not just that no error
+    # followed. set_grid_charge already logs unconditionally on the command
+    # path; these four setters did not.
+
+    def test_set_charging_power_rate_logs_value_at_info(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            ctrl.set_charging_power_rate(100)
+        assert any(
+            r.levelno == logging.INFO
+            and "charging power rate" in r.getMessage().lower()
+            and "100" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_set_discharging_power_rate_logs_value_at_info(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            ctrl.set_discharging_power_rate(75)
+        assert any(
+            r.levelno == logging.INFO
+            and "discharging power rate" in r.getMessage().lower()
+            and "75" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_set_charge_stop_soc_logs_value_at_info(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            ctrl.set_charge_stop_soc(90)
+        assert any(
+            r.levelno == logging.INFO
+            and "charge stop soc" in r.getMessage().lower()
+            and "90" in r.getMessage()
+            for r in caplog.records
+        )
+
+    def test_set_discharge_stop_soc_logs_value_at_info(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_service_call_with_retry"),
+            caplog.at_level(logging.INFO, logger="core.bess.ha_api_controller"),
+        ):
+            ctrl.set_discharge_stop_soc(20)
+        assert any(
+            r.levelno == logging.INFO
+            and "discharge stop soc" in r.getMessage().lower()
+            and "20" in r.getMessage()
+            for r in caplog.records
+        )
+
 
 class TestSetGrowattExportLimit:
     """Export-limit curtailment writes (registers 122/123, #269)."""

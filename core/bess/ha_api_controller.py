@@ -1607,6 +1607,7 @@ class HomeAssistantAPIController:
     def set_charge_stop_soc(self, charge_stop_soc):
         """Set the charge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_charge_stop_soc")
+        logger.info("Set charge stop SOC -> %s%%", charge_stop_soc)
         self._set_number_like(entity_id, charge_stop_soc, "Set charge stop SOC")
 
     def get_discharge_stop_soc(self):
@@ -1616,6 +1617,7 @@ class HomeAssistantAPIController:
     def set_discharge_stop_soc(self, discharge_stop_soc):
         """Set the discharge stop state of charge (SOC)."""
         entity_id = self._get_entity_for_service("battery_discharge_stop_soc")
+        logger.info("Set discharge stop SOC -> %s%%", discharge_stop_soc)
         self._set_number_like(entity_id, discharge_stop_soc, "Set discharge stop SOC")
 
     def get_charging_power_rate(self):
@@ -1625,6 +1627,7 @@ class HomeAssistantAPIController:
     def set_charging_power_rate(self, rate):
         """Set the charging power rate."""
         entity_id = self._get_entity_for_service("battery_charging_power_rate")
+        logger.info("Set charging power rate -> %s%%", rate)
         self._set_number_like(entity_id, rate, "Set charging power rate")
 
     def get_discharging_power_rate(self):
@@ -1634,6 +1637,7 @@ class HomeAssistantAPIController:
     def set_discharging_power_rate(self, rate):
         """Set the discharging power rate."""
         entity_id = self._get_entity_for_service("battery_discharging_power_rate")
+        logger.info("Set discharging power rate -> %s%%", rate)
         self._set_number_like(entity_id, rate, "Set discharging power rate")
 
     def _is_shared_signed_battery_power(self) -> bool:

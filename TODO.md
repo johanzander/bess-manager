@@ -1,6 +1,20 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Commanded-value trace duplicated across the four number-like setters**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/ha_api_controller.py`
+
+**Description**: The #719 fix copy-pastes `logger.info("Set … -> %s%%", value)` into `set_charging_power_rate`, `set_discharging_power_rate`, `set_charge_stop_soc`, and `set_discharge_stop_soc` rather than adding it once to the shared `_set_number_like` helper they all route through (which already has `operation` and `value` in scope). As-is, the other `_set_number_like` callers — SolaX VPP active power, SolaX min SOC, Growatt export limit — still emit no commanded-value trace, and each future number-like control re-copies the line. Consolidating into `_set_number_like` needs a volume check first: VPP active-power writes can fire every cycle, unlike the four setters (once per schedule apply). Raised in the #719 code review.
+
+
+### **`set_grid_charge`-style command logs read as completed actions but fire before the write**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/ha_api_controller.py`
+
+**Description**: The #719 INFO line (and the pre-existing `set_grid_charge` / VPP AC-charge lines it mirrors) is emitted before the HA service call runs and is phrased as a completed action ("Set … -> N%"), so it also appears when the subsequent call fails. A debugger scanning the INFO trace could read it as confirmation the write landed — a failure line follows, but only at WARNING/ERROR. Consistent with existing codebase behaviour, so not a regression; worth revisiting if command-log semantics are tightened. Raised in the #719 code review.
+
+
 ### **A negative base consumption forecast is floored silently when an overlay is configured**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/consumption_overlay.py`, `core/bess/battery_system_manager.py`

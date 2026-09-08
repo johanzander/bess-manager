@@ -12,6 +12,7 @@ from unittest.mock import MagicMock
 from core.bess import time_utils
 from core.bess.daily_view_builder import DailyView
 from core.bess.debug_data_exporter import (
+    _LOG_KEY_PATTERNS,
     _REDACTED,
     DebugDataAggregator,
     _is_secret_key,
@@ -22,6 +23,30 @@ from core.bess.debug_data_exporter import (
 )
 from core.bess.models import EnergyData, PeriodData
 from core.bess.settings import BatterySettings
+
+
+class TestLogKeyPatternsRetainControlWrites:
+    """#717: every control-write log line must survive compact-log trimming, so
+    a debug bundle shows what was commanded across the whole day, not only in
+    the last-50-lines tail."""
+
+    def test_retains_control_write_lines(self) -> None:
+        prefix = "2026-08-19 09:02:01,123 INFO core.bess.ha_api_controller "
+        c = "2026-08-19 09:02:01,123 INFO core.bess.solax_modbus_growatt_controller "
+        lines = [
+            prefix + "Enabling grid charge",
+            prefix + "Disabling grid charge",
+            prefix + "Set charge stop SOC -> 12%",
+            prefix + "Set discharge stop SOC -> 12%",
+            prefix + "Set TOU segment 1 -> mode=load_first enabled=False 00:00-23:59",
+            prefix
+            + "Set inverter TOU segment 1 -> mode=load_first 00:00-23:59 (disabled)",
+            prefix + "Set Solis charge period slot 1 -> 02:00-04:00 enabled=True",
+            c + "TOU segment 1 mode: load_first unchanged (period 36, intent "
+            "SOLAR_STORAGE) - no write",
+        ]
+        for line in lines:
+            assert _LOG_KEY_PATTERNS.search(line), line
 
 
 class TestIsSecretKey:

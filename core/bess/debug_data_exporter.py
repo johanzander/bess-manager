@@ -297,6 +297,9 @@ _LOG_KEY_PATTERNS = re.compile(
     r"WARNING|ERROR|CRITICAL"
     r"|HARDWARE:"
     r"|Discharge inhibit|charge power|charging power|discharge rate"
+    # #717: keep every control-write line (grid charge, stop-SOC, TOU segment,
+    # Solis period) across the whole day, not only in the last-50-lines tail.
+    r"|grid charge|charge stop SOC|TOU segment|Solis.*period"
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"

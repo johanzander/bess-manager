@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { EnergyFlowChart, getSellPriceTooltipText } from '../EnergyFlowChart'
+import { EnergyFlowChart, getSellPriceTooltipText, getHomeLoadSplit } from '../EnergyFlowChart'
 import type { HourlyData } from '../../types'
 
 const dailyViewData: HourlyData[] = [
@@ -44,6 +44,49 @@ describe('EnergyFlowChart sell price toggle', () => {
     fireEvent.click(screen.getByRole('switch', { name: /show sell price/i }))
 
     expect(onShowSellPriceChange).toHaveBeenCalledWith(true)
+  })
+})
+
+describe('getHomeLoadSplit', () => {
+  const fv = (value: number) => ({ value, display: String(value), unit: 'kWh', text: `${value} kWh` })
+
+  it('splits a future period into residual + planned that stack to the combined curve', () => {
+    const split = getHomeLoadSplit(
+      { dataSource: 'predicted', predictedResidualLoad: fv(0.25), plannedManagedLoad: fv(1.0) },
+      1.25
+    )
+    // Consumption is drawn below the zero axis, so both are negative.
+    expect(split.residual).toBe(-0.25)
+    expect(split.planned).toBe(-1.0)
+    expect(split.residual + split.planned).toBe(-1.25)
+    expect(split.plannedTotal).toBeNull()  // no separate line for the future
+  })
+
+  it('keeps an elapsed period at its measured total and exposes the plan for comparison', () => {
+    // Measured 2.5 kWh, but the plan for that period was residual 0.25 + planned 1.0.
+    const split = getHomeLoadSplit(
+      { dataSource: 'actual', predictedResidualLoad: fv(0.25), plannedManagedLoad: fv(1.0) },
+      2.5
+    )
+    expect(split.residual).toBe(-2.5)   // stack shows what was on the meter
+    expect(split.planned).toBe(0)
+    expect(split.plannedTotal).toBe(-1.25)  // dashed reference line = what was planned
+  })
+
+  it('falls back to all-residual when the breakdown is absent', () => {
+    const split = getHomeLoadSplit(undefined, 1.25)
+    expect(split.residual).toBe(-1.25)
+    expect(split.planned).toBe(0)
+    expect(split.plannedTotal).toBeNull()
+  })
+
+  it('keeps a negative planned block (away-from-home subtract) intact for the future', () => {
+    const split = getHomeLoadSplit(
+      { dataSource: 'predicted', predictedResidualLoad: fv(1.0), plannedManagedLoad: fv(-0.4) },
+      0.6
+    )
+    expect(split.residual).toBe(-1.0)
+    expect(split.planned).toBe(0.4)
   })
 })
 

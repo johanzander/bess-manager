@@ -617,6 +617,21 @@ def _aggregate_quarterly_to_hourly(
                 "energy_kwh_only",
                 currency,
             ),
+            predictedResidualLoad=create_formatted_value(
+                sum(p.predictedResidualLoad.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            plannedManagedLoad=create_formatted_value(
+                sum(p.plannedManagedLoad.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
+            predictedTotalLoad=create_formatted_value(
+                sum(p.predictedTotalLoad.value for p in quarter_periods),
+                "energy_kwh_only",
+                currency,
+            ),
             gridImported=create_formatted_value(
                 sum(p.gridImported.value for p in quarter_periods),
                 "energy_kwh_only",

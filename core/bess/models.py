@@ -422,6 +422,32 @@ class DecisionData:
 
 
 @dataclass
+class ConsumptionBreakdown:
+    """Decomposition of a period's home-load forecast (#749).
+
+    Managed Loads (#706) subtracts a managed sensor's own history from the
+    ha_statistics baseline; Planned Consumption Changes (#428) then overlays
+    declared blocks. Both fold into one number by the time the optimizer
+    runs. This keeps the parts so the dashboard can show why the load curve
+    is shaped the way it is — which quarters are ordinary residual prediction
+    and which carry a known planned block (e.g. an EV session).
+
+    Attributes:
+        residual: Predicted unmanaged / residual load — the configured
+            strategy's forecast after Managed Loads subtraction, before
+            Planned Consumption Changes.
+        planned: Net planned managed load applied by Planned Consumption
+            Changes for this period (post-clamp). Zero when no overlay
+            entity is configured; negative for a subtract block.
+        total: What the optimizer plans against. Always ``residual + planned``.
+    """
+
+    residual: float
+    planned: float
+    total: float
+
+
+@dataclass
 class PeriodData:
     """
     Period data with energy, economic, and decision information.
@@ -442,6 +468,11 @@ class PeriodData:
     data_source: str = "predicted"  # "actual" or "predicted"
     economic: EconomicData = field(default_factory=EconomicData)
     decision: DecisionData = field(default_factory=DecisionData)
+    # Home-load forecast split (#749). Set for predicted periods (and for
+    # elapsed periods, where the daily view looks up the plan that was in
+    # force). None where no plan is available — an overlay-free install still
+    # gets a breakdown, with planned == 0.
+    consumption_breakdown: ConsumptionBreakdown | None = None
 
     # Factory methods for creating instances
     @classmethod

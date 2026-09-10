@@ -30,10 +30,13 @@ def _describe_request_error(e: requests.RequestException) -> str:
     """str(e) plus the HTTP response body when one is present.
 
     The default ``HTTPError`` string is just "500 Server Error: ... for url:
-    ...", which omits the body — and the body is where the real reason lives
-    (e.g. a Growatt cloud rate-limit message, or InfluxDB's "no database").
-    Logging only the status turned one-line misconfigurations into opaque
-    failures; including the body makes them diagnosable from the log alone.
+    ...", which omits the body — and when the endpoint provides one, the body
+    is where the real reason lives (e.g. InfluxDB's "no database", or an HA
+    "System is not ready with state: setup" during startup). Some integrations
+    (e.g. Growatt cloud) only return a generic 500 body, but surfacing it still
+    tells you the reason is not at the HTTP layer. Logging only the status
+    turned one-line misconfigurations into opaque failures; including the body
+    makes them diagnosable from the log alone.
     """
     message = str(e)
     if isinstance(e, requests.HTTPError) and e.response is not None:

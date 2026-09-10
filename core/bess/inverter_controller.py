@@ -1112,8 +1112,10 @@ class InverterController(ABC):
 
         The charge rate is written from BatterySystemManager.adjust_charging_power
         (power monitor disabled), outside _write_period_to_hardware's #402 dedup,
-        so without this it re-sends an unchanged rate every scheduler tick and
-        spends Growatt cloud writes toward the daily quota for no effect (#741).
+        so without this it re-sends an unchanged rate to the Growatt cloud every
+        scheduler tick — a surplus write that appears to contribute to the
+        intermittent GrowattV1ApiError write rejections seen in the field (#741;
+        exact cause unconfirmed, same spirit as #402).
         Same dedupe_register_writes policy as the register writes; on a failed
         write the exception propagates (adjust_charging_power's own handler logs
         it) and _last_written is left unset so the next call retries.

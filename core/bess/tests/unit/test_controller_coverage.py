@@ -481,9 +481,10 @@ class TestChargeRateWriteOnChange:
     """#741: the charge-power-rate register is written by
     BatterySystemManager.adjust_charging_power (power monitor disabled),
     which bypasses apply_period's #402 dedup. Re-sending an unchanged rate
-    every scheduler tick spends Growatt cloud writes toward the daily quota
-    for no effect. write_charge_rate_if_changed applies the same
-    dedupe_register_writes policy as the register writes."""
+    every scheduler tick is a surplus Growatt cloud write that appears to
+    contribute to intermittent write rejections (exact cause unconfirmed).
+    write_charge_rate_if_changed applies the same dedupe_register_writes
+    policy as the register writes."""
 
     def test_repeat_call_with_unchanged_rate_skips_write(
         self, min_ctrl, mock_controller

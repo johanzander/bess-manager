@@ -174,6 +174,10 @@ export const StatusCard: React.FC<StatusCardProps> = ({
 interface SystemStatusCardProps {
   className?: string;
   systemMode?: string;
+  // ISO date (YYYY-MM-DD) of a historical day; omit for today's live view.
+  // On a historical day only the day's Cost & Savings is shown — the live
+  // power/battery tiles and current inverter status don't apply to the past.
+  date?: string;
 }
 
 // Issue #287: tomorrow's own slice isn't a backend field - it's the full-horizon
@@ -187,13 +191,18 @@ const formatDelta = (full?: FormattedValue | null, today?: FormattedValue): stri
 
 const DASHBOARD_REFRESH_MS = 60000;
 
-const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode }) => {
-  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(undefined, 'quarter-hourly', DASHBOARD_REFRESH_MS);
+const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode, date }) => {
+  const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(date, 'quarter-hourly', date ? 0 : DASHBOARD_REFRESH_MS);
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);
   const [inverterError, setInverterError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Inverter status is live-only; a historical day never needs it.
+    if (date) {
+      setInverterLoading(false);
+      return;
+    }
     const fetchInverterData = async () => {
       try {
         setInverterLoading(true);
@@ -212,7 +221,7 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     fetchInverterData();
     const interval = setInterval(fetchInverterData, DASHBOARD_REFRESH_MS);
     return () => clearInterval(interval);
-  }, []);
+  }, [date]);
 
   const statusData = useMemo(() => {
     if (!dashboardData || !inverterData) return {};
@@ -381,8 +390,8 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     };
   }, [dashboardData, inverterData]);
 
-  const isLoading = dashboardLoading || inverterLoading;
-  const error = dashboardError || inverterError;
+  const isLoading = dashboardLoading || (!date && inverterLoading);
+  const error = dashboardError || (!date && inverterError) || null;
 
   if (isLoading) {
     return (
@@ -407,6 +416,53 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       <div className="text-red-600 text-center p-4 border border-red-200 rounded-lg bg-red-50">
         <AlertTriangle className="h-6 w-6 mx-auto mb-2" />
         {error}
+      </div>
+    );
+  }
+
+  // Historical day: show only the day's Cost & Savings (see the `date` prop
+  // note). The live power/battery tiles and current inverter status don't
+  // apply to a past day, and a persisted day's plan is always single-horizon.
+  if (date) {
+    const s = dashboardData?.summary;
+    if (!s?.netGridCost) {
+      return (
+        <div className="text-gray-500 dark:text-gray-400 text-center p-4 border border-gray-200 dark:border-gray-700 rounded-lg">
+          No savings summary for this day.
+        </div>
+      );
+    }
+    const savingsValue = s.netSavings?.value ?? 0;
+    const pctValue = s.totalSavingsPercentage?.value ?? 0;
+    return (
+      <div className={`grid grid-cols-1 lg:grid-cols-3 gap-6 ${className}`}>
+        <StatusCard
+          title="Cost & Savings"
+          icon={DollarSign}
+          color="blue"
+          keyMetric="Net Grid Cost"
+          keyValue={s.netGridCost.text}
+          keyUnit=""
+          metrics={[
+            { label: "Grid-Only Cost", value: s.gridOnlyCost?.text ?? '—', unit: "", icon: DollarSign },
+            {
+              label: "Net Savings",
+              value: s.netSavings?.text ?? '—',
+              unit: "",
+              icon: DollarSign,
+              color: savingsValue >= 0 ? 'green' : 'red',
+            },
+            {
+              label: "Percentage Saved",
+              value: `${s.totalSavingsPercentage?.text ?? '—'} saved`,
+              unit: "",
+              icon: TrendingUp,
+              color: pctValue >= 0 ? 'green' : 'red',
+              pill: true,
+            },
+          ]}
+          systemMode={systemMode}
+        />
       </div>
     );
   }

@@ -344,4 +344,31 @@ describe('SystemStatusCard', () => {
 
     expect(screen.queryByText('Battery Mode')).not.toBeInTheDocument();
   });
+
+  describe('historical day (date prop)', () => {
+    it('shows only the day Cost & Savings, not the live power/battery tiles', async () => {
+      render(<SystemStatusCard date="2026-09-10" />);
+
+      // The day's earnings, sourced from summary (netGridCost 1.50, gridOnly
+      // 2.00, netSavings 0.65, 25% saved).
+      expect(await screen.findByText('Net Grid Cost')).toBeInTheDocument();
+      expect(screen.getByText('1.50 EUR')).toBeInTheDocument();
+      expect(screen.getByText('Grid-Only Cost')).toBeInTheDocument();
+      expect(screen.getByText('Net Savings')).toBeInTheDocument();
+      expect(screen.getByText('0.65 EUR')).toBeInTheDocument();
+      expect(screen.getByText('25 % saved')).toBeInTheDocument();
+
+      // The live-only cards must not render for a past day.
+      expect(screen.queryByText('Home Power')).not.toBeInTheDocument();
+      expect(screen.queryByText('Strategic Intent')).not.toBeInTheDocument();
+      expect(screen.queryByText('State of Charge')).not.toBeInTheDocument();
+    });
+
+    it('does not fetch live inverter status for a historical day', async () => {
+      render(<SystemStatusCard date="2026-09-10" />);
+
+      await screen.findByText('Net Grid Cost');
+      expect(api.get).not.toHaveBeenCalled();
+    });
+  });
 });

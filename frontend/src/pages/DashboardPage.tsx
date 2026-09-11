@@ -9,10 +9,13 @@ import SystemStatusCard from '../components/SystemStatusCard';
 import AlertBanner from '../components/AlertBanner';
 import DeprecationBanner from '../components/DeprecationBanner';
 import { RuntimeFailureAlerts } from '../components/RuntimeFailureAlerts';
+import DateSelector from '../components/DateSelector';
 import api from '../lib/api';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { useRuntimeFailures } from '../hooks/useRuntimeFailures';
 import { useHealthRecoveries } from '../hooks/useHealthRecoveries';
+import { useAvailableDashboardDates } from '../hooks/useAvailableDashboardDates';
+import { toISODate } from '../utils/timeUtils';
 
 interface DashboardProps {
   onLoadingChange: (loading: boolean) => void;
@@ -83,6 +86,16 @@ export default function DashboardPage({
   // User preferences (resolution, etc.)
   const { dataResolution, setDataResolution, showSellPrice, setShowSellPrice } = useUserPreferences();
 
+  // Historical day navigation. Default is today (live); picking any earlier day
+  // switches the whole dashboard to that persisted day's view. The backend
+  // (/api/dashboard?date=) serves past days from the DailyViewStore and returns
+  // no tomorrow/live data for them, so the live-only widgets are hidden below.
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const availableDates = useAvailableDashboardDates();
+  const selectedISO = toISODate(selectedDate);
+  const isHistorical = selectedISO !== toISODate(new Date());
+  const dateParam = isHistorical ? selectedISO : undefined;
+
   // Health summary state for alert banner
   interface HealthSummary {
     hasCriticalErrors: boolean;
@@ -146,7 +159,9 @@ export default function DashboardPage({
     try {
       // Fetch dashboard data, health summary, and historical data status concurrently
       const [dashboardResponse, healthResponse, historicalResponse, settingsResponse] = await Promise.all([
-        api.get('/api/dashboard', { params: { resolution: dataResolution } }),
+        api.get('/api/dashboard', {
+          params: { resolution: dataResolution, ...(dateParam ? { date: dateParam } : {}) },
+        }),
         api.get('/api/dashboard-health-summary'),
         api.get('/api/historical-data-status'),
         api.get('/api/settings').catch(() => ({ data: null })),
@@ -202,7 +217,7 @@ export default function DashboardPage({
       onLoadingChange(false);
       setIsInitialLoad(false);
     }
-  }, [isInitialLoad, onLoadingChange, dataResolution]); // Add dependencies
+  }, [isInitialLoad, onLoadingChange, dataResolution, dateParam]); // Add dependencies
 
   // Manually re-run health checks (e.g. after fixing a sensor in Home Assistant)
   // instead of waiting for the next periodic refresh.
@@ -222,10 +237,12 @@ export default function DashboardPage({
 
   useEffect(() => {
     fetchData();
-    // Poll every 3s while initializing for live progress, 60s normally
+    // A historical day is static — fetch once, don't poll. Otherwise poll every
+    // 3s while initializing for live progress, 60s normally.
+    if (isHistorical) return;
     const interval = setInterval(() => fetchData(), isInitializing ? 3000 : 60000);
     return () => clearInterval(interval);
-  }, [fetchData, isInitializing]);
+  }, [fetchData, isInitializing, isHistorical]);
 
   // Check if we have valid dashboard data
   const hasValidData = dashboardData && dashboardData.hourlyData && dashboardData.hourlyData.length > 0;
@@ -316,38 +333,45 @@ export default function DashboardPage({
       />
 
       {/* System Status Header */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <Clock className="h-4 w-4 mr-1" />
-            Last updated: {lastUpdate.toLocaleTimeString()}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Dashboard</h1>
+            <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+              <Clock className="h-4 w-4 mr-1" />
+              Last updated: {lastUpdate.toLocaleTimeString()}
+            </div>
           </div>
-        </div>
 
-        {/* Resolution Selector */}
-        <div className="mt-4 flex items-center justify-end">
-          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-            <button
-              onClick={() => setDataResolution('hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              60 min
-            </button>
-            <button
-              onClick={() => setDataResolution('quarter-hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'quarter-hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              15 min
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <button
+                onClick={() => setDataResolution('hourly')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dataResolution === 'hourly'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                60 min
+              </button>
+              <button
+                onClick={() => setDataResolution('quarter-hourly')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dataResolution === 'quarter-hourly'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                15 min
+              </button>
+            </div>
+            <DateSelector
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+              availableDates={availableDates}
+              resolution="day"
+            />
           </div>
         </div>
       </div>
@@ -382,19 +406,24 @@ export default function DashboardPage({
       {/* Main Content */}
       {hasValidData ? (
         <>
-          {/* System Overview Cards - New section at the top */}
+          {/* System Overview. For a past day SystemStatusCard shows only that
+              day's Cost & Savings; the live power/battery tiles are today-only. */}
           <div className="space-y-6">
             <div>
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Overview</h2>
-              <SystemStatusCard systemMode={demoMode ? 'demo' : undefined} />
+              <SystemStatusCard date={dateParam} systemMode={demoMode ? 'demo' : undefined} />
             </div>
           </div>
 
           {/* Energy Flow Cards - Restructured section */}
           <div className="space-y-6">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Today&apos;s Energy Flows - Actuals & Predicted</h2>
-              <EnergyFlowCards />
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">
+                {isHistorical
+                  ? `Energy Flows — ${selectedISO}`
+                  : "Today's Energy Flows - Actuals & Predicted"}
+              </h2>
+              <EnergyFlowCards date={dateParam} />
             </div>
           </div>
           
@@ -405,6 +434,7 @@ export default function DashboardPage({
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">Schedule</h2>
               <BatteryModeTimeline
                 currentHour={currentHour}
+                date={dateParam}
               />
             </div>
 

@@ -21,6 +21,7 @@ class DailyTotals:
     import_eur: float = 0.0
     export_kwh: float = 0.0
     export_eur: float = 0.0
+    home_consumption_kwh: float = 0.0
     grid_cost: float = 0.0
     grid_only_cost: float = 0.0
     solar_only_cost: float = 0.0  # cost with solar but no battery (no timing/storage)
@@ -45,6 +46,7 @@ class DailyTotals:
             import_eur=import_eur,
             export_kwh=export_kwh,
             export_eur=export_eur,
+            home_consumption_kwh=sum(p.energy.home_consumption for p in view.periods),
             grid_cost=import_eur - export_eur,
             grid_only_cost=sum(p.economic.grid_only_cost for p in view.periods),
             solar_only_cost=sum(p.economic.solar_only_cost for p in view.periods),
@@ -63,6 +65,7 @@ class DailyTotals:
             import_eur=self.import_eur + other.import_eur,
             export_kwh=self.export_kwh + other.export_kwh,
             export_eur=self.export_eur + other.export_eur,
+            home_consumption_kwh=self.home_consumption_kwh + other.home_consumption_kwh,
             grid_cost=self.grid_cost + other.grid_cost,
             grid_only_cost=self.grid_only_cost + other.grid_only_cost,
             solar_only_cost=self.solar_only_cost + other.solar_only_cost,

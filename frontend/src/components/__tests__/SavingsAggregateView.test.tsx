@@ -12,6 +12,7 @@ const bucket = (label: string, dayCount: number) => ({
   importEur: { value: 2, display: '2.00', unit: 'EUR', text: '2.00 EUR' },
   exportKwh: { value: 2, display: '2.0', unit: 'kWh', text: '2.0 kWh' },
   exportEur: { value: 2, display: '2.00', unit: 'EUR', text: '2.00 EUR' },
+  homeConsumptionKwh: { value: 3, display: '3.0', unit: 'kWh', text: '3.0 kWh' },
   gridCost: { value: 0, display: '0.00', unit: 'EUR', text: '0.00 EUR' },
   gridOnlyCost: { value: 5, display: '5.00', unit: 'EUR', text: '5.00 EUR' },
   netSavings: { value: 4.5, display: '4.50', unit: 'EUR', text: '4.50 EUR' },
@@ -46,6 +47,24 @@ describe('SavingsAggregateView', () => {
       expect(screen.getByText('2026-W28')).toBeInTheDocument();
     });
     expect(screen.getAllByText('4.50 EUR').length).toBeGreaterThan(0);
+  });
+
+  it('shows an Energy hero card with the period home-load and energy totals', async () => {
+    vi.spyOn(scheduleApi, 'fetchSavingsAggregate').mockResolvedValue({
+      buckets: [bucket('2026-W28', 1)],
+      count: 1,
+    });
+
+    render(<SavingsAggregateView period="week" />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/home load/i)).toBeInTheDocument();
+    });
+    // Home load headline (homeConsumptionKwh) plus the four energy totals.
+    expect(screen.getByText('3.0 kWh')).toBeInTheDocument(); // home load
+    expect(screen.getByText(/solar production/i)).toBeInTheDocument();
+    expect(screen.getByText(/grid import/i)).toBeInTheDocument();
+    expect(screen.getByText(/grid export/i)).toBeInTheDocument();
   });
 
   it('defaults to the chart view without crashing', async () => {

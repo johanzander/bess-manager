@@ -3750,6 +3750,9 @@ class BatterySystemManager:
             return
         if not self._supports_charge_rate_control:
             return
+        # is_configured already guarantees this; assert narrows it for the type
+        # checker (the property can't narrow the attribute).
+        assert self._inverter_controller is not None
 
         try:
             now = time_utils.now()

@@ -7,11 +7,14 @@ implement hardware-specific schedule conversion and deployment.
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .dp_schedule import DPSchedule
 from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
+
+if TYPE_CHECKING:
+    from .ha_api_controller import HomeAssistantAPIController
 
 logger = logging.getLogger(__name__)
 
@@ -1106,7 +1109,9 @@ class InverterController(ABC):
             return False, "; ".join(errors)
         return True, ""
 
-    def write_charge_rate_if_changed(self, controller, charge_rate: int) -> None:
+    def write_charge_rate_if_changed(
+        self, controller: "HomeAssistantAPIController", charge_rate: int
+    ) -> None:
         """Write the charge-power-rate register, skipping the write when the
         value already matches the last one successfully written.
 

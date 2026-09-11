@@ -11,6 +11,7 @@ from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.settings import BatterySettings
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+from core.bess.tests.conftest import MockHomeAssistantController
 
 
 def _hourly_to_quarterly(
@@ -487,27 +488,37 @@ class TestChargeRateWriteOnChange:
     policy as the register writes."""
 
     def test_repeat_call_with_unchanged_rate_skips_write(
-        self, min_ctrl, mock_controller
-    ):
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
         min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
         min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
 
         assert mock_controller.calls["charge_rate"] == [100]
 
-    def test_changed_rate_is_still_written(self, min_ctrl, mock_controller):
+    def test_changed_rate_is_still_written(
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
         min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
         min_ctrl.write_charge_rate_if_changed(mock_controller, 0)
 
         assert mock_controller.calls["charge_rate"] == [100, 0]
 
-    def test_failed_write_is_retried_next_call(self, min_ctrl, mock_controller):
-        mock_controller.set_charging_power_rate = lambda _: (_ for _ in ()).throw(
+    def test_failed_write_is_retried_next_call(
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
+        mock_controller.set_charging_power_rate = lambda _: (_ for _ in ()).throw(  # type: ignore[method-assign]
             RuntimeError("fail")
         )
         with pytest.raises(RuntimeError):
             min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
 
-        mock_controller.set_charging_power_rate = lambda rate: mock_controller.calls[
+        mock_controller.set_charging_power_rate = lambda rate: mock_controller.calls[  # type: ignore[method-assign]
             "charge_rate"
         ].append(rate)
         min_ctrl.write_charge_rate_if_changed(mock_controller, 100)

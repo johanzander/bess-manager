@@ -7,11 +7,14 @@ implement hardware-specific schedule conversion and deployment.
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from .dp_schedule import DPSchedule
 from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
+
+if TYPE_CHECKING:
+    from .ha_api_controller import HomeAssistantAPIController
 
 logger = logging.getLogger(__name__)
 
@@ -184,6 +187,7 @@ class InverterController(ABC):
         # (always write). Left unset on a failed write so the next call retries.
         self._last_written_grid_charge: bool | None = None
         self._last_written_discharge_rate: int | None = None
+        self._last_written_charge_rate: int | None = None
 
     # ── Period utility ────────────────────────────────────────────────────────
 
@@ -1104,6 +1108,30 @@ class InverterController(ABC):
         if errors:
             return False, "; ".join(errors)
         return True, ""
+
+    def write_charge_rate_if_changed(
+        self, controller: "HomeAssistantAPIController", charge_rate: int
+    ) -> None:
+        """Write the charge-power-rate register, skipping the write when the
+        value already matches the last one successfully written.
+
+        The charge rate is written from BatterySystemManager.adjust_charging_power
+        (power monitor disabled), outside _write_period_to_hardware's #402 dedup,
+        so without this it re-sends an unchanged rate to the Growatt cloud every
+        scheduler tick — a surplus write that appears to contribute to the
+        intermittent GrowattV1ApiError write rejections seen in the field (#741;
+        exact cause unconfirmed, same spirit as #402).
+        Same dedupe_register_writes policy as the register writes; on a failed
+        write the exception propagates (adjust_charging_power's own handler logs
+        it) and _last_written is left unset so the next call retries.
+        """
+        if (
+            self.dedupe_register_writes
+            and charge_rate == self._last_written_charge_rate
+        ):
+            return
+        controller.set_charging_power_rate(charge_rate)
+        self._last_written_charge_rate = charge_rate
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

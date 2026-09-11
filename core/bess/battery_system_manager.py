@@ -3750,6 +3750,9 @@ class BatterySystemManager:
             return
         if not self._supports_charge_rate_control:
             return
+        # is_configured already guarantees this; assert narrows it for the type
+        # checker (the property can't narrow the attribute).
+        assert self._inverter_controller is not None
 
         try:
             now = time_utils.now()
@@ -3763,8 +3766,13 @@ class BatterySystemManager:
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a
-                # preceding LOAD_SUPPORT or BATTERY_EXPORT period).
-                self.controller.set_charging_power_rate(int(charge_rate))
+                # preceding LOAD_SUPPORT or BATTERY_EXPORT period). Deduped so an
+                # unchanged rate isn't re-sent to the Growatt cloud every tick —
+                # a surplus write that appears to contribute to intermittent
+                # write rejections (#741).
+                self._inverter_controller.write_charge_rate_if_changed(
+                    self.controller, int(charge_rate)
+                )
 
         except (
             AttributeError,

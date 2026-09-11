@@ -27,7 +27,9 @@ vi.mock('../../components/BatteryLevelChart', () => ({
   BatteryLevelChart: () => <div data-testid="battery-level-chart" />,
 }));
 vi.mock('../../components/SystemStatusCard', () => ({
-  default: () => <div data-testid="system-status-card" />,
+  default: ({ date }: { date?: string }) => (
+    <div data-testid="system-status-card">{date ?? 'live'}</div>
+  ),
   StatusCard: () => null,
 }));
 vi.mock('../../components/AlertBanner', () => ({ default: () => null }));
@@ -108,9 +110,10 @@ describe('DashboardPage historical day navigation', () => {
     expect(await screen.findByTestId('energy-flow-cards')).toHaveTextContent('live');
     expect(screen.getByTestId('battery-mode-timeline')).toHaveTextContent('live');
     expect(screen.getByText('System Overview')).toBeInTheDocument();
+    expect(screen.getByTestId('system-status-card')).toHaveTextContent('live');
   });
 
-  it('threads an explicit date to the cards and hides live-only widgets on a past day', async () => {
+  it('threads the selected date to every date-aware widget on a past day', async () => {
     renderDashboard();
     await screen.findByTestId('energy-flow-cards');
 
@@ -120,16 +123,14 @@ describe('DashboardPage historical day navigation', () => {
     expect(prevDayButton).toBeDefined();
     fireEvent.click(prevDayButton as HTMLElement);
 
+    const iso = toISODate(yesterday);
     await waitFor(() => {
-      expect(screen.getByTestId('energy-flow-cards')).toHaveTextContent(
-        toISODate(yesterday),
-      );
+      expect(screen.getByTestId('energy-flow-cards')).toHaveTextContent(iso);
     });
-    expect(screen.getByTestId('battery-mode-timeline')).toHaveTextContent(
-      toISODate(yesterday),
-    );
-    // Live-only widgets must not render for a historical day.
-    expect(screen.queryByText('System Overview')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('system-status-card')).not.toBeInTheDocument();
+    expect(screen.getByTestId('battery-mode-timeline')).toHaveTextContent(iso);
+    // System Overview stays, now scoped to the historical day (it renders only
+    // that day's Cost & Savings; the live tiles are handled inside the card).
+    expect(screen.getByText('System Overview')).toBeInTheDocument();
+    expect(screen.getByTestId('system-status-card')).toHaveTextContent(iso);
   });
 });

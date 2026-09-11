@@ -405,15 +405,14 @@ export default function DashboardPage({
       {/* Main Content */}
       {hasValidData ? (
         <>
-          {/* System Overview Cards — live-only, hidden when viewing a past day */}
-          {!isHistorical && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Overview</h2>
-                <SystemStatusCard systemMode={demoMode ? 'demo' : undefined} />
-              </div>
+          {/* System Overview. For a past day SystemStatusCard shows only that
+              day's Cost & Savings; the live power/battery tiles are today-only. */}
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-4">System Overview</h2>
+              <SystemStatusCard date={dateParam} systemMode={demoMode ? 'demo' : undefined} />
             </div>
-          )}
+          </div>
 
           {/* Energy Flow Cards - Restructured section */}
           <div className="space-y-6">

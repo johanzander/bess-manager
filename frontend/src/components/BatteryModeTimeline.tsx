@@ -35,6 +35,8 @@ const INTENT_ORDER: LegendKey[] = ['GRID_CHARGING', 'SOLAR_STORAGE', 'LOAD_SUPPO
 
 interface BatteryModeTimelineProps {
   currentHour: number;
+  // ISO date (YYYY-MM-DD) of a historical day to show; omit for today's live view.
+  date?: string;
 }
 
 interface Segment {
@@ -99,6 +101,7 @@ function formatHour(hour: number): string {
 
 export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
   currentHour,
+  date,
 }) => {
   const [isDarkMode, setIsDarkMode] = useState(
     document.documentElement.classList.contains('dark')
@@ -112,7 +115,8 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  const { data, loading, error } = useDashboardData(undefined, 'quarter-hourly', REFRESH_INTERVAL_MS);
+  // A historical day is static, so skip the periodic refetch (0) for it.
+  const { data, loading, error } = useDashboardData(date, 'quarter-hourly', date ? 0 : REFRESH_INTERVAL_MS);
 
   const [tooltipData, setTooltipData] = useState<{ segment: Segment; x: number; y: number } | null>(null);
 
@@ -195,8 +199,8 @@ export const BatteryModeTimeline: React.FC<BatteryModeTimelineProps> = ({
             );
           })}
 
-          {/* Current hour marker */}
-          {(() => {
+          {/* Current hour marker — only meaningful for today's live view */}
+          {!date && (() => {
             const markerX = (currentHour / maxHour) * 1000;
             return (
               <g>

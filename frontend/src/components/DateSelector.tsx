@@ -4,7 +4,16 @@ import DatePicker from 'react-datepicker';
 import 'react-datepicker/dist/react-datepicker.css';
 import { toISODate } from '../utils/timeUtils';
 
-type DateResolution = 'day' | 'month' | 'year';
+type DateResolution = 'day' | 'week' | 'month' | 'year';
+
+// Monday (local, midnight) of the ISO week containing `d`.
+const mondayOf = (d: Date): Date => {
+  const m = new Date(d);
+  const dow = (m.getDay() + 6) % 7; // Mon=0 .. Sun=6
+  m.setDate(m.getDate() - dow);
+  m.setHours(0, 0, 0, 0);
+  return m;
+};
 
 const DateSelector = ({
   selectedDate,
@@ -33,6 +42,14 @@ const DateSelector = ({
     if (resolution === 'year') {
       return String(date.getFullYear());
     }
+    if (resolution === 'week') {
+      const monday = mondayOf(date);
+      return `Week of ${monday.toLocaleDateString('sv-SE', {
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      })}`;
+    }
     return date.toLocaleDateString('sv-SE', {
       weekday: 'short',
       year: 'numeric',
@@ -47,6 +64,17 @@ const DateSelector = ({
   const isAvailable = (date: Date): boolean => {
     if (!availableDates) return true;
     if (resolution === 'day') return availableDates.has(toISODate(date));
+    if (resolution === 'week') {
+      const monday = mondayOf(date);
+      const sunday = new Date(monday);
+      sunday.setDate(monday.getDate() + 6);
+      const lo = toISODate(monday);
+      const hi = toISODate(sunday);
+      for (const d of availableDates) {
+        if (d >= lo && d <= hi) return true; // ISO dates sort lexically
+      }
+      return false;
+    }
     const prefix =
       resolution === 'month'
         ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
@@ -63,6 +91,8 @@ const DateSelector = ({
       next.setMonth(next.getMonth() + direction, 1);
     } else if (resolution === 'year') {
       next.setFullYear(next.getFullYear() + direction, 0, 1);
+    } else if (resolution === 'week') {
+      next.setDate(next.getDate() + direction * 7);
     } else {
       next.setDate(next.getDate() + direction);
     }
@@ -153,6 +183,7 @@ const DateSelector = ({
               minDate={minDate}
               maxDate={maxDate}
               filterDate={isAvailable}
+              showWeekPicker={resolution === 'week'}
               showMonthYearPicker={resolution === 'month'}
               showYearPicker={resolution === 'year'}
             />

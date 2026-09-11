@@ -63,9 +63,7 @@ const SavingsPage: React.FC = () => {
               selectedDate={selectedDate}
               onDateChange={setSelectedDate}
               availableDates={availableDates}
-              // DateSelector has no native week granularity — anchor a week by
-              // picking any day inside it; the aggregate window ends there.
-              resolution={resolution === 'week' ? 'day' : resolution}
+              resolution={resolution}
             />
           </div>
         </div>

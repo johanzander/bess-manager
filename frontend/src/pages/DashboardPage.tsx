@@ -333,44 +333,45 @@ export default function DashboardPage({
       />
 
       {/* System Status Header */}
-      <div className="bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-        <div className="flex items-center justify-between">
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Dashboard</h1>
-          <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
-            <Clock className="h-4 w-4 mr-1" />
-            Last updated: {lastUpdate.toLocaleTimeString()}
+      <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Dashboard</h1>
+            <div className="flex items-center text-sm text-gray-500 dark:text-gray-400">
+              <Clock className="h-4 w-4 mr-1" />
+              Last updated: {lastUpdate.toLocaleTimeString()}
+            </div>
           </div>
-        </div>
 
-        {/* Date navigation + Resolution Selector */}
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <DateSelector
-            selectedDate={selectedDate}
-            onDateChange={setSelectedDate}
-            availableDates={availableDates}
-            resolution="day"
-          />
-          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
-            <button
-              onClick={() => setDataResolution('hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              60 min
-            </button>
-            <button
-              onClick={() => setDataResolution('quarter-hourly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                dataResolution === 'quarter-hourly'
-                  ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
-              }`}
-            >
-              15 min
-            </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+              <button
+                onClick={() => setDataResolution('hourly')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dataResolution === 'hourly'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                60 min
+              </button>
+              <button
+                onClick={() => setDataResolution('quarter-hourly')}
+                className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                  dataResolution === 'quarter-hourly'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+                }`}
+              >
+                15 min
+              </button>
+            </div>
+            <DateSelector
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+              availableDates={availableDates}
+              resolution="day"
+            />
           </div>
         </div>
       </div>

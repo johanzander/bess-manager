@@ -56,6 +56,21 @@ class TestSchedulePeriodRetry:
         bsm._runtime_failure_tracker.record_failure.assert_not_called()
         assert bsm._last_applied_discharge_rate == 50
 
+    def test_retry_callback_replays_frozen_charge_rate(self) -> None:
+        """#754: charge_rate must be captured at the original period, same
+        as grid_charge/discharge_rate, and replayed unchanged on retry --
+        never re-derived from wall-clock time when the retry actually
+        fires (which could be a different period, planned at a different
+        rate)."""
+        bsm = _make_bsm_with_mocks()
+        bsm._inverter_controller.apply_period.return_value = (True, "")
+
+        bsm._schedule_period_retry(68, True, 50, charge_rate=32)
+        callback = bsm._scheduler.add_job.call_args[0][0]
+        callback()
+
+        assert bsm._inverter_controller.apply_period.call_args[0][-1] == 32
+
     def test_retry_callback_failure_schedules_second_retry(self):
         bsm = _make_bsm_with_mocks()
         bsm._inverter_controller.apply_period.return_value = (

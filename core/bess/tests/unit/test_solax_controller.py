@@ -3,7 +3,8 @@
 Tests verify WHAT the system does, not HOW it does it internally.
 """
 
-from unittest.mock import MagicMock
+from datetime import datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -168,6 +169,72 @@ class TestWritePeriodToHardwareGridCharging:
         )
 
         expected_watts = int(battery_settings.max_charge_power_kw * 1000)
+        watts = mock_hw.set_solax_active_power_control.call_args.args[0]
+        assert watts == expected_watts
+
+    def test_grid_charging_scales_to_plan_throttled_rate(
+        self, controller: SolaxController, battery_settings: BatterySettings
+    ) -> None:
+        """#754: a fuse-throttled GRID_CHARGING plan must command the
+        actual planned rate, not always max power -- same defect as
+        SolaxModbusGrowattController's VPP path, independently present here
+        since neither controller reads the plan's own action magnitude for
+        charging.
+
+        `charge_rate` is supplied by the caller (BatterySystemManager, which
+        computes it from the exact period's action) rather than derived here
+        from wall-clock time -- see `InverterController.apply_period`'s
+        docstring for why a local re-derivation is unsafe under retry (#754
+        code review).
+
+        Command-level assertion, not an R==P scenario -- see the matching
+        note on
+        test_solax_modbus_growatt_vpp.py::test_grid_charging_writes_plan_throttled_rate:
+        no execution model can express a distinct realized outcome for a
+        throttled vs. full-rate charge command without changing shared DP
+        physics (`_period_flows`/`_state_transition`), and SolaX has no
+        `simulate_vpp`-equivalent execution model at all today."""
+        mock_hw = MagicMock()
+        controller._write_period_to_hardware(
+            mock_hw,
+            grid_charge=True,
+            discharge_rate=0,
+            # 0.4 kWh / 15 min == 1.6 kW, well below this fixture's 5.0 kW
+            # max_charge_power_kw -- rounds up (Phase 4c) to 32%.
+            charge_rate=32,
+        )
+
+        expected_watts = int(battery_settings.max_charge_power_kw * 0.32 * 1000)
+        watts = mock_hw.set_solax_active_power_control.call_args.args[0]
+        assert watts == expected_watts
+
+    def test_grid_charging_ignores_current_wall_clock_period(
+        self, controller: SolaxController, battery_settings: BatterySettings
+    ) -> None:
+        """#754 code review: a retried write (BatterySystemManager's +3/+8
+        min retry) replays the *original* period's grid_charge and
+        charge_rate together, frozen at the same time -- so the command
+        must reflect the passed charge_rate regardless of what the wall
+        clock says "now" is, even when the current period's own plan
+        (period 9, GRID_CHARGING at a different rate) would suggest
+        something else. Proves the fix no longer reads
+        self.current_schedule/self.strategic_intents for this at all.
+        """
+        intents = make_intents({2: "GRID_CHARGING"})
+        schedule = make_schedule_mock(intents)
+        schedule.actions[9] = 3.2  # period 9's own, unrelated action -- ignored
+        controller.apply_intents(schedule)
+
+        mock_hw = MagicMock()
+        with patch("core.bess.solax_controller.time_utils") as mock_time:
+            # Wall clock says period 9, but this call replays period 8's
+            # charge_rate (32%), as a retry would.
+            mock_time.now.return_value = datetime(2026, 5, 20, 2, 15, 0)
+            controller._write_period_to_hardware(
+                mock_hw, grid_charge=True, discharge_rate=0, charge_rate=32
+            )
+
+        expected_watts = int(battery_settings.max_charge_power_kw * 0.32 * 1000)
         watts = mock_hw.set_solax_active_power_control.call_args.args[0]
         assert watts == expected_watts
 

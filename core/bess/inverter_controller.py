@@ -491,7 +491,7 @@ class InverterController(ABC):
     # number means -- discharge in 4b, charge in 4c -- so it has no callers
     # left and is gone rather than kept as a second way to do the same thing.
 
-    def _compute_charge_rate(
+    def compute_charge_rate(
         self, intent: str, control: dict[str, bool | int], battery_action_kw: float
     ) -> int:
         """Compute charge_rate for a period, action-derived for GRID_CHARGING.
@@ -583,6 +583,7 @@ class InverterController(ABC):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -610,6 +611,18 @@ class InverterController(ABC):
                 at the floor. Forced-power platforms use it to stop holding a
                 battery that has nothing left to hold, releasing the inverter
                 so its BMS can sleep -- see #592.
+            charge_rate: The plan's action-derived GRID_CHARGING rate
+                (0-100%, #754), computed by the caller (BatterySystemManager,
+                which knows the exact period and action) rather than
+                re-derived here from wall-clock time -- the DP's own plan
+                can charge at a different rate every period, so only the
+                caller that already picked *this* period's action can supply
+                it correctly, including on a retry replaying an earlier
+                period's command minutes later. Register-based platforms
+                ignore this -- they realize the rate via the separate
+                charge_rate register (adjust_charging_power()). Forced-power
+                platforms with no such register (VPP-style) act on it
+                directly.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -663,7 +676,7 @@ class InverterController(ABC):
             grid_charge, discharge_rate, block_passive_charging = (
                 self.compute_rates_for_period(period, battery_action_kw)
             )
-            charge_rate = self._compute_charge_rate(
+            charge_rate = self.compute_charge_rate(
                 intent, self.INTENT_TO_CONTROL[intent], battery_action_kw
             )
         else:
@@ -684,6 +697,7 @@ class InverterController(ABC):
                 discharge_rate,
                 block_passive_charging,
                 self._planned_at_reserve_floor(period),
+                charge_rate,
             ),
         }
 
@@ -737,6 +751,7 @@ class InverterController(ABC):
         discharge_rate: int,
         block_passive_charging: bool,
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> dict:
         """Single source of truth for what mode-related fields a period
         gets, branching on CONTROL_MODEL. Never fabricates a label the
@@ -748,6 +763,13 @@ class InverterController(ABC):
         SolaxController._vpp_display_state) rather than sharing one --
         their real hardware behavior has diverged (design spec section 1
         correction).
+
+        charge_rate (#754): the plan's actual GRID_CHARGING rate, so the
+        displayed vpp_power_pct matches what apply_period's write path now
+        commands instead of always showing 100. Both callers
+        (get_period_settings, get_all_tou_segments' schedule-group builder)
+        already compute it locally via compute_charge_rate and pass it
+        through; the default only covers a caller with no plan at all.
 
         Returns:
             {"batt_mode": str} for tou_register.
@@ -768,6 +790,7 @@ class InverterController(ABC):
                 block_passive_charging,
                 intent,
                 at_reserve_floor,
+                charge_rate,
             )
             return {
                 "vpp_power_pct": power_pct,
@@ -876,10 +899,14 @@ class InverterController(ABC):
             action_kw = action_kwh / 0.25
 
             _, discharge_rate = self._map_intent_to_rates(intent, action_kw)
-            charge_rate = self._compute_charge_rate(intent, control, action_kw)
+            charge_rate = self.compute_charge_rate(intent, control, action_kw)
             block_passive_charging = control["charge_rate"] == 0
             mode_fields = self._mode_display_fields(
-                intent, control["grid_charge"], discharge_rate, block_passive_charging
+                intent,
+                control["grid_charge"],
+                discharge_rate,
+                block_passive_charging,
+                charge_rate=charge_rate,
             )
 
             period_settings.append(

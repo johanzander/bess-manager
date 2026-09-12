@@ -68,6 +68,7 @@ def _apply_at_period(
     discharge_rate,
     block_passive_charging=False,
     strategic_intent="",
+    charge_rate=100,
 ):
     hour = period // 4
     minute = (period % 4) * 15
@@ -80,6 +81,7 @@ def _apply_at_period(
                 discharge_rate,
                 block_passive_charging,
                 strategic_intent,
+                charge_rate=charge_rate,
             )
 
 
@@ -256,6 +258,84 @@ class TestApplyPeriodVpp:
         assert period["remote_control_enabled"] is True
         assert period["power_pct"] == 100
         assert period["fallback_minutes"] == 20
+
+    def test_grid_charging_writes_plan_throttled_rate(
+        self,
+        controller: SolaxModbusGrowattController,
+        mock_ha: MockHomeAssistantController,
+    ) -> None:
+        """#754: a fuse-throttled GRID_CHARGING plan must command the actual
+        planned rate, not always full power -- otherwise VPP execution
+        silently overrides the DP's fuse-aware throttling (#429) and can
+        starve a concurrent load the plan deliberately left headroom for.
+
+        `charge_rate` is supplied by the caller (BatterySystemManager, which
+        computes it from the exact period's action) rather than derived here
+        from wall-clock time -- see `apply_period`'s docstring for why a
+        local re-derivation is unsafe under retry (#754 code review).
+
+        Command-level assertion, not an R==P scenario: the DP's own STORE
+        physics (`_period_flows`/`_state_transition` in
+        dp_battery_algorithm.py) derives charge amount from
+        `max_charge_power_kw` unconditionally and never reads the passed
+        `power` magnitude for anything but its sign (see
+        `vpp_simulator.vpp_command_to_power`'s "binary store physics"
+        note) -- so today's execution model cannot express a distinct
+        realized outcome for a throttled vs. full-rate charge command.
+        Making it able to would mean changing shared DP physics used by
+        planning itself, well beyond this write-path fix.
+        """
+        _apply_at_period(
+            controller,
+            mock_ha,
+            8,
+            grid_charge=True,
+            discharge_rate=0,
+            strategic_intent="GRID_CHARGING",
+            # 0.4 kWh / 15 min == 1.6 kW, well below this fixture's 5.0 kW
+            # max_charge_power_kw -- command_index rounds up (Phase 4c) to
+            # 32%, matching the "throttled by the import cap" case from the
+            # reported bundle (bess-debug-2026-09-10-203023.md).
+            charge_rate=32,
+        )
+
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["remote_control_enabled"] is True
+        assert period["power_pct"] == 32
+
+    def test_grid_charging_ignores_current_wall_clock_period(
+        self,
+        controller: SolaxModbusGrowattController,
+        mock_ha: MockHomeAssistantController,
+    ) -> None:
+        """#754 code review: a retried write (BatterySystemManager's +3/+8
+        min retry) replays the *original* period's strategic_intent and
+        charge_rate together, frozen at the same time -- so the command
+        must reflect the passed charge_rate regardless of what the wall
+        clock says "now" is, even when the current period's own plan
+        (period 9, GRID_CHARGING at a different rate) would suggest
+        something else. Proves the fix no longer reads
+        self.current_schedule/self.strategic_intents for this at all.
+        """
+        intents = hourly_to_quarterly({2: "GRID_CHARGING"})
+        actions = [0.0] * 96
+        actions[9] = 3.2  # period 9's own, unrelated action -- must be ignored
+        controller.apply_intents(make_schedule(intents, actions), current_period=0)
+
+        # Wall clock says period 9, but this call replays period 8's
+        # strategic_intent and its charge_rate (32%), as a retry would.
+        _apply_at_period(
+            controller,
+            mock_ha,
+            9,
+            grid_charge=True,
+            discharge_rate=0,
+            strategic_intent="GRID_CHARGING",
+            charge_rate=32,
+        )
+
+        period = mock_ha.calls["growatt_vpp_periods"][-1]
+        assert period["power_pct"] == 32
 
     def test_discharge_period_writes_negative_power(self, controller, mock_ha):
         intents = hourly_to_quarterly({10: "BATTERY_EXPORT"})

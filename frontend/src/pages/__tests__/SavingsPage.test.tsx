@@ -40,10 +40,11 @@ describe('SavingsPage', () => {
     expect(screen.getByTestId('savings-aggregate-view')).toHaveTextContent('year:live');
   });
 
-  it('does not offer a Week resolution button', () => {
+  it('offers a Week resolution and passes it through to the aggregate view', () => {
     render(<SavingsPage />);
 
-    expect(screen.queryByRole('button', { name: /^week$/i })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^week$/i }));
+    expect(screen.getByTestId('savings-aggregate-view')).toHaveTextContent('week:live');
   });
 
   it('passes a date to SavingsAggregateView once a non-today date is picked', async () => {

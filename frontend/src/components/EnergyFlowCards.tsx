@@ -128,10 +128,13 @@ const EnergyFlowCardView: React.FC<{ card: EnergyFlowCard }> = ({ card }) => {
 
 interface EnergyFlowCardsProps {
   className?: string;
+  // ISO date (YYYY-MM-DD) of a historical day to show; omit for today's live view.
+  date?: string;
 }
 
-const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "" }) => {
-  const { data: apiData, loading: isLoading, error } = useDashboardData(undefined, 'quarter-hourly', 60000);
+const EnergyFlowCards: React.FC<EnergyFlowCardsProps> = ({ className = "", date }) => {
+  // A historical day is static, so skip the periodic refetch (0) for it.
+  const { data: apiData, loading: isLoading, error } = useDashboardData(date, 'quarter-hourly', date ? 0 : 60000);
 
   if (isLoading) {
     return (

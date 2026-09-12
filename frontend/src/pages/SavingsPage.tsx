@@ -6,9 +6,9 @@ import { SavingsAggregatePeriod } from '../api/scheduleApi';
 import { toISODate } from '../utils/timeUtils';
 import api from '../lib/api';
 
-type SavingsResolution = Extract<SavingsAggregatePeriod, 'day' | 'month' | 'year'>;
+type SavingsResolution = SavingsAggregatePeriod;
 
-const RESOLUTIONS: SavingsResolution[] = ['day', 'month', 'year'];
+const RESOLUTIONS: SavingsResolution[] = ['day', 'week', 'month', 'year'];
 
 const SavingsPage: React.FC = () => {
   const [systemMode, setSystemMode] = useState<string>('normal');

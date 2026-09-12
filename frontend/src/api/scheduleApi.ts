@@ -223,6 +223,7 @@ export interface SavingsBucket {
   importEur: FormattedValue;
   exportKwh: FormattedValue;
   exportEur: FormattedValue;
+  homeConsumptionKwh: FormattedValue;
   gridCost: FormattedValue;
   gridOnlyCost: FormattedValue;
   netSavings: FormattedValue;

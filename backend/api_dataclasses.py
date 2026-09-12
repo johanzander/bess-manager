@@ -102,6 +102,7 @@ class APISavingsBucket:
     importEur: FormattedValue
     exportKwh: FormattedValue
     exportEur: FormattedValue
+    homeConsumptionKwh: FormattedValue
     gridCost: FormattedValue
     gridOnlyCost: FormattedValue
     netSavings: FormattedValue
@@ -131,6 +132,9 @@ class APISavingsBucket:
             importEur=create_formatted_value(t.import_eur, "currency", currency),
             exportKwh=create_formatted_value(t.export_kwh, "energy_kwh_only", currency),
             exportEur=create_formatted_value(t.export_eur, "currency", currency),
+            homeConsumptionKwh=create_formatted_value(
+                t.home_consumption_kwh, "energy_kwh_only", currency
+            ),
             gridCost=create_formatted_value(t.grid_cost, "currency", currency),
             gridOnlyCost=create_formatted_value(t.grid_only_cost, "currency", currency),
             netSavings=create_formatted_value(

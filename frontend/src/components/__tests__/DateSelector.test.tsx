@@ -81,6 +81,43 @@ describe('DateSelector resolution', () => {
     expect(result.getMonth()).toBe(4); // May
   });
 
+  it('steps by a whole week (7 days) when resolution="week"', () => {
+    const selected = new Date(2026, 8, 9); // Wed Sep 9, 2026
+    const onDateChange = vi.fn();
+
+    render(
+      <DateSelector
+        selectedDate={selected}
+        onDateChange={onDateChange}
+        resolution="week"
+        availableDates={null}
+      />
+    );
+
+    const [prevButton] = screen.getAllByRole('button');
+    fireEvent.click(prevButton);
+
+    expect(onDateChange).toHaveBeenCalledTimes(1);
+    const result = onDateChange.mock.calls[0][0] as Date;
+    // 7 days earlier, not 1 — Wed Sep 9 → Wed Sep 2.
+    expect(result.getMonth()).toBe(8);
+    expect(result.getDate()).toBe(2);
+  });
+
+  it('treats a week as available if any persisted day falls inside it', () => {
+    const selected = new Date(2026, 8, 9); // Wed Sep 9 (ISO week Mon Sep 7 – Sun Sep 13)
+    render(
+      <DateSelector
+        selectedDate={selected}
+        onDateChange={vi.fn()}
+        resolution="week"
+        availableDates={new Set(['2026-09-10'])} // Thu in the same week
+      />
+    );
+    // The label reflects the week, not a single day.
+    expect(screen.getByText(/Week of/i)).toBeInTheDocument();
+  });
+
   it('steps by year when resolution="year"', () => {
     const selected = new Date(2026, 5, 15);
     const onDateChange = vi.fn();

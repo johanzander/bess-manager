@@ -9,7 +9,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
-import { DollarSign, TrendingUp, Sun, Battery } from 'lucide-react';
+import { DollarSign, TrendingUp, Sun, Battery, Zap } from 'lucide-react';
 import { useSavingsAggregate } from '../hooks/useSavingsAggregate';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { useUserPreferences } from '../hooks/useUserPreferences';
@@ -106,8 +106,10 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
   const costTitle = periodLabel === 'Today' ? "Today's Cost" : `${periodLabel} Cost`;
   const savingsTitle = periodLabel === 'Today' ? "Today's Savings" : `${periodLabel} Savings`;
 
+  const energyTitle = periodLabel === 'Today' ? "Today's Energy" : `${periodLabel} Energy`;
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <StatusCard
         title={costTitle}
         icon={DollarSign}
@@ -151,6 +153,25 @@ const SavingsHero: React.FC<{ bucket: SavingsBucket; period: SavingsAggregatePer
           {
             label: 'Battery Contribution',
             value: bucket.batterySavings.text,
+            unit: '',
+            icon: Battery,
+          },
+        ]}
+      />
+      <StatusCard
+        title={energyTitle}
+        icon={Zap}
+        color="purple"
+        keyMetric="Home Load"
+        keyValue={bucket.homeConsumptionKwh.text}
+        keyUnit=""
+        metrics={[
+          { label: 'Solar Production', value: bucket.solarKwh.text, unit: '', icon: Sun },
+          { label: 'Grid Import', value: bucket.importKwh.text, unit: '', icon: Zap },
+          { label: 'Grid Export', value: bucket.exportKwh.text, unit: '', icon: Zap },
+          {
+            label: 'Battery Discharged',
+            value: bucket.batteryDischargedKwh.text,
             unit: '',
             icon: Battery,
           },

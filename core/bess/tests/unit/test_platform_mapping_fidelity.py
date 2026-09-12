@@ -47,12 +47,18 @@ INTENTS = [
 # deliberate statement that the plan's magnitude is discarded on VPP -- it
 # must not happen by accident.
 #
-# GRID_CHARGING is lossy for the mirror-image reason to LOAD_SUPPORT: TOU
-# carries its plan-scaled magnitude in `charge_rate`, and `_intent_to_vpp`
-# is not given `charge_rate` at all, so it answers (100, True) for every
-# planned magnitude. The plan's charge rate is discarded on VPP exactly as
-# LOAD_SUPPORT's discharge rate is.
-VPP_LOSSY_INTENTS = {"LOAD_SUPPORT", "GRID_CHARGING"}
+# GRID_CHARGING was lossy here for the mirror-image reason to LOAD_SUPPORT
+# (TOU carries its plan-scaled magnitude in `charge_rate`, and
+# `_intent_to_vpp` was not given `charge_rate` at all) until #754: the write
+# path (`_apply_period_vpp`) now derives the plan's actual charge rate from
+# `self.current_schedule` and passes it through, the same way
+# `_apply_period_tou` already derives its own `current_period`. See the
+# Growatt VPP Communication Protocol V2.01 section 3.5: register 30409 is a
+# documented bidirectional power target ("Actual control value of
+# charging/discharging power (30474) = Remote charging/discharging power
+# (30409)"), symmetric for charge and discharge -- there was never a
+# hardware reason charge alone should be lossy, only a missing plumbing.
+VPP_LOSSY_INTENTS = {"LOAD_SUPPORT"}
 
 
 def _settings():
@@ -72,7 +78,7 @@ def _sweep(intent):
     The TOU side is the **full** `(grid_charge, charge_rate, discharge_rate)`
     triple, not just `compute_rates_for_period`'s return. That method does not
     report `charge_rate`, which is the half GRID_CHARGING's magnitude travels
-    in: `get_period_settings` derives it separately via `_compute_charge_rate`
+    in: `get_period_settings` derives it separately via `compute_charge_rate`
     (`inverter_controller.py:601`, and again at `:762`), and this mirrors those
     two call sites. Sweeping the discharge rate alone made GRID_CHARGING look
     like a one-rate intent, so it took the "not rate-bearing, nothing to lose"
@@ -88,12 +94,14 @@ def _sweep(intent):
         grid_charge, rate, block_passive = controller.compute_rates_for_period(
             0, action_kw
         )
-        charge_rate = controller._compute_charge_rate(
+        charge_rate = controller.compute_charge_rate(
             intent, controller.INTENT_TO_CONTROL[intent], action_kw
         )
         rates.add((grid_charge, charge_rate, rate))
         commands.add(
-            controller._intent_to_vpp(grid_charge, rate, block_passive, intent)
+            controller._intent_to_vpp(
+                grid_charge, rate, block_passive, intent, charge_rate=charge_rate
+            )
         )
     return rates, commands
 
@@ -132,18 +140,23 @@ def test_vpp_rate_fidelity_matches_declared_expectation(intent):
         )
 
 
-def test_battery_export_is_the_only_intent_that_carries_its_plan_on_vpp():
+def test_load_support_is_the_only_lossy_intent_on_vpp() -> None:
     """Pins the asymmetry that caused #537's defect.
 
-    BATTERY_EXPORT keeps its magnitude; LOAD_SUPPORT and GRID_CHARGING do not.
-    Generalising from the first to the others is exactly the wrong inference,
-    and it is only visible when they are compared side by side.
+    BATTERY_EXPORT and, since #754, GRID_CHARGING keep their magnitude;
+    LOAD_SUPPORT alone releases control instead (#413) and cannot express a
+    partial rate. Generalising "this rate-bearing intent is lossy" from one
+    intent to another is exactly the wrong inference, and it is only visible
+    when they are compared side by side.
 
     An earlier revision asserted the narrower "LOAD_SUPPORT is the only lossy
-    intent", which was false: GRID_CHARGING was misclassified as not
-    rate-bearing because the sweep never looked at `charge_rate`. Read as
-    licence to send a partial GRID_CHARGING rate over VPP, that pin repeats
-    #537's error class in the other direction.
+    intent", which was false at the time: GRID_CHARGING was misclassified as
+    not rate-bearing because the sweep never looked at `charge_rate`, and the
+    write path did not derive or pass one. #754 fixed the write path
+    (`_apply_period_vpp` now derives `charge_rate` from the plan) and this
+    sweep to match (now passing `charge_rate` through), so the assertion
+    "LOAD_SUPPORT is the only lossy intent" is true again -- for a different,
+    now-correct reason.
     """
     lossy = {
         intent for intent in INTENTS if len(_sweep(intent)[1]) < len(_sweep(intent)[0])
@@ -174,3 +187,28 @@ def test_battery_export_carries_the_plan_exactly():
             expected_pct,
             True,
         ), f"BATTERY_EXPORT at {action_kw} kW should command {expected_pct}%"
+
+
+def test_grid_charging_carries_the_plan_exactly() -> None:
+    """#754's positive half: GRID_CHARGING's command must track the planned
+    magnitude too, not just BATTERY_EXPORT's -- so the test above cannot
+    pass by GRID_CHARGING being lossy for a different reason than declared.
+    """
+    settings = _settings()
+    controller = SolaxModbusGrowattController(settings, control_mode="vpp")
+    controller.strategic_intents = ["GRID_CHARGING"]
+
+    for action_kw, expected_pct in [(6.0, 100), (3.0, 50), (1.5, 25)]:
+        grid_charge, rate, block_passive = controller.compute_rates_for_period(
+            0, action_kw
+        )
+        charge_rate = controller.compute_charge_rate(
+            "GRID_CHARGING", controller.INTENT_TO_CONTROL["GRID_CHARGING"], action_kw
+        )
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge, rate, block_passive, "GRID_CHARGING", charge_rate=charge_rate
+        )
+        assert (power_pct, enabled) == (
+            expected_pct,
+            True,
+        ), f"GRID_CHARGING at {action_kw} kW should command {expected_pct}%"

@@ -210,7 +210,7 @@ def lattice_grid_charge(solar_to_battery, grid_to_battery, charge_step_kwh):
     Only a grid-charging period needs this. `INTENT_TO_CONTROL` writes a flat
     `charge_rate: 100` for SOLAR_STORAGE and IDLE, so their plan is never
     scaled and never rounds; GRID_CHARGING is the one intent whose rate is
-    derived from the plan itself (`_compute_charge_rate`, which rounded to
+    derived from the plan itself (`compute_charge_rate`, which rounded to
     nearest until 4c). A planned power between two steps was
     therefore written as the step *below* and the inverter charges less than
     the plan assumed -- measured pre-fix as 4 of 493 charging periods, worst

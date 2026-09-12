@@ -95,7 +95,7 @@ def _map_rates(
     controller instance. Returns (grid_charge, discharge_rate_pct, charge_rate_pct)."""
     if intent == "GRID_CHARGING":
         if action_kw > 0.01:
-            # Rounded up, mirroring `_compute_charge_rate` (Phase 4c): the
+            # Rounded up, mirroring `compute_charge_rate` (Phase 4c): the
             # battery's remaining room binds above the command, so a rate
             # above the plan still delivers exactly the plan, while nearest
             # lands below it and charges less.

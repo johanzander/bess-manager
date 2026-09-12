@@ -17,7 +17,7 @@ Control model:
   naturally, providing a safe fallback.
 
 Intent-to-power mapping:
-- GRID_CHARGING    → +max_charge_W    (charge from grid at max rate)
+- GRID_CHARGING    → +(rate% x max_charge_W)  (charge at the plan's rate, #754)
 - SOLAR_STORAGE    → disable VPP      (let solar charge naturally)
 - LOAD_SUPPORT     -> -(rate% x max_discharge_W)  (discharge to cover load)
 - BATTERY_EXPORT -> -max_discharge_W (full discharge for export)
@@ -26,12 +26,15 @@ Intent-to-power mapping:
 
 import logging
 from datetime import datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
 from .inverter_controller import InverterController
 from .settings import BatterySettings
+
+if TYPE_CHECKING:
+    from .ha_api_controller import HomeAssistantAPIController
 
 logger = logging.getLogger(__name__)
 
@@ -109,19 +112,42 @@ class SolaxController(InverterController):
 
     # ── Hardware interface ────────────────────────────────────────────────────
 
+    def apply_period(
+        self,
+        controller: "HomeAssistantAPIController",
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
+        strategic_intent: str = "",
+        at_reserve_floor: bool = False,
+        charge_rate: int = 100,
+    ) -> tuple[bool, str]:
+        """Write period control settings to hardware.
+
+        Overrides the base class only to thread `charge_rate` through to
+        `_write_period_to_hardware` -- the base `apply_period` doesn't pass
+        it on, since register-based platforms realize the rate via a
+        separate register instead (see `apply_period`'s own docstring).
+        """
+        return self._write_period_to_hardware(
+            controller, grid_charge, discharge_rate, block_passive_charging, charge_rate
+        )
+
     def _write_period_to_hardware(
         self,
         controller,
         grid_charge: bool,
         discharge_rate: int,
         block_passive_charging: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[bool, str]:
         """Issue a SolaX VPP command for the current period.
 
-        Derives the power target in watts from the two abstract control
-        parameters supplied by the base-class ``apply_period`` path:
+        Derives the power target in watts from the abstract control
+        parameters supplied by `apply_period`:
 
-        - ``grid_charge=True``  → charge at maximum charge power.
+        - ``grid_charge=True``  → charge at `charge_rate` (#754), the plan's
+          action-derived rate.
         - ``grid_charge=False, discharge_rate=0`` → disable VPP (IDLE / SOLAR_STORAGE).
         - ``grid_charge=False, discharge_rate>0`` → discharge at the given rate.
 
@@ -138,6 +164,12 @@ class SolaxController(InverterController):
             grid_charge: Whether grid charging is requested.
             discharge_rate: Discharge power as a percentage (0-100).
             block_passive_charging: Unused -- see docstring above.
+            charge_rate: The plan's action-derived GRID_CHARGING rate
+                (0-100%, #754), supplied by the caller (BatterySystemManager,
+                via apply_period) -- not re-derived here from wall-clock
+                time. See InverterController.apply_period's docstring for
+                why only the caller can supply this correctly, including on
+                a retry.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -146,7 +178,7 @@ class SolaxController(InverterController):
             if not grid_charge and discharge_rate == 0:
                 controller.set_solax_vpp_disabled()
             elif grid_charge:
-                target_watts = int(self.max_charge_power_kw * 1000)
+                target_watts = int(self.max_charge_power_kw * charge_rate / 100 * 1000)
                 controller.set_solax_active_power_control(target_watts)
             else:
                 target_watts = -int(
@@ -165,6 +197,7 @@ class SolaxController(InverterController):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
         for display, mirroring _write_period_to_hardware()'s three branches
@@ -180,6 +213,11 @@ class SolaxController(InverterController):
         that same category: native SolaX never received the Growatt VPP IDLE
         hold (#466) that #592 releases, so there is nothing here to release.
 
+        charge_rate (#754) is NOT in that category: unlike the others, it
+        does change what this reports, mirroring how _write_period_to_hardware
+        now scales its actual watts command to the plan's rate instead of
+        always writing max_charge_power_kw.
+
         Returns:
             (power_pct, remote_control_enabled) -- power_pct expressed as a
             percent of max charge/discharge power, matching discharge_rate's
@@ -188,7 +226,7 @@ class SolaxController(InverterController):
         if not grid_charge and discharge_rate == 0:
             return 0, False
         if grid_charge:
-            return 100, True
+            return charge_rate, True
         return -discharge_rate, True
 
     def sync_to_hardware(

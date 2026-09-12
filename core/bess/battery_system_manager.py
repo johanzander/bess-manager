@@ -235,6 +235,9 @@ class BatterySystemManager:
         self._desired_grid_charge: bool = False  # grid_charge alongside the rate above
         self._desired_block_passive_charging: bool = False  # alongside the rate above
         self._desired_strategic_intent: str = ""  # alongside the rate above
+        self._desired_charge_rate: int = (
+            100  # GRID_CHARGING rate (#754) alongside the rate above
+        )
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
 
         # Export-limit curtailment state (#269) — tracks whether the hardware
@@ -2885,6 +2888,19 @@ class BatterySystemManager:
                 period, battery_action_kw
             )
         )
+        # #754: the action-derived GRID_CHARGING rate, computed here (where
+        # `period` and `battery_action_kw` are known exactly) rather than
+        # re-derived from wall-clock time inside the controller -- which
+        # could not tell "the period this write is about" apart from
+        # "whatever period it happens to be right now" once a retry
+        # (_schedule_period_retry) fires minutes later against a plan whose
+        # rate can change every period.
+        assert self._inverter_controller is not None  # already dereferenced above
+        charge_rate = self._inverter_controller.compute_charge_rate(
+            strategic_intent,
+            self._inverter_controller.INTENT_TO_CONTROL[strategic_intent],
+            battery_action_kw,
+        )
 
         # Intra-period discharge gate: the optimizer's planned rate is a
         # 15-min average, but load_first lets the battery cover an
@@ -2999,6 +3015,7 @@ class BatterySystemManager:
         self._desired_grid_charge = grid_charge
         self._desired_block_passive_charging = block_passive_charging
         self._desired_strategic_intent = strategic_intent
+        self._desired_charge_rate = charge_rate
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -3043,6 +3060,7 @@ class BatterySystemManager:
             block_passive_charging,
             strategic_intent,
             at_reserve_floor,
+            charge_rate,
         )
 
         if not success:
@@ -3062,6 +3080,7 @@ class BatterySystemManager:
                 discharge_rate,
                 block_passive_charging,
                 strategic_intent,
+                charge_rate=charge_rate,
             )
         else:
             self._last_applied_discharge_rate = discharge_rate
@@ -3127,12 +3146,18 @@ class BatterySystemManager:
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         attempt: int = 1,
+        charge_rate: int = 100,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
 
         Retries twice within the 15-min period window (at +3 min and +8 min).
         If the scheduler is not available (e.g. during tests), the retry is
         skipped and the failure banner remains as-is.
+
+        charge_rate (#754) is captured here at the *original* period, same as
+        every other argument -- it must replay this period's actual planned
+        rate on retry, not whatever period the wall clock has moved to by
+        the time the retry fires.
         """
         max_attempts = len(self._PERIOD_RETRY_DELAYS_MIN)
         if attempt > max_attempts:
@@ -3163,6 +3188,7 @@ class BatterySystemManager:
                 block_passive_charging,
                 strategic_intent,
                 self._at_reserve_floor(),
+                charge_rate,
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -3182,6 +3208,7 @@ class BatterySystemManager:
                         block_passive_charging,
                         strategic_intent,
                         attempt + 1,
+                        charge_rate,
                     )
                 else:
                     self._runtime_failure_tracker.record_failure(
@@ -3854,6 +3881,7 @@ class BatterySystemManager:
             # mid-period, and omitting it would default to False and
             # re-assert the battery_first hold #592 released.
             self._at_reserve_floor(),
+            self._desired_charge_rate,
         )
         self._last_applied_discharge_rate = target_rate
 

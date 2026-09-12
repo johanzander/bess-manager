@@ -28,7 +28,9 @@ block_passive_charging distinction at rate=0 (#355 -- see
 docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md).
 LOAD_SUPPORT has since diverged (#413 -- see below): ``SolaxController``
 still forces a rate for it, this controller now releases VPP control instead.
-- GRID_CHARGING              -> power=+100%, remote_control enabled
+- GRID_CHARGING              -> power=+charge_rate% (the plan's actual rate,
+  #754 -- previously always +100%, discarding the DP's own fuse-throttled
+  rate, #429), remote_control enabled
 - BATTERY_EXPORT (rate>0)    -> power=-rate%, remote_control enabled
 - LOAD_SUPPORT (any rate)    -> power=0, remote_control DISABLED, regardless
   of discharge_rate (#413 -- releases control to the inverter's own
@@ -239,6 +241,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[bool, str]:
         """Write period control settings for the current control mode.
 
@@ -280,6 +283,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 block_passive_charging,
                 strategic_intent,
                 at_reserve_floor,
+                charge_rate,
             )
         return self._apply_period_tou(controller, grid_charge, discharge_rate)
 
@@ -359,12 +363,16 @@ class SolaxModbusGrowattController(GrowattMinController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         load_tracking_active: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate, block_passive_charging,
         strategic_intent, at_reserve_floor) to
         (power_pct, remote_control_enabled).
 
-        - grid_charge=True                       -> +100% (charge at max rate)
+        - grid_charge=True                       -> +charge_rate% (#754 --
+          the DP's own planned rate, e.g. throttled below 100 by the fuse
+          import cap (#429); defaults to 100 for callers (display, most
+          tests) that don't have a plan-derived rate to pass)
         - grid_charge=False, intent=LOAD_SUPPORT  -> 0%, remote control
           DISABLED, regardless of rate (#413 -- releases control to the
           inverter's own load-following self-use instead of forcing a fixed
@@ -447,7 +455,7 @@ class SolaxModbusGrowattController(GrowattMinController):
           -> -rate% (discharge/export)
         """
         if grid_charge:
-            return 100, True
+            return charge_rate, True
         if strategic_intent == "LOAD_SUPPORT":
             if load_tracking_active:
                 return VPP_HOLD_POWER_PCT, True
@@ -465,6 +473,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[int, bool]:
         """Display-facing alias for _intent_to_vpp().
 
@@ -478,6 +487,10 @@ class SolaxModbusGrowattController(GrowattMinController):
         _planned_at_reserve_floor(), where the write path derives it from live
         SoC -- see #592. Passing it is what keeps the displayed period equal to
         the commanded one.
+
+        charge_rate (#754): the plan's actual GRID_CHARGING rate, passed
+        through the same way discharge_rate already is, so the displayed
+        vpp_power_pct matches what apply_period's write path commands.
         """
         return self._intent_to_vpp(
             grid_charge,
@@ -485,6 +498,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             block_passive_charging,
             strategic_intent,
             at_reserve_floor,
+            charge_rate=charge_rate,
         )
 
     def _ensure_vpp_status_enabled(self, controller) -> None:
@@ -536,6 +550,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         block_passive_charging: bool = False,
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
+        charge_rate: int = 100,
     ) -> tuple[bool, str]:
         """Write one period's VPP power command.
 
@@ -544,6 +559,17 @@ class SolaxModbusGrowattController(GrowattMinController):
         during a stable run of identical periods (#404). Only skipped when
         remote control is (and was already) disabled — nothing active, no
         timer to protect.
+
+        charge_rate (#754): the plan's action-derived GRID_CHARGING rate,
+        supplied by the caller (BatterySystemManager, via apply_period) --
+        not re-derived here from wall-clock time. A local re-derivation
+        cannot tell "the period this write is about" apart from "whatever
+        period it happens to be right now": a retry
+        (BatterySystemManager._schedule_period_retry, +3/+8 min later) can
+        fire after the wall clock has rolled into a period the DP planned at
+        a *different* rate, including one with the same strategic_intent --
+        an intent-equality guard cannot catch that. The caller already knows
+        the exact period and its action, so it is the only correct source.
         """
         power_pct, remote_control_enabled = self._intent_to_vpp(
             grid_charge,
@@ -551,6 +577,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             block_passive_charging,
             strategic_intent,
             at_reserve_floor,
+            charge_rate=charge_rate,
         )
 
         needs_write = remote_control_enabled or (
@@ -867,6 +894,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 group["grid_charge"],
                 group["discharge_rate"],
                 block_passive_charging,
+                charge_rate=group["charge_rate"],
             )
             is_current = group["start_period"] <= current_p <= group["end_period"]
             is_default_display = mode_fields.get("batt_mode") == "load_first"

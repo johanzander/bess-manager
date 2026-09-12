@@ -264,7 +264,10 @@ Verified against `wills106/homeassistant-solax-modbus`'s
 has since diverged — see "LOAD_SUPPORT semantics" below — plus a
 `block_passive_charging` distinction at rate=0 — see "SOLAR_EXPORT
 semantics" below):
-- `GRID_CHARGING` → `vpp_power=+100%`, remote control enabled
+- `GRID_CHARGING` → `vpp_power=+rate%` (the plan's actual charge rate — issue
+  [#754](https://github.com/johanzander/bess-manager/issues/754); previously
+  always `+100%`, discarding the fuse-aware import cap's throttled rate,
+  issue #429), remote control enabled
 - `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
 - `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
   regardless of `discharge_rate` (releases to `load_first` self-use — see

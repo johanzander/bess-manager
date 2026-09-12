@@ -343,7 +343,13 @@ export default function DashboardPage({
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col items-end gap-3">
+            <DateSelector
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+              availableDates={availableDates}
+              resolution="day"
+            />
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
               <button
                 onClick={() => setDataResolution('hourly')}
@@ -366,12 +372,6 @@ export default function DashboardPage({
                 15 min
               </button>
             </div>
-            <DateSelector
-              selectedDate={selectedDate}
-              onDateChange={setSelectedDate}
-              availableDates={availableDates}
-              resolution="day"
-            />
           </div>
         </div>
       </div>

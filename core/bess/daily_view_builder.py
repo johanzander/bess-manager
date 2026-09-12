@@ -4,7 +4,7 @@ SIMPLIFIED: Always operates on quarterly periods.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime
 
 from . import time_utils
@@ -128,9 +128,24 @@ class DailyViewBuilder:
         num_periods = get_period_count(today)
 
         for i in range(num_periods):
-            if i < current_period and historical_periods[i] is not None:
-                # Past: use actual sensor data
-                periods.append(historical_periods[i])
+            actual = historical_periods[i]
+            if i < current_period and actual is not None:
+                # Past: use actual sensor data, but attach the home-load split
+                # (#749) that was planned for this period so the dashboard can
+                # draw actual-vs-planned. The measured energy is left untouched.
+                if actual.consumption_breakdown is None:
+                    planned = self.schedule_store.get_period_data_at(
+                        time_utils.period_index_to_timestamp(i)
+                    )
+                    if (
+                        planned is not None
+                        and planned.consumption_breakdown is not None
+                    ):
+                        actual = replace(
+                            actual,
+                            consumption_breakdown=planned.consumption_breakdown,
+                        )
+                periods.append(actual)
             else:
                 # Future: use predicted optimization data. Resolved by exact
                 # timestamp (not positional index - optimization_period) so a

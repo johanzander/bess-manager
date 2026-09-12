@@ -942,6 +942,20 @@ silent.  Only periods the overlay itself drove negative count towards that
 failure — a negative the base forecast already carried is floored the same
 way but is not blamed on the overlay (issue #734).
 
+**Dashboard breakdown** (issue #749): `_gather_optimization_data` now also
+records the per-period split as `ConsumptionBreakdown(residual, planned,
+total)` — `residual` is the forecast before the overlay (already post–Managed
+Loads), `planned` is the net the overlay applied for that period (post-clamp),
+`total` is what the optimizer plans against, and `residual + planned == total`
+by construction. It rides on `PeriodData.consumption_breakdown` into
+`schedule_store`; `DailyViewBuilder` also attaches the *planned* split to
+elapsed periods (looked up from the schedule that was in force) so the
+dashboard can draw actual-vs-planned for the past. The dashboard API exposes
+it as `predictedResidualLoad` / `plannedManagedLoad` / `predictedTotalLoad`;
+a period with no split (overlay-free install, missing placeholder) falls back
+to residual == total == `homeConsumption`, planned == 0. This is reporting
+only — the optimizer still sees the single composed array, unchanged.
+
 
 ### Managed Loads (issue #706)
 

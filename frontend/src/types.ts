@@ -50,6 +50,14 @@ export interface HourlyData {
   exportRevenue?: FormattedValue;
   solarProduction?: FormattedValue;
   homeConsumption?: FormattedValue;
+  // Home-load forecast split (#749). residual = unmanaged forecast (post Managed
+  // Loads, pre Planned Consumption Changes); planned = net the #428 overlay
+  // applied this period; total = what the optimizer planned against
+  // (residual + planned). Fall back to residual = total = homeConsumption,
+  // planned = 0 for a period with no split.
+  predictedResidualLoad?: FormattedValue;
+  plannedManagedLoad?: FormattedValue;
+  predictedTotalLoad?: FormattedValue;
   gridImported?: FormattedValue;
   gridExported?: FormattedValue;
   batteryCharged?: FormattedValue;

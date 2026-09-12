@@ -59,10 +59,10 @@ describe('getHomeLoadSplit', () => {
     expect(split.residual).toBe(-0.25)
     expect(split.planned).toBe(-1.0)
     expect(split.residual + split.planned).toBe(-1.25)
-    expect(split.plannedTotal).toBeNull()  // no separate line for the future
+    expect(split.forecastTotal).toBeNull()  // no outline for the future -- it's already the solid stack
   })
 
-  it('keeps an elapsed period at its measured total and exposes the plan for comparison', () => {
+  it('keeps an elapsed period at its measured total and exposes the frozen forecast shape', () => {
     // Measured 2.5 kWh, but the plan for that period was residual 0.25 + planned 1.0.
     const split = getHomeLoadSplit(
       { dataSource: 'actual', predictedResidualLoad: fv(0.25), plannedManagedLoad: fv(1.0) },
@@ -70,23 +70,26 @@ describe('getHomeLoadSplit', () => {
     )
     expect(split.residual).toBe(-2.5)   // stack shows what was on the meter
     expect(split.planned).toBe(0)
-    expect(split.plannedTotal).toBe(-1.25)  // dashed reference line = what was planned
+    expect(split.forecastResidual).toBe(-0.25)  // outline's seam = where residual ended
+    expect(split.forecastTotal).toBe(-1.25)     // outline's outer edge = what was planned
   })
 
-  it('keeps the forecast line null for an elapsed period with no plan declared', () => {
-    // Ordinary hour, no overlay -- nothing to compare, so no dashed line.
+  it('keeps the forecast outline null for an elapsed period with no plan declared', () => {
+    // Ordinary hour, no overlay -- nothing to compare, so no outline.
     const split = getHomeLoadSplit(
       { dataSource: 'actual', predictedResidualLoad: fv(0.375), plannedManagedLoad: fv(0) },
       0.375
     )
-    expect(split.plannedTotal).toBeNull()
+    expect(split.forecastResidual).toBeNull()
+    expect(split.forecastTotal).toBeNull()
   })
 
   it('falls back to all-residual when the breakdown is absent', () => {
     const split = getHomeLoadSplit(undefined, 1.25)
     expect(split.residual).toBe(-1.25)
     expect(split.planned).toBe(0)
-    expect(split.plannedTotal).toBeNull()
+    expect(split.forecastResidual).toBeNull()
+    expect(split.forecastTotal).toBeNull()
   })
 
   it('keeps a negative planned block (away-from-home subtract) intact for the future', () => {

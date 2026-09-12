@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea } from 'recharts';
+import { ComposedChart, Area, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine, ReferenceArea, Customized } from 'recharts';
 import { HourlyData, FormattedValue } from '../types';
 import { periodToTimeRange } from '../utils/timeUtils';
 import { DataResolution } from '../hooks/useUserPreferences';
@@ -20,32 +20,47 @@ export function getSellPriceTooltipText(
 // zero axis, so the returned values are negative.
 //
 //  - A future period whose API payload carries the breakdown stacks as
-//    residual + planned, landing on the same curve `homeConsumption` gives.
+//    residual + planned (solid, filled), landing on the same curve
+//    `homeConsumption` gives.
 //  - An elapsed period's stack stays the measured `homeConsumption` (one
-//    area, as before); `plannedTotal` then carries what was planned so a
-//    dashed reference line can show actual-vs-planned. This is scoped to
-//    hours where a plan was actually declared (planned != 0) -- this is a
-//    plan-verification line, not a general forecast-accuracy one (that's
-//    the Prediction Accuracy page), so it stays silent on ordinary hours.
+//    area, as before -- there's no "residual" on the measured side, a meter
+//    gives one lump number). `forecastResidual`/`forecastTotal` then carry
+//    the same residual+planned shape the period would have drawn as a
+//    future one, so the chart can outline it (dotted, unfilled) over the
+//    solid actual area -- the frozen forecast, for comparison, not a second
+//    measurement. Scoped to hours where a plan was actually declared
+//    (planned != 0) -- this is a plan-verification outline, not a general
+//    forecast-accuracy one (that's the Prediction Accuracy page), so it
+//    stays silent on ordinary hours.
 //  - No breakdown available (overlay-free install): all residual, planned 0.
 //
 // Exported for unit testing without rendering the full recharts tree.
 export function getHomeLoadSplit(
   hour: Partial<HourlyData> | undefined,
   homeConsumption: number
-): { residual: number; planned: number; plannedTotal: number | null } {
+): {
+  residual: number;
+  planned: number;
+  forecastResidual: number | null;
+  forecastTotal: number | null;
+} {
   const residual = hour?.predictedResidualLoad?.value;
   const planned = hour?.plannedManagedLoad?.value;
   const hasSplit = residual !== undefined && planned !== undefined;
   const isActual = hour?.dataSource === 'actual';
 
   if (hasSplit && !isActual) {
-    return { residual: -residual, planned: -planned, plannedTotal: null };
+    return { residual: -residual, planned: -planned, forecastResidual: null, forecastTotal: null };
   }
   if (hasSplit && isActual && planned !== 0) {
-    return { residual: -homeConsumption, planned: 0, plannedTotal: -(residual + planned) };
+    return {
+      residual: -homeConsumption,
+      planned: 0,
+      forecastResidual: -residual,
+      forecastTotal: -(residual + planned),
+    };
   }
-  return { residual: -homeConsumption, planned: 0, plannedTotal: null };
+  return { residual: -homeConsumption, planned: 0, forecastResidual: null, forecastTotal: null };
 }
 
 const CustomTooltip = ({ active, payload, label, resolution }: any) => {
@@ -73,8 +88,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             : (data.homeResidualFormatted?.text || data.homeConsumptionFormatted?.text || 'N/A');
         case 'homePlanned':
           return data.homePlannedFormatted?.text || 'N/A';
-        case 'plannedTotal':
-          return data.plannedTotalFormatted?.text || 'N/A';
+        case 'forecastTotal':
+          return data.forecastTotalFormatted?.text || 'N/A';
         case 'batteryOut':
           return data.batteryDischargedFormatted?.text || 'N/A';
         case 'batteryIn':
@@ -208,7 +223,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
     const batteryDischarged = getValue(dailyViewHour?.batteryDischarged) || 0;
     const gridImported = getValue(dailyViewHour?.gridImported) || 0;
     const gridExported = getValue(dailyViewHour?.gridExported) || 0;
-    const { residual: homeResidual, planned: homePlanned, plannedTotal: homePlannedTotal } = getHomeLoadSplit(dailyViewHour, homeConsumption);
+    const { residual: homeResidual, planned: homePlanned, forecastResidual, forecastTotal } = getHomeLoadSplit(dailyViewHour, homeConsumption);
 
     // Midpoint positioning: period 0 (00:00-01:00) placed at x=0.5
     // Line passes through the middle of each period, tooltip snaps to nearest point
@@ -223,7 +238,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       home: -homeConsumption,
       homeResidual,
       homePlanned,
-      plannedTotal: homePlannedTotal,
+      forecastResidual,
+      forecastTotal,
       batteryIn: batteryCharged > 0 ? -batteryCharged : 0,
       gridOut: gridExported > 0 ? -gridExported : 0,
       isActual,
@@ -235,7 +251,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       homeConsumptionFormatted: dailyViewHour?.homeConsumption,
       homeResidualFormatted: dailyViewHour?.predictedResidualLoad,
       homePlannedFormatted: dailyViewHour?.plannedManagedLoad,
-      plannedTotalFormatted: dailyViewHour?.predictedTotalLoad,
+      forecastTotalFormatted: dailyViewHour?.predictedTotalLoad,
       batteryChargedFormatted: dailyViewHour?.batteryCharged,
       batteryDischargedFormatted: dailyViewHour?.batteryDischarged,
       gridImportedFormatted: dailyViewHour?.gridImported,
@@ -264,7 +280,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
       const batteryDischarged = getValue(hourData?.batteryDischarged) || 0;
       const gridImported = getValue(hourData?.gridImported) || 0;
       const gridExported = getValue(hourData?.gridExported) || 0;
-      const { residual: homeResidual, planned: homePlanned, plannedTotal: homePlannedTotal } = getHomeLoadSplit(hourData, homeConsumption);
+      const { residual: homeResidual, planned: homePlanned, forecastResidual, forecastTotal } = getHomeLoadSplit(hourData, homeConsumption);
 
       chartData.push({
         hour: hourPosition,
@@ -275,7 +291,8 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         home: -homeConsumption,
         homeResidual,
         homePlanned,
-        plannedTotal: homePlannedTotal,
+        forecastResidual,
+        forecastTotal,
         batteryIn: batteryCharged > 0 ? -batteryCharged : 0,
         gridOut: gridExported > 0 ? -gridExported : 0,
         isActual: false,
@@ -287,7 +304,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
         homeConsumptionFormatted: hourData?.homeConsumption,
         homeResidualFormatted: hourData?.predictedResidualLoad,
         homePlannedFormatted: hourData?.plannedManagedLoad,
-        plannedTotalFormatted: hourData?.predictedTotalLoad,
+        forecastTotalFormatted: hourData?.predictedTotalLoad,
         batteryChargedFormatted: hourData?.batteryCharged,
         batteryDischargedFormatted: hourData?.batteryDischarged,
         gridImportedFormatted: hourData?.gridImported,
@@ -316,14 +333,64 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour - halfPeriod : null;
   const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour + halfPeriod : maxHour;
 
-  // Gate each legend row on there being an actual point for it to draw --
-  // not just "a plan exists somewhere today" (#749 follow-up). A future
-  // plan stacks as homePlanned != 0 (the Planned Load area); the dashed
-  // Forecast Total line only has points once an hour with a plan has
-  // actually elapsed (plannedTotal != null). Showing either row with
-  // nothing on the chart to back it up is worse than not showing it.
-  const hasPlannedLoad = chartData.some(d => d.homePlanned !== 0);
-  const hasForecastTotal = chartData.some(d => d.plannedTotal !== null);
+  // Gate the single "Planned Load" legend row on there being an actual mark
+  // for it to draw -- not just "a plan exists somewhere today" (#749
+  // follow-up). Covers both renderings: a future plan stacks as
+  // homePlanned != 0 (solid, filled); an elapsed plan draws the outlined
+  // forecast shape once forecastTotal != null. Both use the same purple, so
+  // one legend row covers both -- which one applies at a given hour is
+  // already obvious from where it falls relative to "now".
+  const hasPlannedLoad = chartData.some(d => d.homePlanned !== 0 || d.forecastTotal !== null);
+
+  // A recharts <Customized> layer: for each elapsed period with a plan,
+  // draws the frozen forecast shape -- the same residual+planned stack a
+  // future period renders solid and filled, just as a dotted, unfilled
+  // outline (with the residual/planned seam still marked) over the solid
+  // measured Home Load area. Reads xAxisMap/yAxisMap off recharts' own
+  // chart state (spread onto Customized's rendered element) rather than
+  // recomputing pixel positions by hand.
+  const ForecastOutline = (customizedProps: any) => {
+    const xAxis = customizedProps.xAxisMap?.[0];
+    const yAxis = customizedProps.yAxisMap?.[0];
+    if (!xAxis || !yAxis) return null;
+    const periodWidthDomain = resolution === 'quarter-hourly' ? 0.25 : 1;
+    const barWidth = Math.max(2, Math.abs(xAxis.scale(periodWidthDomain) - xAxis.scale(0)) * 0.7);
+    const zeroY = yAxis.scale(0);
+
+    return (
+      <g>
+        {chartData.map((d: any, i: number) => {
+          if (d.forecastTotal === null || d.forecastTotal === undefined) return null;
+          const x = xAxis.scale(d.hour);
+          const yTotal = yAxis.scale(d.forecastTotal);
+          const ySeam = yAxis.scale(d.forecastResidual);
+          return (
+            <g key={`forecast-outline-${i}`}>
+              <rect
+                x={x - barWidth / 2}
+                y={Math.min(zeroY, yTotal)}
+                width={barWidth}
+                height={Math.abs(yTotal - zeroY)}
+                fill="none"
+                stroke={colors.homePlanned}
+                strokeWidth={1.5}
+                strokeDasharray="2 2.5"
+              />
+              <line
+                x1={x - barWidth / 2}
+                x2={x + barWidth / 2}
+                y1={ySeam}
+                y2={ySeam}
+                stroke={colors.homePlanned}
+                strokeWidth={1.25}
+                strokeDasharray="2 2.5"
+              />
+            </g>
+          );
+        })}
+      </g>
+    );
+  };
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -481,10 +548,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             />
             {/* ENERGY CONSUMPTION - Home Load (#749). Future periods stack
                 residual + planned (Planned Consumption Changes, e.g. EV
-                charging); elapsed periods keep the measured total as the base
-                area with planned == 0, and the dashed plannedTotal line below
-                shows what had been forecast so you can read actual-vs-planned.
-                An overlay-free install is all residual, unchanged. */}
+                charging), solid and filled. An elapsed period with a plan
+                keeps the measured total as the base area (planned == 0 here
+                -- a meter gives one lump number, not a residual/planned
+                split), and ForecastOutline below draws the frozen forecast
+                shape (residual + planned stacked to the total, same as a
+                future period would) as a dotted, unfilled outline over it,
+                so actual-vs-planned reads at a glance. An overlay-free
+                install is all residual, unchanged. */}
             <Area
               type="monotone"
               dataKey="homeResidual"
@@ -509,17 +580,22 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               dot={false}
               connectNulls
             />
+            {/* Invisible line purely to feed the shared Tooltip's payload --
+                ForecastOutline (a Customized layer) draws the actual visual
+                mark, but isn't a data series recharts' Tooltip knows about. */}
             <Line
               type="monotone"
-              dataKey="plannedTotal"
+              dataKey="forecastTotal"
               stroke={colors.homePlanned}
-              strokeWidth={2}
-              strokeDasharray="4 3"
+              strokeWidth={0}
               name="Forecast Total"
               isAnimationActive={false}
               dot={false}
+              activeDot={false}
+              legendType="none"
               connectNulls={false}
             />
+            <Customized component={ForecastOutline} />
             <Area
               type="monotone"
               dataKey="batteryIn"
@@ -624,12 +700,6 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
           <div className="flex items-center">
             <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.homePlanned }}></div>
             <span className="text-gray-700 dark:text-gray-300">Planned Load</span>
-          </div>
-        )}
-        {hasForecastTotal && (
-          <div className="flex items-center">
-            <div className="w-4 h-1" style={{ backgroundColor: colors.homePlanned, borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
-            <span className="text-gray-700 dark:text-gray-300 ml-2">Forecast Total</span>
           </div>
         )}
         <div className="flex items-center">

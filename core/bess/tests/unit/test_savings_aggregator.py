@@ -65,6 +65,7 @@ class TestWeekBuckets:
         assert bucket.day_count == 1
         assert bucket.totals.import_kwh == 1.0
         assert bucket.totals.export_kwh == 2.0
+        assert bucket.totals.home_consumption_kwh == 1.0  # _period sets load == import
         assert bucket.totals.import_eur == 2.0  # 1.0 * buy_price 2.0
         assert bucket.totals.export_eur == 2.0  # 2.0 * sell_price 1.0
         assert bucket.totals.grid_cost == 0.0
@@ -136,6 +137,7 @@ class TestWeekBuckets:
 
         assert buckets[0].day_count == 2
         assert buckets[0].totals.import_kwh == 2.0
+        assert buckets[0].totals.home_consumption_kwh == 2.0  # summed across days
         assert buckets[0].totals.savings_vs_grid_only == 2.0
 
     def test_multiple_weeks_returned_oldest_first(self, tmp_path):

@@ -103,6 +103,7 @@ jobs:
             --max-turns 6 --model claude-haiku-4-5 --disallowedTools Bash
             --json-schema
             '{"type":"object","properties":{"bucket":{"type":"string","enum":["bug_with_log","bug_without_log","question_or_feature","unclear"]},"labels":{"type":"array","items":{"type":"string"}},"comment":{"type":"string"}},"required":["bucket","labels","comment"],"additionalProperties":false}'
+          show_full_output: true
           prompt: |
             You are the **Stage 1 Triage** classifier for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 

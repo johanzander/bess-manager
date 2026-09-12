@@ -1795,3 +1795,49 @@ class TestOptimizerReadsPriceCacheOnly:
             system.update_battery_schedule(current_period=60)
 
         assert not fetch.called, "optimizer fetched prices instead of reading the cache"
+
+
+class TestRunHealthCheckLoggingShapes:
+    """Issue #627: _run_health_check's logging loop assumed every inner check
+    dict uses the name/entity_id/error shape (price_manager, sensor_collector).
+    Several controllers (growatt_sph_controller, huawei_controller,
+    solis_modbus_controller) report inner checks as component/status/message
+    instead. Whenever such a controller's check is non-OK, the logging loop
+    raised KeyError('name'), which the outer except swallowed — losing the
+    real health results entirely (returning {"status": "ERROR", "checks": []})
+    instead of the actual per-component detail.
+    """
+
+    def test_component_message_shaped_check_does_not_crash_logging(
+        self, system: BatterySystemManager
+    ) -> None:
+        health_results = {
+            "status": "ERROR",
+            "checks": [
+                {
+                    "name": "Battery Control (SPH)",
+                    "description": "Controls SPH battery charging and discharging schedule",
+                    "required": True,
+                    "status": "ERROR",
+                    "checks": [
+                        {
+                            "component": "Growatt Service (read_ac_charge_times)",
+                            "status": "ERROR",
+                            "message": "Service call failed: 500 Server Error",
+                        }
+                    ],
+                    "last_run": "2026-08-17T12:00:00",
+                }
+            ],
+        }
+
+        with patch(
+            "core.bess.battery_system_manager.run_system_health_checks",
+            return_value=health_results,
+        ):
+            result = system._run_health_check()
+
+        # Pre-fix: the KeyError is caught by the outer except, which discards
+        # the real result and reports no failing components at all.
+        assert result["checks"] == health_results["checks"]
+        assert system._critical_sensor_failures == ["Battery Control (SPH)"]

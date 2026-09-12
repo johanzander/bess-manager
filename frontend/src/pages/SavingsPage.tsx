@@ -43,7 +43,13 @@ const SavingsPage: React.FC = () => {
             )}
           </div>
 
-          <div className="flex flex-wrap items-center gap-3">
+          <div className="flex flex-col items-end gap-3">
+            <DateSelector
+              selectedDate={selectedDate}
+              onDateChange={setSelectedDate}
+              availableDates={availableDates}
+              resolution={resolution}
+            />
             <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 w-fit">
               {RESOLUTIONS.map((r) => (
                 <button
@@ -59,12 +65,6 @@ const SavingsPage: React.FC = () => {
                 </button>
               ))}
             </div>
-            <DateSelector
-              selectedDate={selectedDate}
-              onDateChange={setSelectedDate}
-              availableDates={availableDates}
-              resolution={resolution}
-            />
           </div>
         </div>
       </div>

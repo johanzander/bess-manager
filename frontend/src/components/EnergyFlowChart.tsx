@@ -316,11 +316,14 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour - halfPeriod : null;
   const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour + halfPeriod : maxHour;
 
-  // Only show the Planned Load / Forecast Total legend rows on a day that
-  // actually has a declared plan -- on an overlay-free install (or an
-  // ordinary day with nothing declared) they'd otherwise sit in the legend
-  // permanently while contributing nothing to the chart (#749 follow-up).
-  const hasPlannedLoad = chartData.some(d => d.homePlanned !== 0 || d.plannedTotal !== null);
+  // Gate each legend row on there being an actual point for it to draw --
+  // not just "a plan exists somewhere today" (#749 follow-up). A future
+  // plan stacks as homePlanned != 0 (the Planned Load area); the dashed
+  // Forecast Total line only has points once an hour with a plan has
+  // actually elapsed (plannedTotal != null). Showing either row with
+  // nothing on the chart to back it up is worse than not showing it.
+  const hasPlannedLoad = chartData.some(d => d.homePlanned !== 0);
+  const hasForecastTotal = chartData.some(d => d.plannedTotal !== null);
 
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
@@ -623,7 +626,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
             <span className="text-gray-700 dark:text-gray-300">Planned Load</span>
           </div>
         )}
-        {hasPlannedLoad && (
+        {hasForecastTotal && (
           <div className="flex items-center">
             <div className="w-4 h-1" style={{ backgroundColor: colors.homePlanned, borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
             <span className="text-gray-700 dark:text-gray-300 ml-2">Forecast Total</span>

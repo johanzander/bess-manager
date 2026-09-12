@@ -9,6 +9,31 @@
 #   2. issue-analyze.yml  (manual: @claude-bot analyze) — deep root-cause
 #   3. issue-fix.yml      (manual: @claude-bot fix)     — implement, draft PR
 #   4. pr-review.yml      (manual: @claude-bot)         — PR review
+#
+# Architecture note: Claude never calls `gh` in this workflow. It reads the
+# issue from a file a trusted step already fetched, and returns a decision as
+# structured JSON (--json-schema) that a second trusted step applies. This
+# isn't a style choice — a Bash-calling design was tried first and silently
+# failed on every run: `--permission-mode bypassPermissions` in `claude_args`
+# is dropped by claude-code-action's SDK option parser (never reaches the
+# SDK's `permissionMode`, which stays "default"), so every `gh` call needed
+# interactive approval that nothing in CI could give and was auto-rejected --
+# while the run still reported `is_error: false, subtype: success`. Working
+# around that with `--allowedTools Bash` opened Claude's own tool gate but hit
+# a second wall: `allowed_non_write_users` (required here, since bug reporters
+# are non-collaborators) triggers claude-code-action's subprocess-isolation
+# sandbox, and that sandbox's network policy denies `api.github.com` outright
+# ("<sandbox_violations>deny network-outbound api.github.com:443</...>"), so
+# `gh` itself can't reach GitHub even once Claude is allowed to run it. Giving
+# Claude no shell access at all sidesteps both bugs and is strictly safer
+# against prompt injection from untrusted issue bodies, since the classifier
+# can only ever produce text fields, never execute a command.
+#
+# Note the broken permission mode denies EVERY tool by default in this
+# headless mode, not just Bash -- Read needed its own explicit
+# `--allowedTools Read` for the same reason. `--json-schema`'s value must be
+# single-quoted as one shell token in claude_args, or claude-code-action's
+# own arg tokenizer splits the JSON on whitespace before it reaches the CLI.
 
 name: Issue Triage
 
@@ -43,7 +68,28 @@ jobs:
           app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
 
+      # Marks the point the agent started, so the verification step below can
+      # tell a comment IT posted from any comment already on the issue.
+      - name: Mark triage start
+        id: started
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+
+      # Trusted fetch: runs as a plain shell step with the app token, outside
+      # any Claude-invoked sandbox. Claude reads the resulting file instead of
+      # calling `gh` itself.
+      - name: Fetch issue context
+        id: fetch
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+        run: |
+          set -euo pipefail
+          file="${RUNNER_TEMP}/issue-${ISSUE}.json"
+          gh issue view "$ISSUE" --json title,body,labels,comments > "$file"
+          echo "issue_file=${file}" >> "$GITHUB_OUTPUT"
+
       - uses: anthropics/claude-code-action@v1
+        id: triage
         with:
           # Auth switch: BOT_AUTH=api_key uses the Anthropic API key (pay-per-token);
           # unset or 'oauth' uses Claude subscription credits. Change the repo variable
@@ -53,60 +99,71 @@ jobs:
           github_token: ${{ steps.app-token.outputs.token }}
           # Anyone can open an issue, so triage must run for non-collaborators
           # too — otherwise external bug reports never get asked for a debug
-          # log. Safe here: Haiku, classify/label/comment only, no code access.
+          # log. Safe here: Haiku, read-only classification, no shell access
+          # at all (see the architecture note above for why Bash is excluded
+          # rather than merely unused).
           allowed_non_write_users: "*"
-          # Haiku is plenty for classify+label; saves ~3x vs Sonnet.
-          claude_args: "--max-turns 12 --permission-mode bypassPermissions --model claude-haiku-4-5"
+          # Haiku is plenty for classification. No Bash: Claude only reads the
+          # fetched issue file and returns a decision as structured JSON.
+          claude_args: >-
+            --max-turns 6 --model claude-haiku-4-5 --allowedTools Read
+            --json-schema
+            '{"type":"object","properties":{"bucket":{"type":"string","enum":["bug_with_log","bug_without_log","question_or_feature","unclear"]},"labels":{"type":"array","items":{"type":"string"}},"comment":{"type":"string"}},"required":["bucket","labels","comment"],"additionalProperties":false}'
           prompt: |
-            You are the **Stage 1 Triage** bot for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
+            You are the **Stage 1 Triage** classifier for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 
-            Run first:
-              gh issue view ${{ github.event.issue.number || github.event.inputs.issue_number }} --json title,body,labels,comments
+            Read the issue context (title, body, existing labels, comments)
+            from this file using the Read tool — you have no shell access and
+            cannot run `gh` or any other command:
+              ${{ steps.fetch.outputs.issue_file }}
 
-            Classify into one of four buckets and act. Use `gh issue edit <n> --add-label <label>` for labels and `gh issue comment <n> -b "..."` for comments.
+            Classify into exactly one `bucket` and set `labels` and `comment`
+            accordingly. A separate, trusted step applies your decision to
+            the issue — you never touch GitHub directly, so `comment` is the
+            full text that will be posted verbatim and `labels` is the full
+            list of labels that will be added.
+
+            Every bucket's `labels` must include `bot-analyzed` in addition
+            to the bucket-specific labels below.
 
             ──────────────────────────────────────────────────────────────────
-            (a) BUG WITH DEBUG LOG
+            bucket: "bug_with_log"  (BUG WITH DEBUG LOG)
             ──────────────────────────────────────────────────────────────────
             A debug log is present if the issue body or a comment contains a
             JSON dump that looks like a debug report — e.g. keys like
             "BESS Configuration", "Price Settings", "Health Check", or a
             structured system-state JSON object.
 
-            Action:
-              - Labels: `bug`, `bot-analyzed`, `ready-for-analysis`
-              - Comment (concise, one short paragraph max):
-                  • One-line summary of the user's report
-                  • Confirm the debug log was received
-                  • End EXACTLY with: "Reply `@claude-bot analyze` to start deep code-level analysis."
-              - DO NOT speculate about root cause. DO NOT read source code.
+            - labels: `bug`, `bot-analyzed`, `ready-for-analysis`
+            - comment (concise, one short paragraph max):
+                • One-line summary of the user's report
+                • Confirm the debug log was received
+                • End EXACTLY with: "Reply `@claude-bot analyze` to start deep code-level analysis."
+            - DO NOT speculate about root cause. DO NOT read source code.
 
             ──────────────────────────────────────────────────────────────────
-            (b) BUG WITHOUT DEBUG LOG
+            bucket: "bug_without_log"  (BUG WITHOUT DEBUG LOG)
             ──────────────────────────────────────────────────────────────────
-            Action:
-              - Labels: `bug`, `bot-analyzed`, `needs-debug-log`
-              - Comment: politely ask the user to attach a debug log.
-                Steps: System Health → Download Debug Report → paste the JSON
-                in a comment or attach the file.
-              - Explain: deep analysis can't run without the log because the
-                code path depends on configuration and sensor state.
+            - labels: `bug`, `bot-analyzed`, `needs-debug-log`
+            - comment: politely ask the user to attach a debug log.
+              Steps: System Health → Download Debug Report → paste the JSON
+              in a comment or attach the file.
+              Explain: deep analysis can't run without the log because the
+              code path depends on configuration and sensor state.
 
             ──────────────────────────────────────────────────────────────────
-            (c) QUESTION or FEATURE REQUEST
+            bucket: "question_or_feature"  (QUESTION or FEATURE REQUEST)
             ──────────────────────────────────────────────────────────────────
-            Action:
-              - Label: `question` or `enhancement`, plus `bot-analyzed`
-              - Comment: respond helpfully if the answer is in CLAUDE.md or
-                the issue is a usage question. Otherwise note it's queued for
-                human review.
+            - labels: `bot-analyzed` plus one of `question` or `enhancement`
+            - comment: respond helpfully if the answer is in CLAUDE.md or
+              the issue is a usage question. Otherwise note it's queued for
+              human review.
 
             ──────────────────────────────────────────────────────────────────
-            (d) UNCLEAR
+            bucket: "unclear"
             ──────────────────────────────────────────────────────────────────
-            Action:
-              - Label: `bot-analyzed`
-              - Comment: ask ONE specific clarifying question.
+            - labels: `bot-analyzed`
+            - comment: ask ONE specific clarifying question.
 
             ──────────────────────────────────────────────────────────────────
             HARD CONSTRAINTS
@@ -114,4 +171,56 @@ jobs:
             - DO NOT read source files. DO NOT propose fixes.
             - DO NOT claim a bug is confirmed — that's Stage 2's job.
             - Use hedged language ("the report suggests…", "this may indicate…").
-            - Keep your comment under ~150 words. Brevity > thoroughness here.
+            - Keep `comment` under ~150 words. Brevity > thoroughness here.
+
+      # Trusted apply: the only step that ever runs `gh` against the real
+      # issue, using Claude's structured decision as plain data.
+      - name: Apply triage decision
+        if: always() && steps.triage.outputs.structured_output != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+          LABELS: ${{ join(fromJSON(steps.triage.outputs.structured_output).labels, ',') }}
+          COMMENT: ${{ fromJSON(steps.triage.outputs.structured_output).comment }}
+        run: |
+          set -euo pipefail
+          [ -n "$LABELS" ] && gh issue edit "$ISSUE" --add-label "$LABELS"
+          printf '%s' "$COMMENT" > "${RUNNER_TEMP}/triage-comment.md"
+          gh issue comment "$ISSUE" --body-file "${RUNNER_TEMP}/triage-comment.md"
+
+      # The acceptance criterion of #646, applied to Stage 1: a run must not
+      # be able to exit `success` having written nothing to the issue. See
+      # issue-analyze.yml for the sibling check and the incident that
+      # motivated it (5 of 9 runs silently wrote nothing over three days,
+      # every signal green). `if: always()` is load-bearing here too.
+      - name: Verify the triage decision reached the issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          ISSUE: ${{ github.event.issue.number || github.event.inputs.issue_number }}
+          SINCE: ${{ steps.started.outputs.at }}
+        run: |
+          set -euo pipefail
+
+          posted=$(gh issue view "$ISSUE" --json comments \
+            --jq "[.comments[] | select(.createdAt > \"$SINCE\")] | length")
+          labels=$(gh issue view "$ISSUE" --json labels --jq '[.labels[].name] | join(",")')
+
+          echo "Comments posted since ${SINCE}: ${posted}"
+          echo "Labels now: ${labels:-<none>}"
+
+          if [ "$posted" -eq 0 ]; then
+            echo "::error::Stage 1 posted NO comment on issue #${ISSUE}. The run"
+            echo "::error::billed for a triage that reached nobody."
+            exit 1
+          fi
+
+          case ",$labels," in
+            *,bot-analyzed,*) ;;
+            *)
+              echo "::error::Stage 1 did not apply 'bot-analyzed' to issue"
+              echo "::error::#${ISSUE}. Without it the issue is indistinguishable"
+              echo "::error::from one that was never triaged."
+              exit 1
+              ;;
+          esac

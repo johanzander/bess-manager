@@ -28,6 +28,12 @@
 # Claude no shell access at all sidesteps both bugs and is strictly safer
 # against prompt injection from untrusted issue bodies, since the classifier
 # can only ever produce text fields, never execute a command.
+#
+# Note the broken permission mode denies EVERY tool by default in this
+# headless mode, not just Bash -- Read needed its own explicit
+# `--allowedTools Read` for the same reason. `--json-schema`'s value must be
+# single-quoted as one shell token in claude_args, or claude-code-action's
+# own arg tokenizer splits the JSON on whitespace before it reaches the CLI.
 
 name: Issue Triage
 
@@ -100,10 +106,9 @@ jobs:
           # Haiku is plenty for classification. No Bash: Claude only reads the
           # fetched issue file and returns a decision as structured JSON.
           claude_args: >-
-            --max-turns 6 --model claude-haiku-4-5 --disallowedTools Bash
+            --max-turns 6 --model claude-haiku-4-5 --allowedTools Read
             --json-schema
             '{"type":"object","properties":{"bucket":{"type":"string","enum":["bug_with_log","bug_without_log","question_or_feature","unclear"]},"labels":{"type":"array","items":{"type":"string"}},"comment":{"type":"string"}},"required":["bucket","labels","comment"],"additionalProperties":false}'
-          show_full_output: true
           prompt: |
             You are the **Stage 1 Triage** classifier for issue #${{ github.event.issue.number || github.event.inputs.issue_number }} in johanzander/bess-manager.
 

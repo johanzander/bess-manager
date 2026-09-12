@@ -23,8 +23,10 @@ export function getSellPriceTooltipText(
 //    residual + planned, landing on the same curve `homeConsumption` gives.
 //  - An elapsed period's stack stays the measured `homeConsumption` (one
 //    area, as before); `plannedTotal` then carries what was planned so a
-//    dashed reference line can show actual-vs-planned. It is null elsewhere,
-//    so that line only draws over the past.
+//    dashed reference line can show actual-vs-planned. This is scoped to
+//    hours where a plan was actually declared (planned != 0) -- this is a
+//    plan-verification line, not a general forecast-accuracy one (that's
+//    the Prediction Accuracy page), so it stays silent on ordinary hours.
 //  - No breakdown available (overlay-free install): all residual, planned 0.
 //
 // Exported for unit testing without rendering the full recharts tree.
@@ -40,7 +42,7 @@ export function getHomeLoadSplit(
   if (hasSplit && !isActual) {
     return { residual: -residual, planned: -planned, plannedTotal: null };
   }
-  if (hasSplit && isActual) {
+  if (hasSplit && isActual && planned !== 0) {
     return { residual: -homeConsumption, planned: 0, plannedTotal: -(residual + planned) };
   }
   return { residual: -homeConsumption, planned: 0, plannedTotal: null };
@@ -314,6 +316,12 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
   const firstPredictedHour = firstPredictedIdx > -1 ? chartData[firstPredictedIdx].hour - halfPeriod : null;
   const lastTodayHour = lastTodayIdx > -1 ? chartData[lastTodayIdx - 1]?.hour + halfPeriod : maxHour;
 
+  // Only show the Planned Load / Forecast Total legend rows on a day that
+  // actually has a declared plan -- on an overlay-free install (or an
+  // ordinary day with nothing declared) they'd otherwise sit in the legend
+  // permanently while contributing nothing to the chart (#749 follow-up).
+  const hasPlannedLoad = chartData.some(d => d.homePlanned !== 0 || d.plannedTotal !== null);
+
   return (
     <div className="bg-white dark:bg-gray-800 p-6 rounded-lg shadow">
       <div className="flex justify-end mb-2">
@@ -493,7 +501,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               stroke={colors.homePlanned}
               fill="url(#homePlannedActualGradient)"
               strokeWidth={2}
-              name="Planned (e.g. EV)"
+              name="Planned Load"
               isAnimationActive={false}
               dot={false}
               connectNulls
@@ -504,7 +512,7 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
               stroke={colors.homePlanned}
               strokeWidth={2}
               strokeDasharray="4 3"
-              name="Planned forecast"
+              name="Forecast Total"
               isAnimationActive={false}
               dot={false}
               connectNulls={false}
@@ -609,14 +617,18 @@ const CustomTooltip = ({ active, payload, label, resolution }: any) => {
           <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.home }}></div>
           <span className="text-gray-700 dark:text-gray-300">Home Load</span>
         </div>
-        <div className="flex items-center">
-          <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.homePlanned }}></div>
-          <span className="text-gray-700 dark:text-gray-300">Planned (e.g. EV)</span>
-        </div>
-        <div className="flex items-center">
-          <div className="w-4 h-1" style={{ backgroundColor: colors.homePlanned, borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
-          <span className="text-gray-700 dark:text-gray-300 ml-2">Planned forecast</span>
-        </div>
+        {hasPlannedLoad && (
+          <div className="flex items-center">
+            <div className="w-4 h-3 rounded mr-2" style={{ backgroundColor: colors.homePlanned }}></div>
+            <span className="text-gray-700 dark:text-gray-300">Planned Load</span>
+          </div>
+        )}
+        {hasPlannedLoad && (
+          <div className="flex items-center">
+            <div className="w-4 h-1" style={{ backgroundColor: colors.homePlanned, borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
+            <span className="text-gray-700 dark:text-gray-300 ml-2">Forecast Total</span>
+          </div>
+        )}
         <div className="flex items-center">
           <div className="w-4 h-1" style={{ backgroundColor: '#9CA3AF', borderStyle: 'dashed', borderWidth: '1px 0' }}></div>
           <span className="text-gray-700 dark:text-gray-300 ml-2">Buy Price</span>

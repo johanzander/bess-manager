@@ -73,6 +73,15 @@ describe('getHomeLoadSplit', () => {
     expect(split.plannedTotal).toBe(-1.25)  // dashed reference line = what was planned
   })
 
+  it('keeps the forecast line null for an elapsed period with no plan declared', () => {
+    // Ordinary hour, no overlay -- nothing to compare, so no dashed line.
+    const split = getHomeLoadSplit(
+      { dataSource: 'actual', predictedResidualLoad: fv(0.375), plannedManagedLoad: fv(0) },
+      0.375
+    )
+    expect(split.plannedTotal).toBeNull()
+  })
+
   it('falls back to all-residual when the breakdown is absent', () => {
     const split = getHomeLoadSplit(undefined, 1.25)
     expect(split.residual).toBe(-1.25)

@@ -34,19 +34,28 @@ The main dashboard provides a real-time overview of your energy system:
 
 ### Understanding the Charts
 
-#### 1. Energy Flow Chart (Sankey Diagram)
+#### 1. Energy Flow Chart
 
-This beautiful flowing chart shows how energy moves through your system:
+An hourly (or 15-minute) chart of your whole day, today and tomorrow. Energy sources stack above the zero line, consumption stacks below it, and price is plotted on its own axis on the right:
 
-- **🌞 Solar → Home**: Direct solar consumption (best case)
-- **🌞 Solar → Battery**: Solar energy stored for later
-- **🌞 Solar → Grid**: Excess solar sold to grid
-- **🔋 Battery → Home**: Stored energy powering your home
-- **🔋 Battery → Grid**: Stored energy sold during peak prices
-- **⚡ Grid → Home**: Direct grid consumption
-- **⚡ Grid → Battery**: Grid energy stored during cheap periods
+- **🌞 Solar Production**, **🔋 Battery Discharge**, **⚡ Grid Import** — where your energy came from, stacked together
+- **🏠 Home Load**, **🔋 Battery Charge**, **⚡ Grid Export** — where it went, stacked below the zero line
+- **Buy Price** (and, if enabled, **Sell Price**) — a dashed line against the right-hand axis
 
-**Tip**: Thicker flows = more energy. Green flows = good (saving money), red flows = expensive.
+A shaded band marks the hours that have already elapsed today; a second shade marks tomorrow's forecast, once available.
+
+**Home Load, split into Planned Load**
+
+If you've declared a **Planned Consumption Change** (e.g. tonight's EV session — see "Planned Consumption Changes" below), the chart splits **Home Load** into two stacked pieces for the hours the plan covers:
+
+- **Home Load** — your normal forecast for that hour, from whichever consumption strategy you've configured
+- **Planned Load** — the extra (or reduced) energy the declaration adds on top
+
+Together they still stack to the same total the optimizer planned against — the split is purely so you can see how much of an hour's forecast is "normal" versus "because of what I told it to expect."
+
+**Forecast Total — checking a plan against what happened**
+
+Once an hour with a declared plan has passed, the chart keeps showing what was actually measured (the solid Home Load area), but adds a dashed **Forecast Total** line marking what had been planned for that hour. A gap between the solid area and the dashed line means the plan didn't play out as declared — the EV charged less (or more) than announced, for instance. Hours with no plan attached never show this line; it's there to check a specific declaration, not to grade general forecast accuracy — the **Insights** page's Forecast Accuracy view is for that.
 
 #### 2. Battery Level Chart
 

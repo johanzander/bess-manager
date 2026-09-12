@@ -42,6 +42,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 | **Battery protection** | Models cycle degradation cost — won't chase marginal gains that wear out your battery |
 | **Fuse protection** | Plans schedules and monitors real-time grid current to keep charging within your main fuse's limit |
 | **EV aware** | Automatically pauses battery discharge when your EV is charging |
+| **Planned loads** | Declare upcoming EV charging or other known consumption changes so forecasts — and the dashboard — account for them, then check what happened against the plan |
 | **Re-optimization** | Continuously updates as prices, solar, and consumption data change |
 | **AI Analyst** | Chat with your battery system — ask questions, get explanations |
 

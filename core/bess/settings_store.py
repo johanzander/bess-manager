@@ -50,6 +50,7 @@ SHARED_SENSOR_KEYS = frozenset(
         "solar_forecast_tomorrow",
         "48h_avg_grid_import",
         "consumption_overlay",
+        "octoplus_power_up_calendar",
         "current_l1",
         "current_l2",
         "current_l3",
@@ -515,6 +516,7 @@ class SettingsStore:
             DEFAULT_AREA,
             DEFAULT_CURRENCY,
             EXPORT_SPOT_MULTIPLIER,
+            FREE_IMPORT_PRICE,
             HOME_HOURLY_CONSUMPTION_KWH,
             HOUSE_MAX_FUSE_CURRENT_A,
             HOUSE_VOLTAGE_V,
@@ -559,7 +561,7 @@ class SettingsStore:
                 "provider": "nordpool_official",
                 "nordpool_official": {"config_entry_id": ""},
                 "nordpool_hacs": {"entity": ""},
-                "octopus": {},
+                "octopus": {"free_import_price": FREE_IMPORT_PRICE},
                 "entsoe": {"entity": ""},
             },
             "growatt": {"device_id": ""},
@@ -594,6 +596,7 @@ class SettingsStore:
             BATTERY_EFFICIENCY_CHARGE,
             BATTERY_EFFICIENCY_DISCHARGE,
             EXPORT_SPOT_MULTIPLIER,
+            FREE_IMPORT_PRICE,
             INVERTER_AC_POWER_MARGIN,
             INVERTER_MAX_AC_POWER_KW,
             SPOT_MULTIPLIER,
@@ -724,6 +727,17 @@ class SettingsStore:
                 if ep.get("provider") == "nordpool":
                     ep["provider"] = "nordpool_hacs"
                 self.data["energy_provider"] = ep
+                changed = True
+
+            # Added with the Octoplus free-import overlay; BatterySystemManager
+            # reads it strictly for the octopus provider.
+            octopus = ep.get("octopus")
+            if isinstance(octopus, dict) and "free_import_price" not in octopus:
+                octopus["free_import_price"] = FREE_IMPORT_PRICE
+                logger.info(
+                    "Schema migration: added energy_provider.octopus.free_import_price = %s",
+                    FREE_IMPORT_PRICE,
+                )
                 changed = True
 
         growatt = self.data.get("growatt")

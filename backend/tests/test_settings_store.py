@@ -606,6 +606,41 @@ class TestSchemaMigration:
         assert price["export_spot_multiplier"] == 1.0
         assert price["use_actual_price"] is False
 
+    def test_octopus_config_missing_free_import_price_gets_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Octopus configs written before the free-import overlay start up unchanged."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {"import_today_entity": "event.import_today"},
+                }
+            },
+        )
+        octopus = store.get_section("energy_provider")["octopus"]
+        assert octopus["free_import_price"] == 0.0
+        assert octopus["import_today_entity"] == "event.import_today"
+
+    def test_octopus_configured_free_import_price_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {"free_import_price": 0.05},
+                }
+            },
+        )
+        assert store.get_section("energy_provider")["octopus"]["free_import_price"] == (
+            0.05
+        )
+
     def test_electricity_price_existing_multiplier_fields_preserved(
         self, tmp_path, monkeypatch
     ):

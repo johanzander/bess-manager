@@ -10,6 +10,7 @@ export interface PricingForm {
   octopusImportTomorrowEntity: string;
   octopusExportTodayEntity: string;
   octopusExportTomorrowEntity: string;
+  octopusFreeImportPrice: number;
   entsoeEntity: string;
   area: string;
   markupRate: number;
@@ -189,10 +190,21 @@ export function PricingFormSection({ form, onChange }: Props) {
           </>
         )}
         {isOctopus && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {numField('Tax Reduction', form.taxReduction,
-              v => onChange({ ...form, taxReduction: v }),
-              { unit: 'GBP/kWh credit on sold energy', min: 0, step: 0.001 })}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {numField('Tax Reduction', form.taxReduction,
+                v => onChange({ ...form, taxReduction: v }),
+                { unit: 'GBP/kWh credit on sold energy', min: 0, step: 0.001 })}
+              {numField('Price during free windows', form.octopusFreeImportPrice,
+                v => onChange({ ...form, octopusFreeImportPrice: v }),
+                { unit: 'GBP/kWh', min: 0, step: 0.001 })}
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              Octopus doesn't distinguish Power Up sessions from Weekend Happy Hours
+              in the calendar — both are priced the same. Set a small non-zero value
+              here to stay conservative if you only want the effect during genuine
+              free-power events.
+            </p>
           </div>
         )}
       </SectionCard>

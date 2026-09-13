@@ -114,6 +114,7 @@ const SetupWizardPage: React.FC = () => {
     octopusImportTomorrowEntity: '',
     octopusExportTodayEntity: '',
     octopusExportTomorrowEntity: '',
+    octopusFreeImportPrice: 0,
     entsoeEntity: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
@@ -233,6 +234,12 @@ const SetupWizardPage: React.FC = () => {
           }
         }
       }
+      // Octoplus power-up calendar is discovered via octopusEntities, not
+      // the generic d.sensors map (it's found only when scanning for the
+      // Octopus provider, not by domain/suffix matching).
+      if (d.octopusEntities?.powerUpCalendar && !sharedSensors['octoplus_power_up_calendar']) {
+        sharedSensors['octoplus_power_up_calendar'] = d.octopusEntities.powerUpCalendar;
+      }
       newSensors.shared = sharedSensors;
 
       // For each platform, merge with existing config (fill gaps)
@@ -340,6 +347,7 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: ep.octopus?.importTomorrowEntity ?? f.octopusImportTomorrowEntity,
         octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
         octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
+        octopusFreeImportPrice:      ep.octopus?.freeImportPrice      ?? f.octopusFreeImportPrice,
         // Restore ENTSO-e entity
         entsoeEntity:          ep.entsoe?.entity                 ?? f.entsoeEntity,
       }));
@@ -421,6 +429,7 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
         octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
         octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
+        octopusFreeImportPrice: pricingForm.octopusFreeImportPrice,
         // ENTSO-e entity
         entsoeEntity: pricingForm.entsoeEntity || undefined,
         // Inverter
@@ -604,6 +613,17 @@ const SetupWizardPage: React.FC = () => {
                   Re-scan. BESS cannot read a disabled entity, so leaving them
                   off would report the system as degraded after setup.
                 </p>
+              </div>
+            )}
+
+            {discovery.octopusEntities?.powerUpCalendarDisabledBy && (
+              <div
+                data-testid="power-up-calendar-disabled-warning"
+                className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+              >
+                Enable the Octoplus power-up calendar entity (
+                <span className="font-mono text-xs">{discovery.octopusEntities.powerUpCalendar}</span>
+                ) in Home Assistant to use free power windows.
               </div>
             )}
 

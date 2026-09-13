@@ -77,6 +77,8 @@ export interface DiscoveryResult {
     importTomorrow?: string;
     exportToday?: string;
     exportTomorrow?: string;
+    powerUpCalendar?: string;
+    powerUpCalendarDisabledBy?: string;
   };
   entsoeFound: boolean;
   entsoeEntity: string | null;
@@ -141,6 +143,7 @@ function isIntegrationFound(
   if (id === 'weather') return !!shared['weather_entity'];
   if (id === 'consumption_forecast') return !!shared['48h_avg_grid_import'];
   if (id === 'consumption_overlay') return !!shared['consumption_overlay'];
+  if (id === 'octoplus_power_up_calendar') return !!shared['octoplus_power_up_calendar'];
   if (id === 'discharge_inhibit') return !!shared['discharge_inhibit'];
   return false;
 }

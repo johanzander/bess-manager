@@ -258,6 +258,30 @@ class TestSetupCompleteLegacy:
             ep["octopus"]["export_tomorrow_entity"]
             == "event.octopus_electricity_export_next_day_rates"
         )
+        assert ep["octopus"]["free_import_price"] == 0.0
+
+    def test_persists_octopus_free_import_price_when_given(self, mock_controller):
+        """A wizard-supplied free_import_price is saved verbatim."""
+        mock_controller.settings_store.get_section.return_value = {}
+
+        resp = _client.post(
+            "/api/setup/complete",
+            json={
+                "sensors": {"battery_soc": "sensor.growatt_battery_soc"},
+                "provider": "octopus",
+                "currency": "GBP",
+                "octopusImportTodayEntity": "event.octopus_electricity_import_current_day_rates",
+                "octopusImportTomorrowEntity": "event.octopus_electricity_import_next_day_rates",
+                "octopusExportTodayEntity": "event.octopus_electricity_export_current_day_rates",
+                "octopusExportTomorrowEntity": "event.octopus_electricity_export_next_day_rates",
+                "octopusFreeImportPrice": 0.05,
+            },
+        )
+        assert resp.status_code == 200
+
+        sections = mock_controller.settings_store.save_all.call_args[0][0]
+        ep = sections["energy_provider"]
+        assert ep["octopus"]["free_import_price"] == 0.05
 
     def test_persists_without_octopus_entities(self, mock_controller):
         """Non-Octopus wizard completion does not create octopus section."""

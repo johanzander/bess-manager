@@ -631,17 +631,17 @@ def _compute_reward_grid(
     current_sell_price: float,
     solar_production: float,
     import_cap_kwh: float | None = None,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Vectorized form of `_compute_reward`'s reward calculation.
 
-    Only the reward (and, for the import-cap feasibility mask, total
-    grid_imported) is needed by the DP backward pass -- it discards
-    `new_cost_basis`, same simplification the caller already applies to the
-    scalar path (`reward, _ = _compute_reward(...)`). Formulas mirror
-    `_compute_reward` exactly, branch for branch, for numerical parity. See
-    #236.
+    Only the reward (and, for the import-cap and minimum-export feasibility
+    masks, total grid_imported and grid_exported) is needed by the DP
+    backward pass -- it discards `new_cost_basis`, same simplification the
+    caller already applies to the scalar path
+    (`reward, _ = _compute_reward(...)`). Formulas mirror `_compute_reward`
+    exactly, branch for branch, for numerical parity. See #236.
 
-    Returns (reward, grid_imported).
+    Returns (reward, grid_imported, grid_exported).
     """
     max_soe = battery_settings.max_soe_kwh
     eff_charge = battery_settings.efficiency_charge
@@ -739,7 +739,12 @@ def _compute_reward_grid(
         grid_imported_store,
         np.where(is_discharge, grid_imported_d, grid_imported_idle),
     )
-    return reward, grid_imported
+    grid_exported = np.where(
+        is_charge,
+        grid_exported_store,
+        np.where(is_discharge, grid_exported_discharge, grid_exported_idle),
+    )
+    return reward, grid_imported, grid_exported
 
 
 def _compute_reward(
@@ -1231,6 +1236,7 @@ def _run_dynamic_programming(
     max_charge_power_per_period: list[float] | None = None,
     import_cap_kwh: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
+    min_grid_export_kwh: list[float] | None = None,
 ) -> np.ndarray:
     """
     Run backward induction DP to compute optimal battery control policy.
@@ -1243,6 +1249,11 @@ def _run_dynamic_programming(
     (_discharge_candidates) contains the same action. Added for the
     sunrise/sunset crossover (#466) and extended to every such period by
     Phase 4b (#352).
+
+    `import_cap_kwh` and `min_grid_export_kwh`, when given, hold one entry per
+    period. Both are masked per state exactly as `select_action` filters its
+    candidates -- import cap first, then minimum export -- so V values only
+    policies the forward replay can execute (P1).
 
     Also considers, at every state, a distinct SOLAR_EXPORT-below-max
     candidate (#313) -- battery SOE held exactly unchanged (no passive
@@ -1264,6 +1275,7 @@ def _run_dynamic_programming(
     # circular -- the same arrangement pwl_window_dp already has with this
     # file.
     from core.bess.action_selector import (
+        _discharge_is_unexecutable,
         _residual_cover_p,
         _solar_export_bypass_is_unexecutable,
     )
@@ -1318,6 +1330,9 @@ def _run_dynamic_programming(
             else None
         )
         period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
+        period_min_export = (
+            min_grid_export_kwh[t] if min_grid_export_kwh is not None else None
+        )
         if period_max_charge is not None:
             charge_feasible = charge_feasible_base & (
                 ~is_charge | (power_row <= period_max_charge)
@@ -1357,7 +1372,7 @@ def _run_dynamic_programming(
         )
         feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
 
-        reward, grid_imported = _compute_reward_grid(
+        reward, grid_imported, grid_exported = _compute_reward_grid(
             power_row,
             soe_col,
             next_soe,
@@ -1388,12 +1403,12 @@ def _run_dynamic_programming(
         next_i = np.clip(next_i, 0, n_states - 1)
 
         value = reward + V[t + 1][next_i]
-        value = np.where(feasible, value, -np.inf)
 
-        # IDLE is always a feasible, finite-reward action (no physical
-        # constraint check applies to it, and _compute_reward_grid never
-        # returns -inf), so the max over actions can never remain -inf here.
-        V[t, :] = np.max(value, axis=1)
+        # The SOLAR_EXPORT bypass and residual-cover columns below, each as
+        # (value, feasible, grid_exported) per state. They are folded into
+        # V[t] only after the minimum-export mask, whose achievable export has
+        # to be measured across every column the selector would see.
+        extra_columns: list[tuple[np.ndarray, np.ndarray, np.ndarray]] = []
 
         # SOLAR_EXPORT-below-max candidate (#313): soe held exactly
         # unchanged (next_soe == soe, same grid index), solar surplus
@@ -1422,26 +1437,30 @@ def _run_dynamic_programming(
             solar_production[t], home_consumption[t], battery_settings, dt
         ):
             zeros_col = np.zeros_like(soe_col)
-            reward_bypass, grid_imported_bypass = _compute_reward_grid(
-                zeros_col,
-                soe_col,
-                soe_col,
-                home_consumption=home_consumption[t],
-                battery_settings=battery_settings,
-                dt=dt,
-                current_buy_price=buy_price[t],
-                current_sell_price=sell_price[t],
-                solar_production=solar_production[t],
-                import_cap_kwh=period_import_cap,
+            reward_bypass, grid_imported_bypass, grid_exported_bypass = (
+                _compute_reward_grid(
+                    zeros_col,
+                    soe_col,
+                    soe_col,
+                    home_consumption=home_consumption[t],
+                    battery_settings=battery_settings,
+                    dt=dt,
+                    current_buy_price=buy_price[t],
+                    current_sell_price=sell_price[t],
+                    solar_production=solar_production[t],
+                    import_cap_kwh=period_import_cap,
+                )
             )
             value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
+            bypass_feasible = np.ones(n_states, dtype=bool)
             if effective_import_cap is not None:
                 bypass_feasible = (
                     grid_imported_bypass.reshape(-1)
                     <= effective_import_cap.reshape(-1) + 1e-9
                 )
-                value_bypass = np.where(bypass_feasible, value_bypass, -np.inf)
-            V[t, :] = np.maximum(V[t, :], value_bypass)
+            extra_columns.append(
+                (value_bypass, bypass_feasible, grid_exported_bypass.reshape(-1))
+            )
 
         # Residual load-cover candidate (#466 follow-up): one extra
         # O(n_states) column discharging exactly this period's forecast net
@@ -1474,17 +1493,19 @@ def _run_dynamic_programming(
             cover_feasible &= (
                 (next_soe_cover >= min_soe_kwh) & (next_soe_cover <= max_soe_kwh)
             ).reshape(-1)
-            reward_cover, grid_imported_cover = _compute_reward_grid(
-                cover_col,
-                soe_col,
-                next_soe_cover,
-                home_consumption=home_consumption[t],
-                battery_settings=battery_settings,
-                dt=dt,
-                current_buy_price=buy_price[t],
-                current_sell_price=sell_price[t],
-                solar_production=solar_production[t],
-                import_cap_kwh=period_import_cap,
+            reward_cover, grid_imported_cover, grid_exported_cover = (
+                _compute_reward_grid(
+                    cover_col,
+                    soe_col,
+                    next_soe_cover,
+                    home_consumption=home_consumption[t],
+                    battery_settings=battery_settings,
+                    dt=dt,
+                    current_buy_price=buy_price[t],
+                    current_sell_price=sell_price[t],
+                    solar_production=solar_production[t],
+                    import_cap_kwh=period_import_cap,
+                )
             )
             if effective_import_cap is not None:
                 cover_feasible &= (
@@ -1496,8 +1517,54 @@ def _run_dynamic_programming(
             ).astype(np.int64)
             next_i_cover = np.clip(next_i_cover, 0, n_states - 1).reshape(-1)
             value_cover = reward_cover.reshape(-1) + V[t + 1][next_i_cover]
-            value_cover = np.where(cover_feasible, value_cover, -np.inf)
-            V[t, :] = np.maximum(V[t, :], value_cover)
+            extra_columns.append(
+                (value_cover, cover_feasible, grid_exported_cover.reshape(-1))
+            )
+
+        if period_min_export is not None:
+            # Minimum export, "constrain, don't raise", AFTER the import cap --
+            # the same filter in the same order as `select_action`, which
+            # states why. The achievable export is taken over every column,
+            # since the bypass is often the only action that exports at all.
+            #
+            # It is measured over executable discharges only. This pass keeps
+            # in-band `_discharge_is_unexecutable` cells feasible as a proxy
+            # for exact cover (the #497 note at the feasibility mask above),
+            # but their sub-resolution "export" is one the selector can never
+            # choose. Letting it set the requirement would force a phantom
+            # discharge here while the replay, finding no real export, keeps
+            # every candidate.
+            executable = ~is_discharge | ~_discharge_is_unexecutable(
+                np.abs(power_row), home_consumption[t], solar_production[t], dt
+            )
+            achievable_export = np.max(
+                np.where(feasible & executable, grid_exported, -np.inf), axis=1
+            )
+            for _column_value, column_feasible, column_exported in extra_columns:
+                achievable_export = np.maximum(
+                    achievable_export,
+                    np.where(column_feasible, column_exported, -np.inf),
+                )
+            required_export = np.minimum(period_min_export, achievable_export)
+            feasible &= grid_exported >= required_export.reshape(-1, 1) - 1e-9
+            extra_columns = [
+                (
+                    column_value,
+                    column_feasible & (column_exported >= required_export - 1e-9),
+                    column_exported,
+                )
+                for column_value, column_feasible, column_exported in extra_columns
+            ]
+
+        # IDLE is always a feasible, finite-reward action (no physical
+        # constraint check applies to it, and _compute_reward_grid never
+        # returns -inf), and each constraint mask keeps the row's best
+        # achiever, so the max over actions can never remain -inf here.
+        V[t, :] = np.max(np.where(feasible, value, -np.inf), axis=1)
+        for column_value, column_feasible, _column_exported in extra_columns:
+            V[t, :] = np.maximum(
+                V[t, :], np.where(column_feasible, column_value, -np.inf)
+            )
 
     return V
 
@@ -1642,6 +1709,7 @@ def _best_action_at_continuous_state(
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     import_cap_kwh: float | None = None,
     sell_price_floored: list[bool] | None = None,
+    min_grid_export_kwh: float | None = None,
 ) -> tuple[float, float, float, float, PeriodFlows, float, float]:
     """The grid DP's forward replay: `action_selector.select_action` with the
     continuation value read off the already-known V[t+1, :] row, linearly
@@ -1690,6 +1758,7 @@ def _best_action_at_continuous_state(
             dt=dt,
             max_charge_power_per_period=max_charge_power_per_period,
             import_cap_kwh=import_cap_kwh,
+            min_grid_export_kwh=min_grid_export_kwh,
             capabilities=capabilities,
             sell_price_floored=sell_price_floored,
         ),
@@ -1969,6 +2038,7 @@ def optimize_battery_schedule(
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
+    min_grid_export_kwh_per_period: list[float] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -2022,6 +2092,13 @@ def optimize_battery_schedule(
             internal tie-margin/value-slope/window/SoE-trajectory data this
             function already computes, for offline measurement tooling (#450).
             Never passed by production callers; a pure no-op when omitted.
+        min_grid_export_kwh_per_period: Per-period minimum grid export (kWh),
+            one entry per period -- the Octopus Power Down export pulse. A
+            constraint on flows, "constrain, don't raise" like the import cap:
+            a period exports at least its target where some action can, and
+            the most it can where none can. Solar surplus counts. Defaults to
+            None (no minimum anywhere); a list of the wrong length raises
+            ValueError.
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -2029,6 +2106,15 @@ def optimize_battery_schedule(
 
     horizon = len(buy_price)
     dt = period_duration_hours
+    if (
+        min_grid_export_kwh_per_period is not None
+        and len(min_grid_export_kwh_per_period) != horizon
+    ):
+        raise ValueError(
+            f"min_grid_export_kwh_per_period has "
+            f"{len(min_grid_export_kwh_per_period)} entries for a horizon of "
+            f"{horizon} periods"
+        )
     # The fuse cap itself doesn't vary by period (issue #429 has no
     # time-of-day term), but the rest of this function threads it per-period
     # so a future caller can override individual periods (e.g. a session
@@ -2106,6 +2192,7 @@ def optimize_battery_schedule(
         max_charge_power_per_period=max_charge_power_per_period,
         import_cap_kwh=import_cap_kwh,
         capabilities=capabilities,
+        min_grid_export_kwh=min_grid_export_kwh_per_period,
     )
 
     # Step 2: Reconstruct the optimal path with continuous SoE propagation.
@@ -2142,6 +2229,11 @@ def optimize_battery_schedule(
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
         period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
+        period_min_export = (
+            min_grid_export_kwh_per_period[t]
+            if min_grid_export_kwh_per_period is not None
+            else None
+        )
         (
             action,
             next_soe,
@@ -2166,6 +2258,7 @@ def optimize_battery_schedule(
             capabilities=capabilities,
             import_cap_kwh=period_import_cap,
             sell_price_floored=sell_price_floored,
+            min_grid_export_kwh=period_min_export,
         )
         tie_margins.append(tie_margin)
         value_slopes.append(value_slope)
@@ -2276,6 +2369,11 @@ def optimize_battery_schedule(
             window_import_cap = (
                 import_cap_kwh[sl] if import_cap_kwh is not None else None
             )
+            window_min_export = (
+                min_grid_export_kwh_per_period[sl]
+                if min_grid_export_kwh_per_period is not None
+                else None
+            )
             # End SOE is pinned to the grid DP's own SOE at the window's exit,
             # so the untouched schedule after the window stays valid. An
             # infeasible pin raises out of resolve_pwl_window and is
@@ -2321,7 +2419,9 @@ def optimize_battery_schedule(
             # the periods where charging-vs-not is closest, so a window solved
             # without the cap could splice back a grid-charge action that
             # plans more import than the house's fuse can carry -- weakening
-            # the constraint precisely where it is most likely to bind.
+            # the constraint precisely where it is most likely to bind. The
+            # minimum export is sliced and passed for the same reason: a window
+            # solved without it could splice back a hold over a forced export.
             try:
                 V_window = run_pwl_window_backward_induction(
                     window_horizon=window_horizon,
@@ -2335,6 +2435,7 @@ def optimize_battery_schedule(
                     max_charge_power_per_period=window_max_charge,
                     capabilities=capabilities,
                     import_cap_kwh=window_import_cap,
+                    min_grid_export_kwh=window_min_export,
                 )
             except PWLWindowUnderRefinedError:
                 if window_horizon <= 1:
@@ -2369,6 +2470,7 @@ def optimize_battery_schedule(
                 capabilities=capabilities,
                 import_cap_kwh=window_import_cap,
                 sell_price_floored=window_floored,
+                min_grid_export_kwh=window_min_export,
             )
             window_resolutions[window.start] = resolution
             resolved_windows.append(window)

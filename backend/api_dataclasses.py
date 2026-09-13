@@ -448,10 +448,20 @@ class APIDashboardHourlyData:
     # profitable export. See core/bess/models.py DecisionData.curtailed.
     curtailed: bool
     directSolar: float
+    # True when this period falls inside an Octoplus free-import window
+    # (Power Up session or Weekend Happy Hour) — buyPrice is already the
+    # overlaid free price. Only known for today/tomorrow, where the price
+    # manager's cache carries isFreeImport per entry; defaults to False
+    # elsewhere (e.g. historical days).
+    isFreeImport: bool = False
 
     @classmethod
     def from_internal(
-        cls, hourly, battery_capacity: float, currency: str
+        cls,
+        hourly,
+        battery_capacity: float,
+        currency: str,
+        is_free_import: bool = False,
     ) -> APIDashboardHourlyData:
         """Convert internal HourlyData to API format using pure dataclass approach."""
 
@@ -606,6 +616,7 @@ class APIDashboardHourlyData:
             observedIntent=hourly.decision.observed_intent,
             curtailed=hourly.decision.curtailed,
             directSolar=direct_solar,
+            isFreeImport=is_free_import,
         )
 
 
@@ -1182,6 +1193,7 @@ class APISetupCompletePayload(BaseModel):
     octopusImportTomorrowEntity: str | None = None
     octopusExportTodayEntity: str | None = None
     octopusExportTomorrowEntity: str | None = None
+    octopusFreeImportPrice: float | None = None
     # ENTSO-e Transparency Platform entity (required when provider == "entsoe")
     entsoeEntity: str | None = None
     # Inverter

@@ -519,6 +519,17 @@ class TestPatchSettingsLiveUpdates:
         assert len(ep_calls) >= 1
         assert ep_calls[0][0][0]["energy_provider"]["provider"] == "octopus"
 
+    def test_energy_provider_free_import_price_round_trips(self, mock_controller):
+        new_provider = {
+            "provider": "octopus",
+            "octopus": {"api_key": "sk-test", "free_import_price": 0.05},
+        }
+        resp = _client.patch("/api/settings", json={"energyProvider": new_provider})
+        assert resp.status_code == 200
+        saved = mock_controller.settings_store.save_section.call_args_list
+        ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
+        assert ep_saves[-1][0][1]["octopus"]["free_import_price"] == 0.05
+
     def test_growatt_device_id_applied_to_ha_controller(self, mock_controller):
         _client.patch("/api/settings", json={"growatt": {"deviceId": "new-dev-99"}})
         # device_id is written directly to ha_controller, not via update_settings

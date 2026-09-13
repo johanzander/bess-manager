@@ -112,12 +112,13 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
       solarToBatteryFormatted: hour.solarToBattery,
       gridToBatteryFormatted: hour.gridToBattery,
       batteryToHomeFormatted: hour.batteryToHome,
-      batteryToGridFormatted: hour.batteryToGrid
+      batteryToGridFormatted: hour.batteryToGrid,
+      isFreeImport: hour.isFreeImport ?? false
     };
   });
 
   // Zero anchor at x=0: gives stepBefore a left edge so bars render from 0→1 for period 0
-  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, solarCharging: 0, gridCharging: 0, homeDischarging: 0, gridDischarging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted, solarToBatteryFormatted: chartData[0]?.solarToBatteryFormatted, gridToBatteryFormatted: chartData[0]?.gridToBatteryFormatted, batteryToHomeFormatted: chartData[0]?.batteryToHomeFormatted, batteryToGridFormatted: chartData[0]?.batteryToGridFormatted });
+  chartData.unshift({ hour: 0, periodNum: -1, hourLabel: '', batterySocPercent: chartData[0]?.batterySocPercent ?? 0, action: 0, solarCharging: 0, gridCharging: 0, homeDischarging: 0, gridDischarging: 0, price: chartData[0]?.price ?? 0, dataSource: 'actual', isActual: true, isPredicted: false, isTomorrow: false, batterySocEndFormatted: chartData[0]?.batterySocEndFormatted, batteryActionFormatted: chartData[0]?.batteryActionFormatted, buyPriceFormatted: chartData[0]?.buyPriceFormatted, solarToBatteryFormatted: chartData[0]?.solarToBatteryFormatted, gridToBatteryFormatted: chartData[0]?.gridToBatteryFormatted, batteryToHomeFormatted: chartData[0]?.batteryToHomeFormatted, batteryToGridFormatted: chartData[0]?.batteryToGridFormatted, isFreeImport: chartData[0]?.isFreeImport ?? false });
 
   // Append tomorrow's data with hour offset 24+
   const hasTomorrowData = tomorrowData && tomorrowData.length > 0;
@@ -170,7 +171,8 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
         solarToBatteryFormatted: hour.solarToBattery,
         gridToBatteryFormatted: hour.gridToBattery,
         batteryToHomeFormatted: hour.batteryToHome,
-        batteryToGridFormatted: hour.batteryToGrid
+        batteryToGridFormatted: hour.batteryToGrid,
+        isFreeImport: hour.isFreeImport ?? false
       });
     }
   }
@@ -180,6 +182,27 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
     ? Math.ceil(Math.max(...chartData.map(d => d.hour)))
     : 24;
   const xAxisTicks = Array.from({ length: maxHourValue + 1 }, (_, i) => i);
+
+  // Contiguous free-import segments (Octoplus Power Up / Happy Hour windows),
+  // collapsed into [start, end] hour ranges so each renders as one ReferenceArea.
+  const freeImportSegments: { x1: number; x2: number }[] = [];
+  {
+    let segmentStart: number | null = null;
+    let prevHour = 0;
+    for (const d of chartData) {
+      if (d.periodNum === -1) continue;
+      if (d.isFreeImport) {
+        if (segmentStart === null) segmentStart = prevHour;
+      } else if (segmentStart !== null) {
+        freeImportSegments.push({ x1: segmentStart, x2: prevHour });
+        segmentStart = null;
+      }
+      prevHour = d.hour;
+    }
+    if (segmentStart !== null) {
+      freeImportSegments.push({ x1: segmentStart, x2: prevHour });
+    }
+  }
 
   // Find predicted hours range for today (same logic as EnergyFlowChart)
   const firstPredictedIdx = chartData.findIndex(d => !d.isActual && !d.isTomorrow);
@@ -257,6 +280,7 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                     <p style={{ fontWeight: 'bold', marginBottom: 4 }}>{label}</p>
                     <p style={{ color: colors.soc }}>Battery SOC : {data.batterySocEndFormatted?.text ?? `${data.batterySocPercent} %`}</p>
                     <p style={{ color: '#9CA3AF' }}>Electricity Price : {data.buyPriceFormatted?.text ?? `${data.price}`}</p>
+                    {data.isFreeImport && <p style={{ color: colors.solarCharging, fontWeight: 'bold' }}>Free import window</p>}
                     {data.solarCharging > 0 && <p style={{ color: colors.solarCharging }}>Solar → Battery : {data.solarToBatteryFormatted?.text ?? `${data.solarCharging}`}</p>}
                     {data.gridCharging > 0 && <p style={{ color: colors.gridCharging }}>Grid → Battery : {data.gridToBatteryFormatted?.text ?? `${data.gridCharging}`}</p>}
                     {data.homeDischarging < 0 && <p style={{ color: colors.homeDischarging }}>Battery → Home : {data.batteryToHomeFormatted?.text ?? `${-data.homeDischarging}`}</p>}
@@ -300,6 +324,18 @@ export const BatteryLevelChart: React.FC<BatteryLevelChartProps> = ({ hourlyData
                 fill={isDarkMode ? 'rgba(120,120,120,0.12)' : 'rgba(120,120,120,0.08)'}
               />
             )}
+
+            {/* Free-import windows (Octoplus Power Up / Happy Hour) */}
+            {freeImportSegments.map((seg, i) => (
+              <ReferenceArea
+                key={`free-import-${i}`}
+                yAxisId="left"
+                x1={seg.x1}
+                x2={seg.x2}
+                fill={isDarkMode ? 'rgba(34,197,94,0.18)' : 'rgba(34,197,94,0.14)'}
+                ifOverflow="hidden"
+              />
+            ))}
 
             {/* Today/tomorrow divider */}
             {hasTomorrowData && (

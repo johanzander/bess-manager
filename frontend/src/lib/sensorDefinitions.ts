@@ -67,7 +67,7 @@ export interface PerPlatformSensors {
 /** IDs of non-inverter (shared) integrations. */
 export const SHARED_INTEGRATION_IDS = new Set([
   'nordpool', 'solar_forecast', 'consumption_forecast', 'consumption_overlay',
-  'phase_current', 'discharge_inhibit', 'weather',
+  'phase_current', 'discharge_inhibit', 'weather', 'octoplus_power_up_calendar',
 ]);
 
 /** Create an empty per-platform sensors structure. */
@@ -559,6 +559,21 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Planned Changes',
         sensors: [
           { key: 'consumption_overlay', label: 'Planned Consumption Changes', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'octoplus_power_up_calendar',
+    name: 'Octoplus Free Power Calendar',
+    required: false,
+    description:
+      "Optional. The Octopus Energy integration's calendar.octopus_energy_<account>_octoplus_power_up entity, which tracks free-import windows (Power Up sessions, Weekend Happy Hours). This entity is disabled by default in Home Assistant — enable it there first. Periods inside a free window are priced at the configured free-import price.",
+    sensorGroups: [
+      {
+        name: 'Free Power Calendar',
+        sensors: [
+          { key: 'octoplus_power_up_calendar', label: 'Octoplus Free Power Calendar', required: false },
         ],
       },
     ],

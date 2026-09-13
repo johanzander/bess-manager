@@ -22,7 +22,7 @@ interface ChartDataPoint {
   predictedGridExport: number;
 }
 
-const ComparisonTooltip = ({ active, payload, color, actualKey, predictedKey, label }: any) => {
+export const ComparisonTooltip = ({ active, payload, color, actualKey, predictedKey, label, favorableDirection = 'higher' }: any) => {
   if (!active || !payload?.length) return null;
   const data = payload[0].payload as ChartDataPoint;
   const hour = Math.floor(data.hour);
@@ -30,6 +30,7 @@ const ComparisonTooltip = ({ active, payload, color, actualKey, predictedKey, la
   const actual = data[actualKey as keyof ChartDataPoint] as number;
   const predicted = data[predictedKey as keyof ChartDataPoint] as number;
   const diff = actual - predicted;
+  const isFavorable = favorableDirection === 'higher' ? diff >= 0 : diff <= 0;
 
   return (
     <div className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-600 rounded-lg p-3 shadow-lg">
@@ -40,7 +41,7 @@ const ComparisonTooltip = ({ active, payload, color, actualKey, predictedKey, la
         <p style={{ color }}>Actual: {actual.toFixed(3)} kWh</p>
         <p style={{ color, opacity: 0.7 }}>{label === 'forecast' ? 'Predicted' : 'Planned'}: {predicted.toFixed(3)} kWh</p>
         <p className={`font-medium ${
-          Math.abs(diff) < 0.05 ? 'text-gray-500' : diff >= 0
+          Math.abs(diff) < 0.05 ? 'text-gray-500' : isFavorable
             ? 'text-green-600 dark:text-green-400'
             : 'text-red-600 dark:text-red-400'
         }`}>
@@ -64,11 +65,12 @@ interface SingleChartProps {
   isDarkMode: boolean;
   colors: { text: string; gridLines: string };
   minYDomain?: number;
+  favorableDirection?: 'higher' | 'lower';
 }
 
 const SingleChart: React.FC<SingleChartProps> = ({
   data, title, subtitle, color, actualKey, predictedKey, gradientId, label,
-  xAxisTicks, isDarkMode, colors, minYDomain = 0.1,
+  xAxisTicks, isDarkMode, colors, minYDomain = 0.1, favorableDirection = 'higher',
 }) => {
   const rawMin = Math.min(
     ...data.map(d => Math.min(
@@ -124,7 +126,7 @@ const SingleChart: React.FC<SingleChartProps> = ({
               tickFormatter={(v: number) => v.toFixed(1)}
               label={{ value: 'kWh', angle: -90, position: 'insideLeft', style: { textAnchor: 'middle', fill: colors.text }, fontSize: 12 }}
             />
-            <Tooltip content={<ComparisonTooltip color={color} actualKey={actualKey} predictedKey={predictedKey} label={label} />} />
+            <Tooltip content={<ComparisonTooltip color={color} actualKey={actualKey} predictedKey={predictedKey} label={label} favorableDirection={favorableDirection} />} />
             <Area
               type="monotone"
               dataKey={actualKey}
@@ -230,7 +232,7 @@ const ForecastComparisonCharts: React.FC<ForecastComparisonChartsProps> = ({ com
           color="#ef4444" actualKey="actualConsumption" predictedKey="predictedConsumption"
           gradientId="consumptionActualFill" label="forecast"
           xAxisTicks={xAxisTicks} isDarkMode={isDarkMode} colors={colors}
-          minYDomain={0.3}
+          minYDomain={0.3} favorableDirection="lower"
         />
       </div>
 

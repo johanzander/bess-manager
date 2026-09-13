@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Home Consumption forecast chart now colors the Diff tooltip by favorability, not raw sign** — using more than planned shows red, using less shows green, matching how Solar Production already worked. ([#763](https://github.com/johanzander/bess-manager/issues/763))
 - **The System Health page no longer silently hides a real failure on Growatt SPH, Huawei, or Solis Modbus** — a crash in the health-check logging step was swallowing the actual per-component result. ([#627](https://github.com/johanzander/bess-manager/issues/627))
 - **Growatt VPP and SolaX no longer charge at full power when the plan called for less** — `GRID_CHARGING` now commands the DP's actual planned rate instead of always full power, so a fuse-aware throttled plan (#429) is no longer silently overridden at write time, which could starve a concurrent load like an EV charger. ([#754](https://github.com/johanzander/bess-manager/issues/754))
 - **Failed Home Assistant service calls now log the response body, not just the status** — retry/final-failure logs previously hid the actual error (a Growatt cloud error, InfluxDB's "no database", etc.) behind a bare "500 Server Error". ([#741](https://github.com/johanzander/bess-manager/issues/741))

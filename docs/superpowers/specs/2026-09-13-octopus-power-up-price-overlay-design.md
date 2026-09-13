@@ -1,7 +1,8 @@
 # Design: Octopus Power Up sessions as a price overlay
 
 **Date**: 2026-09-13
-**Status**: Proposed. Not implemented.
+**Status**: Implemented on `feat/octopus-power-up-price-overlay` (see
+"Implementation notes" at the end for where the code departs from this text).
 **Related**: #709 (the price cache is read cache-only on the optimizer
 thread), #428 / `consumption_overlay.py` (the precedent: a per-run overlay
 read from an HA entity, composed after the cache), #662 (price health check
@@ -259,7 +260,11 @@ Behavioral tests, per `docs/agents/testing.md`:
     charging into the window;
   - battery discharge covering house load inside the window is zero;
   - the plan's total cost is lower than the same fixture without the window,
-    by at least the window's planned import × 30p.
+    by at least the value of the window's free energy after losses:
+    `30p × (grid→home + grid→battery × η_charge × η_discharge) − cycle cost ×
+    grid→battery`. (The original "window import × 30p" bound is physically
+    unreachable: energy charged in the window loses round-trip efficiency and
+    cycle wear before it displaces a 30p import.)
 
   Assert costs and flows, not intents.
 - No change to `test_vectorized_backward_parity.py`: prices are an input,
@@ -275,3 +280,31 @@ Behavioral tests, per `docs/agents/testing.md`:
   only the Octopus settings branch exposes the picker in this change.
 - Any change to `optimize_battery_schedule`, `action_selector.py`, or the
   tie table. This design is price-input only.
+
+## Implementation notes
+
+Verified against upstream `3c8643ff`; all file:line citations above held.
+Where the implementation differs from the text:
+
+- **The funnel had two bypasses.** `get_price_data()` returned the cached
+  tomorrow slot directly and returned freshly fetched entries without going
+  through `_cached_*`. Both now return overlaid entries, so every read path
+  (optimizer, `get_available_prices()`, dashboard) sees the same price.
+- **DST alignment is by elapsed time.** Price entries' naive timestamps are
+  `midnight + i × 15 min` wall clock, which is wrong after a DST change. The
+  overlay therefore takes the day explicitly —
+  `apply_free_import_windows(entries, day, windows, free_price)` — and places
+  period `i` at local midnight (UTC) + `i × 15 min`, matching how the price
+  sources and `get_period_count` index a 92/100-period day.
+- **Window source is injected.** `PriceManager` takes
+  `free_import_window_source` (BSM passes `_fetch_free_import_windows`, which
+  calls `get_power_up_windows` and emits the 16 kWh warning once per window)
+  and `free_import_price`.
+- **Health** is a separate optional component, "Octoplus Free Import
+  Windows", returned by `PriceManager.check_health()` only while the fetch is
+  failing: WARNING, then ERROR once the failure has persisted > 30 min.
+- **Discovery** returns `powerUpCalendar`, plus `powerUpCalendarDisabledBy`
+  when the registry entry is disabled.
+- **Settings**: `energy_provider.octopus.free_import_price` is added by
+  `_migrate_schema` (default `FREE_IMPORT_PRICE = 0.0` in `settings.py`) and
+  read strictly for the octopus provider.

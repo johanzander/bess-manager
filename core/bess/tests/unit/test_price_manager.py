@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
 from core.bess import time_utils
+from core.bess.calendar_windows import CalendarWindow
 from core.bess.exceptions import PriceDataUnavailableError
 from core.bess.price_manager import (
     HomeAssistantSource,
@@ -749,3 +750,188 @@ def test_official_nordpool_and_octopus_declare_publication_times() -> None:
     assert OctopusEnergySource.TOMORROW_EARLIEST == (15, 30, "Europe/London")
     # Base class stays permissive so an unknown source is never gated out.
     assert PriceSource.TOMORROW_EARLIEST == (0, 0, "UTC")
+
+
+# ── Octoplus free-import windows composed at read time ────────────────────────
+#
+# Octopus leaves the Agile rate unchanged for a Power Up / Happy Hour window, so
+# PriceManager overlays the window onto cached entries whenever they are read.
+# Bookings change during the day while rates do not, so the window list is
+# re-fetched on every refresh_cache() even when the day's prices are cached.
+
+
+class _WindowSource:
+    """Stands in for HomeAssistantAPIController.get_power_up_windows."""
+
+    def __init__(self) -> None:
+        self.windows: list = []
+        self.error: Exception | None = None
+        self.calls: list[tuple[datetime, datetime]] = []
+
+    def __call__(self, start: datetime, end: datetime) -> list:
+        self.calls.append((start, end))
+        if self.error is not None:
+            raise self.error
+        return list(self.windows)
+
+
+def _free_import_price_manager(
+    source: CountingSource, windows: _WindowSource, free_import_price: float = 0.0
+) -> PriceManager:
+    return PriceManager(
+        price_source=source,
+        markup_rate=0.0,
+        vat_multiplier=1.0,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE4",
+        free_import_price=free_import_price,
+        free_import_window_source=windows,
+    )
+
+
+def _window_on(day: date, start_hour: int, end_hour: int) -> CalendarWindow:
+    tz = time_utils.TIMEZONE
+    return CalendarWindow(
+        start=datetime.combine(day, datetime.min.time(), tzinfo=tz)
+        + timedelta(hours=start_hour),
+        end=datetime.combine(day, datetime.min.time(), tzinfo=tz)
+        + timedelta(hours=end_hour),
+    )
+
+
+def test_window_booked_after_prices_are_cached_reaches_the_optimizer_read() -> None:
+    source = CountingSource([0.30] * 96)
+    windows = _WindowSource()
+    pm = _free_import_price_manager(source, windows)
+    today = time_utils.today()
+
+    pm.refresh_cache()
+    assert all(e["buyPrice"] == 0.30 for e in pm.get_cached_today_prices())
+    fetches_after_warmup = source.fetch_count
+
+    windows.windows = [_window_on(today, 11, 12)]
+    pm.refresh_cache()
+
+    entries = pm.get_cached_today_prices()
+    assert [i for i, e in enumerate(entries) if e["buyPrice"] == 0.0] == [
+        44,
+        45,
+        46,
+        47,
+    ]
+    assert all(e["sellPrice"] == entries[0]["sellPrice"] for e in entries)
+    assert (
+        source.fetch_count == fetches_after_warmup
+    ), "cached prices must not be re-fetched"
+
+
+def test_window_is_fetched_for_today_and_tomorrow() -> None:
+    windows = _WindowSource()
+    pm = _free_import_price_manager(CountingSource([0.30] * 96), windows)
+    today = time_utils.today()
+
+    pm.refresh_cache()
+
+    start, end = windows.calls[-1]
+    tz = time_utils.TIMEZONE
+    assert start == datetime.combine(today, datetime.min.time(), tzinfo=tz)
+    assert end == datetime.combine(
+        today + timedelta(days=2), datetime.min.time(), tzinfo=tz
+    )
+
+
+def test_every_cached_read_path_sees_the_same_free_window() -> None:
+    """Plan, dashboard and realized cost must all price the window identically."""
+    source = CountingSource([0.30] * 96)
+    windows = _WindowSource()
+    pm = _free_import_price_manager(source, windows, free_import_price=0.02)
+    today = time_utils.today()
+    tomorrow = today + timedelta(days=1)
+    windows.windows = [_window_on(today, 11, 12), _window_on(tomorrow, 1, 2)]
+
+    pm.refresh_cache()
+    pm.get_price_data(tomorrow)
+
+    buy, _sell = pm.get_available_prices()
+    assert buy[44:48] == [0.02] * 4
+    assert buy[96 + 4 : 96 + 8] == [0.02] * 4
+    assert [e["buyPrice"] for e in pm.get_price_data(today)][44:48] == [0.02] * 4
+    assert [e["buyPrice"] for e in pm.get_cached_tomorrow_prices()][4:8] == [0.02] * 4
+    assert [e["isFreeImport"] for e in pm.get_price_data(tomorrow)][4:8] == [True] * 4
+
+
+def test_freshly_fetched_prices_carry_the_overlay() -> None:
+    """The cache-miss path of get_price_data returns overlaid entries too."""
+    windows = _WindowSource()
+    pm = _free_import_price_manager(CountingSource([0.30] * 96), windows)
+    today = time_utils.today()
+    windows.windows = [_window_on(today, 11, 12)]
+    pm.refresh_cache()
+    pm.clear_cache()
+
+    assert [e["buyPrice"] for e in pm.get_price_data(today)][44:48] == [0.0] * 4
+
+
+def test_failed_window_fetch_keeps_previous_windows_and_does_not_raise() -> None:
+    windows = _WindowSource()
+    pm = _free_import_price_manager(CountingSource([0.30] * 96), windows)
+    today = time_utils.today()
+    windows.windows = [_window_on(today, 11, 12)]
+    pm.refresh_cache()
+
+    windows.windows = []
+    windows.error = RuntimeError("calendar unavailable")
+    pm.refresh_cache()  # must not raise
+
+    assert [e["buyPrice"] for e in pm.get_cached_today_prices()][44:48] == [0.0] * 4
+
+
+def _free_import_health(pm: PriceManager) -> dict | None:
+    components: list[dict] = pm.check_health()
+    for component in components:
+        if component["name"] == "Octoplus Free Import Windows":
+            return component
+    return None
+
+
+def test_healthy_window_fetch_adds_no_health_component() -> None:
+    windows = _WindowSource()
+    pm = _free_import_price_manager(CountingSource([0.30] * 96), windows)
+    pm.refresh_cache()
+
+    assert _free_import_health(pm) is None
+
+
+def test_failed_window_fetch_warns_then_errors_once_it_persists() -> None:
+    windows = _WindowSource()
+    pm = _free_import_price_manager(CountingSource([0.30] * 96), windows)
+    windows.error = RuntimeError("calendar unavailable")
+    tz = ZoneInfo("Europe/Stockholm")
+    first_failure = datetime(2026, 9, 13, 9, 5, tzinfo=tz)
+
+    with patch("core.bess.price_manager.time_utils.now", return_value=first_failure):
+        pm.refresh_cache()
+        component = _free_import_health(pm)
+    assert component is not None
+    assert component["status"] == "WARNING"
+    assert component["required"] is False
+    assert "calendar unavailable" in component["checks"][0]["error"]
+
+    # A second failure does not reset how long the problem has persisted.
+    with patch(
+        "core.bess.price_manager.time_utils.now",
+        return_value=first_failure + timedelta(minutes=15),
+    ):
+        pm.refresh_cache()
+    with patch(
+        "core.bess.price_manager.time_utils.now",
+        return_value=first_failure + timedelta(minutes=31),
+    ):
+        component = _free_import_health(pm)
+    assert component is not None
+    assert component["status"] == "ERROR"
+
+    windows.error = None
+    pm.refresh_cache()
+    assert _free_import_health(pm) is None

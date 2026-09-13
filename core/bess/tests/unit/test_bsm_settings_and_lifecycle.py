@@ -8,11 +8,13 @@ import logging
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.calendar_windows import CalendarWindow
 from core.bess.exceptions import (
     HistoricalDataUnavailableError,
     SystemConfigurationError,
@@ -70,6 +72,38 @@ class TestUpdateSettings:
         system.update_settings({"price": {"markup_rate": 0.05}})
         assert system.price_settings.markup_rate == 0.05
         assert system._price_manager.markup_rate == 0.05
+
+    def test_octopus_free_import_price_synced_to_price_manager(
+        self, system: BatterySystemManager
+    ) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {
+                        "import_today_entity": "event.agile_import_today",
+                        "import_tomorrow_entity": "event.agile_import_tomorrow",
+                        "export_today_entity": "event.agile_export_today",
+                        "export_tomorrow_entity": "event.agile_export_tomorrow",
+                        "free_import_price": 0.05,
+                    },
+                }
+            }
+        )
+        assert system._price_manager.free_import_price == 0.05
+
+    def test_non_octopus_provider_prices_free_windows_at_default(
+        self, system: BatterySystemManager
+    ) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "entsoe",
+                    "entsoe": {"entity": "sensor.entsoe_prices"},
+                }
+            }
+        )
+        assert system._price_manager.free_import_price == 0.0
 
     def test_price_update_clears_cache(self, system):
         with patch.object(system._price_manager, "clear_cache") as mock_clear:
@@ -279,6 +313,7 @@ class TestCreatePriceSource:
                     "import_tomorrow_entity": "event.agile_import_tomorrow",
                     "export_today_entity": "event.agile_export_today",
                     "export_tomorrow_entity": "event.agile_export_tomorrow",
+                    "free_import_price": 0.0,
                 },
             },
             addon_options=_DEFAULT_OPTIONS,
@@ -1841,3 +1876,46 @@ class TestRunHealthCheckLoggingShapes:
         # the real result and reports no failing components at all.
         assert result["checks"] == health_results["checks"]
         assert system._critical_sensor_failures == ["Battery Control (SPH)"]
+
+
+class TestFreeImportWindowCapWarning:
+    """The 16 kWh Happy Hour allowance is not modelled; installs that could
+    exceed it inside a window are told the plan is optimistic, once."""
+
+    START = datetime(2026, 9, 13, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+    END = datetime(2026, 9, 15, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+
+    def _window(self) -> CalendarWindow:
+        tz = ZoneInfo("Europe/London")
+        return CalendarWindow(
+            start=datetime(2026, 9, 13, 11, 0, tzinfo=tz),
+            end=datetime(2026, 9, 13, 12, 0, tzinfo=tz),
+        )
+
+    def test_three_phase_install_warns_once_per_window(
+        self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        system.update_settings(
+            {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 3}}
+        )
+        with patch.object(
+            system._controller, "get_power_up_windows", return_value=[self._window()]
+        ):
+            with caplog.at_level(logging.WARNING):
+                system._fetch_free_import_windows(self.START, self.END)
+                system._fetch_free_import_windows(self.START, self.END)
+        assert caplog.text.count("free allowance") == 1
+
+    def test_single_phase_install_does_not_warn(
+        self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        system.update_settings(
+            {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 1}}
+        )
+        with patch.object(
+            system._controller, "get_power_up_windows", return_value=[self._window()]
+        ):
+            with caplog.at_level(logging.WARNING):
+                windows = system._fetch_free_import_windows(self.START, self.END)
+        assert windows == [self._window()]
+        assert "free allowance" not in caplog.text

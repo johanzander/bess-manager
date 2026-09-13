@@ -13,6 +13,7 @@ from typing import Any, ClassVar
 import requests
 
 from . import time_utils
+from .calendar_windows import CalendarWindow
 from .consumption_overlay import apply_overlay, period_starts_from
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .daily_view_store import DailyViewStore
@@ -62,6 +63,8 @@ from .runtime_failure_tracker import RuntimeFailureTracker
 from .schedule_store import ScheduleStore
 from .sensor_collector import SensorCollector
 from .settings import (
+    FREE_IMPORT_CAP_KWH,
+    FREE_IMPORT_PRICE,
     BatterySettings,
     HomeSettings,
     PriceSettings,
@@ -221,7 +224,10 @@ class BatterySystemManager:
             area=self.price_settings.area,
             spot_multiplier=self.price_settings.spot_multiplier,
             export_spot_multiplier=self.price_settings.export_spot_multiplier,
+            free_import_price=self._configured_free_import_price(),
+            free_import_window_source=self._fetch_free_import_windows,
         )
+        self._free_import_cap_warned: set[CalendarWindow] = set()
 
         # Initialize monitors (created in start() if controller available)
         self._power_monitor = None
@@ -513,6 +519,51 @@ class BatterySystemManager:
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+
+    def _configured_free_import_price(self) -> float:
+        """Buy price during an Octoplus free-import window.
+
+        Only the Octopus provider exposes the setting; every other provider
+        prices a window at the documented default.
+        """
+        config = self._energy_provider_config
+        if config.get("provider") != "octopus":
+            return FREE_IMPORT_PRICE
+        return float(config["octopus"]["free_import_price"])
+
+    def _fetch_free_import_windows(
+        self, start: datetime, end: datetime
+    ) -> list[CalendarWindow]:
+        """Read the Octoplus free-import windows for PriceManager's refresh.
+
+        A Weekend Happy Hour is free only up to 16 kWh, which the DP does not
+        model (it has no tiered price). Warns once per window when this
+        install's grid connection could exceed that inside the window.
+        """
+        if self._controller is None:
+            raise SystemConfigurationError(
+                message="Cannot read free import windows without a Home Assistant controller"
+            )
+        windows = self._controller.get_power_up_windows(start, end)
+        home = self.home_settings
+        max_import_kw = home.max_fuse_current * home.voltage * home.phase_count / 1000
+        for window in windows:
+            window_hours = (window.end - window.start).total_seconds() / 3600
+            if (
+                max_import_kw * window_hours > FREE_IMPORT_CAP_KWH
+                and window not in self._free_import_cap_warned
+            ):
+                self._free_import_cap_warned.add(window)
+                logger.warning(
+                    "Free import window %s - %s: this grid connection can import "
+                    "%.1f kWh, above the %.0f kWh free allowance; the plan treats "
+                    "all of it as free",
+                    window.start.isoformat(),
+                    window.end.isoformat(),
+                    max_import_kw * window_hours,
+                    FREE_IMPORT_CAP_KWH,
+                )
+        return windows
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.
@@ -3972,6 +4023,9 @@ class BatterySystemManager:
                 self._energy_provider_config = settings["energy_provider"]
                 new_source = self._create_price_source(self._controller)
                 self._price_manager.price_source = new_source
+                self._price_manager.free_import_price = (
+                    self._configured_free_import_price()
+                )
                 self._price_manager.clear_cache()
 
             logger.info("Settings updated successfully")

@@ -250,20 +250,37 @@ def period_import_caps_kwh(
     peak_shaving_import_cap_per_period: list[float | None] | None,
     horizon: int,
     dt: float,
+    session_import_cap_kwh_per_period: list[float | None] | None = None,
 ) -> list[float | None] | None:
     """Per-period grid-import caps (kWh) the optimizer plans under, or None
     when no cap applies anywhere.
 
-    The one place the fuse cap (#429) and the peak-shaving caps (#96) are
-    combined. The optimizer plans under this list and the inverter simulator
-    executes under it (#804), so a throttled grid charge is throttled the same
-    way in both and the plan stays executable (R == P).
+    The one place the fuse cap (#429), the peak-shaving caps (#96) and the
+    Octopus Power Down session caps are combined: the tightest binds. The
+    optimizer plans under this list and the inverter simulator executes under
+    it (#804), so a throttled grid charge is throttled the same way in both
+    and the plan stays executable (R == P).
     """
     fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
-    if peak_shaving_import_cap_per_period is not None:
+    if (
+        peak_shaving_import_cap_per_period is not None
+        or session_import_cap_kwh_per_period is not None
+    ):
         return [
             _combine_import_caps(
-                fuse_import_cap_kwh, peak_shaving_import_cap_per_period[t]
+                _combine_import_caps(
+                    fuse_import_cap_kwh,
+                    (
+                        peak_shaving_import_cap_per_period[t]
+                        if peak_shaving_import_cap_per_period is not None
+                        else None
+                    ),
+                ),
+                (
+                    session_import_cap_kwh_per_period[t]
+                    if session_import_cap_kwh_per_period is not None
+                    else None
+                ),
             )
             for t in range(horizon)
         ]
@@ -2083,6 +2100,7 @@ def optimize_battery_schedule(
     tie_diagnostics: dict | None = None,
     peak_shaving_import_cap_per_period: list[float | None] | None = None,
     min_grid_export_kwh_per_period: list[float] | None = None,
+    session_import_cap_kwh_per_period: list[float | None] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -2152,6 +2170,15 @@ def optimize_battery_schedule(
             the most it can where none can. Solar surplus counts. Defaults to
             None (no minimum anywhere); a list of the wrong length raises
             ValueError.
+        session_import_cap_kwh_per_period: Per-period grid-import cap (kWh),
+            the Octopus Power Down session's own "no grid import in the
+            window" constraint (element None = no session cap that period).
+            Combined with the fuse cap (home_settings) and the peak-shaving
+            cap above via `min()`, the same way those two combine -- a session
+            period gets whichever is smallest, a non-session period keeps the
+            other caps alone. Defaults
+            to None (no session constraint anywhere); a list of the wrong
+            length raises ValueError.
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -2168,8 +2195,21 @@ def optimize_battery_schedule(
             f"{len(min_grid_export_kwh_per_period)} entries for a horizon of "
             f"{horizon} periods"
         )
+    if (
+        session_import_cap_kwh_per_period is not None
+        and len(session_import_cap_kwh_per_period) != horizon
+    ):
+        raise ValueError(
+            f"session_import_cap_kwh_per_period has "
+            f"{len(session_import_cap_kwh_per_period)} entries for a horizon "
+            f"of {horizon} periods"
+        )
     import_cap_kwh = period_import_caps_kwh(
-        home_settings, peak_shaving_import_cap_per_period, horizon, dt
+        home_settings,
+        peak_shaving_import_cap_per_period,
+        horizon,
+        dt,
+        session_import_cap_kwh_per_period=session_import_cap_kwh_per_period,
     )
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")

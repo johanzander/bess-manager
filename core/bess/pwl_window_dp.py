@@ -800,13 +800,15 @@ def run_pwl_window_backward_induction(
     `end_soe_tolerance` is floored at half the discharge action lattice --
     see `_end_soe_pin_tolerance`.
 
-    `import_cap_kwh` is the caller's fuse-derived per-period grid-import cap
-    (#429) and must be the same value the surrounding grid DP solved with:
-    the window is re-solved precisely where charging-vs-not is closest, so
-    omitting it here would let the exact solver propose grid charging the
-    house's fuse cannot carry, in exactly the periods where the constraint is
-    most likely to bind. Passing `None` means "no cap", which is correct only
-    when fuse protection is disabled.
+    `import_cap_kwh` is the caller's per-period grid-import cap -- the
+    tightest of the fuse cap (#429), a peak-shaving window's cap (#96) and a
+    Power Down session's cap, element None where none applies -- and must be
+    the same values the surrounding grid DP solved with: the window is
+    re-solved precisely where charging-vs-not is closest, so omitting it here
+    would let the exact solver propose grid charging the house's fuse cannot
+    carry, in exactly the periods where the constraint is most likely to
+    bind. Passing `None` means "no cap", which is correct only when no cap
+    source is configured.
 
     `min_grid_export_kwh` is the per-period minimum grid export, one entry
     per window period, passed for the same reason: a window solved without it
@@ -1015,7 +1017,7 @@ def resolve_pwl_window(
     failure Task 5's feasibility predicate exists to catch before it reaches
     the splice.
 
-    `import_cap_kwh` must be the same fuse-derived grid-import cap (#429) the
+    `import_cap_kwh` must be the same per-period grid-import caps the
     backward induction was run with, so the replayed actions obey the same
     constraint the value table was built under. `min_grid_export_kwh` likewise.
 

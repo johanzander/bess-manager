@@ -305,6 +305,15 @@ Where the implementation differs from the text:
   failing: WARNING, then ERROR once the failure has persisted > 30 min.
 - **Discovery** returns `powerUpCalendar`, plus `powerUpCalendarDisabledBy`
   when the registry entry is disabled.
-- **Settings**: `energy_provider.octopus.free_import_price` is added by
-  `_migrate_schema` (default `FREE_IMPORT_PRICE = 0.0` in `settings.py`) and
-  read strictly for the octopus provider.
+- **Configuration lives in Electricity Pricing, not Sensors.** Following the
+  Octopus rate entities' precedent (`energy_provider.octopus.*_entity`, read
+  by `OctopusEnergySource` directly), the calendar is stored as
+  `energy_provider.octopus.power_up_calendar_entity` ("" = off) next to
+  `free_import_price`, both added by `_migrate_schema`. There is no
+  `octoplus_power_up_calendar` sensor key: the controller exposes
+  `get_calendar_windows(entity_id, start, end)`, and BSM passes the configured
+  entity. The Power Down spec's wrapper should take the same shape.
+- **Saving pricing or provider settings replans immediately.** `PATCH
+  /api/settings` touching `electricityPrice` or `energyProvider` refreshes
+  prices (which fetches the windows) and rebuilds the schedule in a background
+  thread, mirroring setup-complete's post-save schedule build.

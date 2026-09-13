@@ -1498,36 +1498,24 @@ class TestConsumptionOverlayBlocksStateGating:
                 overlay_ctrl.get_consumption_overlay_blocks()
 
 
-class TestGetPowerUpWindows:
-    """The Octoplus power-up calendar read through HA's calendar REST API."""
+class TestGetCalendarWindows:
+    """An HA calendar entity read through HA's calendar REST API."""
 
     START = datetime(2026, 9, 13, 0, 0, tzinfo=ZoneInfo("Europe/London"))
     END = datetime(2026, 9, 15, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+    CALENDAR = "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
 
     @pytest.fixture
     def calendar_ctrl(self) -> HomeAssistantAPIController:
         c = HomeAssistantAPIController(
             ha_url="http://ha.local:8123",
             token="test-token",
-            settings_store=_settings_store(
-                {
-                    "octoplus_power_up_calendar": (
-                        "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
-                    )
-                }
-            ),
+            settings_store=_settings_store({}),
             service_domain="growatt_server",
         )
         c.max_attempts = 1
         c.retry_base_delay = 0
         return c
-
-    def test_unconfigured_calendar_means_no_windows(
-        self, ctrl: HomeAssistantAPIController
-    ) -> None:
-        with patch.object(ctrl, "_api_request") as mock:
-            assert ctrl.get_power_up_windows(self.START, self.END) == []
-        mock.assert_not_called()
 
     def test_verified_payload_is_returned_as_windows(
         self, calendar_ctrl: HomeAssistantAPIController
@@ -1545,7 +1533,9 @@ class TestGetPowerUpWindows:
             }
         ]
         with patch.object(calendar_ctrl, "_api_request", return_value=payload) as mock:
-            windows = calendar_ctrl.get_power_up_windows(self.START, self.END)
+            windows = calendar_ctrl.get_calendar_windows(
+                self.CALENDAR, self.START, self.END
+            )
 
         assert [(w.start, w.end) for w in windows] == [
             (
@@ -1568,7 +1558,7 @@ class TestGetPowerUpWindows:
         payload = [{"start": {"date": "2026-09-13"}, "end": {"date": "2026-09-14"}}]
         with patch.object(calendar_ctrl, "_api_request", return_value=payload):
             with pytest.raises(CalendarWindowError):
-                calendar_ctrl.get_power_up_windows(self.START, self.END)
+                calendar_ctrl.get_calendar_windows(self.CALENDAR, self.START, self.END)
 
     def test_missing_datetime_raises(
         self, calendar_ctrl: HomeAssistantAPIController
@@ -1576,7 +1566,7 @@ class TestGetPowerUpWindows:
         payload = [{"start": {}, "end": {"dateTime": "2026-09-13T12:00:00+01:00"}}]
         with patch.object(calendar_ctrl, "_api_request", return_value=payload):
             with pytest.raises(CalendarWindowError):
-                calendar_ctrl.get_power_up_windows(self.START, self.END)
+                calendar_ctrl.get_calendar_windows(self.CALENDAR, self.START, self.END)
 
     def test_disabled_or_renamed_calendar_404_raises(
         self, calendar_ctrl: HomeAssistantAPIController
@@ -1588,14 +1578,14 @@ class TestGetPowerUpWindows:
         )
         with patch.object(calendar_ctrl.session, "get", not_found):
             with pytest.raises(CalendarWindowError, match="octoplus_power_up"):
-                calendar_ctrl.get_power_up_windows(self.START, self.END)
+                calendar_ctrl.get_calendar_windows(self.CALENDAR, self.START, self.END)
 
     def test_empty_response_raises(
         self, calendar_ctrl: HomeAssistantAPIController
     ) -> None:
         with patch.object(calendar_ctrl, "_api_request", return_value=None):
             with pytest.raises(CalendarWindowError):
-                calendar_ctrl.get_power_up_windows(self.START, self.END)
+                calendar_ctrl.get_calendar_windows(self.CALENDAR, self.START, self.END)
 
 
 class TestGetDeviceMaps:

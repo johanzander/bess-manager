@@ -536,6 +536,9 @@ class BatterySystemManager:
     ) -> list[CalendarWindow]:
         """Read the Octoplus free-import windows for PriceManager's refresh.
 
+        Only the Octopus provider has a power-up calendar; no configured
+        calendar means no windows, exactly as before the feature.
+
         A Weekend Happy Hour is free only up to 16 kWh, which the DP does not
         model (it has no tiered price). Warns once per window when this
         install's grid connection could exceed that inside the window.
@@ -544,7 +547,13 @@ class BatterySystemManager:
             raise SystemConfigurationError(
                 message="Cannot read free import windows without a Home Assistant controller"
             )
-        windows = self._controller.get_power_up_windows(start, end)
+        config = self._energy_provider_config
+        if config.get("provider") != "octopus":
+            return []
+        calendar_entity = config["octopus"]["power_up_calendar_entity"]
+        if not calendar_entity:
+            return []
+        windows = self._controller.get_calendar_windows(calendar_entity, start, end)
         home = self.home_settings
         max_import_kw = home.max_fuse_current * home.voltage * home.phase_count / 1000
         for window in windows:

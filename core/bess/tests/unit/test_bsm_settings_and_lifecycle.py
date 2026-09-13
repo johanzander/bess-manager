@@ -1878,12 +1878,12 @@ class TestRunHealthCheckLoggingShapes:
         assert system._critical_sensor_failures == ["Battery Control (SPH)"]
 
 
-class TestFreeImportWindowCapWarning:
-    """The 16 kWh Happy Hour allowance is not modelled; installs that could
-    exceed it inside a window are told the plan is optimistic, once."""
+class TestFetchFreeImportWindows:
+    """Where the Octoplus windows come from, and the unmodelled 16 kWh cap."""
 
     START = datetime(2026, 9, 13, 0, 0, tzinfo=ZoneInfo("Europe/London"))
     END = datetime(2026, 9, 15, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+    CALENDAR = "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
 
     def _window(self) -> CalendarWindow:
         tz = ZoneInfo("Europe/London")
@@ -1892,14 +1892,57 @@ class TestFreeImportWindowCapWarning:
             end=datetime(2026, 9, 13, 12, 0, tzinfo=tz),
         )
 
+    def _use_octopus(self, system: BatterySystemManager, calendar: str) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {
+                        "import_today_entity": "event.agile_import_today",
+                        "import_tomorrow_entity": "event.agile_import_tomorrow",
+                        "export_today_entity": "event.agile_export_today",
+                        "export_tomorrow_entity": "event.agile_export_tomorrow",
+                        "free_import_price": 0.0,
+                        "power_up_calendar_entity": calendar,
+                    },
+                }
+            }
+        )
+
+    def test_configured_calendar_is_read(self, system: BatterySystemManager) -> None:
+        self._use_octopus(system, self.CALENDAR)
+        with patch.object(
+            system._controller, "get_calendar_windows", return_value=[self._window()]
+        ) as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == [
+                self._window()
+            ]
+        read.assert_called_once_with(self.CALENDAR, self.START, self.END)
+
+    def test_no_calendar_configured_means_no_windows(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._use_octopus(system, "")
+        with patch.object(system._controller, "get_calendar_windows") as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == []
+        read.assert_not_called()
+
+    def test_non_octopus_provider_has_no_windows(
+        self, system: BatterySystemManager
+    ) -> None:
+        with patch.object(system._controller, "get_calendar_windows") as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == []
+        read.assert_not_called()
+
     def test_three_phase_install_warns_once_per_window(
         self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
     ) -> None:
+        self._use_octopus(system, self.CALENDAR)
         system.update_settings(
             {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 3}}
         )
         with patch.object(
-            system._controller, "get_power_up_windows", return_value=[self._window()]
+            system._controller, "get_calendar_windows", return_value=[self._window()]
         ):
             with caplog.at_level(logging.WARNING):
                 system._fetch_free_import_windows(self.START, self.END)
@@ -1909,13 +1952,13 @@ class TestFreeImportWindowCapWarning:
     def test_single_phase_install_does_not_warn(
         self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
     ) -> None:
+        self._use_octopus(system, self.CALENDAR)
         system.update_settings(
             {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 1}}
         )
         with patch.object(
-            system._controller, "get_power_up_windows", return_value=[self._window()]
+            system._controller, "get_calendar_windows", return_value=[self._window()]
         ):
             with caplog.at_level(logging.WARNING):
-                windows = system._fetch_free_import_windows(self.START, self.END)
-        assert windows == [self._window()]
+                system._fetch_free_import_windows(self.START, self.END)
         assert "free allowance" not in caplog.text

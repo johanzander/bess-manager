@@ -269,6 +269,28 @@ def _refresh_health(bess_controller) -> None:
         logger.warning("Could not refresh health state after settings update: %s", exc)
 
 
+def _replan_in_background(bess_controller: Any) -> None:
+    """Refresh prices and rebuild the schedule after a price-affecting change.
+
+    Mirrors setup-complete's post-save schedule build, so a pricing edit shows
+    in the plan now rather than at the next price refresh and quarterly run.
+    Prices are refreshed first: free-import windows are only fetched there.
+    """
+
+    def _replan() -> None:
+        try:
+            bess_controller.system.refresh_prices()
+            now = time_utils.now()
+            bess_controller.system.update_battery_schedule(
+                current_period=now.hour * 4 + now.minute // 15
+            )
+            logger.info("Schedule rebuilt after pricing settings change")
+        except Exception as e:
+            logger.warning("Could not rebuild schedule after settings change: %s", e)
+
+    threading.Thread(target=_replan, daemon=True).start()
+
+
 # ---------------------------------------------------------------------------
 # Unified settings endpoints
 # ---------------------------------------------------------------------------
@@ -507,6 +529,10 @@ async def patch_settings(updates: dict):
         bess_controller.refresh_service_domain()
         bess_controller.refresh_power_polarities()
         _refresh_health(bess_controller)
+        if {"electricity_price", "energy_provider"} & {
+            _SECTION_MAP[name] for name in updates
+        }:
+            _replan_in_background(bess_controller)
         return await get_settings()
 
     except HTTPException:
@@ -3297,6 +3323,9 @@ async def setup_complete(payload: APISetupCompletePayload):
                         payload.octopusFreeImportPrice
                         if payload.octopusFreeImportPrice is not None
                         else FREE_IMPORT_PRICE
+                    ),
+                    "power_up_calendar_entity": (
+                        payload.octopusPowerUpCalendarEntity or ""
                     ),
                 }
             # Persist ENTSO-e entity when provider is entsoe

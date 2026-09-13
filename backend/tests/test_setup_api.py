@@ -259,6 +259,7 @@ class TestSetupCompleteLegacy:
             == "event.octopus_electricity_export_next_day_rates"
         )
         assert ep["octopus"]["free_import_price"] == 0.0
+        assert ep["octopus"]["power_up_calendar_entity"] == ""
 
     def test_persists_octopus_free_import_price_when_given(self, mock_controller):
         """A wizard-supplied free_import_price is saved verbatim."""
@@ -275,6 +276,9 @@ class TestSetupCompleteLegacy:
                 "octopusExportTodayEntity": "event.octopus_electricity_export_current_day_rates",
                 "octopusExportTomorrowEntity": "event.octopus_electricity_export_next_day_rates",
                 "octopusFreeImportPrice": 0.05,
+                "octopusPowerUpCalendarEntity": (
+                    "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
+                ),
             },
         )
         assert resp.status_code == 200
@@ -282,6 +286,10 @@ class TestSetupCompleteLegacy:
         sections = mock_controller.settings_store.save_all.call_args[0][0]
         ep = sections["energy_provider"]
         assert ep["octopus"]["free_import_price"] == 0.05
+        assert (
+            ep["octopus"]["power_up_calendar_entity"]
+            == "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
+        )
 
     def test_persists_without_octopus_entities(self, mock_controller):
         """Non-Octopus wizard completion does not create octopus section."""

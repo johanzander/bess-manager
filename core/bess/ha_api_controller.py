@@ -359,14 +359,6 @@ class HomeAssistantAPIController:
             "precision": None,
             "conversion_threshold": None,
         },
-        # Octoplus free-import windows (Power Up sessions, Weekend Happy Hours)
-        "get_power_up_windows": {
-            "sensor_key": "octoplus_power_up_calendar",
-            "name": "Octoplus Free Power Calendar",
-            "unit": "list",
-            "precision": None,
-            "conversion_threshold": None,
-        },
         # Solar forecast
         "get_solar_forecast": {
             "sensor_key": "solar_forecast_today",
@@ -1594,28 +1586,14 @@ class HomeAssistantAPIController:
             f"attribute (found: {sorted(attributes)})"
         )
 
-    def get_power_up_windows(
-        self, start: datetime, end: datetime
+    def get_calendar_windows(
+        self, entity_id: str, start: datetime, end: datetime
     ) -> list[CalendarWindow]:
-        """Read the Octoplus free-import windows overlapping ``[start, end)``.
+        """Query an HA calendar entity for events overlapping ``[start, end)``.
 
-        Returns:
-            The power-up calendar's events as windows, or an empty list when
-            no calendar is configured -- "no overlay" is a supported
-            configuration that behaves exactly as before the feature.
-
-        Raises:
-            CalendarWindowError: See ``_get_calendar_windows``.
-
-        """
-        if not self.sensors.get("octoplus_power_up_calendar"):
-            return []
-        return self._get_calendar_windows("octoplus_power_up_calendar", start, end)
-
-    def _get_calendar_windows(
-        self, sensor_key: str, start: datetime, end: datetime
-    ) -> list[CalendarWindow]:
-        """Query a configured HA calendar entity for events in a time range.
+        Takes the entity directly, like OctopusEnergySource's rate entities:
+        the Octoplus calendar is provider configuration
+        (``energy_provider.octopus``), not a platform sensor.
 
         Raises:
             CalendarWindowError: If the entity 404s (disabled or renamed in
@@ -1623,7 +1601,6 @@ class HomeAssistantAPIController:
                 timezone-aware spans.
 
         """
-        entity_id, _ = self._resolve_entity_id(sensor_key)
         try:
             response = self._api_request(
                 "get",

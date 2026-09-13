@@ -13,6 +13,7 @@ Coverage goals
 """
 
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
@@ -81,6 +82,16 @@ _DEFAULT_STORE: dict = {
         "shared": {},
     },
 }
+
+
+class _RunInline:
+    """threading.Thread stand-in that runs its target synchronously on start()."""
+
+    def __init__(self, target: Callable[[], None], daemon: bool) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
 
 
 @pytest.fixture()
@@ -529,6 +540,42 @@ class TestPatchSettingsLiveUpdates:
         saved = mock_controller.settings_store.save_section.call_args_list
         ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
         assert ep_saves[-1][0][1]["octopus"]["free_import_price"] == 0.05
+
+    @pytest.mark.parametrize(
+        "update",
+        [
+            pytest.param({"electricityPrice": {"markupRate": 0.1}}, id="pricing"),
+            pytest.param(
+                {
+                    "energyProvider": {
+                        "provider": "octopus",
+                        "octopus": {"power_up_calendar_entity": "calendar.power_up"},
+                    }
+                },
+                id="energy provider",
+            ),
+        ],
+    )
+    def test_price_affecting_save_refreshes_prices_then_replans(
+        self, mock_controller: MagicMock, update: dict
+    ) -> None:
+        """A pricing edit reaches the plan now, not at the next scheduled run."""
+        calls: list[str] = []
+        mock_controller.system.refresh_prices.side_effect = lambda: calls.append(
+            "refresh_prices"
+        )
+        mock_controller.system.update_battery_schedule.side_effect = (
+            lambda **_: calls.append("update_battery_schedule")
+        )
+        with patch("api.threading.Thread", _RunInline):
+            resp = _client.patch("/api/settings", json=update)
+        assert resp.status_code == 200
+        assert calls == ["refresh_prices", "update_battery_schedule"]
+
+    def test_non_price_save_does_not_replan(self, mock_controller: MagicMock) -> None:
+        with patch("api.threading.Thread", _RunInline):
+            _client.patch("/api/settings", json={"battery": {"totalCapacity": 20.0}})
+        mock_controller.system.update_battery_schedule.assert_not_called()
 
     def test_growatt_device_id_applied_to_ha_controller(self, mock_controller):
         _client.patch("/api/settings", json={"growatt": {"deviceId": "new-dev-99"}})

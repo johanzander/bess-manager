@@ -50,7 +50,6 @@ SHARED_SENSOR_KEYS = frozenset(
         "solar_forecast_tomorrow",
         "48h_avg_grid_import",
         "consumption_overlay",
-        "octoplus_power_up_calendar",
         "current_l1",
         "current_l2",
         "current_l3",
@@ -561,7 +560,10 @@ class SettingsStore:
                 "provider": "nordpool_official",
                 "nordpool_official": {"config_entry_id": ""},
                 "nordpool_hacs": {"entity": ""},
-                "octopus": {"free_import_price": FREE_IMPORT_PRICE},
+                "octopus": {
+                    "free_import_price": FREE_IMPORT_PRICE,
+                    "power_up_calendar_entity": "",
+                },
                 "entsoe": {"entity": ""},
             },
             "growatt": {"device_id": ""},
@@ -730,15 +732,23 @@ class SettingsStore:
                 changed = True
 
             # Added with the Octoplus free-import overlay; BatterySystemManager
-            # reads it strictly for the octopus provider.
+            # reads both strictly for the octopus provider. An empty calendar
+            # entity means the overlay is not configured.
             octopus = ep.get("octopus")
-            if isinstance(octopus, dict) and "free_import_price" not in octopus:
-                octopus["free_import_price"] = FREE_IMPORT_PRICE
-                logger.info(
-                    "Schema migration: added energy_provider.octopus.free_import_price = %s",
-                    FREE_IMPORT_PRICE,
+            if isinstance(octopus, dict):
+                octopus_defaults: tuple[tuple[str, float | str], ...] = (
+                    ("free_import_price", FREE_IMPORT_PRICE),
+                    ("power_up_calendar_entity", ""),
                 )
-                changed = True
+                for octopus_key, octopus_default in octopus_defaults:
+                    if octopus_key not in octopus:
+                        octopus[octopus_key] = octopus_default
+                        logger.info(
+                            "Schema migration: added energy_provider.octopus.%s = %r",
+                            octopus_key,
+                            octopus_default,
+                        )
+                        changed = True
 
         growatt = self.data.get("growatt")
         if isinstance(growatt, dict):

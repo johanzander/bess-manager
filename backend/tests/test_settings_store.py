@@ -622,6 +622,7 @@ class TestSchemaMigration:
         )
         octopus = store.get_section("energy_provider")["octopus"]
         assert octopus["free_import_price"] == 0.0
+        assert octopus["power_up_calendar_entity"] == ""
         assert octopus["import_today_entity"] == "event.import_today"
 
     def test_octopus_configured_free_import_price_preserved(

@@ -761,7 +761,7 @@ def test_official_nordpool_and_octopus_declare_publication_times() -> None:
 
 
 class _WindowSource:
-    """Stands in for HomeAssistantAPIController.get_power_up_windows."""
+    """Stands in for BatterySystemManager._fetch_free_import_windows."""
 
     def __init__(self) -> None:
         self.windows: list = []

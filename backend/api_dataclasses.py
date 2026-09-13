@@ -1194,6 +1194,7 @@ class APISetupCompletePayload(BaseModel):
     octopusExportTodayEntity: str | None = None
     octopusExportTomorrowEntity: str | None = None
     octopusFreeImportPrice: float | None = None
+    octopusPowerUpCalendarEntity: str | None = None
     # ENTSO-e Transparency Platform entity (required when provider == "entsoe")
     entsoeEntity: str | None = None
     # Inverter

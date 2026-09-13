@@ -35,6 +35,8 @@ MIN_PROFIT = 0.2  # Minimum profit per kWh to consider a charge/discharge cycle
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
 FREE_IMPORT_PRICE = 0.0  # buy price during an Octoplus free power window
 FREE_IMPORT_CAP_KWH = 16.0  # Weekend Happy Hour allowance; not modelled by the DP
+POWER_DOWN_EXPORT_KW = 1.0  # Octoplus Power Down export pulse rate
+POWER_DOWN_EXPORT_MINUTES = 15  # Octoplus Power Down export pulse duration
 
 # Battery settings defaults
 BATTERY_STORAGE_SIZE_KWH = 30.0

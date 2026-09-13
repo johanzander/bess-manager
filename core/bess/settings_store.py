@@ -520,6 +520,8 @@ class SettingsStore:
             HOUSE_MAX_FUSE_CURRENT_A,
             HOUSE_VOLTAGE_V,
             MARKUP_RATE,
+            POWER_DOWN_EXPORT_KW,
+            POWER_DOWN_EXPORT_MINUTES,
             SAFETY_MARGIN_FACTOR,
             SPOT_MULTIPLIER,
             TAX_REDUCTION,
@@ -563,6 +565,10 @@ class SettingsStore:
                 "octopus": {
                     "free_import_price": FREE_IMPORT_PRICE,
                     "power_up_calendar_entity": "",
+                    "power_down_enabled": False,
+                    "power_down_calendar_entity": "",
+                    "power_down_export_kw": POWER_DOWN_EXPORT_KW,
+                    "power_down_export_minutes": POWER_DOWN_EXPORT_MINUTES,
                 },
                 "entsoe": {"entity": ""},
             },
@@ -601,6 +607,8 @@ class SettingsStore:
             FREE_IMPORT_PRICE,
             INVERTER_AC_POWER_MARGIN,
             INVERTER_MAX_AC_POWER_KW,
+            POWER_DOWN_EXPORT_KW,
+            POWER_DOWN_EXPORT_MINUTES,
             SPOT_MULTIPLIER,
             USE_ACTUAL_PRICE,
         )
@@ -736,9 +744,13 @@ class SettingsStore:
             # entity means the overlay is not configured.
             octopus = ep.get("octopus")
             if isinstance(octopus, dict):
-                octopus_defaults: tuple[tuple[str, float | str], ...] = (
+                octopus_defaults: tuple[tuple[str, float | str | bool], ...] = (
                     ("free_import_price", FREE_IMPORT_PRICE),
                     ("power_up_calendar_entity", ""),
+                    ("power_down_enabled", False),
+                    ("power_down_calendar_entity", ""),
+                    ("power_down_export_kw", POWER_DOWN_EXPORT_KW),
+                    ("power_down_export_minutes", POWER_DOWN_EXPORT_MINUTES),
                 )
                 for octopus_key, octopus_default in octopus_defaults:
                     if octopus_key not in octopus:

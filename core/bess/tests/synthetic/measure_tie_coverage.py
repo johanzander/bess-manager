@@ -335,7 +335,7 @@ def segment_reference_cost(
     dt: float,
     soe_trajectory: list[float],
     cost_basis: float,
-    import_cap_kwh: list[float] | None,
+    import_cap_kwh: list[float | None] | None,
 ) -> float:
     """Objective cost over `segment` as re-solved by the continuous-SOE PWL
     DP, pinned to the schedule's own SOE at both ends.

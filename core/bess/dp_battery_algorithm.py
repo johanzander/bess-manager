@@ -1234,7 +1234,7 @@ def _run_dynamic_programming(
     terminal_curve: TerminalValueCurve | None = None,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    import_cap_kwh: list[float] | None = None,
+    import_cap_kwh: list[float | None] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
     min_grid_export_kwh: list[float] | None = None,
 ) -> np.ndarray:
@@ -2039,6 +2039,7 @@ def optimize_battery_schedule(
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
     min_grid_export_kwh_per_period: list[float] | None = None,
+    session_import_cap_kwh_per_period: list[float | None] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -2099,6 +2100,14 @@ def optimize_battery_schedule(
             the most it can where none can. Solar surplus counts. Defaults to
             None (no minimum anywhere); a list of the wrong length raises
             ValueError.
+        session_import_cap_kwh_per_period: Per-period grid-import cap (kWh),
+            the Octopus Power Down session's own "no grid import in the
+            window" constraint (element None = no session cap that period).
+            Combined with the fuse cap (home_settings) by taking the tighter
+            of the two per period -- a session period gets whichever is
+            smaller, a non-session period keeps the fuse cap alone. Defaults
+            to None (no session constraint anywhere); a list of the wrong
+            length raises ValueError.
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -2115,14 +2124,39 @@ def optimize_battery_schedule(
             f"{len(min_grid_export_kwh_per_period)} entries for a horizon of "
             f"{horizon} periods"
         )
+    if (
+        session_import_cap_kwh_per_period is not None
+        and len(session_import_cap_kwh_per_period) != horizon
+    ):
+        raise ValueError(
+            f"session_import_cap_kwh_per_period has "
+            f"{len(session_import_cap_kwh_per_period)} entries for a horizon "
+            f"of {horizon} periods"
+        )
     # The fuse cap itself doesn't vary by period (issue #429 has no
     # time-of-day term), but the rest of this function threads it per-period
-    # so a future caller can override individual periods (e.g. a session
-    # window that must import nothing) without a second cap mechanism.
+    # so a caller can override individual periods (e.g. a Power Down session
+    # window that must import nothing) without a second cap mechanism. Where
+    # both a fuse cap and a session cap apply to the same period, the tighter
+    # (smaller) of the two binds -- the fuse cap is a physical limit the
+    # session cap can only ever narrow, never relax.
     _fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
-    import_cap_kwh: list[float] | None = (
-        None if _fuse_import_cap_kwh is None else [_fuse_import_cap_kwh] * horizon
-    )
+    import_cap_kwh: list[float | None] | None
+    if session_import_cap_kwh_per_period is None:
+        import_cap_kwh = (
+            None if _fuse_import_cap_kwh is None else [_fuse_import_cap_kwh] * horizon
+        )
+    elif _fuse_import_cap_kwh is None:
+        import_cap_kwh = session_import_cap_kwh_per_period
+    else:
+        import_cap_kwh = [
+            (
+                _fuse_import_cap_kwh
+                if session_cap is None
+                else min(session_cap, _fuse_import_cap_kwh)
+            )
+            for session_cap in session_import_cap_kwh_per_period
+        ]
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 

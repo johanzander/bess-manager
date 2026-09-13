@@ -226,6 +226,7 @@ class BatterySystemManager:
             export_spot_multiplier=self.price_settings.export_spot_multiplier,
             free_import_price=self._configured_free_import_price(),
             free_import_window_source=self._fetch_free_import_windows,
+            power_down_window_source=self._fetch_power_down_windows,
         )
         self._free_import_cap_warned: set[CalendarWindow] = set()
 
@@ -579,6 +580,30 @@ class BatterySystemManager:
                     max_import_kw * window_hours,
                     FREE_IMPORT_CAP_KWH,
                 )
+
+    def _fetch_power_down_windows(
+        self, start: datetime, end: datetime
+    ) -> list[CalendarWindow]:
+        """Read the Octoplus Power Down joined-session windows for PriceManager's refresh.
+
+        Only the Octopus provider has a power-down calendar, and only when the
+        feature is enabled and a calendar is configured -- checked here, before
+        touching the controller, so a disabled feature never issues an HA call.
+        """
+        config = self._energy_provider_config
+        if config.get("provider") != "octopus":
+            return []
+        octopus_config = config["octopus"]
+        if not octopus_config["power_down_enabled"]:
+            return []
+        calendar_entity = octopus_config["power_down_calendar_entity"]
+        if not calendar_entity:
+            return []
+        if self._controller is None:
+            raise SystemConfigurationError(
+                message="Cannot read Power Down session windows without a Home Assistant controller"
+            )
+        return self._controller.get_calendar_windows(calendar_entity, start, end)
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.
@@ -1451,6 +1476,154 @@ class BatterySystemManager:
 
         return result.values
 
+    def _power_down_export_targets(
+        self, period_count: int, prepare_next_day: bool
+    ) -> tuple[list[float] | None, list[float | None] | None]:
+        """Per-period Octoplus Power Down export targets and session import caps.
+
+        Turns joined Power Down session windows (PriceManager.get_power_down_windows(),
+        never applied to prices -- see its docstring) into the two optimizer
+        inputs built together here because both come from the same
+        session-to-period mapping:
+
+        - export target (kWh, min_grid_export_kwh_per_period): placed on the
+          first remaining whole periods of each session, rolled over against
+          realized export so far;
+        - session import cap (kWh, session_import_cap_kwh_per_period): 0.0 on
+          every remaining period of a session still in the horizon, so the DP
+          plans no grid import there. "Constrain, don't raise" (#429) still
+          lets an empty battery import the load it must.
+
+        Placement and rollover rule: each call recomputes from scratch. For a
+        session's periods that fall before "now" (only possible when
+        ``prepare_next_day`` is False -- a next-day horizon is entirely
+        future), realized ``grid_exported`` is summed from
+        ``historical_store``. The shortfall (target minus realized, floored at
+        zero) is spread evenly over the first
+        ``max(1, ceil(minutes/15) - completed_periods)`` of the session's
+        still-remaining periods -- fewer if the session has fewer left, and
+        none if the shortfall is already zero. Completed session periods
+        shrink the placement count whether or not they met their own share:
+        a 30-minute pulse whose first (of two) periods delivered exactly its
+        0.25 kWh share puts the remaining 0.25 kWh on the next period alone,
+        not spread back over two -- stretching the pulse to a lower sustained
+        rate over more periods would defeat "export at the configured power
+        for the configured duration." The ``max(1, ...)`` floor is what lets
+        a first-period miss put the *entire* target on the very next period
+        instead of vanishing once completed periods reach the configured
+        count. A session that has fully ended before this horizon is
+        ignored; the import cap is applied to every remaining period
+        regardless of whether a target is still owed.
+
+        Args:
+            period_count: Periods in the horizon.
+            prepare_next_day: Whether this horizon starts at tomorrow 00:00
+                rather than today 00:00 -- which day index 0 refers to.
+
+        Returns:
+            (export_targets, session_import_caps), each `period_count` long,
+            or (None, None) when the feature is off, the provider isn't
+            Octopus, no calendar is configured, or no session touches this
+            horizon.
+
+        Raises:
+            SystemConfigurationError: power_down_export_minutes is not a
+                multiple of 15 in 15..60.
+        """
+        config = self._energy_provider_config
+        if config.get("provider") != "octopus":
+            return None, None
+        octopus_config = config["octopus"]
+        if not octopus_config["power_down_enabled"]:
+            return None, None
+        if not octopus_config["power_down_calendar_entity"]:
+            return None, None
+
+        export_minutes = int(octopus_config["power_down_export_minutes"])
+        if export_minutes % 15 != 0 or not 15 <= export_minutes <= 60:
+            raise SystemConfigurationError(
+                message=(
+                    "energy_provider.octopus.power_down_export_minutes must be "
+                    f"a multiple of 15 between 15 and 60, got {export_minutes}"
+                )
+            )
+        periods_needed = export_minutes // 15
+        export_kw = float(octopus_config["power_down_export_kw"])
+        target_kwh = export_kw * 0.25 * periods_needed
+
+        windows = self._price_manager.get_power_down_windows()
+        if not windows:
+            return None, None
+
+        # Period 0 of this horizon is tomorrow 00:00 when preparing the next
+        # day's plan, today 00:00 otherwise -- the same offset
+        # _add_timestamps_to_period_data uses in the opposite direction.
+        day_offset = (
+            time_utils.get_period_count(time_utils.today()) if prepare_next_day else 0
+        )
+        current_period = (
+            None if prepare_next_day else time_utils.get_current_period_index()
+        )
+
+        export_targets = [0.0] * period_count
+        session_import_caps: list[float | None] = [None] * period_count
+        session_found = False
+
+        for window in windows:
+            try:
+                abs_start = time_utils.timestamp_to_period_index(window.start)
+                abs_end = time_utils.timestamp_to_period_index(window.end)
+            except ValueError:
+                # Outside today/tomorrow entirely -- not reachable from this
+                # horizon, whichever day it starts on.
+                continue
+            session_periods = [
+                p
+                for p in range(abs_start - day_offset, abs_end - day_offset)
+                if 0 <= p < period_count
+            ]
+            if not session_periods:
+                continue
+            session_found = True
+            for p in session_periods:
+                session_import_caps[p] = 0.0
+
+            if current_period is None:
+                # prepare_next_day: the whole session is still ahead of
+                # tonight's plan, so there is nothing to roll over.
+                remaining_periods = session_periods
+                target_kwh_remaining = target_kwh
+                placement_count = periods_needed
+            else:
+                remaining_periods = [p for p in session_periods if p >= current_period]
+                completed_periods = [p for p in session_periods if p < current_period]
+                realized_export = 0.0
+                for p in completed_periods:
+                    record = self.historical_store.get_period(p)
+                    if record is not None:
+                        realized_export += record.energy.grid_exported
+                target_kwh_remaining = max(0.0, target_kwh - realized_export)
+                # A completed period counts against the pulse duration
+                # whether or not it met its own share -- otherwise a
+                # partially-met early slot would spread the shortfall back
+                # over more periods than configured, stretching the pulse to
+                # a lower sustained rate instead of keeping it at the
+                # configured power. The max(1, ...) floor is what still lets
+                # a fully-missed first slot put the whole target on the very
+                # next period once completed_periods reaches periods_needed.
+                placement_count = max(1, periods_needed - len(completed_periods))
+
+            if not remaining_periods or target_kwh_remaining <= 0:
+                continue
+            placement = remaining_periods[:placement_count]
+            per_period = target_kwh_remaining / len(placement)
+            for p in placement:
+                export_targets[p] += per_period
+
+        if not session_found:
+            return None, None
+        return export_targets, session_import_caps
+
     def _get_consumption_forecast(self) -> list[float]:
         """Get consumption forecast based on the configured strategy.
 
@@ -2133,6 +2306,11 @@ class BatterySystemManager:
             consumption_predictions, period_count, prepare_next_day
         )
 
+        # --- Octoplus Power Down export pulse (session windows) ---
+        power_down_export_targets, power_down_session_import_caps = (
+            self._power_down_export_targets(period_count, prepare_next_day)
+        )
+
         # --- Home-load forecast split (issue #749) ---
         # residual is the forecast before Planned Consumption Changes (already
         # post Managed Loads); planned is the net the overlay applied for the
@@ -2237,6 +2415,8 @@ class BatterySystemManager:
             "combined_actions": combined_actions,
             "combined_soe": combined_soe,
             "solar_charged": solar_charged,
+            "power_down_export_targets": power_down_export_targets,
+            "power_down_session_import_caps": power_down_session_import_caps,
         }
 
         logger.debug(f"Optimization data prepared for period {optimization_period}")
@@ -2467,6 +2647,25 @@ class BatterySystemManager:
                 n_periods
             )
 
+            # Octoplus Power Down: both full-day lists (or both None) were
+            # built for the whole horizon by _power_down_export_targets, so
+            # slicing from optimization_period lines them up with every other
+            # remaining_* array above -- period_count there equals len(prices).
+            power_down_export_targets = optimization_data["power_down_export_targets"]
+            min_grid_export_kwh_per_period = (
+                None
+                if power_down_export_targets is None
+                else power_down_export_targets[optimization_period:]
+            )
+            power_down_session_import_caps = optimization_data[
+                "power_down_session_import_caps"
+            ]
+            session_import_cap_kwh_per_period = (
+                None
+                if power_down_session_import_caps is None
+                else power_down_session_import_caps[optimization_period:]
+            )
+
             # Run DP optimization with strategic intent capture - returns OptimizationResult directly
             result = optimize_battery_schedule(
                 buy_price=buy_prices,
@@ -2483,6 +2682,8 @@ class BatterySystemManager:
                 capabilities=self.platform_capabilities,
                 export_curtailment_active=self.export_curtailment_active,
                 home_settings=self.home_settings,
+                min_grid_export_kwh_per_period=min_grid_export_kwh_per_period,
+                session_import_cap_kwh_per_period=session_import_cap_kwh_per_period,
             )
 
             # Add timestamps to period data (algorithm is time-agnostic, operates on relative indices)

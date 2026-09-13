@@ -777,7 +777,7 @@ def run_pwl_window_backward_induction(
     end_soe_tolerance: float = 1e-6,
     max_charge_power_per_period: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
-    import_cap_kwh: list[float] | None = None,
+    import_cap_kwh: list[float | None] | None = None,
     min_grid_export_kwh: list[float] | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Exact PWL backward induction over a short sub-horizon window whose end
@@ -800,11 +800,13 @@ def run_pwl_window_backward_induction(
     `end_soe_tolerance` is floored at half the discharge action lattice --
     see `_end_soe_pin_tolerance`.
 
-    `import_cap_kwh` is the caller's fuse-derived per-period grid-import cap
-    (#429), one entry per window period (aligned with `buy_price` etc. --
-    the caller slices the horizon-level cap to the window exactly as it
-    slices every other per-period input), and must carry the same values the
-    surrounding grid DP solved with: the window is re-solved precisely where
+    `import_cap_kwh` is the caller's per-period grid-import cap -- the fuse
+    cap (#429), a Power Down session's own cap, or their per-period minimum,
+    element None where neither applies -- one entry per window period
+    (aligned with `buy_price` etc. -- the caller slices the horizon-level cap
+    to the window exactly as it slices every other per-period input), and
+    must carry the same values the surrounding grid DP solved with: the
+    window is re-solved precisely where
     charging-vs-not is closest, so omitting it here would let the exact
     solver propose grid charging the house's fuse cannot carry, in exactly
     the periods where the constraint is most likely to bind. Passing `None`
@@ -1000,7 +1002,7 @@ def resolve_pwl_window(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
-    import_cap_kwh: list[float] | None = None,
+    import_cap_kwh: list[float | None] | None = None,
     sell_price_floored: list[bool] | None = None,
     min_grid_export_kwh: list[float] | None = None,
 ) -> list[tuple[float, float, PeriodFlows]]:
@@ -1018,10 +1020,12 @@ def resolve_pwl_window(
     failure Task 5's feasibility predicate exists to catch before it reaches
     the splice.
 
-    `import_cap_kwh` must carry the same per-period fuse-derived grid-import
-    cap (#429) values, one per window period, that the backward induction
-    was run with, so the replayed actions obey the same constraint the value
-    table was built under. `min_grid_export_kwh` likewise.
+    `import_cap_kwh` must carry the same per-period grid-import cap values,
+    one per window period (the fuse cap (#429), a Power Down session's own
+    cap, or their per-period minimum -- element None where neither applies),
+    that the backward induction was run with, so the replayed actions obey
+    the same constraint the value table was built under. `min_grid_export_kwh`
+    likewise.
 
     Returns `[(power, next_soe), ...]` for each of the window's periods.
     """

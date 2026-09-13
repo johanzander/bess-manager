@@ -442,6 +442,9 @@ class PriceManager:
         free_import_window_source: (
             Callable[[datetime, datetime], list[CalendarWindow]] | None
         ) = None,
+        power_down_window_source: (
+            Callable[[datetime, datetime], list[CalendarWindow]] | None
+        ) = None,
     ) -> None:
         """Initialize the price manager.
 
@@ -457,6 +460,12 @@ class PriceManager:
             free_import_price: Buy price for periods inside a free-import window
             free_import_window_source: Returns the free-import windows
                 overlapping ``[start, end)``; None when no window source exists
+            power_down_window_source: Returns the Octoplus Power Down joined
+                session windows overlapping ``[start, end)``; None when no
+                window source exists. Unlike the free-import windows, these
+                are never applied to prices -- BatterySystemManager reads them
+                back through get_power_down_windows() to build the optimizer's
+                export-pulse and session-import-cap inputs.
         """
         self.price_source = price_source
         self.markup_rate = markup_rate
@@ -468,6 +477,7 @@ class PriceManager:
         self.export_spot_multiplier = export_spot_multiplier
         self.free_import_price = free_import_price
         self._free_import_window_source = free_import_window_source
+        self._power_down_window_source = power_down_window_source
         self._logger = logging.getLogger(__name__)
 
         # Free-import windows, replaced on every refresh_cache(). Kept outside
@@ -475,6 +485,12 @@ class PriceManager:
         self._free_import_windows: list[CalendarWindow] = []
         self._free_import_window_error: Exception | None = None
         self._free_import_window_failing_since: datetime | None = None
+
+        # Power Down session windows, replaced on every refresh_cache() the
+        # same way -- but never composed into a price entry (see docstring).
+        self._power_down_windows: list[CalendarWindow] = []
+        self._power_down_window_error: Exception | None = None
+        self._power_down_window_failing_since: datetime | None = None
 
         # Cache for today's prices
         self._today_prices: list[dict[str, Any]] | None = None
@@ -664,11 +680,13 @@ class PriceManager:
         the market's publication time to avoid pointless calls against a
         sometimes-flaky HA integration.
 
-        Free-import windows are re-fetched on every call regardless, since a
-        window can be booked after the day's prices are cached.
+        Free-import and Power Down windows are re-fetched on every call
+        regardless, since a booking can change after the day's prices are
+        cached.
         """
         today = time_utils.today()
         self._refresh_free_import_windows(today)
+        self._refresh_power_down_windows(today)
 
         try:
             self.get_price_data(today)
@@ -712,6 +730,45 @@ class PriceManager:
             return
         self._free_import_window_error = None
         self._free_import_window_failing_since = None
+
+    def _refresh_power_down_windows(self, today: date) -> None:
+        """Replace the Power Down session windows for today and tomorrow.
+
+        Same "keep the previous list on failure" rule as
+        _refresh_free_import_windows, and for the same reason (#709): a flaky
+        calendar must never block a price refresh.
+        """
+        if self._power_down_window_source is None:
+            return
+        tz = time_utils.TIMEZONE
+        start = datetime.combine(today, datetime.min.time(), tzinfo=tz)
+        end = datetime.combine(
+            today + timedelta(days=2), datetime.min.time(), tzinfo=tz
+        )
+        try:
+            self._power_down_windows = self._power_down_window_source(start, end)
+        except Exception as e:
+            self._logger.warning(
+                "Price refresh: Power Down session windows unavailable, "
+                "keeping %d previous window(s): %s",
+                len(self._power_down_windows),
+                e,
+            )
+            self._power_down_window_error = e
+            if self._power_down_window_failing_since is None:
+                self._power_down_window_failing_since = time_utils.now()
+            return
+        self._power_down_window_error = None
+        self._power_down_window_failing_since = None
+
+    def get_power_down_windows(self) -> list[CalendarWindow]:
+        """The Power Down session windows from the most recent refresh_cache().
+
+        Never applied to prices (see __init__'s power_down_window_source
+        docstring) -- BatterySystemManager reads this to build the
+        optimizer's export-pulse and session-import-cap inputs.
+        """
+        return list(self._power_down_windows)
 
     def _with_free_import_windows(self, entries: list, day: date) -> list:
         """Overlay the current free-import windows onto one day's entries."""

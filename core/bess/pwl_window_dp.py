@@ -742,7 +742,7 @@ def run_pwl_window_backward_induction(
     end_soe_tolerance: float = 1e-6,
     max_charge_power_per_period: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
-    import_cap_kwh: float | None = None,
+    import_cap_kwh: list[float] | None = None,
 ) -> list[tuple[np.ndarray, np.ndarray]]:
     """Exact PWL backward induction over a short sub-horizon window whose end
     SOE is pinned to `end_soe_target` (see `_pinned_terminal_row`).
@@ -765,12 +765,15 @@ def run_pwl_window_backward_induction(
     see `_end_soe_pin_tolerance`.
 
     `import_cap_kwh` is the caller's fuse-derived per-period grid-import cap
-    (#429) and must be the same value the surrounding grid DP solved with:
-    the window is re-solved precisely where charging-vs-not is closest, so
-    omitting it here would let the exact solver propose grid charging the
-    house's fuse cannot carry, in exactly the periods where the constraint is
-    most likely to bind. Passing `None` means "no cap", which is correct only
-    when fuse protection is disabled.
+    (#429), one entry per window period (aligned with `buy_price` etc. --
+    the caller slices the horizon-level cap to the window exactly as it
+    slices every other per-period input), and must carry the same values the
+    surrounding grid DP solved with: the window is re-solved precisely where
+    charging-vs-not is closest, so omitting it here would let the exact
+    solver propose grid charging the house's fuse cannot carry, in exactly
+    the periods where the constraint is most likely to bind. Passing `None`
+    means "no cap for any period in the window", which is correct only when
+    fuse protection is disabled.
 
     Infeasible targets are not an error: if the window physically cannot
     reach `end_soe_target` from the caller's start SOE (rate limits, the
@@ -818,8 +821,11 @@ def run_pwl_window_backward_induction(
             if max_charge_power_per_period is not None
             else None
         )
+        period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
 
-        def values_at(X: np.ndarray, _t: int = t, _pmc=period_max_charge) -> np.ndarray:
+        def values_at(
+            X: np.ndarray, _t: int = t, _pmc=period_max_charge, _cap=period_import_cap
+        ) -> np.ndarray:
             return _pwl_candidate_values_at(
                 X,
                 _t,
@@ -829,7 +835,7 @@ def run_pwl_window_backward_induction(
                 battery_settings,
                 dt,
                 _pmc,
-                import_cap_kwh,
+                _cap,
                 capabilities,
             )
 
@@ -946,7 +952,7 @@ def resolve_pwl_window(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
-    import_cap_kwh: float | None = None,
+    import_cap_kwh: list[float] | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> list[tuple[float, float, PeriodFlows]]:
     """Forward-replay the window's resolved value table `V` (from
@@ -963,9 +969,10 @@ def resolve_pwl_window(
     failure Task 5's feasibility predicate exists to catch before it reaches
     the splice.
 
-    `import_cap_kwh` must be the same fuse-derived grid-import cap (#429) the
-    backward induction was run with, so the replayed actions obey the same
-    constraint the value table was built under.
+    `import_cap_kwh` must carry the same per-period fuse-derived grid-import
+    cap (#429) values, one per window period, that the backward induction
+    was run with, so the replayed actions obey the same constraint the value
+    table was built under.
 
     Returns `[(power, next_soe), ...]` for each of the window's periods.
     """
@@ -982,6 +989,7 @@ def resolve_pwl_window(
     basis = cost_basis
     actions: list[tuple[float, float, PeriodFlows]] = []
     for t in range(window_horizon):
+        period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
         action, next_soe, basis, _reward, flows = _pwl_best_action_at_continuous_state(
             soe=soe,
             t=t,
@@ -996,7 +1004,7 @@ def resolve_pwl_window(
             cost_basis=basis,
             max_charge_power_per_period=max_charge_power_per_period,
             capabilities=capabilities,
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
             sell_price_floored=sell_price_floored,
         )
         actions.append((action, next_soe, flows))

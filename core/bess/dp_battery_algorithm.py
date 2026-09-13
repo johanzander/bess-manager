@@ -1229,7 +1229,7 @@ def _run_dynamic_programming(
     terminal_curve: TerminalValueCurve | None = None,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    import_cap_kwh: float | None = None,
+    import_cap_kwh: list[float] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
 ) -> np.ndarray:
     """
@@ -1317,6 +1317,7 @@ def _run_dynamic_programming(
             if max_charge_power_per_period is not None
             else None
         )
+        period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
         if period_max_charge is not None:
             charge_feasible = charge_feasible_base & (
                 ~is_charge | (power_row <= period_max_charge)
@@ -1352,7 +1353,7 @@ def _run_dynamic_programming(
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
             ac_cap_kwh=ac_cap_kwh,
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
         )
         feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
 
@@ -1366,11 +1367,11 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
         )
 
         effective_import_cap = None
-        if import_cap_kwh is not None:
+        if period_import_cap is not None:
             # Constrain, don't raise (#429): an action pushing total import
             # over the cap is infeasible UNLESS no feasible action can meet
             # it (e.g. load alone exceeds the cap even at max discharge) --
@@ -1380,7 +1381,7 @@ def _run_dynamic_programming(
             floor_grid_imported = np.min(
                 np.where(feasible, grid_imported, np.inf), axis=1, keepdims=True
             )
-            effective_import_cap = np.maximum(import_cap_kwh, floor_grid_imported)
+            effective_import_cap = np.maximum(period_import_cap, floor_grid_imported)
             feasible &= grid_imported <= effective_import_cap + 1e-9
 
         next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
@@ -1431,7 +1432,7 @@ def _run_dynamic_programming(
                 current_buy_price=buy_price[t],
                 current_sell_price=sell_price[t],
                 solar_production=solar_production[t],
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
             if effective_import_cap is not None:
@@ -1468,7 +1469,7 @@ def _run_dynamic_programming(
                 solar_production=solar_production[t],
                 home_consumption=home_consumption[t],
                 ac_cap_kwh=ac_cap_kwh,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             cover_feasible &= (
                 (next_soe_cover >= min_soe_kwh) & (next_soe_cover <= max_soe_kwh)
@@ -1483,7 +1484,7 @@ def _run_dynamic_programming(
                 current_buy_price=buy_price[t],
                 current_sell_price=sell_price[t],
                 solar_production=solar_production[t],
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             if effective_import_cap is not None:
                 cover_feasible &= (
@@ -2028,7 +2029,14 @@ def optimize_battery_schedule(
 
     horizon = len(buy_price)
     dt = period_duration_hours
-    import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
+    # The fuse cap itself doesn't vary by period (issue #429 has no
+    # time-of-day term), but the rest of this function threads it per-period
+    # so a future caller can override individual periods (e.g. a session
+    # window that must import nothing) without a second cap mechanism.
+    _fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
+    import_cap_kwh: list[float] | None = (
+        None if _fuse_import_cap_kwh is None else [_fuse_import_cap_kwh] * horizon
+    )
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 
@@ -2133,6 +2141,7 @@ def optimize_battery_schedule(
         # already-known V[t+1, :] (linearly interpolated) as the continuation
         # value -- the same reward+max(V) logic as the backward pass, applied
         # at the true state instead of one snapped to the nearest grid index.
+        period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
         (
             action,
             next_soe,
@@ -2155,7 +2164,7 @@ def optimize_battery_schedule(
             cost_basis=current_cost_basis,
             max_charge_power_per_period=max_charge_power_per_period,
             capabilities=capabilities,
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
             sell_price_floored=sell_price_floored,
         )
         tie_margins.append(tie_margin)
@@ -2264,6 +2273,9 @@ def optimize_battery_schedule(
                 if max_charge_power_per_period is not None
                 else None
             )
+            window_import_cap = (
+                import_cap_kwh[sl] if import_cap_kwh is not None else None
+            )
             # End SOE is pinned to the grid DP's own SOE at the window's exit,
             # so the untouched schedule after the window stays valid. An
             # infeasible pin raises out of resolve_pwl_window and is
@@ -2303,9 +2315,10 @@ def optimize_battery_schedule(
             # therefore not a sizing problem, and is re-raised.
             #
             # `import_cap_kwh` is the same fuse-derived grid-import cap (#429)
-            # the grid DP optimized the rest of the schedule against. It has to
-            # be passed here too: the windowed solver re-decides exactly the
-            # periods where charging-vs-not is closest, so a window solved
+            # the grid DP optimized the rest of the schedule against, sliced to
+            # this window exactly like every other per-period input above. It
+            # has to be passed here too: the windowed solver re-decides exactly
+            # the periods where charging-vs-not is closest, so a window solved
             # without the cap could splice back a grid-charge action that
             # plans more import than the house's fuse can carry -- weakening
             # the constraint precisely where it is most likely to bind.
@@ -2321,7 +2334,7 @@ def optimize_battery_schedule(
                     end_soe_target=soe_trajectory[window.end],
                     max_charge_power_per_period=window_max_charge,
                     capabilities=capabilities,
-                    import_cap_kwh=import_cap_kwh,
+                    import_cap_kwh=window_import_cap,
                 )
             except PWLWindowUnderRefinedError:
                 if window_horizon <= 1:
@@ -2354,7 +2367,7 @@ def optimize_battery_schedule(
                 cost_basis=cost_basis_trajectory[window.start],
                 max_charge_power_per_period=window_max_charge,
                 capabilities=capabilities,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=window_import_cap,
                 sell_price_floored=window_floored,
             )
             window_resolutions[window.start] = resolution
@@ -2458,7 +2471,9 @@ def optimize_battery_schedule(
                 solar_production=solar_production[window.end],
                 battery_settings=battery_settings,
                 dt=dt,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=(
+                    import_cap_kwh[window.end] if import_cap_kwh is not None else None
+                ),
             )
         hourly_results, reward_objective_cost = _replay_accounting_pass(
             horizon=horizon,

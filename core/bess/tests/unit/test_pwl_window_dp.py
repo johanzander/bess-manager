@@ -545,7 +545,7 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
         "solar_production": [0.0, 0.0],
         "battery_settings": battery,
         "dt": 1.0,
-        "import_cap_kwh": cap,
+        "import_cap_kwh": [cap, cap],
     }
     V = run_pwl_window_backward_induction(end_soe_target=end_soe_target, **kwargs)
     actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
@@ -590,7 +590,7 @@ def test_pwl_backward_induction_values_reflect_the_grid_import_cap():
         "dt": 1.0,
         "end_soe_target": end_soe_target,
     }
-    V_capped = run_pwl_window_backward_induction(import_cap_kwh=cap, **kwargs)
+    V_capped = run_pwl_window_backward_induction(import_cap_kwh=[cap, cap], **kwargs)
     V_uncapped = run_pwl_window_backward_induction(import_cap_kwh=None, **kwargs)
 
     assert pwl_window_is_feasible(

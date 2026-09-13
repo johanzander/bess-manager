@@ -43,6 +43,7 @@ from core.bess.health_check import (
     run_system_health_checks,
 )
 from core.bess.influxdb_helper import is_influxdb_configured
+from core.bess.models import PeriodData
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import canonicalize_consumption_strategy
 from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
@@ -914,7 +915,7 @@ async def get_dashboard_data(
                     "isFreeImport", False
                 )
 
-        def _is_free_import(period_data) -> bool:
+        def _is_free_import(period_data: PeriodData) -> bool:
             ts = period_data.timestamp
             if ts is None:
                 return False

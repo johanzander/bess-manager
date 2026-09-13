@@ -261,7 +261,9 @@ class TestSetupCompleteLegacy:
         assert ep["octopus"]["free_import_price"] == 0.0
         assert ep["octopus"]["power_up_calendar_entity"] == ""
 
-    def test_persists_octopus_free_import_price_when_given(self, mock_controller):
+    def test_persists_octopus_free_import_price_when_given(
+        self, mock_controller: MagicMock
+    ) -> None:
         """A wizard-supplied free_import_price is saved verbatim."""
         mock_controller.settings_store.get_section.return_value = {}
 

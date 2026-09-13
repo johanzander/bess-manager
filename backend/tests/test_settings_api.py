@@ -530,7 +530,9 @@ class TestPatchSettingsLiveUpdates:
         assert len(ep_calls) >= 1
         assert ep_calls[0][0][0]["energy_provider"]["provider"] == "octopus"
 
-    def test_energy_provider_free_import_price_round_trips(self, mock_controller):
+    def test_energy_provider_free_import_price_round_trips(
+        self, mock_controller: MagicMock
+    ) -> None:
         new_provider = {
             "provider": "octopus",
             "octopus": {"api_key": "sk-test", "free_import_price": 0.05},

@@ -3471,13 +3471,32 @@ class BatterySystemManager:
                     logger.info("-" * 40)
                     for check in component["checks"]:
                         if check["status"] != "OK":
+                            # Two shapes are in live use across check_health()
+                            # implementations: name/entity_id/error (price_manager,
+                            # sensor_collector) and component/message (SPH/Huawei/
+                            # Solis controllers). Assuming the first crashed here
+                            # with KeyError('name') whenever a controller used the
+                            # second, and the outer except discarded the real
+                            # per-component result (#627). Detect the shape
+                            # explicitly and raise on neither, per rules.md's
+                            # ban on silent fallback.
+                            if "name" in check:
+                                label = check["name"]
+                                detail = check.get("error") or "No specific error"
+                            elif "component" in check:
+                                label = check["component"]
+                                detail = check.get("message") or "No specific error"
+                            else:
+                                raise ValueError(
+                                    f"Unrecognized health-check shape: {check!r}"
+                                )
                             entity_str = (
                                 f" ({check['entity_id']})"
                                 if check.get("entity_id")
                                 else ""
                             )
                             logger.info(
-                                f"  - {check['name']}{entity_str}: {check['status']} - {check['error'] or 'No specific error'}"
+                                f"  - {label}{entity_str}: {check['status']} - {detail}"
                             )
                     logger.info("-" * 40)
 

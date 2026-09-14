@@ -537,11 +537,9 @@ class BatterySystemManager:
         """Read the Octoplus free-import windows for PriceManager's refresh.
 
         Only the Octopus provider has a power-up calendar; no configured
-        calendar means no windows, exactly as before the feature.
-
-        A Weekend Happy Hour is free only up to 16 kWh, which the DP does not
-        model (it has no tiered price). Warns once per window when this
-        install's grid connection could exceed that inside the window.
+        calendar means no windows, exactly as before the feature. Each
+        fetched list is checked against the free allowance
+        (_warn_on_free_allowance_overrun).
         """
         if self._controller is None:
             raise SystemConfigurationError(
@@ -554,6 +552,15 @@ class BatterySystemManager:
         if not calendar_entity:
             return []
         windows = self._controller.get_calendar_windows(calendar_entity, start, end)
+        self._warn_on_free_allowance_overrun(windows)
+        return windows
+
+    def _warn_on_free_allowance_overrun(self, windows: list[CalendarWindow]) -> None:
+        """Warn once per window this install could import past the free allowance in.
+
+        A Weekend Happy Hour is free only up to 16 kWh, which the DP does not
+        model (it has no tiered price), so the plan treats all of it as free.
+        """
         home = self.home_settings
         max_import_kw = home.max_fuse_current * home.voltage * home.phase_count / 1000
         for window in windows:
@@ -572,7 +579,6 @@ class BatterySystemManager:
                     max_import_kw * window_hours,
                     FREE_IMPORT_CAP_KWH,
                 )
-        return windows
 
     def _create_price_source(self, controller) -> PriceSource:
         """Create the appropriate price source based on energy_provider config.

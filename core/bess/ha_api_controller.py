@@ -3880,6 +3880,20 @@ class HomeAssistantAPIController:
         r"^octopus_energy_[^_]+_octoplus_power_up$"
     )
 
+    # The Octoplus power-down calendar (account-scoped, ships disabled in HA,
+    # same as power-up): calendar unique_id:
+    #   octopus_energy_{ACCOUNT}_octoplus_power_down
+    _OCTOPUS_POWER_DOWN_CALENDAR_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^octopus_energy_[^_]+_octoplus_power_down$"
+    )
+
+    # The event entity carrying joined Power Down session start/end times:
+    #   event unique_id: octopus_energy_{ACCOUNT}_octoplus_power_down_events
+    # Not the deprecated octoplus_saving_sessions entity.
+    _OCTOPUS_POWER_DOWN_EVENTS_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^octopus_energy_[^_]+_octoplus_power_down_events$"
+    )
+
     def discover_octopus_entities(self, entity_registry: list[dict]) -> dict[str, str]:
         """Discover Octopus Energy pricing entity IDs from the entity registry.
 
@@ -3916,6 +3930,24 @@ class HomeAssistantAPIController:
                 result["powerUpCalendar"] = entity_id
                 if entry.get("disabled_by"):
                     result["powerUpCalendarDisabledBy"] = str(entry["disabled_by"])
+                continue
+
+            if (
+                entity_id.startswith("calendar.")
+                and self._OCTOPUS_POWER_DOWN_CALENDAR_PATTERN.search(unique_id)
+                and "powerDownCalendar" not in result
+            ):
+                result["powerDownCalendar"] = entity_id
+                if entry.get("disabled_by"):
+                    result["powerDownCalendarDisabledBy"] = str(entry["disabled_by"])
+                continue
+
+            if (
+                entity_id.startswith("event.")
+                and self._OCTOPUS_POWER_DOWN_EVENTS_PATTERN.search(unique_id)
+                and "powerDownEvents" not in result
+            ):
+                result["powerDownEvents"] = entity_id
                 continue
 
             for pattern, bess_key in self._OCTOPUS_RATE_PATTERNS:

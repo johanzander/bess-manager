@@ -413,6 +413,30 @@ async def patch_settings(updates: dict):
                         ),
                     )
 
+            if store_key == "energy_provider":
+                octopus_update = snake_data.get("octopus")
+                if isinstance(octopus_update, dict):
+                    export_kw = octopus_update.get("power_down_export_kw")
+                    if export_kw is not None and export_kw <= 0:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"power_down_export_kw must be > 0, got {export_kw!r}",
+                        )
+                    export_minutes = octopus_update.get("power_down_export_minutes")
+                    if export_minutes is not None and export_minutes not in (
+                        15,
+                        30,
+                        45,
+                        60,
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "power_down_export_minutes must be one of "
+                                f"15, 30, 45, 60, got {export_minutes!r}"
+                            ),
+                        )
+
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
             # nordpool_official.config_entry_id) do not erase sibling keys.

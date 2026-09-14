@@ -79,6 +79,9 @@ export interface DiscoveryResult {
     exportTomorrow?: string;
     powerUpCalendar?: string;
     powerUpCalendarDisabledBy?: string;
+    powerDownCalendar?: string;
+    powerDownCalendarDisabledBy?: string;
+    powerDownEvents?: string;
   };
   entsoeFound: boolean;
   entsoeEntity: string | null;

@@ -569,6 +569,7 @@ class SettingsStore:
                     "power_down_calendar_entity": "",
                     "power_down_export_kw": POWER_DOWN_EXPORT_KW,
                     "power_down_export_minutes": POWER_DOWN_EXPORT_MINUTES,
+                    "power_down_events_entity": "",
                 },
                 "entsoe": {"entity": ""},
             },
@@ -751,6 +752,7 @@ class SettingsStore:
                     ("power_down_calendar_entity", ""),
                     ("power_down_export_kw", POWER_DOWN_EXPORT_KW),
                     ("power_down_export_minutes", POWER_DOWN_EXPORT_MINUTES),
+                    ("power_down_events_entity", ""),
                 )
                 for octopus_key, octopus_default in octopus_defaults:
                     if octopus_key not in octopus:

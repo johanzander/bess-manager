@@ -392,6 +392,7 @@ class DebugDataExport:
     historical_periods: list[dict]
     historical_summary: dict
     previous_days: list[dict]
+    power_down_sessions_today: list[dict]
     inverter_tou_segments: list[dict]
     schedules: list[dict]
     schedules_summary: dict
@@ -482,6 +483,7 @@ class DebugDataAggregator:
             historical_periods=self._serialize_historical_data(),
             historical_summary=self._summarize_historical_data(),
             previous_days=self._serialize_previous_days(),
+            power_down_sessions_today=self._serialize_power_down_sessions_today(),
             schedules=self._serialize_schedules(compact=compact),
             schedules_summary=self._summarize_schedules(),
             snapshots=self._serialize_snapshots(compact=compact),
@@ -950,6 +952,25 @@ class DebugDataAggregator:
             return result
         except Exception as e:
             logger.warning("Failed to serialize previous days: %s", e)
+            return []
+
+    def _serialize_power_down_sessions_today(self) -> list[dict]:
+        """Serialize today's recorded Octoplus Power Down session outcomes.
+
+        _serialize_previous_days only reaches yesterday and earlier (via
+        DailyViewStore, the only source that survives midnight rollover) --
+        today's records live in BatterySystemManager's in-memory list until
+        the next persisted-view write, so they need their own field to reach
+        a same-day debug export.
+
+        Returns:
+            List of PowerDownSessionOutcome dicts, in the order they were
+            recorded (session start order).
+        """
+        try:
+            return [asdict(o) for o in self.system.power_down_session_outcomes]
+        except Exception as e:
+            logger.warning("Failed to serialize today's Power Down sessions: %s", e)
             return []
 
     def _serialize_schedules(self, compact: bool = True) -> list[dict]:

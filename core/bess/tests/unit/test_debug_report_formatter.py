@@ -23,6 +23,7 @@ def _minimal_export(**overrides) -> DebugDataExport:
         "historical_periods": [],
         "historical_summary": {"total_periods": 0, "periods_with_data": 0},
         "previous_days": [],
+        "power_down_sessions_today": [],
         "inverter_tou_segments": [],
         "schedules": [],
         "schedules_summary": {"total_schedules": 0},

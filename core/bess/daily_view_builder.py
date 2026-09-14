@@ -4,7 +4,7 @@ SIMPLIFIED: Always operates on quarterly periods.
 """
 
 import logging
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 
 from . import time_utils
@@ -16,6 +16,7 @@ from .models import (
     PeriodData,
     apply_export_curtailment_to_period_data,
 )
+from .power_down_outcome import PowerDownSessionOutcome
 from .schedule_store import ScheduleStore
 from .settings import BatterySettings
 from .time_utils import format_period, get_period_count
@@ -33,6 +34,11 @@ class DailyView:
     actual_count: int
     predicted_count: int
     missing_count: int = 0  # Periods with no sensor data (e.g., HA restart gap)
+    # Octoplus Power Down session outcomes recorded so far today. Never
+    # populated by DailyViewBuilder itself (see build_daily_view) --
+    # BatterySystemManager owns this feature end-to-end and attaches its own
+    # in-memory record list onto the views it persists.
+    power_down_sessions: list[PowerDownSessionOutcome] = field(default_factory=list)
 
 
 class DailyViewBuilder:

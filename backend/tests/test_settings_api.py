@@ -543,6 +543,61 @@ class TestPatchSettingsLiveUpdates:
         ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
         assert ep_saves[-1][0][1]["octopus"]["free_import_price"] == 0.05
 
+    def test_power_down_settings_round_trip(self, mock_controller: MagicMock) -> None:
+        new_provider = {
+            "provider": "octopus",
+            "octopus": {
+                "powerDownEnabled": True,
+                "powerDownCalendarEntity": "calendar.octopus_power_down",
+                "powerDownExportKw": 2.5,
+                "powerDownExportMinutes": 30,
+                "powerDownEventsEntity": "event.octopus_power_down_events",
+            },
+        }
+        resp = _client.patch("/api/settings", json={"energyProvider": new_provider})
+        assert resp.status_code == 200
+        saved = mock_controller.settings_store.save_section.call_args_list
+        ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
+        octopus_saved = ep_saves[-1][0][1]["octopus"]
+        assert octopus_saved["power_down_enabled"] is True
+        assert (
+            octopus_saved["power_down_calendar_entity"] == "calendar.octopus_power_down"
+        )
+        assert octopus_saved["power_down_export_kw"] == 2.5
+        assert octopus_saved["power_down_export_minutes"] == 30
+        assert (
+            octopus_saved["power_down_events_entity"]
+            == "event.octopus_power_down_events"
+        )
+
+    def test_power_down_export_kw_must_be_positive(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "energyProvider": {
+                    "provider": "octopus",
+                    "octopus": {"powerDownExportKw": 0},
+                }
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_power_down_export_minutes_must_be_valid_step(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "energyProvider": {
+                    "provider": "octopus",
+                    "octopus": {"powerDownExportMinutes": 20},
+                }
+            },
+        )
+        assert resp.status_code == 422
+
     @pytest.mark.parametrize(
         "update",
         [

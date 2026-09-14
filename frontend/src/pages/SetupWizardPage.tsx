@@ -118,6 +118,11 @@ const SetupWizardPage: React.FC = () => {
     octopusExportTomorrowEntity: '',
     octopusFreeImportPrice: 0,
     octopusPowerUpCalendarEntity: '',
+    octopusPowerDownEnabled: false,
+    octopusPowerDownCalendarEntity: '',
+    octopusPowerDownExportKw: 1.0,
+    octopusPowerDownExportMinutes: 15,
+    octopusPowerDownEventsEntity: '',
     entsoeEntity: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
@@ -180,6 +185,10 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
         ...(d.octopusEntities?.powerUpCalendar ? { octopusPowerUpCalendarEntity: d.octopusEntities.powerUpCalendar } : {}),
+        ...(d.octopusEntities?.powerDownCalendar && !f.octopusPowerDownCalendarEntity
+          ? { octopusPowerDownCalendarEntity: d.octopusEntities.powerDownCalendar } : {}),
+        ...(d.octopusEntities?.powerDownEvents && !f.octopusPowerDownEventsEntity
+          ? { octopusPowerDownEventsEntity: d.octopusEntities.powerDownEvents } : {}),
         ...(d.entsoeEntity ? { entsoeEntity: d.entsoeEntity } : {}),
       }));
       if (d.currency && CYCLE_COST_BY_CURRENCY[d.currency] !== undefined) {
@@ -347,6 +356,11 @@ const SetupWizardPage: React.FC = () => {
         octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
         octopusFreeImportPrice:      ep.octopus?.freeImportPrice      ?? f.octopusFreeImportPrice,
         octopusPowerUpCalendarEntity: ep.octopus?.powerUpCalendarEntity ?? f.octopusPowerUpCalendarEntity,
+        octopusPowerDownEnabled: ep.octopus?.powerDownEnabled ?? f.octopusPowerDownEnabled,
+        octopusPowerDownCalendarEntity: ep.octopus?.powerDownCalendarEntity ?? f.octopusPowerDownCalendarEntity,
+        octopusPowerDownExportKw: ep.octopus?.powerDownExportKw ?? f.octopusPowerDownExportKw,
+        octopusPowerDownExportMinutes: ep.octopus?.powerDownExportMinutes ?? f.octopusPowerDownExportMinutes,
+        octopusPowerDownEventsEntity: ep.octopus?.powerDownEventsEntity ?? f.octopusPowerDownEventsEntity,
         // Restore ENTSO-e entity
         entsoeEntity:          ep.entsoe?.entity                 ?? f.entsoeEntity,
       }));
@@ -680,7 +694,11 @@ const SetupWizardPage: React.FC = () => {
               </div>
             )}
 
-            <PricingFormSection form={pricingForm} onChange={setPricingForm} />
+            <PricingFormSection
+              form={pricingForm}
+              onChange={setPricingForm}
+              powerDownCalendarDisabledBy={discovery?.octopusEntities?.powerDownCalendarDisabledBy}
+            />
 
             {!pricingReady && (
               <div

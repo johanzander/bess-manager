@@ -20,6 +20,7 @@ from core.bess.models import (
     EnergyData,
     PeriodData,
 )
+from core.bess.power_down_outcome import PowerDownSessionOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -72,9 +73,33 @@ def _period_data_from_dict(d: dict) -> PeriodData:
     )
 
 
+def _power_down_session_outcome_from_dict(d: dict) -> PowerDownSessionOutcome:
+    """Deserialize a PowerDownSessionOutcome from a dict produced by asdict()."""
+    return PowerDownSessionOutcome(
+        session_start=datetime.fromisoformat(d["session_start"]),
+        session_end=datetime.fromisoformat(d["session_end"]),
+        target_export_kwh=d["target_export_kwh"],
+        planned_import_kwh=d["planned_import_kwh"],
+        planned_export_kwh=d["planned_export_kwh"],
+        realized_import_kwh=d["realized_import_kwh"],
+        realized_export_kwh=d["realized_export_kwh"],
+        target_met=d["target_met"],
+        export_curtailment_active=d["export_curtailment_active"],
+        rewarded_octopoints=d["rewarded_octopoints"],
+    )
+
+
 def _daily_view_from_dict(d: dict) -> DailyView:
-    """Deserialize a DailyView from a dict produced by dataclasses.asdict()."""
+    """Deserialize a DailyView from a dict produced by dataclasses.asdict().
+
+    ``power_down_sessions`` defaults to ``[]`` for a file persisted before
+    that field existed.
+    """
     periods = [_period_data_from_dict(p) for p in d["periods"]]
+    power_down_sessions = [
+        _power_down_session_outcome_from_dict(s)
+        for s in d.get("power_down_sessions", [])
+    ]
     return DailyView(
         date=date.fromisoformat(d["date"]),
         periods=periods,
@@ -82,6 +107,7 @@ def _daily_view_from_dict(d: dict) -> DailyView:
         actual_count=d["actual_count"],
         predicted_count=d["predicted_count"],
         missing_count=d.get("missing_count", 0),
+        power_down_sessions=power_down_sessions,
     )
 
 

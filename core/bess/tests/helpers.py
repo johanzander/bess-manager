@@ -141,6 +141,14 @@ def _scenario_inputs(scenario: dict):
         inputs["export_curtailment_active"] = True
     if "home" in scenario:
         inputs["home_settings"] = HomeSettings(**scenario["home"])
+    if "min_grid_export_kwh_per_period" in scenario:
+        inputs["min_grid_export_kwh_per_period"] = scenario[
+            "min_grid_export_kwh_per_period"
+        ]
+    if "session_import_cap_kwh_per_period" in scenario:
+        inputs["session_import_cap_kwh_per_period"] = scenario[
+            "session_import_cap_kwh_per_period"
+        ]
     return inputs
 
 

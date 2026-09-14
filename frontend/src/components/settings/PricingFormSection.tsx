@@ -1,5 +1,5 @@
 import React from 'react';
-import { numField, txtInput, radioGroup, SectionCard } from './FormHelpers';
+import { numField, txtInput, radioGroup, toggle, SectionCard } from './FormHelpers';
 
 export interface PricingForm {
   currency: string;
@@ -10,6 +10,13 @@ export interface PricingForm {
   octopusImportTomorrowEntity: string;
   octopusExportTodayEntity: string;
   octopusExportTomorrowEntity: string;
+  octopusFreeImportPrice: number;
+  octopusPowerUpCalendarEntity: string;
+  octopusPowerDownEnabled: boolean;
+  octopusPowerDownCalendarEntity: string;
+  octopusPowerDownExportKw: number;
+  octopusPowerDownExportMinutes: number;
+  octopusPowerDownEventsEntity: string;
   entsoeEntity: string;
   area: string;
   markupRate: number;
@@ -23,9 +30,12 @@ export interface PricingForm {
 interface Props {
   form: PricingForm;
   onChange: (f: PricingForm) => void;
+  /** Set when HA has the Power Down calendar entity disabled — same shape as
+   * the setup wizard's powerUpCalendarDisabledBy notice. */
+  powerDownCalendarDisabledBy?: string;
 }
 
-export function PricingFormSection({ form, onChange }: Props) {
+export function PricingFormSection({ form, onChange, powerDownCalendarDisabledBy }: Props) {
   const isOctopus = form.provider === 'octopus';
   const isEntsoe = form.provider === 'entsoe';
   const currency = isOctopus ? 'GBP' : form.currency;
@@ -83,15 +93,93 @@ export function PricingFormSection({ form, onChange }: Props) {
         )}
 
         {isOctopus && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {txtInput('Import today', form.octopusImportTodayEntity,
-              v => onChange({ ...form, octopusImportTodayEntity: v }))}
-            {txtInput('Import tomorrow', form.octopusImportTomorrowEntity,
-              v => onChange({ ...form, octopusImportTomorrowEntity: v }))}
-            {txtInput('Export today', form.octopusExportTodayEntity,
-              v => onChange({ ...form, octopusExportTodayEntity: v }))}
-            {txtInput('Export tomorrow', form.octopusExportTomorrowEntity,
-              v => onChange({ ...form, octopusExportTomorrowEntity: v }))}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {txtInput('Import today', form.octopusImportTodayEntity,
+                v => onChange({ ...form, octopusImportTodayEntity: v }))}
+              {txtInput('Import tomorrow', form.octopusImportTomorrowEntity,
+                v => onChange({ ...form, octopusImportTomorrowEntity: v }))}
+              {txtInput('Export today', form.octopusExportTodayEntity,
+                v => onChange({ ...form, octopusExportTodayEntity: v }))}
+              {txtInput('Export tomorrow', form.octopusExportTomorrowEntity,
+                v => onChange({ ...form, octopusExportTomorrowEntity: v }))}
+            </div>
+            <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Octoplus free power windows
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {txtInput('Free power calendar', form.octopusPowerUpCalendarEntity,
+                  v => onChange({ ...form, octopusPowerUpCalendarEntity: v }),
+                  'calendar.octopus_energy_…_octoplus_power_up')}
+                {numField('Price during free windows', form.octopusFreeImportPrice,
+                  v => onChange({ ...form, octopusFreeImportPrice: v }),
+                  { unit: 'GBP/kWh', min: 0, step: 0.001 })}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                The Octopus Energy integration's Octoplus power-up calendar, disabled
+                by default in Home Assistant — enable it there first. Leave empty to
+                disable. Octopus doesn't distinguish Power Up sessions from Weekend
+                Happy Hours in the calendar, so set a small non-zero price to stay
+                conservative.
+              </p>
+            </div>
+            <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Octoplus Power Down sessions
+              </p>
+              {toggle('Export during Power Down sessions', form.octopusPowerDownEnabled,
+                v => onChange({ ...form, octopusPowerDownEnabled: v }))}
+              {powerDownCalendarDisabledBy && (
+                <div
+                  data-testid="power-down-calendar-disabled-warning"
+                  className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+                >
+                  Enable the Octoplus power-down calendar entity (
+                  <span className="font-mono text-xs">{form.octopusPowerDownCalendarEntity}</span>
+                  ) in Home Assistant to use Power Down sessions.
+                </div>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {txtInput('Power Down calendar', form.octopusPowerDownCalendarEntity,
+                  v => onChange({ ...form, octopusPowerDownCalendarEntity: v }),
+                  'calendar.octopus_energy_…_octoplus_power_down')}
+                {txtInput('Octoplus Power Down events entity (for session rewards)',
+                  form.octopusPowerDownEventsEntity,
+                  v => onChange({ ...form, octopusPowerDownEventsEntity: v }),
+                  'event.octopus_energy_…_octoplus_power_down_events')}
+                {numField('Export power', form.octopusPowerDownExportKw,
+                  v => onChange({ ...form, octopusPowerDownExportKw: v }),
+                  { unit: 'kW', min: 0.1, step: 0.1 })}
+                <label className="block">
+                  <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Export duration</span>
+                  <select
+                    value={form.octopusPowerDownExportMinutes}
+                    onChange={e => onChange({ ...form, octopusPowerDownExportMinutes: Number(e.target.value) })}
+                    className="mt-1 block w-full rounded-lg border bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={15}>15 minutes</option>
+                    <option value={30}>30 minutes</option>
+                    <option value={45}>45 minutes</option>
+                    <option value={60}>60 minutes</option>
+                  </select>
+                </label>
+                <div className="flex items-end">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 pb-2">
+                    ≈ {(form.octopusPowerDownExportKw * form.octopusPowerDownExportMinutes / 60).toFixed(2)} kWh per session
+                  </p>
+                </div>
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                During each joined Octoplus Power Down session, BESS exports at least
+                the chosen power for the chosen duration at the start of the session,
+                and plans no grid import for the rest of the session, so your meter
+                reads net export. Your grid connection must allow exporting. Export
+                power is also the safety margin if the house uses more than forecast.
+                Whether exporting improves session scoring is unproven, which is why
+                this is off by default.
+              </p>
+            </div>
           </div>
         )}
 

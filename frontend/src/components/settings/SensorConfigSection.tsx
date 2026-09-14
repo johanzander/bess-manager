@@ -77,6 +77,11 @@ export interface DiscoveryResult {
     importTomorrow?: string;
     exportToday?: string;
     exportTomorrow?: string;
+    powerUpCalendar?: string;
+    powerUpCalendarDisabledBy?: string;
+    powerDownCalendar?: string;
+    powerDownCalendarDisabledBy?: string;
+    powerDownEvents?: string;
   };
   entsoeFound: boolean;
   entsoeEntity: string | null;

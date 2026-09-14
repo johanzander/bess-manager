@@ -13,6 +13,7 @@ Coverage goals
 """
 
 import sys
+from collections.abc import Callable
 from copy import deepcopy
 from unittest.mock import MagicMock, patch
 
@@ -81,6 +82,16 @@ _DEFAULT_STORE: dict = {
         "shared": {},
     },
 }
+
+
+class _RunInline:
+    """threading.Thread stand-in that runs its target synchronously on start()."""
+
+    def __init__(self, target: Callable[[], None], daemon: bool) -> None:
+        self._target = target
+
+    def start(self) -> None:
+        self._target()
 
 
 @pytest.fixture()
@@ -518,6 +529,110 @@ class TestPatchSettingsLiveUpdates:
         ep_calls = [c for c in calls if "energy_provider" in c[0][0]]
         assert len(ep_calls) >= 1
         assert ep_calls[0][0][0]["energy_provider"]["provider"] == "octopus"
+
+    def test_energy_provider_free_import_price_round_trips(
+        self, mock_controller: MagicMock
+    ) -> None:
+        new_provider = {
+            "provider": "octopus",
+            "octopus": {"api_key": "sk-test", "free_import_price": 0.05},
+        }
+        resp = _client.patch("/api/settings", json={"energyProvider": new_provider})
+        assert resp.status_code == 200
+        saved = mock_controller.settings_store.save_section.call_args_list
+        ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
+        assert ep_saves[-1][0][1]["octopus"]["free_import_price"] == 0.05
+
+    def test_power_down_settings_round_trip(self, mock_controller: MagicMock) -> None:
+        new_provider = {
+            "provider": "octopus",
+            "octopus": {
+                "powerDownEnabled": True,
+                "powerDownCalendarEntity": "calendar.octopus_power_down",
+                "powerDownExportKw": 2.5,
+                "powerDownExportMinutes": 30,
+                "powerDownEventsEntity": "event.octopus_power_down_events",
+            },
+        }
+        resp = _client.patch("/api/settings", json={"energyProvider": new_provider})
+        assert resp.status_code == 200
+        saved = mock_controller.settings_store.save_section.call_args_list
+        ep_saves = [c for c in saved if c[0][0] == "energy_provider"]
+        octopus_saved = ep_saves[-1][0][1]["octopus"]
+        assert octopus_saved["power_down_enabled"] is True
+        assert (
+            octopus_saved["power_down_calendar_entity"] == "calendar.octopus_power_down"
+        )
+        assert octopus_saved["power_down_export_kw"] == 2.5
+        assert octopus_saved["power_down_export_minutes"] == 30
+        assert (
+            octopus_saved["power_down_events_entity"]
+            == "event.octopus_power_down_events"
+        )
+
+    def test_power_down_export_kw_must_be_positive(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "energyProvider": {
+                    "provider": "octopus",
+                    "octopus": {"powerDownExportKw": 0},
+                }
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_power_down_export_minutes_must_be_valid_step(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "energyProvider": {
+                    "provider": "octopus",
+                    "octopus": {"powerDownExportMinutes": 20},
+                }
+            },
+        )
+        assert resp.status_code == 422
+
+    @pytest.mark.parametrize(
+        "update",
+        [
+            pytest.param({"electricityPrice": {"markupRate": 0.1}}, id="pricing"),
+            pytest.param(
+                {
+                    "energyProvider": {
+                        "provider": "octopus",
+                        "octopus": {"power_up_calendar_entity": "calendar.power_up"},
+                    }
+                },
+                id="energy provider",
+            ),
+        ],
+    )
+    def test_price_affecting_save_refreshes_prices_then_replans(
+        self, mock_controller: MagicMock, update: dict
+    ) -> None:
+        """A pricing edit reaches the plan now, not at the next scheduled run."""
+        calls: list[str] = []
+        mock_controller.system.refresh_prices.side_effect = lambda: calls.append(
+            "refresh_prices"
+        )
+        mock_controller.system.update_battery_schedule.side_effect = (
+            lambda **_: calls.append("update_battery_schedule")
+        )
+        with patch("api.threading.Thread", _RunInline):
+            resp = _client.patch("/api/settings", json=update)
+        assert resp.status_code == 200
+        assert calls == ["refresh_prices", "update_battery_schedule"]
+
+    def test_non_price_save_does_not_replan(self, mock_controller: MagicMock) -> None:
+        with patch("api.threading.Thread", _RunInline):
+            _client.patch("/api/settings", json={"battery": {"totalCapacity": 20.0}})
+        mock_controller.system.update_battery_schedule.assert_not_called()
 
     def test_growatt_device_id_applied_to_ha_controller(self, mock_controller):
         _client.patch("/api/settings", json={"growatt": {"deviceId": "new-dev-99"}})

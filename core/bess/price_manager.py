@@ -5,14 +5,22 @@ inversion.
 """
 
 import logging
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
 from . import time_utils
+from .calendar_windows import CalendarWindow
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
+from .free_import_overlay import apply_free_import_windows
+from .settings import FREE_IMPORT_PRICE
 
 logger = logging.getLogger(__name__)
+
+# The price refresh job runs every 15 minutes (app.py); a calendar fetch that
+# has failed across two of them is no longer a blip.
+FREE_IMPORT_WINDOW_ERROR_AFTER = timedelta(minutes=30)
 
 
 class PriceSource:
@@ -430,6 +438,13 @@ class PriceManager:
         area: str,
         spot_multiplier: float = 1.0,
         export_spot_multiplier: float = 1.0,
+        free_import_price: float = FREE_IMPORT_PRICE,
+        free_import_window_source: (
+            Callable[[datetime, datetime], list[CalendarWindow]] | None
+        ) = None,
+        power_down_window_source: (
+            Callable[[datetime, datetime], list[CalendarWindow]] | None
+        ) = None,
     ) -> None:
         """Initialize the price manager.
 
@@ -442,6 +457,15 @@ class PriceManager:
             area: Price area code (e.g. "SE4", "NO1", "DK1")
             spot_multiplier: Multiplicative factor on spot buy price (1.0 = no adjustment)
             export_spot_multiplier: Multiplicative factor on spot sell price
+            free_import_price: Buy price for periods inside a free-import window
+            free_import_window_source: Returns the free-import windows
+                overlapping ``[start, end)``; None when no window source exists
+            power_down_window_source: Returns the Octoplus Power Down joined
+                session windows overlapping ``[start, end)``; None when no
+                window source exists. Unlike the free-import windows, these
+                are never applied to prices -- BatterySystemManager reads them
+                back through get_power_down_windows() to build the optimizer's
+                export-pulse and session-import-cap inputs.
         """
         self.price_source = price_source
         self.markup_rate = markup_rate
@@ -451,7 +475,22 @@ class PriceManager:
         self.area = area
         self.spot_multiplier = spot_multiplier
         self.export_spot_multiplier = export_spot_multiplier
+        self.free_import_price = free_import_price
+        self._free_import_window_source = free_import_window_source
+        self._power_down_window_source = power_down_window_source
         self._logger = logging.getLogger(__name__)
+
+        # Free-import windows, replaced on every refresh_cache(). Kept outside
+        # the price cache: bookings change during the day while rates do not.
+        self._free_import_windows: list[CalendarWindow] = []
+        self._free_import_window_error: Exception | None = None
+        self._free_import_window_failing_since: datetime | None = None
+
+        # Power Down session windows, replaced on every refresh_cache() the
+        # same way -- but never composed into a price entry (see docstring).
+        self._power_down_windows: list[CalendarWindow] = []
+        self._power_down_window_error: Exception | None = None
+        self._power_down_window_failing_since: datetime | None = None
 
         # Cache for today's prices
         self._today_prices: list[dict[str, Any]] | None = None
@@ -521,8 +560,10 @@ class PriceManager:
         # Use cached values for tomorrow if available. The after-midnight case
         # (target_date is now "today" but still sits in the _tomorrow_* slot)
         # is handled by _cached_today_prices() above, which promotes it.
-        if self._tomorrow_date == target_date and self._tomorrow_prices is not None:
-            return self._tomorrow_prices
+        if target_date == time_utils.today() + timedelta(days=1):
+            cached_tomorrow = self._cached_tomorrow_prices()
+            if cached_tomorrow is not None:
+                return cached_tomorrow
 
         try:
             # Get raw prices from the source
@@ -569,7 +610,7 @@ class PriceManager:
                 self._tomorrow_prices = price_data
                 self._tomorrow_date = target_date
 
-            return price_data
+            return self._with_free_import_windows(price_data, target_date)
 
         except Exception as e:
             if isinstance(e, PriceDataUnavailableError | SystemConfigurationError):
@@ -638,8 +679,15 @@ class PriceManager:
         cached, so a warm day is not re-fetched. Tomorrow is skipped until
         the market's publication time to avoid pointless calls against a
         sometimes-flaky HA integration.
+
+        Free-import and Power Down windows are re-fetched on every call
+        regardless, since a booking can change after the day's prices are
+        cached.
         """
         today = time_utils.today()
+        self._refresh_free_import_windows(today)
+        self._refresh_power_down_windows(today)
+
         try:
             self.get_price_data(today)
         except Exception as e:
@@ -652,6 +700,81 @@ class PriceManager:
                 self._logger.debug(
                     "Price refresh: tomorrow's prices not yet available: %s", e
                 )
+
+    def _refresh_free_import_windows(self, today: date) -> None:
+        """Replace the free-import windows for today and tomorrow.
+
+        A failed fetch keeps the previous windows and is surfaced by
+        check_health() rather than raised, so a flaky calendar can never
+        block a price refresh (#709).
+        """
+        if self._free_import_window_source is None:
+            return
+        tz = time_utils.TIMEZONE
+        start = datetime.combine(today, datetime.min.time(), tzinfo=tz)
+        end = datetime.combine(
+            today + timedelta(days=2), datetime.min.time(), tzinfo=tz
+        )
+        try:
+            self._free_import_windows = self._free_import_window_source(start, end)
+        except Exception as e:
+            self._logger.warning(
+                "Price refresh: free import windows unavailable, keeping %d "
+                "previous window(s): %s",
+                len(self._free_import_windows),
+                e,
+            )
+            self._free_import_window_error = e
+            if self._free_import_window_failing_since is None:
+                self._free_import_window_failing_since = time_utils.now()
+            return
+        self._free_import_window_error = None
+        self._free_import_window_failing_since = None
+
+    def _refresh_power_down_windows(self, today: date) -> None:
+        """Replace the Power Down session windows for today and tomorrow.
+
+        Same "keep the previous list on failure" rule as
+        _refresh_free_import_windows, and for the same reason (#709): a flaky
+        calendar must never block a price refresh.
+        """
+        if self._power_down_window_source is None:
+            return
+        tz = time_utils.TIMEZONE
+        start = datetime.combine(today, datetime.min.time(), tzinfo=tz)
+        end = datetime.combine(
+            today + timedelta(days=2), datetime.min.time(), tzinfo=tz
+        )
+        try:
+            self._power_down_windows = self._power_down_window_source(start, end)
+        except Exception as e:
+            self._logger.warning(
+                "Price refresh: Power Down session windows unavailable, "
+                "keeping %d previous window(s): %s",
+                len(self._power_down_windows),
+                e,
+            )
+            self._power_down_window_error = e
+            if self._power_down_window_failing_since is None:
+                self._power_down_window_failing_since = time_utils.now()
+            return
+        self._power_down_window_error = None
+        self._power_down_window_failing_since = None
+
+    def get_power_down_windows(self) -> list[CalendarWindow]:
+        """The Power Down session windows from the most recent refresh_cache().
+
+        Never applied to prices (see __init__'s power_down_window_source
+        docstring) -- BatterySystemManager reads this to build the
+        optimizer's export-pulse and session-import-cap inputs.
+        """
+        return list(self._power_down_windows)
+
+    def _with_free_import_windows(self, entries: list, day: date) -> list:
+        """Overlay the current free-import windows onto one day's entries."""
+        return apply_free_import_windows(
+            entries, day, self._free_import_windows, self.free_import_price
+        )
 
     def get_prices(self, target_date: date | None = None) -> list:
         """Get raw price data for a specified date.
@@ -806,25 +929,67 @@ class PriceManager:
         (before the next tomorrow fetch overwrites it) so the read succeeds
         without waiting for refresh_cache() to run — the quarterly optimizer
         fires at :00 and the refresh job only at :05.
+
+        Free-import windows are overlaid here, on the way out, so the cache
+        itself always holds raw rates.
         """
         today = time_utils.today()
         if self._today_date == today and self._today_prices is not None:
-            return self._today_prices
+            return self._with_free_import_windows(self._today_prices, today)
         if self._tomorrow_date == today and self._tomorrow_prices is not None:
             self._today_prices = self._tomorrow_prices
             self._today_date = today
-            return self._today_prices
+            return self._with_free_import_windows(self._today_prices, today)
         return None
 
     def _cached_tomorrow_prices(self) -> list | None:
-        """Return tomorrow's cached price entries, or None if the cache is cold."""
+        """Return tomorrow's cached price entries, or None if the cache is cold.
+
+        Free-import windows are overlaid on the way out, as for today.
+        """
         tomorrow = time_utils.today() + timedelta(days=1)
         if self._tomorrow_date == tomorrow and self._tomorrow_prices is not None:
-            return self._tomorrow_prices
+            return self._with_free_import_windows(self._tomorrow_prices, tomorrow)
         return None
 
     def check_health(self) -> list:
         """Check price management capabilities."""
+        return [*self._check_price_health(), *self._check_free_import_health()]
+
+    def _check_free_import_health(self) -> list:
+        """Report a failing free-import window fetch; nothing while it works.
+
+        Today's prices stay usable without the windows, so this is optional:
+        WARNING at first, ERROR once the failure outlives two refresh cycles.
+        """
+        if self._free_import_window_error is None:
+            return []
+        assert self._free_import_window_failing_since is not None
+        persisted = time_utils.now() - self._free_import_window_failing_since
+        status = "ERROR" if persisted > FREE_IMPORT_WINDOW_ERROR_AFTER else "WARNING"
+        return [
+            {
+                "name": "Octoplus Free Import Windows",
+                "description": "Reads free power windows from the Octoplus calendar",
+                "required": False,
+                "status": status,
+                "checks": [
+                    {
+                        "name": "Octoplus Free Power Calendar",
+                        "status": status,
+                        "error": (
+                            "Free power windows may be missing from the plan: "
+                            f"{self._free_import_window_error}"
+                        ),
+                        "value": "N/A",
+                    }
+                ],
+                "last_run": datetime.now().isoformat(),
+            }
+        ]
+
+    def _check_price_health(self) -> list:
+        """Check that today's electricity prices are available."""
 
         price_check = {
             "name": "Electricity Price Data",

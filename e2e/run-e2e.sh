@@ -3,9 +3,10 @@
 # when multiple worktrees run simultaneously.
 #
 # Usage:
-#   ./e2e/run-e2e.sh                          # run all tests (smoke + wizard)
+#   ./e2e/run-e2e.sh                          # run all tests (smoke + wizard + growatt-vpp)
 #   ./e2e/run-e2e.sh --project=chromium       # run smoke tests only
 #   ./e2e/run-e2e.sh --project=wizard         # run wizard tests only
+#   ./e2e/run-e2e.sh --vpp                    # run Growatt VPP checks only
 #   BESS_PORT=8085 ./e2e/run-e2e.sh           # use a specific port
 #
 # Port derivation uses the same cksum approach as dev-run.sh so each
@@ -46,15 +47,18 @@ trap cleanup EXIT
 PLAYWRIGHT_ARGS=("$@")
 RUN_CHROMIUM=false
 RUN_WIZARD=false
+RUN_VPP_CONTROL=false
 
 if [ ${#PLAYWRIGHT_ARGS[@]} -eq 0 ]; then
   RUN_CHROMIUM=true
   RUN_WIZARD=true
+  RUN_VPP_CONTROL=true
 else
   for arg in "${PLAYWRIGHT_ARGS[@]}"; do
     case "$arg" in
-      *chromium*) RUN_CHROMIUM=true ;;
-      *wizard*)   RUN_WIZARD=true ;;
+      *chromium*)    RUN_CHROMIUM=true ;;
+      *wizard*)      RUN_WIZARD=true ;;
+      *vpp*)         RUN_VPP_CONTROL=true ;;
     esac
   done
 fi
@@ -108,6 +112,35 @@ if [ "$RUN_WIZARD" = true ]; then
 
     docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml down
   done
+fi
+
+# --- Phase 1b: Growatt VPP schedule build + register writes (#399, #538) ---
+# mock_time is pinned to a fixed past date, so the container's wall clock is
+# faked to match -- otherwise date-anchored price lookups fail. Mirrors the
+# equivalent job in .github/workflows/ci.yml; keep the two in sync.
+if [ "$RUN_VPP_CONTROL" = true ]; then
+  echo "==> Phase 1b: Starting environment (Growatt VPP)..."
+  BESS_FAKETIME_PRELOAD=/usr/local/lib/libfaketime.so.1 \
+    BESS_FAKETIME="2025-01-15 08:30:00" \
+    SCENARIO=ci-growatt-vpp \
+    BESS_SETTINGS=./e2e/ci-bess-settings-growatt-vpp.json \
+    docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml up -d
+  echo "==> Waiting for BESS on port ${BESS_PORT}..."
+  timeout 120 bash -c "until curl -sf http://localhost:${BESS_PORT}/api/settings > /dev/null 2>&1; do sleep 2; done"
+
+  echo "==> Verifying Growatt VPP schedule builds without error..."
+  sleep 5
+  curl -sf "http://localhost:${BESS_PORT}/api/dashboard-health-summary" > /dev/null
+  if docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml logs bess | grep -q "Failed to update battery schedule"; then
+    echo "Growatt VPP schedule build failed -- see logs below"
+    docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml logs bess
+    exit 1
+  fi
+
+  echo "==> Verifying Growatt VPP register writes reached mock HA..."
+  python3 scripts/mock_ha/assert_vpp_control_writes.py "http://localhost:${MOCK_HA_PORT}" "http://localhost:${BESS_PORT}"
+
+  docker compose -p "$COMPOSE_PROJECT_NAME" -f docker-compose.ci.yml down
 fi
 
 echo ""

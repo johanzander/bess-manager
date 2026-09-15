@@ -539,6 +539,78 @@ def test_hybrid_wiring_is_no_op_when_no_ties_detected(caplog):
     )
 
 
+def test_513_pwl_solver_does_not_mis_rank_a_forced_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """#513: forced to re-solve its whole horizon, the "exact" PWL solver
+    once picked a plan 0.5843 SEK worse than the grid DP's own plan, under
+    the DP's own reward objective -- on this fixture
+    (historical_2025_01_13_night_low_no_solar), both plans start at SOE 3.0,
+    end at the pinned terminal SOE 3.000, and discharge exactly 12.0 kWh
+    across periods 6-9; they differed only in which hours. That is not
+    reward-vs-flows divergence (#497 class) and not a missing candidate in
+    the *shared* candidate set (every diverging action is on-lattice) -- the
+    PWL backward pass propagated a distorted value function because
+    `_residual_cover_p` (action_selector.py) offered its exact off-lattice
+    load-cover candidate only below the smallest lattice step, so a
+    sub-lattice kink in the true value function was missing wherever the
+    residual exceeded it.
+
+    Fixed as a side effect of #607 (Phase 4b, commit 11c5ddd5), which
+    removed that restriction to close #352 Shape B -- an unrelated
+    candidate-completeness bug of the same shape. Nothing here re-derives
+    root cause; this pins the outcome #513 exists to guard: an "exact"
+    solver must not rank worse than the grid DP it is spliced over, under
+    its own objective (docs/agents/optimizer-architecture.md P6).
+
+    `detect_tie_windows` is forced here rather than relying on the fixture
+    naturally tripping the tie detector, because that is what #513's own
+    repro did and what actually exercises the PWL solver across the whole
+    horizon -- the production tie detector only ever hands it short
+    windows, which is precisely why a solver-level mis-ranking could ship
+    for weeks before #512's benchmark caught it."""
+    from core.bess.tie_detection import Window
+
+    _, inputs = build_scenario_optimizer_inputs(
+        "historical_2025_01_13_night_low_no_solar"
+    )
+
+    monkeypatch.setattr(
+        "core.bess.tie_detection.detect_tie_windows", lambda *a, **k: []
+    )
+    grid_result = optimize_battery_schedule(**inputs)
+
+    monkeypatch.setattr(
+        "core.bess.tie_detection.detect_tie_windows",
+        lambda tie_margins, value_slopes, soe_step_kwh: [Window(0, len(tie_margins))],
+    )
+    pwl_result = optimize_battery_schedule(**inputs)
+
+    assert grid_result.reward_objective_cost is not None
+    assert pwl_result.reward_objective_cost is not None
+
+    # Mutation check (run manually, not in CI): reintroducing the pre-#607
+    # gate -- `if residual_p >= capabilities.discharge_rate_step_kw(...):
+    # return None` at the top of `_residual_cover_p` -- reproduces the bug
+    # exactly: pwl_result.reward_objective_cost - grid_result.reward_objective_cost
+    # goes from -0.0479 to +0.6745 on this fixture, and the assertion below
+    # fails. Verified 2026-09-13.
+    assert (
+        pwl_result.reward_objective_cost <= grid_result.reward_objective_cost + 1e-6
+    ), (
+        f"PWL solver ranked its own re-solved window worse than the grid "
+        f"DP's plan under the DP's own objective: pwl="
+        f"{pwl_result.reward_objective_cost:.4f}, grid="
+        f"{grid_result.reward_objective_cost:.4f}, delta="
+        f"{pwl_result.reward_objective_cost - grid_result.reward_objective_cost:+.4f} SEK"
+    )
+
+    # Pinned so a future change that reopens or shifts this defect is caught
+    # even if it stays within the +1e-6 tolerance above by luck.
+    assert grid_result.reward_objective_cost == pytest.approx(202.72390, abs=1e-3)
+    assert pwl_result.reward_objective_cost == pytest.approx(202.67600, abs=1e-3)
+
+
 def test_466_near_tied_evening_periods_discharge_instead_of_idle():
     """Replays the exact optimizer input recorded in #466's debug bundle
     (bess-debug-2026-08-06-110152.md, run at optimization_period 44, horizon

@@ -331,18 +331,30 @@ check below.
 
 A solver output spliced over another solver's output (the #450 PWL path)
 must either carry a certification the machinery actually earns, or an
-explicit error bound. #513 (PWL mis-ranks a plan by 0.584 SEK while
-"exact") is the standing counterexample.
+explicit error bound. #513 (PWL mis-ranked a plan by 0.584 SEK while
+"exact") was a real instance of this: a missing off-lattice covering
+candidate in `_residual_cover_p`, the same gap as #352 Shape B, distorted
+the backward-pass value function enough that PWL's re-solve committed to a
+jointly worse split of one discharge across periods 6-9. It shipped fixed
+as a side effect of `11c5ddd5` (#607, Phase 4b) — that PR widened the
+candidate's gating from "only below the smallest lattice step" to "wherever
+the lattice cannot express exact cover," which is what the mis-ranked
+window needed. Confirmed fixed on the #513 fixture: PWL now finds a plan at
+or below the grid DP's cost. #513 is now a *closed instance*, not a live
+counterexample — but it is exactly the failure shape the paragraph below
+still has no structural guard against, so the gate it describes remains
+undone.
 
 **Current state (aspirational until the Phase 2 rider lands):**
 `splice_schedule` today splices unconditionally — the only guard is the
-certification raise (`PWLWindowUnderRefinedError`), and #513 proves
-certification does not imply correct ranking. "Treated as heuristic"
-becomes a code property via the splice cost-gate (migration plan, Phase 2
-rider): a re-solved window is accepted only if its replayed cost is no
-worse than the grid segment it replaces. Until that gate exists, any NEW
-reliance on PWL exactness is forbidden; the existing splice path is
-grandfathered, gate pending.
+certification raise (`PWLWindowUnderRefinedError`), and it does not imply
+correct ranking (#513 shipped through exactly this gap before it was fixed
+by an unrelated candidate-completeness patch, not by anything that checks
+ranking). "Treated as heuristic" becomes a code property via the splice
+cost-gate (migration plan, Phase 2 rider): a re-solved window is accepted
+only if its replayed cost is no worse than the grid segment it replaces.
+Until that gate exists, any NEW reliance on PWL exactness is forbidden; the
+existing splice path is grandfathered, gate pending.
 
 **Window size is the caller's problem, not the solver's (#624).**
 `detect_tie_windows` merges adjacent flagged periods with no cap, while the

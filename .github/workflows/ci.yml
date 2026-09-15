@@ -250,6 +250,9 @@ jobs:
             docker compose -f docker-compose.ci.yml logs bess
             exit 1
           fi
+      - name: "E2E: Verify Growatt VPP register writes reached mock HA (#538)"
+        if: env.RUN_E2E == 'true'
+        run: python3 scripts/mock_ha/assert_vpp_control_writes.py http://localhost:8123 http://localhost:8080
       - name: "E2E: Stop environment (Growatt VPP)"
         if: always() && env.RUN_E2E == 'true'
         run: docker compose -f docker-compose.ci.yml down

@@ -10,6 +10,8 @@ export interface PricingForm {
   octopusImportTomorrowEntity: string;
   octopusExportTodayEntity: string;
   octopusExportTomorrowEntity: string;
+  octopusFreeImportPrice: number;
+  octopusPowerUpCalendarEntity: string;
   entsoeEntity: string;
   area: string;
   markupRate: number;
@@ -83,15 +85,37 @@ export function PricingFormSection({ form, onChange }: Props) {
         )}
 
         {isOctopus && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {txtInput('Import today', form.octopusImportTodayEntity,
-              v => onChange({ ...form, octopusImportTodayEntity: v }))}
-            {txtInput('Import tomorrow', form.octopusImportTomorrowEntity,
-              v => onChange({ ...form, octopusImportTomorrowEntity: v }))}
-            {txtInput('Export today', form.octopusExportTodayEntity,
-              v => onChange({ ...form, octopusExportTodayEntity: v }))}
-            {txtInput('Export tomorrow', form.octopusExportTomorrowEntity,
-              v => onChange({ ...form, octopusExportTomorrowEntity: v }))}
+          <div className="space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {txtInput('Import today', form.octopusImportTodayEntity,
+                v => onChange({ ...form, octopusImportTodayEntity: v }))}
+              {txtInput('Import tomorrow', form.octopusImportTomorrowEntity,
+                v => onChange({ ...form, octopusImportTomorrowEntity: v }))}
+              {txtInput('Export today', form.octopusExportTodayEntity,
+                v => onChange({ ...form, octopusExportTodayEntity: v }))}
+              {txtInput('Export tomorrow', form.octopusExportTomorrowEntity,
+                v => onChange({ ...form, octopusExportTomorrowEntity: v }))}
+            </div>
+            <div className="pt-2 border-t border-gray-200 dark:border-gray-700 space-y-3">
+              <p className="text-sm font-medium text-gray-700 dark:text-gray-200">
+                Octoplus free power windows
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {txtInput('Free power calendar', form.octopusPowerUpCalendarEntity,
+                  v => onChange({ ...form, octopusPowerUpCalendarEntity: v }),
+                  'calendar.octopus_energy_…_octoplus_power_up')}
+                {numField('Price during free windows', form.octopusFreeImportPrice,
+                  v => onChange({ ...form, octopusFreeImportPrice: v }),
+                  { unit: 'GBP/kWh', min: 0, step: 0.001 })}
+              </div>
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                The Octopus Energy integration's Octoplus power-up calendar, disabled
+                by default in Home Assistant — enable it there first. Leave empty to
+                disable. Octopus doesn't distinguish Power Up sessions from Weekend
+                Happy Hours in the calendar, so set a small non-zero price to stay
+                conservative.
+              </p>
+            </div>
           </div>
         )}
 

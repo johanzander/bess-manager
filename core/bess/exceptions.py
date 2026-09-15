@@ -104,6 +104,16 @@ class ConsumptionOverlayError(BESSException):
     """
 
 
+class CalendarWindowError(BESSException):
+    """A configured Home Assistant calendar could not be read as time windows.
+
+    Raised for an unreachable calendar entity (disabled or renamed) and for
+    events that are not bounded, timezone-aware spans. A user who configured
+    the Octoplus calendar is better served by a visible error than by a free
+    hour the plan silently ignored.
+    """
+
+
 class ManagedLoadsError(BESSException):
     """A managed-load sensor's historical statistics could not be fetched.
 

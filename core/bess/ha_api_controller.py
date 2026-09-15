@@ -10,15 +10,21 @@ import re
 import ssl
 import time
 import urllib.parse
+from datetime import datetime
 from functools import partial
 from typing import ClassVar
 
 import requests
 import websocket
 
+from .calendar_windows import CalendarWindow, parse_calendar_events
 from .consumption_overlay import OverlayBlock, parse_overlay_blocks
 from .energy_balance import derive_load_consumption
-from .exceptions import ConsumptionOverlayError, SystemConfigurationError
+from .exceptions import (
+    CalendarWindowError,
+    ConsumptionOverlayError,
+    SystemConfigurationError,
+)
 from .runtime_failure_tracker import RuntimeFailureTracker
 from .settings_store import SettingsStore, apply_signed_pair_aliases
 
@@ -1579,6 +1585,41 @@ class HomeAssistantAPIController:
             f"Planned consumption changes entity '{entity_id}' has no 'blocks' "
             f"attribute (found: {sorted(attributes)})"
         )
+
+    def get_calendar_windows(
+        self, entity_id: str, start: datetime, end: datetime
+    ) -> list[CalendarWindow]:
+        """Query an HA calendar entity for events overlapping ``[start, end)``.
+
+        Takes the entity directly, like OctopusEnergySource's rate entities:
+        the Octoplus calendar is provider configuration
+        (``energy_provider.octopus``), not a platform sensor.
+
+        Raises:
+            CalendarWindowError: If the entity 404s (disabled or renamed in
+                HA), returns no body, or holds events that are not bounded,
+                timezone-aware spans.
+
+        """
+        try:
+            response = self._api_request(
+                "get",
+                f"/api/calendars/{entity_id}",
+                operation=f"Read calendar '{entity_id}'",
+                category="sensor_read",
+                context={"entity_id": entity_id},
+                params={"start": start.isoformat(), "end": end.isoformat()},
+            )
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                raise CalendarWindowError(
+                    f"Calendar '{entity_id}' was not found in Home Assistant -- "
+                    "enable the entity or update the configured calendar"
+                ) from e
+            raise
+        if response is None:
+            raise CalendarWindowError(f"Calendar '{entity_id}' returned no events body")
+        return parse_calendar_events(response)
 
     def get_estimated_consumption(self):
         """Get estimated consumption in quarterly resolution (96 periods).
@@ -3833,6 +3874,12 @@ class HomeAssistantAPIController:
 
         return None
 
+    # The Octoplus power-up calendar (account-scoped, ships disabled in HA):
+    #   calendar unique_id: octopus_energy_{ACCOUNT}_octoplus_power_up
+    _OCTOPUS_POWER_UP_CALENDAR_PATTERN: ClassVar[re.Pattern] = re.compile(
+        r"^octopus_energy_[^_]+_octoplus_power_up$"
+    )
+
     def discover_octopus_entities(self, entity_registry: list[dict]) -> dict[str, str]:
         """Discover Octopus Energy pricing entity IDs from the entity registry.
 
@@ -3841,6 +3888,11 @@ class HomeAssistantAPIController:
         ``_OCTOPUS_RATE_PATTERNS`` regex patterns against the unique_id to
         identify electricity rate entities — gas entities are excluded by
         requiring ``_electricity_`` in the unique_id pattern.
+
+        Also finds the Octoplus power-up calendar (``powerUpCalendar``). That
+        entity ships disabled, so when its registry entry has ``disabled_by``
+        set the reason is returned as ``powerUpCalendarDisabledBy`` for the UI
+        to tell the user to enable it.
 
         Args:
             entity_registry: Entity registry list from HA WebSocket API.
@@ -3855,6 +3907,16 @@ class HomeAssistantAPIController:
                 continue
             entity_id = str(entry.get("entity_id", ""))
             unique_id = str(entry.get("unique_id", ""))
+
+            if (
+                entity_id.startswith("calendar.")
+                and self._OCTOPUS_POWER_UP_CALENDAR_PATTERN.search(unique_id)
+                and "powerUpCalendar" not in result
+            ):
+                result["powerUpCalendar"] = entity_id
+                if entry.get("disabled_by"):
+                    result["powerUpCalendarDisabledBy"] = str(entry["disabled_by"])
+                continue
 
             for pattern, bess_key in self._OCTOPUS_RATE_PATTERNS:
                 if pattern.search(unique_id) and bess_key not in result:

@@ -515,6 +515,7 @@ class SettingsStore:
             DEFAULT_AREA,
             DEFAULT_CURRENCY,
             EXPORT_SPOT_MULTIPLIER,
+            FREE_IMPORT_PRICE,
             HOME_HOURLY_CONSUMPTION_KWH,
             HOUSE_MAX_FUSE_CURRENT_A,
             HOUSE_VOLTAGE_V,
@@ -559,7 +560,10 @@ class SettingsStore:
                 "provider": "nordpool_official",
                 "nordpool_official": {"config_entry_id": ""},
                 "nordpool_hacs": {"entity": ""},
-                "octopus": {},
+                "octopus": {
+                    "free_import_price": FREE_IMPORT_PRICE,
+                    "power_up_calendar_entity": "",
+                },
                 "entsoe": {"entity": ""},
             },
             "growatt": {"device_id": ""},
@@ -594,6 +598,7 @@ class SettingsStore:
             BATTERY_EFFICIENCY_CHARGE,
             BATTERY_EFFICIENCY_DISCHARGE,
             EXPORT_SPOT_MULTIPLIER,
+            FREE_IMPORT_PRICE,
             INVERTER_AC_POWER_MARGIN,
             INVERTER_MAX_AC_POWER_KW,
             SPOT_MULTIPLIER,
@@ -725,6 +730,25 @@ class SettingsStore:
                     ep["provider"] = "nordpool_hacs"
                 self.data["energy_provider"] = ep
                 changed = True
+
+            # Added with the Octoplus free-import overlay; BatterySystemManager
+            # reads both strictly for the octopus provider. An empty calendar
+            # entity means the overlay is not configured.
+            octopus = ep.get("octopus")
+            if isinstance(octopus, dict):
+                octopus_defaults: tuple[tuple[str, float | str], ...] = (
+                    ("free_import_price", FREE_IMPORT_PRICE),
+                    ("power_up_calendar_entity", ""),
+                )
+                for octopus_key, octopus_default in octopus_defaults:
+                    if octopus_key not in octopus:
+                        octopus[octopus_key] = octopus_default
+                        logger.info(
+                            "Schema migration: added energy_provider.octopus.%s = %r",
+                            octopus_key,
+                            octopus_default,
+                        )
+                        changed = True
 
         growatt = self.data.get("growatt")
         if isinstance(growatt, dict):

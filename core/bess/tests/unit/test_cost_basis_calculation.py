@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 
 TIMEZONE = ZoneInfo("Europe/Stockholm")
@@ -25,6 +26,7 @@ def make_period_data(
     buy_price: float = 1.0,
     home_consumption: float = 0.5,
     grid_imported: float | None = None,
+    strategic_intent: str = "IDLE",
 ) -> PeriodData:
     """Create PeriodData for testing."""
     return PeriodData(
@@ -46,7 +48,7 @@ def make_period_data(
         economic=EconomicData(buy_price=buy_price, sell_price=buy_price * 0.4),
         timestamp=datetime.now(tz=TIMEZONE),
         data_source="actual",
-        decision=DecisionData(),
+        decision=DecisionData(strategic_intent=strategic_intent),
     )
 
 
@@ -383,3 +385,100 @@ class TestChargeSourceAttribution:
             + unattributed * cycle_cost
         ) / 3.5
         assert cost_basis > at_cycle_cost
+
+
+class TestGridChargingChargeSourceAttribution:
+    """During deliberate GRID_CHARGING (`battery_first`) the PV is DC-coupled
+    straight to the battery and the house runs off the grid -- the opposite
+    priority order from `load_first`. `EnergyData`'s home-first split is
+    correct for `load_first` but wrong here, so the cost basis must recompute
+    the split locally for periods recorded with this intent (issue #536).
+    """
+
+    def test_grid_charging_attributes_solar_to_the_battery_first(
+        self, base_system: BatterySystemManager
+    ) -> None:
+        """Reproduction from issue #536: solar=2.0, home=2.0, charged=3.0,
+        grid_imported=3.0.
+
+        `EnergyData`'s home-first split sends all 2.0 kWh of solar to the
+        home (fully consuming it) and books the entire 3.0 kWh charge to the
+        grid. But this period is a deliberate GRID_CHARGING period: PV feeds
+        the battery directly and the house runs off the grid, so only 1.0 kWh
+        of the charge actually came from the grid.
+        """
+        cycle_cost = base_system.battery_settings.cycle_cost_per_kwh
+        buy_price = 1.0
+
+        base_system.historical_store.record_period(
+            0,
+            make_period_data(period=0, battery_soe_start=0.0, battery_soe_end=0.0),
+        )
+        base_system.historical_store.record_period(
+            4,
+            make_period_data(
+                period=4,
+                battery_soe_start=0.0,
+                battery_soe_end=3.0,
+                battery_charged=3.0,
+                solar_production=2.0,
+                home_consumption=2.0,
+                grid_imported=3.0,
+                buy_price=buy_price,
+                strategic_intent="GRID_CHARGING",
+            ),
+        )
+
+        # Confirm the fixture actually reproduces the issue's numbers: on
+        # EnergyData's home-first split, all solar goes to the home and the
+        # whole charge is booked to the grid.
+        event = base_system.historical_store.get_period(4)
+        assert event is not None
+        assert event.energy.solar_to_battery == pytest.approx(0.0)
+        assert event.energy.grid_to_battery == pytest.approx(3.0)
+
+        cost_basis = base_system._calculate_initial_cost_basis(current_period=8)
+
+        # Battery-first: 2.0 kWh solar (free, cycle cost only) + 1.0 kWh grid
+        # (buy + cycle cost), over the 3.0 kWh stored.
+        expected = (2.0 * cycle_cost + 1.0 * (buy_price + cycle_cost)) / 3.0
+        assert cost_basis == pytest.approx(expected)
+
+        # Must not collapse to the home-first (all-grid) answer -- that is
+        # exactly the bug this test guards against.
+        all_grid_basis = (3.0 * (buy_price + cycle_cost)) / 3.0
+        assert cost_basis != pytest.approx(all_grid_basis)
+
+    def test_non_grid_charging_periods_keep_the_home_first_split(
+        self, base_system: BatterySystemManager
+    ) -> None:
+        """A load_first (SOLAR_STORAGE) period must still use EnergyData's
+        home-first split -- the regime-aware branch is scoped to
+        GRID_CHARGING only."""
+        cycle_cost = base_system.battery_settings.cycle_cost_per_kwh
+        buy_price = 1.0
+
+        base_system.historical_store.record_period(
+            0,
+            make_period_data(period=0, battery_soe_start=0.0, battery_soe_end=0.0),
+        )
+        base_system.historical_store.record_period(
+            4,
+            make_period_data(
+                period=4,
+                battery_soe_start=0.0,
+                battery_soe_end=3.0,
+                battery_charged=3.0,
+                solar_production=2.0,
+                home_consumption=2.0,
+                grid_imported=3.0,
+                buy_price=buy_price,
+                strategic_intent="SOLAR_STORAGE",
+            ),
+        )
+
+        cost_basis = base_system._calculate_initial_cost_basis(current_period=8)
+
+        # Home-first: all solar consumed at home, all 3.0 kWh charge from grid.
+        expected = (3.0 * (buy_price + cycle_cost)) / 3.0
+        assert cost_basis == pytest.approx(expected)

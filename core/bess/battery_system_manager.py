@@ -3323,8 +3323,40 @@ class BatterySystemManager:
                 # was consuming 5.2 of it). The understated basis then fed
                 # `optimize_battery_schedule(initial_cost_basis=...)`, making
                 # stored energy look cheaper to discharge than it was.
-                solar_to_battery = event.energy.solar_to_battery
-                grid_to_battery = event.energy.grid_to_battery
+                #
+                # During DELIBERATE grid charging (`battery_first`, #536) this
+                # split is the wrong way round. `EnergyData` allocates solar to
+                # the home first, which is right for load_first surplus
+                # charging, but in battery_first the PV is DC-coupled straight
+                # to the battery and the house runs off the grid -- so solar
+                # that really did charge the battery would get booked to the
+                # home, and the battery's charge booked entirely to the grid.
+                # The retired formula (min(charged, solar), remainder to grid)
+                # is the accurate one in that regime, so use it there instead
+                # of the home-first split -- confined to this cost-basis site,
+                # per the intent already recorded on the period; EnergyData's
+                # split (and the intent classifier that reads it) is unchanged.
+                #
+                # Keyed on strategic_intent (the DP's plan), not observed_intent
+                # (inferred from flows): observed_intent is itself derived via
+                # `infer_intent_from_flows`, which decides GRID_CHARGING purely
+                # from `grid_to_battery > 0.01` on this same home-first split --
+                # so it cannot independently resolve the plan-vs-execution
+                # question and would not detect a genuine divergence either.
+                # strategic_intent is what the issue's own measurement (#536)
+                # was computed against, and what actually commanded the
+                # inverter's topology for the period.
+                if event.decision.strategic_intent == "GRID_CHARGING":
+                    solar_to_battery = min(
+                        event.energy.solar_production, event.energy.battery_charged
+                    )
+                    grid_to_battery = min(
+                        max(0.0, event.energy.battery_charged - solar_to_battery),
+                        event.energy.grid_imported,
+                    )
+                else:
+                    solar_to_battery = event.energy.solar_to_battery
+                    grid_to_battery = event.energy.grid_to_battery
 
                 # Calculate costs using same logic as everywhere else
                 solar_cost = solar_to_battery * self.battery_settings.cycle_cost_per_kwh
@@ -3354,26 +3386,6 @@ class BatterySystemManager:
                 # grid charging would have booked the whole charge as nearly
                 # free. Caught in review on this repo's own evidence bundle,
                 # `historical_2026_07_18_charge_attribution.json` period 39.
-                #
-                # Known limitation, measured rather than assumed: during
-                # DELIBERATE grid charging (`battery_first`) this split is the
-                # wrong way round. `EnergyData` allocates solar to the home
-                # first, which is right for load_first surplus charging, but in
-                # battery_first the PV is DC-coupled straight to the battery and
-                # the house runs off the grid -- so solar that really did charge
-                # the battery gets booked to the home, and the battery's charge
-                # gets booked entirely to the grid. The retired formula happened
-                # to be the accurate one in that regime.
-                #
-                # Not fixed here because the trade is measured and lopsided.
-                # Across the 30 debug bundles in `docs/`: load_first charging is
-                # 264 periods / 191.1 kWh where this correction ADDS 55.15 SEK
-                # of correctly-attributed cost, against 26 GRID_CHARGING periods
-                # / 30.3 kWh where it overstates by 3.85 SEK -- and overstating
-                # makes the DP more reluctant to discharge, which forfeits
-                # margin rather than losing money. Making the split regime-aware
-                # (keying off `decision.strategic_intent`) is the real fix and a
-                # modelling decision in its own right, not a Phase 3 consolidation.
                 #
                 # Second known asymmetry: this can only push the basis UP.
                 # A grid counter that under-reads leaves a positive remainder

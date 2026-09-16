@@ -42,6 +42,7 @@ export interface HourlyData {
   strategicIntent?: string;    // strategy name
   observedIntent?: string;     // what actually happened (set for past periods only)
   curtailed?: boolean;         // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
+  isFreeImport?: boolean;      // inside an Octoplus free-import window (Power Up / Happy Hour) — buyPrice is already the overlaid free price
 
   // All user-facing data via FormattedValue - canonical naming
   buyPrice?: FormattedValue;

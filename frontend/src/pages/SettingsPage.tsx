@@ -55,6 +55,13 @@ const EMPTY_PRICING: PricingForm = {
   nordpoolEntity: '',
   octopusImportTodayEntity: '', octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '', octopusExportTomorrowEntity: '',
+  octopusFreeImportPrice: 0,
+  octopusPowerUpCalendarEntity: '',
+  octopusPowerDownEnabled: false,
+  octopusPowerDownCalendarEntity: '',
+  octopusPowerDownExportKw: 1.0,
+  octopusPowerDownExportMinutes: 15,
+  octopusPowerDownEventsEntity: '',
   entsoeEntity: '',
   area: '', markupRate: 0, vatMultiplier: 1.25, additionalCosts: 0,
   taxReduction: 0, spotMultiplier: 1.0, exportSpotMultiplier: 1.0,
@@ -134,6 +141,7 @@ const SettingsPage: React.FC = () => {
   // ── auto-configure ────────────────────────────────────────────────────
   const [discovering, setDiscovering] = useState(false);
   const [lastDiscoveredAt, setLastDiscoveredAt] = useState<string | null>(null);
+  const [powerDownCalendarDisabledBy, setPowerDownCalendarDisabledBy] = useState<string | undefined>(undefined);
 
   // ── auto-dismiss toast ────────────────────────────────────────────────
   useEffect(() => {
@@ -202,6 +210,13 @@ const SettingsPage: React.FC = () => {
         octopusImportTomorrowEntity: octopus.importTomorrowEntity ?? '',
         octopusExportTodayEntity: octopus.exportTodayEntity ?? '',
         octopusExportTomorrowEntity: octopus.exportTomorrowEntity ?? '',
+        octopusFreeImportPrice: octopus.freeImportPrice ?? 0,
+        octopusPowerUpCalendarEntity: octopus.powerUpCalendarEntity ?? '',
+        octopusPowerDownEnabled: octopus.powerDownEnabled ?? false,
+        octopusPowerDownCalendarEntity: octopus.powerDownCalendarEntity ?? '',
+        octopusPowerDownExportKw: octopus.powerDownExportKw ?? 1.0,
+        octopusPowerDownExportMinutes: octopus.powerDownExportMinutes ?? 15,
+        octopusPowerDownEventsEntity: octopus.powerDownEventsEntity ?? '',
         entsoeEntity: entsoe.entity ?? '',
         area: elec_s.area ?? '',
         markupRate: elec_s.markupRate ?? 0,
@@ -333,8 +348,17 @@ const SettingsPage: React.FC = () => {
         if (d.currency && d.currency !== f.currency) {
           next.currency = d.currency; changed = true;
         }
+        // Prefill the Octoplus Power Down calendar / events entities only
+        // when not already configured — never clobber a saved value.
+        if (d.octopusEntities?.powerDownCalendar && !f.octopusPowerDownCalendarEntity) {
+          next.octopusPowerDownCalendarEntity = d.octopusEntities.powerDownCalendar; changed = true;
+        }
+        if (d.octopusEntities?.powerDownEvents && !f.octopusPowerDownEventsEntity) {
+          next.octopusPowerDownEventsEntity = d.octopusEntities.powerDownEvents; changed = true;
+        }
         return changed ? next : f;
       });
+      setPowerDownCalendarDisabledBy(d.octopusEntities?.powerDownCalendarDisabledBy);
 
       if (d.detectedPhaseCount) {
         setHomeForm(f => ({ ...f, phaseCount: d.detectedPhaseCount }));
@@ -436,6 +460,13 @@ const SettingsPage: React.FC = () => {
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
+            freeImportPrice: pricingForm.octopusFreeImportPrice,
+            powerUpCalendarEntity: pricingForm.octopusPowerUpCalendarEntity,
+            powerDownEnabled: pricingForm.octopusPowerDownEnabled,
+            powerDownCalendarEntity: pricingForm.octopusPowerDownCalendarEntity,
+            powerDownExportKw: pricingForm.octopusPowerDownExportKw,
+            powerDownExportMinutes: pricingForm.octopusPowerDownExportMinutes,
+            powerDownEventsEntity: pricingForm.octopusPowerDownEventsEntity,
           },
           entsoe: { entity: pricingForm.entsoeEntity },
         },
@@ -518,6 +549,13 @@ const SettingsPage: React.FC = () => {
             importTomorrowEntity: pricingForm.octopusImportTomorrowEntity,
             exportTodayEntity: pricingForm.octopusExportTodayEntity,
             exportTomorrowEntity: pricingForm.octopusExportTomorrowEntity,
+            freeImportPrice: pricingForm.octopusFreeImportPrice,
+            powerUpCalendarEntity: pricingForm.octopusPowerUpCalendarEntity,
+            powerDownEnabled: pricingForm.octopusPowerDownEnabled,
+            powerDownCalendarEntity: pricingForm.octopusPowerDownCalendarEntity,
+            powerDownExportKw: pricingForm.octopusPowerDownExportKw,
+            powerDownExportMinutes: pricingForm.octopusPowerDownExportMinutes,
+            powerDownEventsEntity: pricingForm.octopusPowerDownEventsEntity,
           },
           entsoe: { entity: pricingForm.entsoeEntity },
         },
@@ -677,7 +715,11 @@ const SettingsPage: React.FC = () => {
 
           {/* ── Electricity Pricing ──────────────────────────────────────── */}
           {tab === 'pricing' && (
-            <PricingFormSection form={pricingForm} onChange={setPricingForm} />
+            <PricingFormSection
+              form={pricingForm}
+              onChange={setPricingForm}
+              powerDownCalendarDisabledBy={powerDownCalendarDisabledBy}
+            />
           )}
 
           {/* ── Battery ──────────────────────────────────────────────────── */}

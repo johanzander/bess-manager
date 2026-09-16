@@ -606,6 +606,87 @@ class TestSchemaMigration:
         assert price["export_spot_multiplier"] == 1.0
         assert price["use_actual_price"] is False
 
+    def test_octopus_config_missing_free_import_price_gets_default(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Octopus configs written before the free-import overlay start up unchanged."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {"import_today_entity": "event.import_today"},
+                }
+            },
+        )
+        octopus = store.get_section("energy_provider")["octopus"]
+        assert octopus["free_import_price"] == 0.0
+        assert octopus["power_up_calendar_entity"] == ""
+        assert octopus["import_today_entity"] == "event.import_today"
+
+    def test_octopus_configured_free_import_price_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {"free_import_price": 0.05},
+                }
+            },
+        )
+        assert store.get_section("energy_provider")["octopus"]["free_import_price"] == (
+            0.05
+        )
+
+    def test_octopus_config_missing_power_down_fields_gets_defaults(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Octopus configs written before the Power Down export pulse start up unchanged."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {"import_today_entity": "event.import_today"},
+                }
+            },
+        )
+        octopus = store.get_section("energy_provider")["octopus"]
+        assert octopus["power_down_enabled"] is False
+        assert octopus["power_down_calendar_entity"] == ""
+        assert octopus["power_down_export_kw"] == 1.0
+        assert octopus["power_down_export_minutes"] == 15
+        assert octopus["import_today_entity"] == "event.import_today"
+
+    def test_octopus_configured_power_down_fields_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {
+                        "power_down_enabled": True,
+                        "power_down_calendar_entity": "calendar.octoplus_power_down",
+                        "power_down_export_kw": 2.0,
+                        "power_down_export_minutes": 30,
+                    },
+                }
+            },
+        )
+        octopus = store.get_section("energy_provider")["octopus"]
+        assert octopus["power_down_enabled"] is True
+        assert octopus["power_down_calendar_entity"] == "calendar.octoplus_power_down"
+        assert octopus["power_down_export_kw"] == 2.0
+        assert octopus["power_down_export_minutes"] == 30
+
     def test_electricity_price_existing_multiplier_fields_preserved(
         self, tmp_path, monkeypatch
     ):

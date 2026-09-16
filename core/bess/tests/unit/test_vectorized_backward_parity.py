@@ -25,7 +25,7 @@ Two things are pinned here, matching the two ways the passes can diverge:
 import numpy as np
 import pytest
 
-from core.bess.action_selector import _residual_cover_p
+from core.bess.action_selector import PeriodInputs, _residual_cover_p, select_action
 from core.bess.dp_battery_algorithm import (
     _compute_reward,
     _compute_reward_grid,
@@ -34,8 +34,13 @@ from core.bess.dp_battery_algorithm import (
     _state_transition,
     _state_transition_grid,
 )
-from core.bess.dp_constants import SOE_STEP_KWH
+from core.bess.dp_constants import POWER_STEP_KW, SOE_STEP_KWH
 from core.bess.execution_model import DEFAULT_CAPABILITIES
+from core.bess.pwl_window_dp import (
+    _backward_discharge_levels,
+    _pwl_candidate_values_at,
+)
+from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import make_battery_settings
 
 DT = 0.25
@@ -47,8 +52,9 @@ DT = 0.25
 def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
     solar, home, import_cap_kwh
 ):
-    """Both passes must compute the same next_soe, reward and grid import for
-    the same action -- exactly, not approximately.
+    """Both passes must compute the same next_soe, reward, grid import and
+    grid export for the same action -- exactly, not approximately. Import and
+    export are what the import-cap and minimum-export masks read.
 
     The scalar functions are what `select_action` prices candidates with;
     the `_grid` twins are what the backward pass estimates V with. Any gap
@@ -68,7 +74,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
         ac_cap_kwh=_effective_ac_cap_kwh(settings, DT),
         import_cap_kwh=import_cap_kwh,
     )
-    grid_reward, grid_imported = _compute_reward_grid(
+    grid_reward, grid_imported, grid_exported = _compute_reward_grid(
         powers.reshape(1, -1),
         soes.reshape(-1, 1),
         grid_next_soe,
@@ -116,6 +122,7 @@ def test_vectorized_evaluator_matches_the_selectors_scalar_physics(
                 f"{grid_reward[i, j]} != {scalar_reward}"
             )
             assert grid_imported[i, j] == scalar_flows.grid_imported
+            assert grid_exported[i, j] == scalar_flows.grid_exported
 
 
 def _single_period_value(
@@ -251,4 +258,146 @@ def test_backward_pass_values_the_solar_export_bypass_candidate():
     assert (
         _single_period_value(settings, home, solar, buy, sell, soe, soe)
         == bypass_reward
+    )
+
+
+def _backward_pass_value(
+    backward_pass: str,
+    settings: BatterySettings,
+    home: float,
+    solar: float,
+    buy: float,
+    sell: float,
+    soe: float,
+    target: float | None,
+) -> float:
+    """One-period V at `soe` from the named backward pass, with a zero
+    continuation row so the value is exactly the best reward it admits."""
+    if backward_pass == "grid":
+        V = _run_dynamic_programming(
+            horizon=1,
+            buy_price=[buy],
+            sell_price=[sell],
+            home_consumption=[home],
+            battery_settings=settings,
+            dt=DT,
+            solar_production=[solar],
+            initial_soe=soe,
+            min_grid_export_kwh=None if target is None else [target],
+        )
+        return float(V[0, round((soe - settings.min_soe_kwh) / SOE_STEP_KWH)])
+    power_row = np.concatenate(
+        (
+            [0.0],
+            _backward_discharge_levels(settings, DEFAULT_CAPABILITIES) * -1,
+            [POWER_STEP_KW],
+        )
+    )
+    flat_zero_row = (
+        np.array([settings.min_soe_kwh, settings.max_soe_kwh]),
+        np.array([0.0, 0.0]),
+    )
+    values = _pwl_candidate_values_at(
+        np.array([soe]),
+        0,
+        flat_zero_row,
+        power_row,
+        ([buy], [sell], [home], [solar]),
+        settings,
+        DT,
+        None,
+        None,
+        DEFAULT_CAPABILITIES,
+        min_grid_export_kwh=target,
+    )
+    return float(values[0])
+
+
+def _selector_value(
+    settings: BatterySettings,
+    home: float,
+    solar: float,
+    buy: float,
+    sell: float,
+    soe: float,
+    target: float | None,
+) -> float:
+    """The selector's argmax value under the same zero continuation."""
+    result = select_action(
+        soe=soe,
+        t=0,
+        cost_basis=0.0,
+        eval_V=lambda _next_soe: 0.0,
+        eval_value_slope=lambda _next_soe: 0.0,
+        period_inputs=PeriodInputs(
+            buy_price=[buy],
+            sell_price=[sell],
+            home_consumption=[home],
+            solar_production=[solar],
+            dt=DT,
+            min_grid_export_kwh=target,
+        ),
+        battery_settings=settings,
+    )
+    return result.candidates[result.argmax_index].value
+
+
+# Exporting is paid for (negative sell price), so without a target no pass
+# exports and each case below shows the target moving V.
+EXPORT_TARGET_CASES = {
+    # A mid battery covers the 0.4 kW deficit exactly; the target forces a
+    # 1.4 kW discharge. Masks both the main grid and the residual-cover column.
+    "battery_export": {"home": 0.1, "solar": 0.0, "soe_steps": 160, "moves": True},
+    # At the floor no discharge exists, so only the SOLAR_EXPORT bypass meets
+    # the target. The export ceiling must be measured over that column too.
+    "solar_bypass_at_floor": {
+        "home": 0.0,
+        "solar": 0.4,
+        "soe_steps": 0,
+        "moves": True,
+    },
+    # Nothing can export: the target shrinks to zero and V is unchanged.
+    "empty_battery": {"home": 0.1, "solar": 0.0, "soe_steps": 0, "moves": False},
+    # 0.175 kWh above the floor affords at most 0.6 kW against a 0.4 kW
+    # deficit. The only discharges that "export" overshoot it by less than
+    # the counters resolve, so the selector has no real export and keeps
+    # everything. The grid pass keeps those cells as a proxy for exact cover,
+    # and must not let their phantom export set the requirement.
+    "only_sub_resolution_export": {
+        "home": 0.1,
+        "solar": 0.0,
+        "soe_steps": 7,
+        "moves": False,
+    },
+}
+
+
+@pytest.mark.parametrize("backward_pass", ["grid", "pwl"])
+@pytest.mark.parametrize("case", EXPORT_TARGET_CASES)
+def test_backward_passes_apply_the_selectors_minimum_export_mask(
+    backward_pass: str, case: str
+) -> None:
+    """A backward pass that ignores the export target values a policy the
+    replay cannot execute (P1): V would promise the unconstrained reward while
+    the selector forces the export. Both passes must land on the selector's
+    constrained value, and the "constrain, don't raise" floor must hold."""
+    settings = make_battery_settings(cycle_cost_per_kwh=0.0)
+    spec = EXPORT_TARGET_CASES[case]
+    home, solar, buy, sell = spec["home"], spec["solar"], 1.5, -0.5
+    soe = settings.min_soe_kwh + spec["soe_steps"] * SOE_STEP_KWH
+    target = 0.25
+
+    constrained = _selector_value(settings, home, solar, buy, sell, soe, target)
+    unconstrained = _selector_value(settings, home, solar, buy, sell, soe, None)
+    if spec["moves"]:
+        assert constrained < unconstrained, "fixture no longer discriminates"
+    else:
+        assert constrained == unconstrained, "fixture can export after all"
+
+    backward = _backward_pass_value(
+        backward_pass, settings, home, solar, buy, sell, soe, target
+    )
+    assert backward == pytest.approx(constrained, abs=1e-9), (
+        f"{backward_pass} backward pass valued this state at {backward} while "
+        f"the selector's best export-meeting candidate is worth {constrained}"
     )

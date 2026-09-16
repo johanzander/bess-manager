@@ -109,6 +109,13 @@ const SetupWizardPage: React.FC = () => {
     octopusImportTomorrowEntity: '',
     octopusExportTodayEntity: '',
     octopusExportTomorrowEntity: '',
+    octopusFreeImportPrice: 0,
+    octopusPowerUpCalendarEntity: '',
+    octopusPowerDownEnabled: false,
+    octopusPowerDownCalendarEntity: '',
+    octopusPowerDownExportKw: 1.0,
+    octopusPowerDownExportMinutes: 15,
+    octopusPowerDownEventsEntity: '',
     entsoeEntity: '',
     markupRate: 0.08,
     vatMultiplier: 1.25,
@@ -170,6 +177,11 @@ const SetupWizardPage: React.FC = () => {
         ...(d.octopusEntities?.importTomorrow ? { octopusImportTomorrowEntity: d.octopusEntities.importTomorrow } : {}),
         ...(d.octopusEntities?.exportToday ? { octopusExportTodayEntity: d.octopusEntities.exportToday } : {}),
         ...(d.octopusEntities?.exportTomorrow ? { octopusExportTomorrowEntity: d.octopusEntities.exportTomorrow } : {}),
+        ...(d.octopusEntities?.powerUpCalendar ? { octopusPowerUpCalendarEntity: d.octopusEntities.powerUpCalendar } : {}),
+        ...(d.octopusEntities?.powerDownCalendar && !f.octopusPowerDownCalendarEntity
+          ? { octopusPowerDownCalendarEntity: d.octopusEntities.powerDownCalendar } : {}),
+        ...(d.octopusEntities?.powerDownEvents && !f.octopusPowerDownEventsEntity
+          ? { octopusPowerDownEventsEntity: d.octopusEntities.powerDownEvents } : {}),
         ...(d.entsoeEntity ? { entsoeEntity: d.entsoeEntity } : {}),
       }));
       if (d.currency && CYCLE_COST_BY_CURRENCY[d.currency] !== undefined) {
@@ -335,6 +347,13 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: ep.octopus?.importTomorrowEntity ?? f.octopusImportTomorrowEntity,
         octopusExportTodayEntity:    ep.octopus?.exportTodayEntity    ?? f.octopusExportTodayEntity,
         octopusExportTomorrowEntity: ep.octopus?.exportTomorrowEntity ?? f.octopusExportTomorrowEntity,
+        octopusFreeImportPrice:      ep.octopus?.freeImportPrice      ?? f.octopusFreeImportPrice,
+        octopusPowerUpCalendarEntity: ep.octopus?.powerUpCalendarEntity ?? f.octopusPowerUpCalendarEntity,
+        octopusPowerDownEnabled: ep.octopus?.powerDownEnabled ?? f.octopusPowerDownEnabled,
+        octopusPowerDownCalendarEntity: ep.octopus?.powerDownCalendarEntity ?? f.octopusPowerDownCalendarEntity,
+        octopusPowerDownExportKw: ep.octopus?.powerDownExportKw ?? f.octopusPowerDownExportKw,
+        octopusPowerDownExportMinutes: ep.octopus?.powerDownExportMinutes ?? f.octopusPowerDownExportMinutes,
+        octopusPowerDownEventsEntity: ep.octopus?.powerDownEventsEntity ?? f.octopusPowerDownEventsEntity,
         // Restore ENTSO-e entity
         entsoeEntity:          ep.entsoe?.entity                 ?? f.entsoeEntity,
       }));
@@ -416,6 +435,8 @@ const SetupWizardPage: React.FC = () => {
         octopusImportTomorrowEntity: pricingForm.octopusImportTomorrowEntity || undefined,
         octopusExportTodayEntity: pricingForm.octopusExportTodayEntity || undefined,
         octopusExportTomorrowEntity: pricingForm.octopusExportTomorrowEntity || undefined,
+        octopusFreeImportPrice: pricingForm.octopusFreeImportPrice,
+        octopusPowerUpCalendarEntity: pricingForm.octopusPowerUpCalendarEntity || undefined,
         // ENTSO-e entity
         entsoeEntity: pricingForm.entsoeEntity || undefined,
         // Inverter
@@ -602,6 +623,17 @@ const SetupWizardPage: React.FC = () => {
               </div>
             )}
 
+            {discovery.octopusEntities?.powerUpCalendarDisabledBy && (
+              <div
+                data-testid="power-up-calendar-disabled-warning"
+                className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300"
+              >
+                Enable the Octoplus power-up calendar entity (
+                <span className="font-mono text-xs">{discovery.octopusEntities.powerUpCalendar}</span>
+                ) in Home Assistant to use free power windows.
+              </div>
+            )}
+
             {!allRequiredFilled && disabledRequiredEntities.length === 0 && (
               <div className="p-3 bg-orange-50 dark:bg-orange-900/20 border border-orange-200 dark:border-orange-800 rounded-lg text-sm text-orange-700 dark:text-orange-300">
                 Some required sensors (marked with <span className="font-semibold">*</span>) are missing. Expand the integration to configure them manually.
@@ -655,7 +687,11 @@ const SetupWizardPage: React.FC = () => {
               </div>
             )}
 
-            <PricingFormSection form={pricingForm} onChange={setPricingForm} />
+            <PricingFormSection
+              form={pricingForm}
+              onChange={setPricingForm}
+              powerDownCalendarDisabledBy={discovery?.octopusEntities?.powerDownCalendarDisabledBy}
+            />
 
             {!pricingReady && (
               <div

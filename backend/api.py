@@ -43,6 +43,7 @@ from core.bess.health_check import (
     run_system_health_checks,
 )
 from core.bess.influxdb_helper import is_influxdb_configured
+from core.bess.models import PeriodData
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import canonicalize_consumption_strategy
 from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
@@ -269,6 +270,28 @@ def _refresh_health(bess_controller) -> None:
         logger.warning("Could not refresh health state after settings update: %s", exc)
 
 
+def _replan_in_background(bess_controller: Any) -> None:
+    """Refresh prices and rebuild the schedule after a price-affecting change.
+
+    Mirrors setup-complete's post-save schedule build, so a pricing edit shows
+    in the plan now rather than at the next price refresh and quarterly run.
+    Prices are refreshed first: free-import windows are only fetched there.
+    """
+
+    def _replan() -> None:
+        try:
+            bess_controller.system.refresh_prices()
+            now = time_utils.now()
+            bess_controller.system.update_battery_schedule(
+                current_period=now.hour * 4 + now.minute // 15
+            )
+            logger.info("Schedule rebuilt after pricing settings change")
+        except Exception as e:
+            logger.warning("Could not rebuild schedule after settings change: %s", e)
+
+    threading.Thread(target=_replan, daemon=True).start()
+
+
 # ---------------------------------------------------------------------------
 # Unified settings endpoints
 # ---------------------------------------------------------------------------
@@ -390,6 +413,30 @@ async def patch_settings(updates: dict):
                         ),
                     )
 
+            if store_key == "energy_provider":
+                octopus_update = snake_data.get("octopus")
+                if isinstance(octopus_update, dict):
+                    export_kw = octopus_update.get("power_down_export_kw")
+                    if export_kw is not None and export_kw <= 0:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"power_down_export_kw must be > 0, got {export_kw!r}",
+                        )
+                    export_minutes = octopus_update.get("power_down_export_minutes")
+                    if export_minutes is not None and export_minutes not in (
+                        15,
+                        30,
+                        45,
+                        60,
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "power_down_export_minutes must be one of "
+                                f"15, 30, 45, 60, got {export_minutes!r}"
+                            ),
+                        )
+
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
             # nordpool_official.config_entry_id) do not erase sibling keys.
@@ -507,6 +554,10 @@ async def patch_settings(updates: dict):
         bess_controller.refresh_service_domain()
         bess_controller.refresh_power_polarities()
         _refresh_health(bess_controller)
+        if {"electricity_price", "energy_provider"} & {
+            _SECTION_MAP[name] for name in updates
+        }:
+            _replan_in_background(bess_controller)
         return await get_settings()
 
     except HTTPException:
@@ -774,6 +825,7 @@ def _aggregate_quarterly_to_hourly(
             observedIntent=hour_observed_intent,
             curtailed=hour_curtailed,
             directSolar=sum(p.directSolar for p in quarter_periods),
+            isFreeImport=any(p.isFreeImport for p in quarter_periods),
         )
 
         hourly_periods.append(hourly_period)
@@ -877,10 +929,29 @@ async def get_dashboard_data(
         battery_capacity = settings["battery"].total_capacity
         currency = bess_controller.system.home_settings.currency
 
+        # Free-import window lookup, keyed by "YYYY-MM-DD HH:MM" timestamp —
+        # only available for today/tomorrow via the price manager's cache
+        # (get_price_data), never for a historical day.
+        free_import_by_timestamp: dict[str, bool] = {}
+        if not is_historical:
+            for entry in bess_controller.system.price_manager.get_cached_today_prices():
+                free_import_by_timestamp[entry["timestamp"]] = entry.get(
+                    "isFreeImport", False
+                )
+
+        def _is_free_import(period_data: PeriodData) -> bool:
+            ts = period_data.timestamp
+            if ts is None:
+                return False
+            return free_import_by_timestamp.get(ts.strftime("%Y-%m-%d %H:%M"), False)
+
         # Convert periods to API format (works for both hourly and quarterly)
         hourly_dataclass_instances = [
             APIDashboardHourlyData.from_internal(
-                period_data, battery_capacity, currency
+                period_data,
+                battery_capacity,
+                currency,
+                is_free_import=_is_free_import(period_data),
             )
             for period_data in daily_view.periods
         ]
@@ -925,9 +996,27 @@ async def get_dashboard_data(
                     if period_data is not None:
                         tomorrow_periods.append(period_data)
                 if tomorrow_periods:
+                    tomorrow_free_import_by_timestamp: dict[str, bool] = {}
+                    for (
+                        entry
+                    ) in (
+                        bess_controller.system.price_manager.get_cached_tomorrow_prices()
+                    ):
+                        tomorrow_free_import_by_timestamp[entry["timestamp"]] = (
+                            entry.get("isFreeImport", False)
+                        )
                     tomorrow_data = [
                         APIDashboardHourlyData.from_internal(
-                            p, battery_capacity, currency
+                            p,
+                            battery_capacity,
+                            currency,
+                            is_free_import=(
+                                tomorrow_free_import_by_timestamp.get(
+                                    p.timestamp.strftime("%Y-%m-%d %H:%M"), False
+                                )
+                                if p.timestamp is not None
+                                else False
+                            ),
                         )
                         for p in tomorrow_periods
                     ]
@@ -3248,11 +3337,21 @@ async def setup_complete(payload: APISetupCompletePayload):
                 ep["nordpool_hacs"] = {"entity": payload.nordpoolEntity}
             # Persist Octopus entity IDs when provider is octopus
             if payload.provider == "octopus" and payload.octopusImportTodayEntity:
+                from core.bess.settings import FREE_IMPORT_PRICE
+
                 ep["octopus"] = {
                     "import_today_entity": payload.octopusImportTodayEntity,
                     "import_tomorrow_entity": payload.octopusImportTomorrowEntity,
                     "export_today_entity": payload.octopusExportTodayEntity,
                     "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
+                    "free_import_price": (
+                        payload.octopusFreeImportPrice
+                        if payload.octopusFreeImportPrice is not None
+                        else FREE_IMPORT_PRICE
+                    ),
+                    "power_up_calendar_entity": (
+                        payload.octopusPowerUpCalendarEntity or ""
+                    ),
                 }
             # Persist ENTSO-e entity when provider is entsoe
             if payload.provider == "entsoe" and payload.entsoeEntity:

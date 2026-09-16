@@ -335,7 +335,7 @@ def segment_reference_cost(
     dt: float,
     soe_trajectory: list[float],
     cost_basis: float,
-    import_cap_kwh: float | None,
+    import_cap_kwh: list[float | None] | None,
 ) -> float:
     """Objective cost over `segment` as re-solved by the continuous-SOE PWL
     DP, pinned to the schedule's own SOE at both ends.
@@ -431,6 +431,7 @@ def segment_reference_cost(
     segment_sell = sell_price[sl]
     segment_load = home_consumption[sl]
     segment_solar = solar_production[sl]
+    segment_import_cap = import_cap_kwh[sl] if import_cap_kwh is not None else None
     start_soe = soe_trajectory[segment.start]
 
     V = run_pwl_window_backward_induction(
@@ -442,7 +443,7 @@ def segment_reference_cost(
         battery_settings=battery_settings,
         dt=dt,
         end_soe_target=soe_trajectory[segment.end],
-        import_cap_kwh=import_cap_kwh,
+        import_cap_kwh=segment_import_cap,
     )
     actions = resolve_pwl_window(
         V,
@@ -455,7 +456,7 @@ def segment_reference_cost(
         battery_settings=battery_settings,
         dt=dt,
         cost_basis=cost_basis,
-        import_cap_kwh=import_cap_kwh,
+        import_cap_kwh=segment_import_cap,
     )
 
     soe = start_soe
@@ -474,7 +475,9 @@ def segment_reference_cost(
             sell_price=segment_sell,
             solar_production=segment_solar[t],
             cost_basis=basis,
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=(
+                segment_import_cap[t] if segment_import_cap is not None else None
+            ),
         )
         reference_cost -= reward
         soe = next_soe

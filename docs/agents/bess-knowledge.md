@@ -689,6 +689,21 @@ configured.
   behavior — it remains the real-time safety net; this constraint just makes
   the *plan* agree with it.
 
+**Peak-shaving window extension (#96, Option B)**: the fuse cap above is a
+horizon-wide scalar; `BatterySystemManager.peak_shaving` (a `PeakShavingSettings`
+block: `enabled`, `start_time`/`end_time`, `days`, `max_import_kw`) adds a
+*per-period* grid-import cap, active only during a user-configured window
+(e.g. a capacity-tariff peak window), combined with the fuse cap via `min()`
+(`_combine_import_caps`, `dp_battery_algorithm.py`) — whichever is tighter
+applies. This is a generic peak-fighting control, deliberately not a modeled
+capacity/demand tariff (that design, "Option A", was parked — see #96's
+thread): it reuses the exact "constrain, don't raise" mechanism above
+(grid-charging throttled, discharge forced to cover load) rather than adding
+a new tariff cost term to the reward. `peak_shaving_import_cap_per_period`
+(`settings.py`) builds the per-period array from each period's local
+timestamp; `BatterySystemManager._get_peak_shaving_import_cap_limits` wires
+it into `optimize_battery_schedule`.
+
 ### Export curtailment and the charge-early tie-break (#269)
 
 When export curtailment is active (enabled AND the platform supports

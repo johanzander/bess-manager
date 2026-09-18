@@ -15,6 +15,7 @@ For production configuration, all user-facing values must be properly configured
 """
 
 from dataclasses import dataclass, field, fields
+from datetime import datetime
 from typing import Any
 
 from .vpp_load_tracking import VPP_LOAD_TRACKING_TICK_SECONDS
@@ -297,6 +298,87 @@ class HomeSettings:
             self.power_monitoring_enabled = home_config["power_monitoring_enabled"]
             self.__post_init__()
         return self
+
+
+@dataclass
+class PeakShavingSettings:
+    """Settings for a generic peak-shaving grid-import cap during a configured window.
+
+    Issue #96, Option B: unlike a modeled capacity/demand tariff
+    (effektavgift), this makes no attempt to model the tariff itself -- it
+    caps grid import during a user-configured window, reusing the DP's
+    existing fuse-derived `import_cap_kwh` mechanism (#429), which already
+    both blocks grid-charging and forces discharge to cover load whenever a
+    candidate's grid import would exceed the cap.
+
+    Disabled by default -- most users are not on a capacity/demand tariff.
+    """
+
+    enabled: bool = False
+    start_time: str = "07:00"
+    end_time: str = "20:00"
+    days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
+    max_import_kw: float = 0.0
+
+    def from_ha_config(self, config: dict) -> "PeakShavingSettings":
+        """Load from add-on config."""
+        home_config = config.get("home", {})
+        peak_shaving_config = home_config.get("peak_shaving", {})
+        if peak_shaving_config:
+            self.enabled = peak_shaving_config.get("enabled", False)
+            self.start_time = peak_shaving_config.get("start_time", "07:00")
+            self.end_time = peak_shaving_config.get("end_time", "20:00")
+            self.days = peak_shaving_config.get("days", [0, 1, 2, 3, 4])
+            self.max_import_kw = peak_shaving_config.get("max_import_kw", 0.0)
+        return self
+
+
+def peak_shaving_import_cap_per_period(
+    peak_shaving: PeakShavingSettings,
+    timestamps: list[str],
+    dt: float,
+) -> list[float | None] | None:
+    """Per-period grid-import energy cap (kWh) for a peak-shaving window.
+
+    `timestamps` are local "YYYY-MM-DD HH:MM" strings, one per period --
+    the same format `PriceManager` already produces for every price entry.
+    A period outside the configured window/days gets `None` (no additional
+    constraint); one inside it gets `max_import_kw * dt`, which
+    `optimize_battery_schedule` combines with the fuse-derived cap via
+    `min()` (#429) -- so this only ever tightens the constraint, never
+    loosens it.
+
+    Returns None when disabled, matching `_get_temperature_derated_charge_limits`'s
+    convention for an inactive per-period constraint.
+
+    Handles an overnight window (`start_time > end_time`, e.g. "22:00" to
+    "06:00"): the portion after midnight is attributed to the day the
+    window *started* on, one calendar day earlier, so `days` selects the
+    window's start day consistently regardless of which side of midnight a
+    given period falls on.
+    """
+    if not peak_shaving.enabled:
+        return None
+    caps: list[float | None] = []
+    overnight = peak_shaving.start_time > peak_shaving.end_time
+    for ts in timestamps:
+        local_dt = datetime.strptime(ts, "%Y-%m-%d %H:%M")
+        time_str = local_dt.strftime("%H:%M")
+        if not overnight:
+            in_time_window = peak_shaving.start_time <= time_str < peak_shaving.end_time
+            window_day = local_dt.weekday()
+        elif time_str >= peak_shaving.start_time:
+            in_time_window = True
+            window_day = local_dt.weekday()
+        elif time_str < peak_shaving.end_time:
+            in_time_window = True
+            window_day = (local_dt.weekday() - 1) % 7
+        else:
+            in_time_window = False
+            window_day = local_dt.weekday()
+        in_window = in_time_window and window_day in peak_shaving.days
+        caps.append(peak_shaving.max_import_kw * dt if in_window else None)
+    return caps
 
 
 @dataclass

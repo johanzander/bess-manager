@@ -564,7 +564,7 @@ class PeriodInputs:
     solar_production: list[float]
     dt: float
     max_charge_power_per_period: list[float] | None = None
-    import_cap_kwh: float | None = None
+    import_cap_kwh: list[float | None] | None = None
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES
     sell_price_floored: list[bool] | None = None
 
@@ -627,7 +627,11 @@ def select_action(
         else None
     )
     dt = period_inputs.dt
-    import_cap_kwh = period_inputs.import_cap_kwh
+    import_cap_kwh = (
+        period_inputs.import_cap_kwh[t]
+        if period_inputs.import_cap_kwh is not None
+        else None
+    )
     home = period_inputs.home_consumption[t]
     solar = period_inputs.solar_production[t]
     ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)

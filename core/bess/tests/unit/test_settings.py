@@ -5,6 +5,7 @@ import pytest
 from core.bess.settings import (
     BatterySettings,
     HomeSettings,
+    PeakShavingSettings,
     PriceSettings,
     TemperatureDeratingSettings,
     apply_temperature_derating,
@@ -239,6 +240,46 @@ def test_temperature_derating_from_ha_config_disabled():
     """Test loading with derating disabled."""
     settings = TemperatureDeratingSettings()
     config = {"battery": {}}
+    settings.from_ha_config(config)
+    assert settings.enabled is False
+
+
+def test_peak_shaving_defaults() -> None:
+    """Test PeakShavingSettings defaults (disabled, Mon-Fri, 07:00-20:00)."""
+    settings = PeakShavingSettings()
+    assert settings.enabled is False
+    assert settings.start_time == "07:00"
+    assert settings.end_time == "20:00"
+    assert settings.days == [0, 1, 2, 3, 4]
+    assert settings.max_import_kw == 0.0
+
+
+def test_peak_shaving_from_ha_config() -> None:
+    """Test loading peak-shaving settings from config."""
+    settings = PeakShavingSettings()
+    config = {
+        "home": {
+            "peak_shaving": {
+                "enabled": True,
+                "start_time": "06:00",
+                "end_time": "22:00",
+                "days": [0, 1, 2, 3, 4, 5, 6],
+                "max_import_kw": 2.5,
+            }
+        }
+    }
+    settings.from_ha_config(config)
+    assert settings.enabled is True
+    assert settings.start_time == "06:00"
+    assert settings.end_time == "22:00"
+    assert settings.days == [0, 1, 2, 3, 4, 5, 6]
+    assert settings.max_import_kw == 2.5
+
+
+def test_peak_shaving_from_ha_config_disabled() -> None:
+    """Test loading with peak-shaving unconfigured -- stays at defaults."""
+    settings = PeakShavingSettings()
+    config: dict = {"home": {}}
     settings.from_ha_config(config)
     assert settings.enabled is False
 

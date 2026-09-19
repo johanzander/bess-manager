@@ -32,6 +32,8 @@ TAX_REDUCTION = (
 SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot (1.0 = no adjustment)
 EXPORT_SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot for sell price
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
+FREE_IMPORT_PRICE = 0.0  # buy price during an Octoplus free power window
+FREE_IMPORT_CAP_KWH = 16.0  # Weekend Happy Hour allowance; not modelled by the DP
 
 # Battery settings defaults
 BATTERY_STORAGE_SIZE_KWH = 30.0

@@ -2078,11 +2078,20 @@ def optimize_battery_schedule(
     if initial_cost_basis is None:
         initial_cost_basis = battery_settings.cycle_cost_per_kwh
 
-    # Validate inputs to prevent impossible scenarios
+    # Allow optimization to start from above maximum SOE, symmetric with the
+    # below-minimum case below. The inverter can read a hair above the
+    # configured ceiling (SOC sensor/register offset, or a maxSoc lowered
+    # below the current charge), and raising here aborts the WHOLE optimization
+    # -- the caller swallows it, so no schedule is produced and the battery
+    # cannot discharge back into range, self-locking the over-max state for the
+    # rest of the day. Clamp to max and let the optimizer discharge it down.
     if initial_soe > battery_settings.max_soe_kwh:
-        raise ValueError(
-            f"Invalid initial_soe={initial_soe:.1f}kWh exceeds battery capacity={battery_settings.max_soe_kwh:.1f}kWh"
+        logger.warning(
+            f"Starting optimization with initial_soe={initial_soe:.1f}kWh above maximum "
+            f"SOE={battery_settings.max_soe_kwh:.1f}kWh (clamping). "
+            f"Optimizer will work to discharge the battery back within range."
         )
+        initial_soe = battery_settings.max_soe_kwh
 
     # Allow optimization to start from below minimum SOC (can happen after restart or deep discharge)
     # The optimizer will naturally work to bring SOE back above minimum through charging

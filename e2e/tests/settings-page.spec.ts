@@ -113,6 +113,43 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
+  test('peak shaving window enables and persists (#96)', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+
+    // Fields are hidden until the toggle is enabled
+    await expect(page.getByText(/Window start/i)).not.toBeVisible();
+    await page.getByRole('switch', { name: 'Enable peak shaving' }).click();
+    await expect(page.getByText(/Window start/i)).toBeVisible();
+
+    const startInput = page.locator('label').filter({ hasText: /Window start/i }).locator('input');
+    await startInput.fill('06:00');
+    const capInput = page.locator('label').filter({ hasText: /Max grid import during window/i }).locator('input');
+    await capInput.fill('2.5');
+
+    const saveButton = page.getByRole('button', { name: 'Save', exact: true });
+    await expect(saveButton).toBeEnabled();
+    await saveButton.click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+
+    await page.reload();
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+
+    await expect(page.getByRole('switch', { name: 'Enable peak shaving' })).toHaveAttribute('aria-checked', 'true');
+    const reloadedStart = page.locator('label').filter({ hasText: /Window start/i }).locator('input');
+    await expect(reloadedStart).toHaveValue('06:00');
+    const reloadedCap = page.locator('label').filter({ hasText: /Max grid import during window/i }).locator('input');
+    await expect(reloadedCap).toHaveValue('2.5');
+
+    // Restore disabled so this test leaves the fixture as it found it.
+    await page.getByRole('switch', { name: 'Enable peak shaving' }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+  });
+
   test('system tab shows diagnostics', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });

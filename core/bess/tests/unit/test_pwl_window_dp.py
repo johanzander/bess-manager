@@ -1,3 +1,5 @@
+from typing import Any
+
 import numpy as np
 import pytest
 
@@ -279,7 +281,7 @@ def test_out_of_range_end_soe_target_raises():
     """Clipping would produce a legitimate-looking zero-penalty pin at the
     wrong SOE, so an impossible target must fail loudly instead."""
     battery = _tiny_battery()
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "window_horizon": 1,
         "buy_price": [1.0],
         "sell_price": [0.5],
@@ -490,7 +492,7 @@ def test_pwl_replay_respects_the_grid_import_cap():
         sell_price=[0.0],
         cost_basis=0.0,
         max_charge_power_per_period=None,
-        import_cap_kwh=cap,
+        import_cap_kwh=[cap],
     )
 
     # Uncapped, STORE charges at the full 5 kW rate (4.75 kWh stored after
@@ -537,7 +539,7 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
     per_period_gain = 0.2 * battery.efficiency_charge
     end_soe_target = start_soe + 2 * per_period_gain
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "window_horizon": 2,
         "buy_price": [0.1, 0.1],
         "sell_price": [0.0, 0.0],
@@ -545,7 +547,7 @@ def test_pwl_window_backward_induction_respects_the_grid_import_cap():
         "solar_production": [0.0, 0.0],
         "battery_settings": battery,
         "dt": 1.0,
-        "import_cap_kwh": cap,
+        "import_cap_kwh": [cap, cap],
     }
     V = run_pwl_window_backward_induction(end_soe_target=end_soe_target, **kwargs)
     actions = resolve_pwl_window(V, start_soe=start_soe, cost_basis=0.0, **kwargs)
@@ -580,7 +582,7 @@ def test_pwl_backward_induction_values_reflect_the_grid_import_cap():
     # STORE action stores 4.75 kWh in one period, the capped one 0.19 kWh.
     end_soe_target = start_soe + 2.0
 
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "window_horizon": 2,
         "buy_price": [0.1, 0.1],
         "sell_price": [0.0, 0.0],
@@ -590,7 +592,7 @@ def test_pwl_backward_induction_values_reflect_the_grid_import_cap():
         "dt": 1.0,
         "end_soe_target": end_soe_target,
     }
-    V_capped = run_pwl_window_backward_induction(import_cap_kwh=cap, **kwargs)
+    V_capped = run_pwl_window_backward_induction(import_cap_kwh=[cap, cap], **kwargs)
     V_uncapped = run_pwl_window_backward_induction(import_cap_kwh=None, **kwargs)
 
     assert pwl_window_is_feasible(

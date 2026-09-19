@@ -97,6 +97,10 @@ def start() -> None
   cover a load spike via discharge rather than importing past the house's
   fuse limit. See `docs/agents/bess-knowledge.md`'s "grid import (fuse) cap"
   section (#429).
+- An optional peak-shaving window (`BatterySystemManager.peak_shaving`) — a
+  user-configured per-period grid-import cap, active only during a
+  configured time window/weekdays, combined with the fuse cap above via
+  `min()`. See the same section's "Peak-shaving window extension" (#96).
 
 **Outputs**:
 

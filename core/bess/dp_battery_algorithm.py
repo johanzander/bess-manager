@@ -229,6 +229,22 @@ def _effective_import_cap_kwh(
     ) * dt
 
 
+def _combine_import_caps(a: float | None, b: float | None) -> float | None:
+    """Tightest of two optional per-period import caps (kWh).
+
+    `None` means "no constraint from this source", not "zero" -- so the
+    combination is `min()` only when both are set, and whichever is set
+    otherwise. Used to combine the fuse-derived cap (#429) with a
+    peak-shaving window's cap (#96): either alone, both together, or
+    neither.
+    """
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return min(a, b)
+
+
 def _ac_flows(
     solar_production: float,
     home_consumption: float,
@@ -1229,7 +1245,7 @@ def _run_dynamic_programming(
     terminal_curve: TerminalValueCurve | None = None,
     currency: str = "SEK",
     max_charge_power_per_period: list[float] | None = None,
-    import_cap_kwh: float | None = None,
+    import_cap_kwh: list[float | None] | None = None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
 ) -> np.ndarray:
     """
@@ -1317,6 +1333,7 @@ def _run_dynamic_programming(
             if max_charge_power_per_period is not None
             else None
         )
+        period_import_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
         if period_max_charge is not None:
             charge_feasible = charge_feasible_base & (
                 ~is_charge | (power_row <= period_max_charge)
@@ -1352,7 +1369,7 @@ def _run_dynamic_programming(
             solar_production=solar_production[t],
             home_consumption=home_consumption[t],
             ac_cap_kwh=ac_cap_kwh,
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
         )
         feasible &= (next_soe >= min_soe_kwh) & (next_soe <= max_soe_kwh)
 
@@ -1366,11 +1383,11 @@ def _run_dynamic_programming(
             current_buy_price=buy_price[t],
             current_sell_price=sell_price[t],
             solar_production=solar_production[t],
-            import_cap_kwh=import_cap_kwh,
+            import_cap_kwh=period_import_cap,
         )
 
         effective_import_cap = None
-        if import_cap_kwh is not None:
+        if period_import_cap is not None:
             # Constrain, don't raise (#429): an action pushing total import
             # over the cap is infeasible UNLESS no feasible action can meet
             # it (e.g. load alone exceeds the cap even at max discharge) --
@@ -1380,7 +1397,7 @@ def _run_dynamic_programming(
             floor_grid_imported = np.min(
                 np.where(feasible, grid_imported, np.inf), axis=1, keepdims=True
             )
-            effective_import_cap = np.maximum(import_cap_kwh, floor_grid_imported)
+            effective_import_cap = np.maximum(period_import_cap, floor_grid_imported)
             feasible &= grid_imported <= effective_import_cap + 1e-9
 
         next_i = np.round((next_soe - min_soe_kwh) / SOE_STEP_KWH).astype(np.int64)
@@ -1431,7 +1448,7 @@ def _run_dynamic_programming(
                 current_buy_price=buy_price[t],
                 current_sell_price=sell_price[t],
                 solar_production=solar_production[t],
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             value_bypass = reward_bypass.reshape(-1) + V[t + 1][np.arange(n_states)]
             if effective_import_cap is not None:
@@ -1468,7 +1485,7 @@ def _run_dynamic_programming(
                 solar_production=solar_production[t],
                 home_consumption=home_consumption[t],
                 ac_cap_kwh=ac_cap_kwh,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             cover_feasible &= (
                 (next_soe_cover >= min_soe_kwh) & (next_soe_cover <= max_soe_kwh)
@@ -1483,7 +1500,7 @@ def _run_dynamic_programming(
                 current_buy_price=buy_price[t],
                 current_sell_price=sell_price[t],
                 solar_production=solar_production[t],
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=period_import_cap,
             )
             if effective_import_cap is not None:
                 cover_feasible &= (
@@ -1639,7 +1656,7 @@ def _best_action_at_continuous_state(
     cost_basis: float,
     max_charge_power_per_period: list[float] | None,
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES,
-    import_cap_kwh: float | None = None,
+    import_cap_kwh: list[float | None] | None = None,
     sell_price_floored: list[bool] | None = None,
 ) -> tuple[float, float, float, float, PeriodFlows, float, float]:
     """The grid DP's forward replay: `action_selector.select_action` with the
@@ -1968,6 +1985,7 @@ def optimize_battery_schedule(
     export_curtailment_active: bool = False,
     home_settings: HomeSettings | None = None,
     tie_diagnostics: dict | None = None,
+    peak_shaving_import_cap_per_period: list[float | None] | None = None,
 ) -> OptimizationResult:
     """
     Battery optimization that eliminates dual cost calculation by using
@@ -2021,6 +2039,15 @@ def optimize_battery_schedule(
             internal tie-margin/value-slope/window/SoE-trajectory data this
             function already computes, for offline measurement tooling (#450).
             Never passed by production callers; a pure no-op when omitted.
+        peak_shaving_import_cap_per_period: Per-period grid-import energy cap
+            (kWh) for a user-configured peak-shaving window (issue #96,
+            Option B), or None outside any configured window/when disabled.
+            Combined with the fuse-derived cap above via `min()` -- this can
+            only tighten the constraint the fuse cap already enforces, never
+            loosen it, and reuses the same "constrain, don't raise" (#429)
+            mechanism: grid-charging is throttled during the window, and
+            discharge is forced to cover load if the configured cap is at or
+            below it. Defaults to None (no additional constraint).
 
     Returns:
         OptimizationResult with optimal battery schedule
@@ -2028,7 +2055,18 @@ def optimize_battery_schedule(
 
     horizon = len(buy_price)
     dt = period_duration_hours
-    import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
+    fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
+    if peak_shaving_import_cap_per_period is not None:
+        import_cap_kwh: list[float | None] | None = [
+            _combine_import_caps(
+                fuse_import_cap_kwh, peak_shaving_import_cap_per_period[t]
+            )
+            for t in range(horizon)
+        ]
+    elif fuse_import_cap_kwh is not None:
+        import_cap_kwh = [fuse_import_cap_kwh] * horizon
+    else:
+        import_cap_kwh = None
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 
@@ -2264,6 +2302,9 @@ def optimize_battery_schedule(
                 if max_charge_power_per_period is not None
                 else None
             )
+            window_import_cap = (
+                import_cap_kwh[sl] if import_cap_kwh is not None else None
+            )
             # End SOE is pinned to the grid DP's own SOE at the window's exit,
             # so the untouched schedule after the window stays valid. An
             # infeasible pin raises out of resolve_pwl_window and is
@@ -2321,7 +2362,7 @@ def optimize_battery_schedule(
                     end_soe_target=soe_trajectory[window.end],
                     max_charge_power_per_period=window_max_charge,
                     capabilities=capabilities,
-                    import_cap_kwh=import_cap_kwh,
+                    import_cap_kwh=window_import_cap,
                 )
             except PWLWindowUnderRefinedError:
                 if window_horizon <= 1:
@@ -2354,7 +2395,7 @@ def optimize_battery_schedule(
                 cost_basis=cost_basis_trajectory[window.start],
                 max_charge_power_per_period=window_max_charge,
                 capabilities=capabilities,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=window_import_cap,
                 sell_price_floored=window_floored,
             )
             window_resolutions[window.start] = resolution
@@ -2458,7 +2499,9 @@ def optimize_battery_schedule(
                 solar_production=solar_production[window.end],
                 battery_settings=battery_settings,
                 dt=dt,
-                import_cap_kwh=import_cap_kwh,
+                import_cap_kwh=(
+                    import_cap_kwh[window.end] if import_cap_kwh is not None else None
+                ),
             )
         hourly_results, reward_objective_cost = _replay_accounting_pass(
             horizon=horizon,

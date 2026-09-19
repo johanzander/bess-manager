@@ -173,6 +173,18 @@ def test_price_settings_camelcase_no_longer_accepted():
         settings.update(markupRate=0.5)
 
 
+def test_price_settings_has_no_min_profit_field() -> None:
+    """min_profit was a dead PriceSettings field (issue #773): no code in
+    core/ ever read it (the profitability-floor mechanism it once fed was
+    removed from _compute_reward in an earlier Bellman-optimality refactor),
+    it was never exposed via the wizard/frontend, and it only ever appeared
+    in debug-bundle settings dumps, misleading users doing root-cause
+    analysis from a bundle. Removed rather than kept as a documented no-op."""
+    settings = PriceSettings()
+
+    assert not hasattr(settings, "min_profit")
+
+
 def test_battery_settings_update_rejects_method_names():
     """update() validates against dataclass fields, not hasattr() — a key
     matching a method/property name (e.g. 'update' itself) must raise, not

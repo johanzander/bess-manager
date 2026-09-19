@@ -400,7 +400,7 @@ influxdb:
 All other settings are stored in this file and managed via the settings API. Top-level sections:
 
 - **`battery`**: `total_capacity`, `min_soc`, `max_soc`, `max_charge_power_kw`, `max_discharge_power_kw`, `cycle_cost_per_kwh`, `charging_power_rate`, `efficiency_charge`, `efficiency_discharge`
-- **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `min_profit`, `use_actual_price`
+- **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `use_actual_price`
 - **`home`**: `max_fuse_current`, `voltage`, `safety_margin`, `phase_count`, `default_hourly`, `currency`, `consumption_strategy`, `power_monitoring_enabled`
 - **`growatt`**: Inverter device ID and integration settings
 - **`sensors`**: Entity ID mappings for all Home Assistant sensors

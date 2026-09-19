@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Removed
+
+- **Removed the unused `min_profit` price setting** — it was never read by the optimizer and only ever appeared as dead noise in settings/debug bundles. ([#773](https://github.com/johanzander/bess-manager/issues/773))
+
 ### Fixed
 
 - **The battery's stored-energy cost basis no longer overstates the grid's share during deliberate grid charging** — during `GRID_CHARGING` periods the accounting now attributes concurrent solar to the battery first (matching the battery-first inverter topology), instead of assuming the home-first order that only holds for solar-surplus charging. ([#536](https://github.com/johanzander/bess-manager/issues/536))

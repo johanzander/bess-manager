@@ -15,11 +15,15 @@ same — clamp to max and let the optimizer discharge back into range.
 
 import logging
 
+import pytest
+
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.models import OptimizationResult
+from core.bess.settings import BatterySettings
 from core.bess.tests.helpers import make_battery_settings
 
 
-def _run(initial_soe, settings):
+def _run(initial_soe: float, settings: BatterySettings) -> OptimizationResult:
     horizon = 8
     return optimize_battery_schedule(
         buy_price=[2.0] * horizon,
@@ -32,7 +36,9 @@ def _run(initial_soe, settings):
     )
 
 
-def test_initial_soe_above_max_is_clamped_not_raised(caplog):
+def test_initial_soe_above_max_is_clamped_not_raised(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     settings = make_battery_settings()
     over = settings.max_soe_kwh + 0.5  # e.g. inverter charged past the ceiling
 
@@ -47,7 +53,7 @@ def test_initial_soe_above_max_is_clamped_not_raised(caplog):
     assert "above" in caplog.text.lower() and "max" in caplog.text.lower()
 
 
-def test_initial_soe_below_min_still_proceeds():
+def test_initial_soe_below_min_still_proceeds() -> None:
     # Regression: the symmetric below-min case already proceeds; keep it working.
     settings = make_battery_settings()
     under = max(0.0, settings.min_soe_kwh - 0.5)

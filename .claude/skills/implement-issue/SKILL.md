@@ -560,6 +560,24 @@ If neither file mentions anything your change touches, say so explicitly in
 the PR description rather than silently skipping — a reviewer shouldn't have
 to guess whether it was checked.
 
+**User-facing documentation check (mandatory when the diff adds or changes a
+user-facing capability — a new setting, a new Settings-page section, a new
+dashboard control, a new behavior a user can turn on):** check `README.md`'s
+Features table and root `DOCS.md`'s Settings Page section (`bess_manager/DOCS.md`
+is a symlink to the root file — edit the root). Update whichever describes a
+section your change touches. Found in practice: #772 shipped a whole new
+opt-in feature (peak-shaving, with its own Settings-page section) and updated
+only the AI-agent-facing docs (`bess-knowledge.md`/`SOFTWARE_DESIGN.md`)
+above — the feature was invisible in both user-facing docs until the
+maintainer noticed after merge and #775 had to backfill it. Match the
+documentation *depth* an existing comparable feature already gets, rather
+than inventing a new tier: a Home-tab toggle like fuse protection gets one
+README table row and one DOCS.md list-item mention, not a `docs/USER_GUIDE.md`
+section — a same-shaped new feature gets the same, and only reaches for
+`USER_GUIDE.md` if its closest comparable already has a section there. A pure
+bug fix, an internal refactor, or a change to an existing setting's behavior
+(not introducing a new one) does not trigger this check.
+
 Commit per `docs/agents/workflow.md` format (subject + blank line + body
 explaining WHY).
 
@@ -862,6 +880,8 @@ net is upstream, not this section.
   dispatching the Step 6 background agent.
 - About to open the PR without checking whether the fix invalidates a claim
   in `docs/agents/bess-knowledge.md` or `docs/SOFTWARE_DESIGN.md`.
+- About to open a PR for a new user-facing capability without checking
+  `README.md`'s Features table and root `DOCS.md`'s Settings Page section.
 - About to write only a synthetic-input unit test for a DP/intent/control-
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
 - About to push the branch without having merged `origin/main` since Step 4.

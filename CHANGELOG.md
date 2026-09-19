@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- **Fewer Growatt cloud writes for the load-following discharge rate** — the discharge rate is recomputed every 15-min period and wobbles a few points (11% → 13% → 12%); previously every change was re-sent, and each write is exposed to the intermittent `GrowattV1ApiError` cloud rejections. Sub-threshold changes (< 5 percentage points) are now skipped, while the 0%/100% endpoints and the first departure from a stopped battery are always written exactly, so stops and small discharges are never missed. Extends the #402/#741 write-reduction work.
+
 ### Added
 
 - **Peak-shaving: cap grid import during a configured window** — set a time window, weekdays and a max import power, and BESS suppresses grid-charging and discharges to cover load during that window, independent of spot price. Useful for capacity/demand tariffs. ([#96](https://github.com/johanzander/bess-manager/issues/96))

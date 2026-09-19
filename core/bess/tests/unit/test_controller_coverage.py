@@ -526,6 +526,60 @@ class TestChargeRateWriteOnChange:
         assert mock_controller.calls["charge_rate"] == [100]
 
 
+class TestDischargeRateMateriality:
+    """#741 follow-up: the load-following discharge rate is recomputed every
+    15-min period and wobbles a few points (11% -> 13% -> 12%). The #402 dedup
+    only skips an *identical* rate, so each tiny change is still a Growatt cloud
+    write, exposed to the intermittent GrowattV1ApiError rejections. Skip a
+    re-write when the change from the last written value is below a materiality
+    threshold -- but always honour the 0/100 endpoints (stop / full rate) and
+    the first departure from a stopped battery, so small discharges still start
+    and stops are never missed."""
+
+    def test_subthreshold_change_is_skipped(self, min_ctrl, mock_controller):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=11)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=13)
+        # +2 is below the materiality threshold -> 13 not re-sent.
+        assert mock_controller.calls["discharge_rate"] == [11]
+
+    def test_material_change_is_written(self, min_ctrl, mock_controller):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=11)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=20)
+        assert mock_controller.calls["discharge_rate"] == [11, 20]
+
+    def test_stop_is_always_written_even_if_subthreshold(
+        self, min_ctrl, mock_controller
+    ):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=2)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+        # 0 = stop discharging; a residual 2% would keep draining -> always write.
+        assert mock_controller.calls["discharge_rate"] == [2, 0]
+
+    def test_full_rate_is_always_written_even_if_subthreshold(
+        self, min_ctrl, mock_controller
+    ):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=98)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=100)
+        assert mock_controller.calls["discharge_rate"] == [98, 100]
+
+    def test_first_departure_from_zero_starts_small_discharge(
+        self, min_ctrl, mock_controller
+    ):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=3)
+        # Starting a discharge from a stopped battery is material even if small.
+        assert mock_controller.calls["discharge_rate"] == [0, 3]
+
+    def test_threshold_is_measured_against_last_written_not_last_desired(
+        self, min_ctrl, mock_controller
+    ):
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=10)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=13)
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=16)
+        # 13 skipped (vs 10); 16 crosses the threshold vs the written baseline 10.
+        assert mock_controller.calls["discharge_rate"] == [10, 16]
+
+
 class TestSolaxModbusGrowattTouWritesUnconditionally:
     """#402: unlike GrowattMinController (cloud), the solax_modbus TOU path
     must keep writing every period regardless of whether the value changed

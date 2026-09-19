@@ -32,7 +32,6 @@ TAX_REDUCTION = (
 )
 SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot (1.0 = no adjustment)
 EXPORT_SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot for sell price
-MIN_PROFIT = 0.2  # Minimum profit per kWh to consider a charge/discharge cycle
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
 
 # Battery settings defaults
@@ -97,7 +96,6 @@ class PriceSettings:
     tax_reduction: float = TAX_REDUCTION
     spot_multiplier: float = SPOT_MULTIPLIER
     export_spot_multiplier: float = EXPORT_SPOT_MULTIPLIER
-    min_profit: float = MIN_PROFIT
     use_actual_price: bool = USE_ACTUAL_PRICE
 
     def update(self, **kwargs: Any) -> None:

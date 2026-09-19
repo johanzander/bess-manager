@@ -13,6 +13,57 @@ export interface HomeForm {
    * to exclude from the ha_statistics baseline before it is computed —
    * see issue #706. Empty by default; only meaningful for that strategy. */
   managedLoadSensors: string[];
+  /** Peak-shaving grid-import cap during a configured window (issue #96,
+   * Option B) — a generic peak-fighting control, independent of spot price. */
+  peakShavingEnabled: boolean;
+  peakShavingStartTime: string;
+  peakShavingEndTime: string;
+  /** ISO weekday numbers, 0 = Monday .. 6 = Sunday. */
+  peakShavingDays: number[];
+  peakShavingMaxImportKw: number;
+}
+
+const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+function dayPicker(days: number[], onChange: (_: number[]) => void) {
+  return (
+    <div>
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">Active days</span>
+      <div className="flex flex-wrap gap-2 pt-1">
+        {WEEKDAY_LABELS.map((label, i) => {
+          const active = days.includes(i);
+          return (
+            <button
+              key={i}
+              type="button"
+              aria-pressed={active}
+              onClick={() => onChange(active ? days.filter(d => d !== i) : [...days, i].sort())}
+              className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-colors
+                ${active
+                  ? 'bg-blue-500 border-blue-500 text-white'
+                  : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300'}`}
+            >
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function timeField(label: string, value: string, onChange: (_: string) => void) {
+  return (
+    <label className="block">
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      <input
+        type="time"
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="mt-1 block w-full rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-3 py-2 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+      />
+    </label>
+  );
 }
 
 /** Add/remove list of managed-load sensor entity IDs. Only shown for the
@@ -201,6 +252,27 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             {numField('Safety Margin Factor', form.safetyMarginFactor,
               v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title="Peak Shaving"
+        description="Cap grid import during a configured window — the battery discharges to cover load above the cap, and grid-charging is suppressed, independent of spot price. Useful for a capacity/demand tariff that charges by your peak import power rather than energy price."
+      >
+        {toggle('Enable peak shaving', form.peakShavingEnabled,
+          v => onChange({ ...form, peakShavingEnabled: v }))}
+        {form.peakShavingEnabled && (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {timeField('Window start', form.peakShavingStartTime,
+                v => onChange({ ...form, peakShavingStartTime: v }))}
+              {timeField('Window end', form.peakShavingEndTime,
+                v => onChange({ ...form, peakShavingEndTime: v }))}
+            </div>
+            {dayPicker(form.peakShavingDays, v => onChange({ ...form, peakShavingDays: v }))}
+            {numField('Max grid import during window', form.peakShavingMaxImportKw,
+              v => onChange({ ...form, peakShavingMaxImportKw: v }), { unit: 'kW', min: 0, step: 0.1 })}
+          </>
         )}
       </SectionCard>
     </div>

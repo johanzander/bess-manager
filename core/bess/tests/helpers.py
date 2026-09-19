@@ -141,6 +141,10 @@ def _scenario_inputs(scenario: dict):
         inputs["export_curtailment_active"] = True
     if "home" in scenario:
         inputs["home_settings"] = HomeSettings(**scenario["home"])
+    if "peak_shaving_import_cap_per_period" in scenario:
+        inputs["peak_shaving_import_cap_per_period"] = scenario[
+            "peak_shaving_import_cap_per_period"
+        ]
     return inputs
 
 

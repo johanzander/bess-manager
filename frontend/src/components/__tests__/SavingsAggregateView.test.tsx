@@ -75,10 +75,14 @@ describe('SavingsAggregateView', () => {
 
     render(<SavingsAggregateView period="week" />);
 
+    // The Chart/Table toggle renders before the fetched data does -- waiting
+    // for the button alone is a race with the data-dependent "net savings"
+    // text below (flaky under CI's slower runners, e.g. #772 CI run
+    // 35400347565). Wait for the actual data-dependent text instead.
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /^chart$/i })).toBeInTheDocument();
+      expect(screen.getByText(/net savings/i)).toBeInTheDocument();
     });
-    expect(screen.getByText(/net savings/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^chart$/i })).toBeInTheDocument();
     expect(screen.queryByText(/could not load savings history/i)).not.toBeInTheDocument();
     // The table view must not be rendered by default - this guards against the
     // regression this branch already reintroduced once (default silently

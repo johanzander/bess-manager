@@ -405,12 +405,11 @@ class TestModelAttrsConsistency:
 # 3b. api_conversion.PRICE_REQUIRED_FIELDS must match PriceSettings' store-
 # backed fields.
 #
-# min_profit and use_actual_price are excluded: they are internal algorithm
-# parameters (see core/bess/settings.py module docstring), never read from
-# the settings store or written by the wizard. If this fails after adding a
-# field to PriceSettings, add it to PRICE_REQUIRED_FIELDS in
-# api_conversion.py (store-backed) or to the exclusion set below
-# (internal-only).
+# use_actual_price is excluded: it is an internal algorithm parameter (see
+# core/bess/settings.py module docstring), never read from the settings
+# store or written by the wizard. If this fails after adding a field to
+# PriceSettings, add it to PRICE_REQUIRED_FIELDS in api_conversion.py
+# (store-backed) or to the exclusion set below (internal-only).
 # ---------------------------------------------------------------------------
 
 
@@ -418,7 +417,7 @@ class TestPriceModelAttrsConsistency:
     def test_required_fields_match_store_backed_dataclass_fields(self):
         from core.bess.settings import PriceSettings
 
-        internal_only = {"min_profit", "use_actual_price"}
+        internal_only = {"use_actual_price"}
         expected = frozenset(
             f.name
             for f in dataclasses.fields(PriceSettings)

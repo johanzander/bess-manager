@@ -85,7 +85,7 @@ HOME_REQUIRED_FIELDS: frozenset[str] = frozenset(
 # export_spot_multiplier are wizard-configurable and store-backed like the
 # other required fields (issue #221); use_actual_price is excluded — it is
 # an internal-only field, never read from the store or written by the
-# wizard, matching min_profit's exclusion.
+# wizard.
 PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
     {
         "area",

@@ -449,6 +449,19 @@ async def patch_settings(updates: dict):
                 # save_section, so the invalid combination is never persisted.)
                 in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
                 bess_controller.system.update_settings({"home": in_mem})
+                ps = section.get("peak_shaving")
+                if isinstance(ps, dict):
+                    obj = bess_controller.system.peak_shaving
+                    if "enabled" in ps:
+                        obj.enabled = ps["enabled"]
+                    if "start_time" in ps:
+                        obj.start_time = ps["start_time"]
+                    if "end_time" in ps:
+                        obj.end_time = ps["end_time"]
+                    if "days" in ps:
+                        obj.days = ps["days"]
+                    if "max_import_kw" in ps:
+                        obj.max_import_kw = ps["max_import_kw"]
 
             elif store_key == "electricity_price":
                 # PriceSettings attribute names match the store field names directly

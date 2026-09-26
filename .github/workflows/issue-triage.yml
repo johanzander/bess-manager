@@ -86,6 +86,17 @@ jobs:
           set -euo pipefail
           file="${RUNNER_TEMP}/issue-${ISSUE}.json"
           gh issue view "$ISSUE" --json title,body,labels,comments > "$file"
+          # Reporters routinely deliver the ~2 MB debug export as a gist or a
+          # GitHub file attachment, because it cannot fit in a comment. Only
+          # `user-attachments/files/` counts: `user-attachments/assets/` is
+          # what every pasted screenshot uses and is never an export. The
+          # classifier has no network access, so it cannot open those links
+          # and used to read them as "no log". Surface them as data instead.
+          links=$(jq -r '[.body, (.comments[].body)] | join("\n")' "$file" \
+            | grep -oE 'https://(gist\.github(usercontent)?\.com/|github\.com/user-attachments/files/)[^][:space:])>"]+|https://[^][:space:])>"]*bess-debug-[^][:space:])>"]*' \
+            | sort -u | jq -R . | jq -s . || true)
+          jq --argjson l "${links:-[]}" '. + {debug_log_links: $l}' "$file" > "${file}.tmp"
+          mv "${file}.tmp" "$file"
           echo "issue_file=${file}" >> "$GITHUB_OUTPUT"
 
       - uses: anthropics/claude-code-action@v1
@@ -130,14 +141,18 @@ jobs:
             bucket: "bug_with_log"  (BUG WITH DEBUG LOG)
             ──────────────────────────────────────────────────────────────────
             A debug log is present if the issue body or a comment contains a
-            JSON dump that looks like a debug report — e.g. keys like
+            LINK to one — the file's `debug_log_links` array is non-empty
+            (gist or GitHub attachment, typically named `bess-debug-*.md`) —
+            or contains a JSON dump that looks like a debug report — e.g. keys like
             "BESS Configuration", "Price Settings", "Health Check", or a
             structured system-state JSON object.
 
             - labels: `bug`, `bot-analyzed`, `ready-for-analysis`
             - comment (concise, one short paragraph max):
                 • One-line summary of the user's report
-                • Confirm the debug log was received
+                • Confirm the debug log was received (a linked gist counts;
+                  never ask for it to be pasted when a link is present —
+                  you cannot open it, but Stage 2 can)
                 • End EXACTLY with: "Reply `@claude-bot analyze` to start deep code-level analysis."
             - DO NOT speculate about root cause. DO NOT read source code.
 

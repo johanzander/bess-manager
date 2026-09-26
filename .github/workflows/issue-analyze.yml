@@ -107,8 +107,12 @@ jobs:
                  - The issue title and body
                  - A summary of how the issue has evolved (what's resolved,
                    what the current problem is)
-                 - The LATEST debug bundle (from issue body or attachments —
-                   download it). If multiple bundles exist, use the most recent.
+                 - The LATEST debug bundle (from issue body, attachments, or
+                   a linked gist — download it: for a gist page URL fetch
+                   `<url>/raw`, for a gist raw URL fetch it directly, with
+                   `curl -sL`. Reporters put the ~2 MB export in a gist because
+                   it cannot fit in a comment; a gist link IS the debug log.
+                   Never report the log as missing without trying the link). If multiple bundles exist, use the most recent.
                  - This task: "Diagnose this issue independently. The reporter's
                    explanation is a HYPOTHESIS — do not assume it is correct.
 

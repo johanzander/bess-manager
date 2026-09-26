@@ -87,11 +87,13 @@ jobs:
           file="${RUNNER_TEMP}/issue-${ISSUE}.json"
           gh issue view "$ISSUE" --json title,body,labels,comments > "$file"
           # Reporters routinely deliver the ~2 MB debug export as a gist or a
-          # GitHub file attachment, because it cannot fit in a comment. The
+          # GitHub file attachment, because it cannot fit in a comment. Only
+          # `user-attachments/files/` counts: `user-attachments/assets/` is
+          # what every pasted screenshot uses and is never an export. The
           # classifier has no network access, so it cannot open those links
           # and used to read them as "no log". Surface them as data instead.
           links=$(jq -r '[.body, (.comments[].body)] | join("\n")' "$file" \
-            | grep -oE 'https://(gist\.github(usercontent)?\.com/|github\.com/user-attachments/)[^][:space:])>"]+|https://[^][:space:])>"]*bess-debug-[^][:space:])>"]*' \
+            | grep -oE 'https://(gist\.github(usercontent)?\.com/|github\.com/user-attachments/files/)[^][:space:])>"]+|https://[^][:space:])>"]*bess-debug-[^][:space:])>"]*' \
             | sort -u | jq -R . | jq -s . || true)
           jq --argjson l "${links:-[]}" '. + {debug_log_links: $l}' "$file" > "${file}.tmp"
           mv "${file}.tmp" "$file"

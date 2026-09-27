@@ -531,6 +531,21 @@ exit code. A green test suite is necessary, not sufficient — this step is
 what makes this skill worth running instead of the bot pipeline, and it is
 not satisfied by re-stating that `quality-check.sh` passed.
 
+**If the diff adds or changes an HA entity, service call, or REST endpoint
+the backend depends on** (a new sensor kind, a new `GET`/`POST` the
+`ha_api_controller` makes, a new entity-registry lookup), `scripts/mock_ha/server.py`
+almost certainly has no matching route or fixture — it only grows the
+endpoints someone has already needed. Extend it, and update or add a
+scenario in `scripts/mock_ha/scenarios/` so the new surface area has real
+data behind it, then drive that scenario here rather than only unit-testing
+the client code. This was found missing in practice (#782): a feature added
+an HA calendar read with no mock coverage, so neither this step nor the
+Stage 4 review caught a real bug in the settings-save path until someone
+exercised it by hand. Skip this only when the feature it depends on hasn't
+merged yet — building mock coverage against unmerged code can't be verified
+against anything real; say so explicitly and note it belongs with that
+feature's own PR instead.
+
 ### 9. Commit + draft PR
 
 Add a `CHANGELOG.md` entry under `## [Unreleased]` (create that heading at
@@ -849,6 +864,7 @@ net is upstream, not this section.
 | "the fix is small, docs don't need touching" | Small fixes are exactly what silently invalidates a one-line doc claim (a removed threshold, a renamed formula). Grep the two design docs before opening the PR, every time. |
 | "a unit test on the changed function is enough" | Not for DP/intent/control-mapping changes — a synthetic-input unit test can pass while the new branch is unreachable by any real optimizer-derived scenario. `docs/agents/simulator.md` requires `R == P` for exactly this class of change. |
 | "the existing suite still passes, so nothing broke" | Passing unchanged means the new code path may simply be untested, not unbroken — check whether any existing fixture actually reaches the new branch before treating a green suite as coverage. |
+| "the unit tests for the new HA client code pass, mock-HA coverage is extra" | Unit tests with stubbed responses can pass while the real endpoint is unreachable by the actual backend flow (Step 8, #782). |
 
 ## Red Flags — Stop and Go Back
 
@@ -884,6 +900,8 @@ net is upstream, not this section.
   `README.md`'s Features table and root `DOCS.md`'s Settings Page section.
 - About to write only a synthetic-input unit test for a DP/intent/control-
   mapping change instead of a plan-faithfulness (`R == P`) scenario test.
+- About to run Step 8 on a diff with new HA-facing surface area without the
+  mock-HA coverage check (Step 8, #782).
 - About to push the branch without having merged `origin/main` since Step 4.
 - About to stop at "draft PR opened" without watching CI settle (Step 10).
 - About to stop at "CI is green" without running the Step 11 review loop.

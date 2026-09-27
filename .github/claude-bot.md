@@ -29,6 +29,12 @@ Every PR review must cover these aspects, in addition to anything explicitly req
 - Tests check behavior, not implementation details
 - No tests of specific field names, algorithm boundaries, or exact interval counts
 - Tests should survive an equivalent algorithm swap
+- If the diff adds or changes an HA entity, service call, or REST endpoint
+  the backend depends on, `scripts/mock_ha/server.py` and a scenario under
+  `scripts/mock_ha/scenarios/` should cover it — a client-side unit test with
+  stubbed responses is not enough on its own. If the feature it belongs to
+  hasn't merged yet, this is fine to defer to that PR, but say so explicitly
+  rather than silently skipping it (#782).
 
 ### Security
 

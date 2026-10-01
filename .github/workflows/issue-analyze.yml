@@ -306,3 +306,50 @@ jobs:
           fi
 
           echo "✅ Analysis published: ${posted} new comment(s), labels: ${labels}"
+
+      # #788: the run logs of a silent exit contain no transcript
+      # (`show_full_output` is off and the action's log omits the final message),
+      # so what the agent did between "read issue" and "exit" -- whether it ever
+      # called the Agent tool for `bess-analyst`, and what that returned -- is
+      # unrecoverable after the fact. These two steps keep a reduced transcript
+      # ONLY for runs the verification step failed, so the root cause can be
+      # read from a real failure instead of guessed at.
+      #
+      # The action's execution file is the raw SDK message stream, unsanitised.
+      # Only the agent's text, its tool calls (name + input), tool-result sizes
+      # and, for failed tool calls, the first 300 chars of the error are kept.
+      # Tool-result bodies -- file contents, downloaded debug bundles -- are
+      # dropped: they are the bulk of the file and not what the question needs.
+      #
+      # `if: failure()` (not `always()`) scopes both steps: it is true only when
+      # an earlier step -- here the verification -- failed.
+      - name: Reduce the agent transcript of a failed run
+        if: failure()
+        env:
+          RAW: ${{ runner.temp }}/claude-execution-output.json
+          REDUCED: ${{ runner.temp }}/stage2-transcript-reduced.json
+        run: |
+          jq '[ .[]
+            | if .type == "assistant" then
+                {type, content: [ .message.content[]?
+                  | if .type == "tool_use" then {type, name, input}
+                    elif .type == "text" then {type, text}
+                    else {type} end ]}
+              elif .type == "user" then
+                {type, tool_results: [ .message.content[]?
+                  | select(.type? == "tool_result")
+                  | ((.content | tostring)) as $body
+                  | {tool_use_id, is_error, chars: ($body | length)}
+                    + (if .is_error == true then {error: $body[0:300]} else {} end) ]}
+              elif .type == "result" then
+                {type, subtype, is_error, num_turns, result}
+              else empty end ]' "$RAW" > "$REDUCED"
+
+      - name: Keep the reduced agent transcript of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stage2-agent-transcript-${{ github.run_id }}
+          path: ${{ runner.temp }}/stage2-transcript-reduced.json
+          if-no-files-found: warn
+          retention-days: 7

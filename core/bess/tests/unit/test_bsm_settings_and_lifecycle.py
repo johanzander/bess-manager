@@ -8,11 +8,13 @@ import logging
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.calendar_windows import CalendarWindow
 from core.bess.exceptions import (
     HistoricalDataUnavailableError,
     SystemConfigurationError,
@@ -70,6 +72,38 @@ class TestUpdateSettings:
         system.update_settings({"price": {"markup_rate": 0.05}})
         assert system.price_settings.markup_rate == 0.05
         assert system._price_manager.markup_rate == 0.05
+
+    def test_octopus_free_import_price_synced_to_price_manager(
+        self, system: BatterySystemManager
+    ) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {
+                        "import_today_entity": "event.agile_import_today",
+                        "import_tomorrow_entity": "event.agile_import_tomorrow",
+                        "export_today_entity": "event.agile_export_today",
+                        "export_tomorrow_entity": "event.agile_export_tomorrow",
+                        "free_import_price": 0.05,
+                    },
+                }
+            }
+        )
+        assert system._price_manager.free_import_price == 0.05
+
+    def test_non_octopus_provider_prices_free_windows_at_default(
+        self, system: BatterySystemManager
+    ) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "entsoe",
+                    "entsoe": {"entity": "sensor.entsoe_prices"},
+                }
+            }
+        )
+        assert system._price_manager.free_import_price == 0.0
 
     def test_price_update_clears_cache(self, system):
         with patch.object(system._price_manager, "clear_cache") as mock_clear:
@@ -279,6 +313,7 @@ class TestCreatePriceSource:
                     "import_tomorrow_entity": "event.agile_import_tomorrow",
                     "export_today_entity": "event.agile_export_today",
                     "export_tomorrow_entity": "event.agile_export_tomorrow",
+                    "free_import_price": 0.0,
                 },
             },
             addon_options=_DEFAULT_OPTIONS,
@@ -1841,3 +1876,89 @@ class TestRunHealthCheckLoggingShapes:
         # the real result and reports no failing components at all.
         assert result["checks"] == health_results["checks"]
         assert system._critical_sensor_failures == ["Battery Control (SPH)"]
+
+
+class TestFetchFreeImportWindows:
+    """Where the Octoplus windows come from, and the unmodelled 16 kWh cap."""
+
+    START = datetime(2026, 9, 13, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+    END = datetime(2026, 9, 15, 0, 0, tzinfo=ZoneInfo("Europe/London"))
+    CALENDAR = "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
+
+    def _window(self) -> CalendarWindow:
+        tz = ZoneInfo("Europe/London")
+        return CalendarWindow(
+            start=datetime(2026, 9, 13, 11, 0, tzinfo=tz),
+            end=datetime(2026, 9, 13, 12, 0, tzinfo=tz),
+        )
+
+    def _use_octopus(self, system: BatterySystemManager, calendar: str) -> None:
+        system.update_settings(
+            {
+                "energy_provider": {
+                    "provider": "octopus",
+                    "octopus": {
+                        "import_today_entity": "event.agile_import_today",
+                        "import_tomorrow_entity": "event.agile_import_tomorrow",
+                        "export_today_entity": "event.agile_export_today",
+                        "export_tomorrow_entity": "event.agile_export_tomorrow",
+                        "free_import_price": 0.0,
+                        "power_up_calendar_entity": calendar,
+                    },
+                }
+            }
+        )
+
+    def test_configured_calendar_is_read(self, system: BatterySystemManager) -> None:
+        self._use_octopus(system, self.CALENDAR)
+        with patch.object(
+            system._controller, "get_calendar_windows", return_value=[self._window()]
+        ) as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == [
+                self._window()
+            ]
+        read.assert_called_once_with(self.CALENDAR, self.START, self.END)
+
+    def test_no_calendar_configured_means_no_windows(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._use_octopus(system, "")
+        with patch.object(system._controller, "get_calendar_windows") as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == []
+        read.assert_not_called()
+
+    def test_non_octopus_provider_has_no_windows(
+        self, system: BatterySystemManager
+    ) -> None:
+        with patch.object(system._controller, "get_calendar_windows") as read:
+            assert system._fetch_free_import_windows(self.START, self.END) == []
+        read.assert_not_called()
+
+    def test_three_phase_install_warns_once_per_window(
+        self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._use_octopus(system, self.CALENDAR)
+        system.update_settings(
+            {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 3}}
+        )
+        with patch.object(
+            system._controller, "get_calendar_windows", return_value=[self._window()]
+        ):
+            with caplog.at_level(logging.WARNING):
+                system._fetch_free_import_windows(self.START, self.END)
+                system._fetch_free_import_windows(self.START, self.END)
+        assert caplog.text.count("free allowance") == 1
+
+    def test_single_phase_install_does_not_warn(
+        self, system: BatterySystemManager, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self._use_octopus(system, self.CALENDAR)
+        system.update_settings(
+            {"home": {"max_fuse_current": 25, "voltage": 230, "phase_count": 1}}
+        )
+        with patch.object(
+            system._controller, "get_calendar_windows", return_value=[self._window()]
+        ):
+            with caplog.at_level(logging.WARNING):
+                system._fetch_free_import_windows(self.START, self.END)
+        assert "free allowance" not in caplog.text

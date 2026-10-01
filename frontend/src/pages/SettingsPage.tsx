@@ -117,7 +117,9 @@ const SettingsPage: React.FC = () => {
     battery:
       JSON.stringify(batteryForm) !== savedBattery.current ||
       JSON.stringify(inverterForm) !== savedInverter.current,
-    sensors: stableStringify(sensors) !== savedSensors.current,
+    sensors:
+      stableStringify(sensors) !== savedSensors.current ||
+      JSON.stringify(inverterForm) !== savedInverter.current,
     system: demoEnabled !== savedDemoEnabled || JSON.stringify(aiForm) !== savedAi.current,
   };
 
@@ -465,6 +467,35 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  /** Inverter section of a PATCH payload — shared by every Save handler that
+   * can touch inverterForm (Battery tab and Integrations/Sensors tab both
+   * render inverter fields; #787 was this going stale in one of the two). */
+  const inverterPatchPayload = () => ({
+    ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+      ? {}
+      : { growatt: { deviceId: inverterForm.deviceId } }),
+    inverter: {
+      platform: inverterForm.inverterPlatform,
+      controlMode: inverterForm.controlMode ?? 'tou',
+      serviceDomain: inverterForm.serviceDomain ?? '',
+      ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
+        ? { deviceId: inverterForm.deviceId }
+        : {}),
+    },
+  });
+
+  /** The effective service domain is computed server-side and changes when
+   * the platform or override does — take it from the save response rather
+   * than leaving the placeholder showing the value fetched at page load. */
+  const applyResolvedInverterDomain = (saved: { data?: { inverter?: { resolvedServiceDomain?: string } } }) => {
+    const resolved = saved.data?.inverter?.resolvedServiceDomain;
+    const updatedInverter = resolved === undefined
+      ? inverterForm
+      : { ...inverterForm, resolvedServiceDomain: resolved };
+    setInverterForm(updatedInverter);
+    savedInverter.current = JSON.stringify(updatedInverter);
+  };
+
   const saveBattery = async () => {
     setSaving(true);
     try {
@@ -487,29 +518,10 @@ const SettingsPage: React.FC = () => {
             weatherEntity: sensors.shared?.['weather_entity'] ?? '',
           },
         },
-        ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
-          ? {}
-          : { growatt: { deviceId: inverterForm.deviceId } }),
-        inverter: {
-          platform: inverterForm.inverterPlatform,
-          controlMode: inverterForm.controlMode ?? 'tou',
-          serviceDomain: inverterForm.serviceDomain ?? '',
-          ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
-            ? { deviceId: inverterForm.deviceId }
-            : {}),
-        },
+        ...inverterPatchPayload(),
       });
       savedBattery.current = JSON.stringify(batteryForm);
-      // The effective domain is computed server-side and changes when the
-      // platform or override does — take it from the save response rather
-      // than leaving the placeholder showing the value fetched at page load.
-      const resolved = (saved as { inverter?: { resolvedServiceDomain?: string } })
-        ?.inverter?.resolvedServiceDomain;
-      const updatedInverter = resolved === undefined
-        ? inverterForm
-        : { ...inverterForm, resolvedServiceDomain: resolved };
-      setInverterForm(updatedInverter);
-      savedInverter.current = JSON.stringify(updatedInverter);
+      applyResolvedInverterDomain(saved);
       setToast({ type: 'success', message: 'Battery settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
@@ -521,7 +533,7 @@ const SettingsPage: React.FC = () => {
   const saveSensors = async () => {
     setSaving(true);
     try {
-      await api.patch('/api/settings', {
+      const saved = await api.patch('/api/settings', {
         sensors,
         energyProvider: {
           provider: pricingForm.provider,
@@ -535,9 +547,11 @@ const SettingsPage: React.FC = () => {
           },
           entsoe: { entity: pricingForm.entsoeEntity },
         },
+        ...inverterPatchPayload(),
       });
       savedSensors.current = stableStringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
+      applyResolvedInverterDomain(saved);
       const failed = await checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
       if (failed.length > 0) {
         setToast({

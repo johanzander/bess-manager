@@ -18,6 +18,15 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Minimum change (percentage points) in the load-following discharge rate that
+# justifies re-writing the register to the Growatt cloud. The rate is recomputed
+# every 15-min period and wobbles a few points (e.g. 11% -> 13%); re-sending each
+# tiny change is surplus cloud write churn that contributes to the intermittent
+# GrowattV1ApiError rejections (#741). Sub-threshold changes are skipped, but the
+# 0/100 endpoints and the first departure from a stopped battery are always
+# written (see _discharge_rate_write_needed).
+DISCHARGE_RATE_WRITE_MATERIALITY_PCT = 5
+
 
 class InverterController(ABC):
     """Abstract base class for inverter controllers.
@@ -1119,10 +1128,7 @@ class InverterController(ABC):
                 logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
                 errors.append(str(e))
 
-        if (
-            not self.dedupe_register_writes
-            or discharge_rate != self._last_written_discharge_rate
-        ):
+        if self._discharge_rate_write_needed(discharge_rate):
             try:
                 controller.set_discharging_power_rate(discharge_rate)
                 self._last_written_discharge_rate = discharge_rate
@@ -1159,6 +1165,31 @@ class InverterController(ABC):
             return
         controller.set_charging_power_rate(charge_rate)
         self._last_written_charge_rate = charge_rate
+
+    def _discharge_rate_write_needed(self, discharge_rate: int) -> bool:
+        """Whether the discharge-power-rate register needs a (re)write.
+
+        Beyond the #402 identical-value dedup, skip a re-write when the change
+        from the last written value is economically trivial (< the materiality
+        threshold), because the load-following rate wobbles a few points every
+        period and each write is exposed to Growatt cloud rejections (#741).
+        The endpoints are always honoured exactly: 0 (stop — a residual few %
+        would keep draining) and 100 (full rate — a cap a few % low loses peak
+        capacity); and the first departure from a stopped battery is always
+        written, so a small discharge still starts. The threshold is measured
+        against the last *written* value, not the last desired one, so many
+        small steps still trigger a write once they drift past it.
+        """
+        if not self.dedupe_register_writes:
+            return True
+        last = self._last_written_discharge_rate
+        if last is None:
+            return True
+        if discharge_rate == last:
+            return False
+        if discharge_rate == 0 or discharge_rate == 100 or last == 0:
+            return True
+        return abs(discharge_rate - last) >= DISCHARGE_RATE_WRITE_MATERIALITY_PCT
 
     @abstractmethod
     def get_all_tou_segments(self) -> list[dict]:

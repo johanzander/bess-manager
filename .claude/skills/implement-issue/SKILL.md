@@ -778,12 +778,15 @@ not carry them.** The bot posts its findings as INLINE review comments, which
 show up in neither `gh pr view --json reviews` nor `--json comments`. Read
 them directly, scoped to comments newer than the previous round's verdict so
 a re-run doesn't re-litigate findings already addressed (on the first round,
-omit the `select` — there is no prior verdict to filter against):
+omit the timestamp — there is no prior verdict to filter against):
 
 ```bash
-gh api repos/johanzander/bess-manager/pulls/<n>/comments \
-  --jq '.[] | select(.created_at > "<submittedAt from the round before>") | "\(.path):\(.line) \(.body)"'
+scripts/pr-status.sh <n> "<submittedAt from the round before>"
 ```
+
+The script prints the `== inline comments ==` section after the PR state and
+non-passing checks. Never inline `gh api` here: it is an ask rule and prompts
+every time, which stalls an unattended run.
 
 **Hard cap: 3 rounds.** On the third `CHANGES_REQUESTED`, stop reworking — a
 fourth round will not settle a design disagreement. The escalation itself is

@@ -1848,6 +1848,43 @@ class TestDiscoverOctopusEntities:
             "exportTomorrow": "event.octopus_energy_electricity_export_next_day_rates",
         }
 
+    def test_octoplus_power_up_calendar_discovered(self) -> None:
+        registry = [
+            *self._octopus_registry(),
+            _entity(
+                "calendar.octopus_energy_a_982b3d40_octoplus_power_up",
+                "octopus_energy",
+                "octopus_energy_A-982B3D40_octoplus_power_up",
+            ),
+            # Same platform and suffix family, but the event entity is not
+            # the calendar the overlay reads.
+            _entity(
+                "event.octopus_energy_a_982b3d40_octoplus_power_up_events",
+                "octopus_energy",
+                "octopus_energy_A-982B3D40_octoplus_power_up_events",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert (
+            result["powerUpCalendar"]
+            == "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
+        )
+        assert "powerUpCalendarDisabledBy" not in result
+
+    def test_disabled_power_up_calendar_is_reported_as_disabled(self) -> None:
+        """The calendar ships disabled; the wizard must tell the user to enable it."""
+        entry = _entity(
+            "calendar.octopus_energy_a_982b3d40_octoplus_power_up",
+            "octopus_energy",
+            "octopus_energy_A-982B3D40_octoplus_power_up",
+        )
+        entry["disabled_by"] = "integration"
+        result = self.ctrl.discover_octopus_entities([entry])
+        assert result == {
+            "powerUpCalendar": "calendar.octopus_energy_a_982b3d40_octoplus_power_up",
+            "powerUpCalendarDisabledBy": "integration",
+        }
+
     def test_empty_registry(self):
         assert self.ctrl.discover_octopus_entities([]) == {}
 

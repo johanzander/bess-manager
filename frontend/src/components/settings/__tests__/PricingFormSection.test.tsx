@@ -12,6 +12,8 @@ const BASE_FORM: PricingForm = {
   octopusImportTomorrowEntity: '',
   octopusExportTodayEntity: '',
   octopusExportTomorrowEntity: '',
+  octopusFreeImportPrice: 0,
+  octopusPowerUpCalendarEntity: '',
   entsoeEntity: '',
   area: '',
   markupRate: 0,

@@ -61,6 +61,8 @@
       "Bash(gh run view *)",
       "Bash(gh run watch *)",
       "Bash(scripts/request-pr-review.sh *)",
+      "Bash(scripts/pr-status.sh *)",
+      "Bash(scripts/fetch-upstream-file.sh *)",
       "Bash(scripts/gh-agent.sh *)",
       "Bash(./scripts/worktree-setup.sh*)",
       "Bash(./scripts/quality-check.sh*)",

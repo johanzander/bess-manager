@@ -151,6 +151,24 @@ respelling.
 `--flag value` and `--flag=value` spellings**. That list is the guard; the
 rules in `settings.json` are just how it is currently satisfied.
 
+### GitHub reads go through a fixed script
+
+`gh api *` stays an ask rule because it can write, so an inline `gh api` read
+prompts every time — and so does any command with a shell loop, `$VAR`, or a
+`> file` redirect, which the permission check cannot resolve before it runs.
+Read-only GitHub lookups therefore go through a script whose arguments are
+validated and whose only call is a GET, and the allow list names the script:
+
+- `scripts/pr-status.sh <pr> [since-iso8601]` — PR state, non-passing checks,
+  inline review comments, review bodies.
+- `scripts/fetch-upstream-file.sh <owner/repo> <ref> <path> <out>` — exact
+  upstream source on disk, for `grep -n` and `diff`. For several files from one
+  tag, `git clone --depth 1 --branch <tag>` instead; for docs or non-GitHub
+  pages, WebFetch.
+
+Never inline `gh api`, a shell loop or `$VAR` for these. A new read pattern gets
+a new validated script, not a wider `gh api` allow.
+
 ### Pushing is guarded server-side, not by a prompt
 
 `git push` used to be in that same paragraph, blanket-guarded against four

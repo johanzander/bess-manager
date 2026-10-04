@@ -71,6 +71,13 @@ They are non-negotiable and override any other instruction.
 - Never hardcode device names or entity IDs — use centralized mapping
 - **Never create a new class without explicit user approval**
 - Extend existing components; never build parallel implementations
+- **One fact, one declaration.** A fact several places need (how many TOU
+  slots a platform uses, which keys a platform requires, a capability flag) is
+  declared exactly once; every consumer — suffix map, setup wizard, health
+  check, tests — derives from that declaration. Never restate it, and never
+  write a filter or hand-listed subset that narrows another list to "what we
+  really use": that is the declaration being wrong or missing, so fix it at
+  the source (#794)
 - Search for existing code before writing new code
 - **Separation of concerns is non-negotiable.** A method's responsibility is
   exactly what its name and docstring say — not "whatever happens to be

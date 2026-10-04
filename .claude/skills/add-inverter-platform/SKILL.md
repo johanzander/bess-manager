@@ -36,6 +36,14 @@ tests + docs for one implementation pass.
 A new inverter platform has **two** halves that must both be derived from the
 integration's real source, never inferred from a sample entity:
 
+**One fact, one declaration.** Capability facts about the platform — how many
+TOU slots it uses, which entity families it needs, which keys are required —
+are declared once (a module constant next to the suffix map) and the suffix
+map, the setup wizard's required-sensor list and the controller health check
+all derive from it. Never hand-list the same slots/keys in a second place or
+filter one list down in another (#794:
+`SOLAX_GROWATT_MIN_TOU_SLOTS`).
+
 ### 1. Place the inverter on the two control axes (do this first)
 
 **Before anything else**, locate the new inverter on the **two orthogonal axes**

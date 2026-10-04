@@ -51,6 +51,8 @@ For every substantive change, ask:
 4. **Workaround check:** does the diff add anything — a parameter, flag, default-fallback, second construction site, extra trigger or branch — whose only job is to route around a problem the fix ran into (ordering, timing, a dependency not available yet) rather than fix it? If yes, CONFIRMED finding regardless of whether tests pass; the direct fix is usually to reorder or reuse/expose the thing that already exists. Worked example: `docs/agents/patterns.md` → same section (issue #440).
 5. Does the PR description state the fix's scope assessment (local fix within an existing method's contract vs. structural fix routed to a new/different owner vs. escalated for a second opinion), per `rules.md`'s Debugging Protocol step 9? If a structural-looking change has no such statement, ask for it rather than guessing which category the author judged it to be.
 
+6. **One fact, one declaration** (`docs/agents/rules.md` → Architecture): does the diff encode a fact (a slot count, a required-key list, a platform capability) that is already encoded elsewhere, or add a filter / hand-listed subset that narrows another list? CONFIRMED finding regardless of whether tests pass. Grep the literal across `backend/` and `core/` (e.g. `tou_time_`, `[2-9]`, the count) and check every hit derives from one declaration. Worked example: `docs/agents/patterns.md` → "One fact, one declaration" (issue #794).
+
 Name specific failure modes or better alternatives when they exist.
 
 ## Agent documentation

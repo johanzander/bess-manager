@@ -277,6 +277,10 @@ than picking one.
 
 8. **Conclude independently** — your root cause may differ from the reporter's.
    That is expected and correct.
+   When the finding is an inconsistency between places, name every place that
+   encodes the fact and propose one declaration they all derive from — not a
+   patch that makes one place match another (`docs/agents/rules.md` → "One
+   fact, one declaration").
 9. **Sanity check before reporting:** re-read the last 3-5 user comments.
    Does your analysis address what the user is actually struggling with NOW?
    If not, you've likely analyzed a stale problem.

@@ -297,7 +297,11 @@ presenting anything. Then the scope category: does the fix stay within
 the target method's existing contract (local), does it need a different/new
 owner (structural), or does it have multiple plausible owners worth a second
 opinion? State which, explicitly — don't let the user infer it from the diff
-description. A structural assessment with no stated reason for the chosen
+description. If the issue is a "the same fact is encoded in N places"
+inconsistency, the design must also name the **single declaration** the fact
+will live in and list every consumer that will derive from it; a design that
+patches one place to match another (a filter, a second list) is not ready to
+present (#794). A structural assessment with no stated reason for the chosen
 owner is not ready to present. Wait for explicit go-ahead before touching
 code. One message — cheap insurance against building an entire
 implementation on a wrong diagnosis *or* a wrong placement.

@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Fail when an agent-guidance file grows past its recorded line budget.
+"""Fail when an agent-guidance file differs from its recorded line budget.
+
+Caps are exact (a ratchet): growth must be paid for by pruning, and a prune
+must lower the cap so the room it frees is not spent silently.
 
 Every fix PR carries an `## Escape analysis` (see `.claude/skills/implement-issue/SKILL.md`
 Step 9) that may add guidance. Without a ceiling, each PR adds a line and the
@@ -27,15 +30,19 @@ def main() -> int:
         path, limit = line.rsplit(maxsplit=1)
         actual = len((ROOT / path).read_text().splitlines())
         if actual > int(limit):
-            failures.append(f"{path}: {actual} lines, budget {limit}")
+            failures.append(f"{path}: {actual} lines, budget {limit} (over)")
+        elif actual < int(limit):
+            failures.append(
+                f"{path}: {actual} lines, budget {limit} (under: lower the cap to {actual})"
+            )
     if failures:
-        print("Guidance files over budget:")
+        print("Guidance files off budget:")
         for failure in failures:
             print(f"  {failure}")
         print(
-            "Prune or merge existing guidance to make room. If the growth is "
-            "justified, raise the ceiling in docs/agents/guidance-budget.txt and "
-            "state why in the PR's Escape analysis."
+            "Over: prune or merge existing guidance, or raise the cap in "
+            "docs/agents/guidance-budget.txt and state why in the PR's Escape "
+            "analysis. Under: lower the cap, so freed room is not spent silently."
         )
         return 1
     return 0

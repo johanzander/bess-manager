@@ -816,57 +816,24 @@ report — and whoever acts on it — is what sets `Awaiting: maintainer`.
 
 ## After Merge
 
-A **separate, later invocation** — often a different session, sometimes days
-later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at a green, bot-approved, ready-for-review PR that
-the maintainer has not merged yet, per the Step 12 constraints.
+A **separate, later invocation** — often days later, after the maintainer has
+reviewed. Best-effort only: it depends on someone returning, so it reliably
+does not happen; Step 4's prune is the cleanup that actually runs.
 
-**Treat this as best-effort, not the cleanup mechanism.** Because it depends
-on someone returning after the merge, it reliably does not happen; Step 4's
-prune is the one that actually runs. If you are here, do it — but the safety
-net is upstream, not this section.
-
-1. Confirm the merge:
-
-   ```bash
-   gh pr view <n> --json state,mergedAt,mergeCommit
-   ```
-
-   `state == "MERGED"` is authoritative — that's the standard signal, no need
-   to separately diff branch content against `main`. Squash merges break
-   `git branch -d`'s normal ancestry check (the branch's commits never become
-   reachable from `main`), so force-delete below is expected, not a sign
-   something's wrong.
-
-2. Remove the worktree — via `ExitWorktree action=remove discard_changes=true`
-   if the session is still in it. That is the harness doing it, so it is not
-   sandboxed and it works.
-
-   If the session has already left, **emit one `!`-prefixed command that
-   removes the worktree and force-deletes the branch together**, in that
-   order — the branch delete has to ride the same deferred command: git
-   refuses `git branch -D` while the worktree registration persists, and the
-   command below is what clears the registration:
+1. `gh pr view <n> --json state,mergedAt,mergeCommit` — `state == "MERGED"` is
+   authoritative. Squash merges break `git branch -d`'s ancestry check, so the
+   force-delete below is expected, not a sign something is wrong.
+2. In the session that still holds the worktree: `ExitWorktree action=remove
+   discard_changes=true` (the harness does it, so it is not sandboxed), then
+   `git branch -D <branch-name>` and `git fetch origin --prune`.
+3. From any other session, **emit, do not execute**, one `!`-prefixed command.
+   The order is load-bearing: git refuses `branch -D` while the worktree
+   registration persists, and a sandboxed `git worktree remove` half-deletes
+   the tree (Step 4):
 
    ```bash
-   # Emit this; do not execute it. It must run unsandboxed.
    git worktree remove --force <path> && git branch -D <branch-name>
    ```
-
-   Running `git worktree remove` from a sandboxed Bash half-deletes the
-   worktree and then fails (see Step 4), so the agent must not run it either.
-
-3. In-session only — when item 2 completed via `ExitWorktree`, the
-   registration is gone and `git branch -D` is safe. Force-delete the local
-   branch and prune stale remote refs:
-
-   ```bash
-   git branch -D <branch-name>
-   git fetch origin --prune
-   ```
-
-   GitHub auto-deletes the remote branch on merge by default; `--prune` just
-   clears the now-stale local tracking ref.
 
 ## Rationalizations — Reality
 

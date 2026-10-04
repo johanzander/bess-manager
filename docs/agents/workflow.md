@@ -182,10 +182,4 @@ When a draft PR is opened by the issue fixer, two notifications fire:
 ## Quality Gate
 
 Before any PR: `./scripts/quality-check.sh` must pass with zero errors.
-
-## Escape Analysis
-
-Every fix PR's body carries `## Escape analysis`: which gate failed to catch
-the bug and what guard now does. Procedure, guard preference order and the
-bloat rules are in `implement-issue` Step 9; the line caps on guidance files
-are in `docs/agents/guidance-budget.txt`, enforced by `quality-check.sh`.
+Fix PRs also carry `## Escape analysis` (`implement-issue` Step 9; caps in `docs/agents/guidance-budget.txt`).

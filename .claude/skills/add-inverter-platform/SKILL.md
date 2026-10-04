@@ -82,7 +82,7 @@ survives entity renaming (`core/bess/ha_api_controller.py` →
 from the **integration's source code**, not from a sample `entity_id` and not
 from inference:
 
-1. Find the integration's GitHub repo (`gh api "search/repositories?q=..."`).
+1. Find the integration's GitHub repo (`gh search repos "<query>"`; read its files with `scripts/fetch-upstream-file.sh`, not inline `gh api`).
 2. Read `custom_components/<domain>/sensor.py` / `number.py` / `select.py` /
    `button.py` (and `const.py`, `coordinator.py`). Locate `DOMAIN` (= the
    registry `platform`), the `_attr_unique_id` construction, and the entity

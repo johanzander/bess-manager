@@ -14,7 +14,7 @@ survives entity renaming (`ha_api_controller.py` → `discover_octopus_entities`
 You MUST derive the real `unique_id` pattern from the **integration's source
 code**, not from a sample entity_id and not from inference:
 
-1. Find the integration's GitHub repo (`gh api "search/repositories?q=..."`).
+1. Find the integration's GitHub repo (`gh search repos "<query>"`; read its files with `scripts/fetch-upstream-file.sh`, not inline `gh api`).
 2. Read `custom_components/<domain>/sensor.py` (and `const.py`, `coordinator.py`).
    Locate `DOMAIN` (= the registry `platform`), the `_attr_unique_id`
    construction, and the `extra_state_attributes` that expose the price arrays.

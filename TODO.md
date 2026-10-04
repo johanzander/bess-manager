@@ -49,6 +49,12 @@
 
 **Description**: PR #701 replaced the only two production call sites of `describe_failing_checks()` (in `api.py` and `battery_system_manager.py`) with the new device-grouping helpers, leaving it exercised only by its own `test_describe_failing_checks.py`. Not wrong, just dead weight — a follow-up removal (function plus its dedicated test file) should land separately from the banner PR.
 
+### **`scripts/pr-status.sh` / `fetch-upstream-file.sh` review nits (PR #799)**
+
+**Impact**: Low | **Effort**: Low | **Dependencies**: `scripts/pr-status.sh`, `scripts/fetch-upstream-file.sh`
+
+**Description**: Non-blocking nits from the PR #799 review. (1) `pr-status.sh` calls `gh api .../pulls/<n>/comments` without `--paginate`, so a PR with more than 30 inline comments returns only the first 30 and the newest findings, the ones the `since` filter exists for, are dropped silently; the inline command it replaced had the same limit. (2) `fetch-upstream-file.sh` confines the output to `$TMPDIR`, `/tmp` or `/private/tmp` by prefix, which does not stop a pre-existing symlink under `/tmp` redirecting the write. (3) `pr-status.sh` filters failing checks with `grep -v pass`, which also hides a check whose name contains "pass" and swallows a genuine `gh pr checks` failure such as an auth error as "all checks pass"; filtering on the status column would be exact.
+
 ### **DP-results/schedule log can be dropped by an unexpected exception after `should_apply`**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `battery_system_manager.py`

@@ -72,6 +72,7 @@ from typing import ClassVar
 from . import time_utils
 from .dp_schedule import DPSchedule
 from .growatt_min_controller import GrowattMinController
+from .ha_api_controller import SOLAX_GROWATT_MIN_TOU_SUFFIXES
 from .health_check import perform_health_check
 from .settings import BatterySettings
 from .vpp_load_tracking import VPP_HOLD_POWER_PCT
@@ -94,6 +95,12 @@ class SolaxModbusGrowattController(GrowattMinController):
     hardware, with ``sync_to_hardware`` doing only the one-time VPP
     enable sequence.
     """
+
+    # TOU sensor keys this platform needs — derived from the suffix map's slot
+    # declaration, the single source of truth (#794).
+    TOU_REQUIRED_KEYS: ClassVar[tuple[str, ...]] = tuple(
+        SOLAX_GROWATT_MIN_TOU_SUFFIXES.values()
+    )
 
     # TOU mode's per-period write goes through the inherited base
     # _write_period_to_hardware() (#166 comment above _apply_period_tou):
@@ -968,13 +975,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 "growatt_vpp_power",
             ]
             if self.control_mode == "vpp"
-            else [
-                "tou_time_1_enabled",
-                "tou_time_1_begin",
-                "tou_time_1_end",
-                "tou_time_1_mode",
-                "tou_time_1_update",
-            ]
+            else list(self.TOU_REQUIRED_KEYS)
         )
         entity_label = "VPP Entity" if self.control_mode == "vpp" else "TOU Entity"
         for key in required_keys:

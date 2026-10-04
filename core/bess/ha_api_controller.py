@@ -31,6 +31,18 @@ from .settings_store import SettingsStore, apply_signed_pair_aliases
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
 
+# Growatt GEN4 via solax_modbus: the single place that says which TOU slots the
+# product controls (#794). The suffix map, the setup wizard's required-sensor
+# list and the controller health check all derive from this — never restate it.
+# The legacy-slot cleanup deliberately reads beyond it (the hardware has 9).
+SOLAX_GROWATT_MIN_TOU_SLOTS = 1
+_SOLAX_TOU_FIELDS = ("enabled", "begin", "end", "mode", "update")
+SOLAX_GROWATT_MIN_TOU_SUFFIXES: dict[str, str] = {
+    f"time_{n}_{field}": f"tou_time_{n}_{field}"
+    for n in range(1, SOLAX_GROWATT_MIN_TOU_SLOTS + 1)
+    for field in _SOLAX_TOU_FIELDS
+}
+
 
 def _describe_request_error(e: requests.RequestException) -> str:
     """str(e) plus the HTTP response body when one is present.
@@ -500,8 +512,10 @@ class HomeAssistantAPIController:
     # Note: plugin key="time_N_enabled" (used in unique_id) but
     # name="Time N Active" (used in entity_id → *_time_N_active).
     # Detection and mapping match on unique_id, so the suffix is "enabled".
-    # Slots 4-9 are disabled by default in HA entity registry.
-    # tou_time_N_enabled             —                                  solax_time_N_enabled  (N=1..9)
+    # Slots 4-9 are disabled by default in HA entity registry. BESS maps only
+    # SOLAX_GROWATT_MIN_TOU_SLOTS of them (slot 1); that constant is the single
+    # source of truth — do not list slots here or in a second place (#794).
+    # tou_time_N_enabled             —                                  solax_time_N_enabled  (N=1..SOLAX_GROWATT_MIN_TOU_SLOTS)
     # tou_time_N_begin               —                                  solax_time_N_begin
     # tou_time_N_end                 —                                  solax_time_N_end
     # tou_time_N_mode                —                                  solax_time_N_mode
@@ -698,52 +712,8 @@ class HomeAssistantAPIController:
         # SELECT_TYPES/NUMBER_TYPES the same way as the VPP entries above.
         "limit_grid_export": "growatt_export_limit_mode",
         "grid_export_limit": "growatt_export_limit_value",
-        # TOU time slots (9 slots)
-        "time_1_enabled": "tou_time_1_enabled",
-        "time_1_begin": "tou_time_1_begin",
-        "time_1_end": "tou_time_1_end",
-        "time_1_mode": "tou_time_1_mode",
-        "time_1_update": "tou_time_1_update",
-        "time_2_enabled": "tou_time_2_enabled",
-        "time_2_begin": "tou_time_2_begin",
-        "time_2_end": "tou_time_2_end",
-        "time_2_mode": "tou_time_2_mode",
-        "time_2_update": "tou_time_2_update",
-        "time_3_enabled": "tou_time_3_enabled",
-        "time_3_begin": "tou_time_3_begin",
-        "time_3_end": "tou_time_3_end",
-        "time_3_mode": "tou_time_3_mode",
-        "time_3_update": "tou_time_3_update",
-        "time_4_enabled": "tou_time_4_enabled",
-        "time_4_begin": "tou_time_4_begin",
-        "time_4_end": "tou_time_4_end",
-        "time_4_mode": "tou_time_4_mode",
-        "time_4_update": "tou_time_4_update",
-        "time_5_enabled": "tou_time_5_enabled",
-        "time_5_begin": "tou_time_5_begin",
-        "time_5_end": "tou_time_5_end",
-        "time_5_mode": "tou_time_5_mode",
-        "time_5_update": "tou_time_5_update",
-        "time_6_enabled": "tou_time_6_enabled",
-        "time_6_begin": "tou_time_6_begin",
-        "time_6_end": "tou_time_6_end",
-        "time_6_mode": "tou_time_6_mode",
-        "time_6_update": "tou_time_6_update",
-        "time_7_enabled": "tou_time_7_enabled",
-        "time_7_begin": "tou_time_7_begin",
-        "time_7_end": "tou_time_7_end",
-        "time_7_mode": "tou_time_7_mode",
-        "time_7_update": "tou_time_7_update",
-        "time_8_enabled": "tou_time_8_enabled",
-        "time_8_begin": "tou_time_8_begin",
-        "time_8_end": "tou_time_8_end",
-        "time_8_mode": "tou_time_8_mode",
-        "time_8_update": "tou_time_8_update",
-        "time_9_enabled": "tou_time_9_enabled",
-        "time_9_begin": "tou_time_9_begin",
-        "time_9_end": "tou_time_9_end",
-        "time_9_mode": "tou_time_9_mode",
-        "time_9_update": "tou_time_9_update",
+        # TOU time slots — only the slots the product controls (#794)
+        **SOLAX_GROWATT_MIN_TOU_SUFFIXES,
     }
 
     # Growatt GEN3 (MIX/SPA/SPH) via solax_modbus Growatt plugin

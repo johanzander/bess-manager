@@ -62,6 +62,13 @@ jobs:
         run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: anthropics/claude-code-action@v1
+        env:
+          # Sub-agents otherwise run in the background: the Agent call returns an
+          # acknowledgement, the orchestrator writes "still running, I'll wait" and
+          # the headless session ends with no comment posted (#788, run on #791).
+          # Disabling background tasks makes the bess-analyst delegation block
+          # until its report is in hand.
+          CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1"
         with:
           # Auth switch: BOT_AUTH=api_key uses the Anthropic API key (pay-per-token);
           # unset or 'oauth' uses Claude subscription credits. Change the repo variable
@@ -240,6 +247,9 @@ jobs:
             - DO NOT open a PR.
             - DO NOT skip the bess-analyst delegation step — it's the whole
               point of this stage.
+            - The bess-analyst call is synchronous: do not end your turn, or
+              write that you are "waiting", until its full report is in your
+              context. A turn that ends without `gh issue comment` fails the run.
             - DO NOT end the run without having RUN `gh issue comment`. A
               diagnosis you only wrote out is a diagnosis nobody receives,
               and the job will fail the verification step below.

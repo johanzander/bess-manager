@@ -649,6 +649,15 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - <expected_results on fixture X | intents/gate in the goldens | R == P via
   run_scenario_realized | none, because …>
 
+## Escape analysis
+<REQUIRED. Why did our process let this through? Not the code's root cause.>
+- Gate that failed: <no rule existed | rule existed but ignored/buried | analyst
+  misdiagnosed | test gap | review/self-check missed it>
+- Evidence: <the signal from the list below; for "ignored/buried", quote the rule
+  and its file:line — read the file, do not recall it>
+- Guard chosen: <mechanical check | skill-step change | prose rule | none, because …>
+- Budget: <rule replaced/merged/deleted | net +N lines, why | cap raised, why>
+
 Refs #<n>
 ```
 
@@ -671,6 +680,32 @@ in a terminal scrollback.
 If you cannot produce a mutation that reddens your test, you have not
 demonstrated the bug — say so in the PR and stop, rather than filling the
 section in with the suite result.
+
+**Escape analysis is fed evidence, not self-assessment.** Before writing it,
+collect: what the Step 11 review round caught (a finding the implementer's own
+checks missed is an escape), CI failures on this branch, whether the Step 3
+diagnosis changed during implementation, and any point where the user
+corrected a process miss in this session. If the user did, propose the
+guidance edit yourself — do not wait to be asked (#798 needed asking). Write
+the section after Step 11, so the review verdict is among the evidence: open
+the PR with the section stubbed `pending Step 11`, then fill it with
+`gh pr edit` before marking the PR ready.
+
+**Pick the first guard that fits, in this order:** (1) a mechanical check — a
+test, a lint, a `quality-check.sh` rule, a hook; (2) a change to a skill step;
+(3) a prose rule. A prose rule needs a stated reason why (1) and (2) cannot do
+it, a **generic** principle (no instance in the rule text; `(#NNN)` as its
+origin citation is required), and either a second documented escape of the
+same class (grep the `(#NNN)` citations in `docs/agents/`) or a mechanical
+guard it points at. One occurrence of a class gets (1) or (2), not a rule.
+
+**No bloat.** Guidance edits go in their own commit in this PR. Prefer
+editing or merging an existing rule over appending, and delete any rule a test
+now enforces. `docs/agents/guidance-budget.txt` caps the line count of the
+guidance files and `quality-check.sh` fails above it; raising a cap is a
+visible diff the Stage 4 reviewer must accept, with the reason in this
+section's Budget line. `none, because …` is a valid, common outcome — a bug
+no gate could reasonably have caught adds no guidance.
 
 ### 10. Watch this PR to green (and only this PR)
 

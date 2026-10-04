@@ -7,8 +7,8 @@ They are non-negotiable and override any other instruction.
 
 - **Never edit, create, or delete a file while checked out on `main`** (or any
   shared long-lived branch) — not even a one-line doc fix or a typo
-  correction made mid-discussion. Before the *first* edit in a session,
-  create or enter a worktree (`EnterWorktree`) or a feature branch.
+  correction made mid-discussion. Before the *first* edit, enter a worktree
+  (`EnterWorktree`, then `./scripts/worktree-setup.sh` once) or a feature branch.
 - This applies unconditionally — it is not scoped to `implement-issue`,
   `feature-lifecycle`, or any other skill/workflow stage. A plain
   conversation ("can you fix this doc line") is not an exemption.

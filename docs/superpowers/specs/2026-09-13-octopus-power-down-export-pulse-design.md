@@ -129,14 +129,11 @@ threaded exactly the way `import_cap_kwh` is today:
 - `optimize_battery_schedule` gains the keyword, default `None`, meaning
   today's behavior exactly.
 
-**No grid import in the window.** `import_cap_kwh` becomes per-period, with
-the session periods capped at `0.0`. The existing "constrain, don't raise"
-floor already means an empty battery still imports the load it must, rather
-than failing. This reuses the filter that exists instead of adding a second
-one. The scalar-to-list change touches every `import_cap_kwh` site listed by
-`grep -n import_cap_kwh core/bess/{action_selector,dp_battery_algorithm,pwl_window_dp}.py`.
-That's mechanical but wide, so it goes in its own commit with the parity
-test passing before and after.
+**No grid import in the window.** `import_cap_kwh` is already per-period
+(#772 made it so for the peak-shaving window), so the session periods are
+capped at `0.0` through it. The existing "constrain, don't raise" floor
+already means an empty battery still imports the load it must, rather than
+failing. This reuses the filter that exists instead of adding a second one.
 
 ### 3. Building the per-period targets (`BatterySystemManager`)
 
@@ -239,8 +236,6 @@ instead of one install's five sessions.
   A later run after the target is met sets no further targets.
 - **Disabled by default**: with `power_down.enabled = False`, plans are
   bit-identical to today's across the fixture corpus.
-- **Import cap refactor**: the scalar-to-per-period `import_cap_kwh` change
-  alone leaves every existing fixture's plan unchanged.
 
 ## Non-goals
 
@@ -280,9 +275,9 @@ from the text:
   carries `export_curtailment_active` so that case is visible.
 - **The session import cap is its own keyword.**
   `optimize_battery_schedule(session_import_cap_kwh_per_period=...)` is
-  combined element-wise (`min`) with the fuse cap. The horizon-level
-  `import_cap_kwh` is a `list[float | None]`, where `None` means no cap in that
-  period.
+  combined element-wise (`_combine_import_caps`) with the fuse cap and the
+  peak-shaving cap (#772). The horizon-level `import_cap_kwh` is a
+  `list[float | None]`, where `None` means no cap in that period.
 - **Selector order.** The minimum-export filter runs after the import-cap
   filter, in the selector and in both backward passes, so the achievable
   export is measured over the fuse-feasible set. The grid backward pass

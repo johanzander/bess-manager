@@ -201,6 +201,51 @@ label does that now; `last_comment` is what you read to judge the rest.
 **`Ready for Dev` requires a `Priority`.** An analysed item with no priority is
 un-ranked, so it cannot be "next" — it stays in *Analysis* as a triage action.
 
+## Verify before a public write
+
+The digest and rhythm pass derive state from **labels and PR reference verbs**.
+Those are heuristics. A comment, a label or a board field you write is public
+and the reporter reads it, so each of these writes needs a read of the actual
+issue and PR first — the digest value is a suggestion, never the evidence.
+Three real mistakes (#791, #792) set these rules:
+
+1. **A label-implied wait is a suggestion, not a fact.** `set_awaiting` fires
+   from `awaiting_suggested`, which comes from a *label* (`needs-debug-log` →
+   `reporter`). The triage bot stamps `needs-debug-log` when the issue body has
+   no attached log, and it is wrong whenever the log lives elsewhere: an issue
+   filed by the maintainer or the analyst ("Found while analysing #791",
+   bundle named there), or one that points at another issue carrying the
+   bundle, **or one where the reporter has already answered the bot's ask** —
+   a `.md` attachment or a gist link in a later comment (#785, #780: the log
+   was posted days before `Awaiting: reporter` was written, because triage's
+   label never cleared). A reporter comment after the bot's request means the
+   log is in: that is `recheck_ready` (clear the stale wait, re-check the
+   Definition of Ready, and surface it for Stage 2), never a new wait. Before writing `Awaiting: reporter`, read the body and thread. If
+   the log is referenced or already available, do **not** record the wait —
+   an `Awaiting: reporter` on such a card pulls it to *Analysis* and hides
+   everything behind it (#792 sat there with a merged fix). Report the label as
+   a triage false positive instead.
+2. **`Refs #N` / `Part of #N` means linked, not fixed.** The digest's
+   `merged_pr` is the first merged PR that *mentions* the issue, so CI, tooling,
+   diagnostic, test or docs PRs that cite an issue as their trigger flip it to
+   *In Verification*. #795 ("ci: run Stage 2 sub-agent in the foreground", Refs
+   #791) is a workflow fix; the bug in #791 was untouched, yet it was announced
+   as fixed. Before `announce_verification`, read each PR in `merged_prs` —
+   title and body against the issue's reported behaviour — and announce only
+   when one of them resolves it. If none does, post nothing, apply no
+   `awaiting-release`, and report that the digest's column is wrong. Never
+   announce on the digest's say-so alone, and never claim "fixed" for an issue
+   whose root cause is still open (a PR that says "re-run analyze after merge"
+   is a follow-up, not a fix).
+3. **A merged fix must not be hidden by a stale wait.** `announce_verification`
+   keys off the *In Verification* column, and a recorded wait pulls an item
+   back to *Analysis*, so a verified fix under a wait never fires it. When
+   `merged_pr` resolves the issue (rule 2) but the column says *Analysis* or
+   *Backlog* because of an `Awaiting` / blocking label, check whether the wait
+   is still real (rule 1); if it is stale, clear it and then announce. If the
+   wait is real, still apply `awaiting-release` and the fix-status comment —
+   the reporter should know the fix is on main.
+
 ## Definition of Ready
 
 Nothing is dispatched that has not crossed this line. A bug is Ready when:
@@ -312,7 +357,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | Action | Do |
 |---|---|
 | `escalated` | **Read first, always** — rank 0, above every other action. Three sources, each meaning something different: `Awaiting: maintainer` on the board (read the open question, decide, or send it back to *Analysis* by clearing `Awaiting` and re-opening the scope); `resume_count >= 2` **and no merged PR** (two implementation sessions have already been handed back on this issue — it is not implementable as specified, so decide or re-scope it, don't dispatch a third; suppressed once a fix has merged, since `resume_count` never decrements and the handbacks are then history); and, on a PR, 3 `CHANGES_REQUESTED` rounds with no intervening `APPROVED` (the reviewer and the diff disagree about the design, and a fourth round will not settle it) |
-| `announce_verification` | rank 1, right after escalations. An issue is *In Verification* — its fix is on `main` and in a beta build — but that state lives only in the Project field, so a reporter reading the issue sees no sign it is fixed (#683 sat here for weeks with only stale WIP notes). Fires **once**: as the PO, comment the fix status (merged in #N, shipped in beta, closes on the stable release) and apply the `awaiting-release` label, which suppresses it thereafter. The issue still closes only on the graduation PR |
+| `announce_verification` | **Verify the PR resolves the issue first — see "Verify before a public write", rules 2–3; `Refs` is not a fix.** Rank 1, right after escalations. An issue is *In Verification* — its fix is on `main` and in a beta build — but that state lives only in the Project field, so a reporter reading the issue sees no sign it is fixed (#683 sat here for weeks with only stale WIP notes). Fires **once**: as the PO, comment the fix status (merged in #N, shipped in beta, closes on the stable release) and apply the `awaiting-release` label, which suppresses it thereafter. The issue still closes only on the graduation PR |
 | `mark_ready` | Route through `/advance-pr <n>` — its `draft, APPROVED, green` row runs exactly `gh pr ready <n>`, then report it. APPROVED, green, still a draft: the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure, not a priority call |
 | `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line — the maintainer's merge is all that is left |
 | `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>` (what `/advance-pr <n>` would also run). **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |
@@ -332,7 +377,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | `nudge_reporter` | one nudge, as the PO identity |
 | `park` | move to *Backlog* — the chase went unanswered |
 | `autonomous_analyze` | the tier-1 carve-out, computed from evidence not the board field: post `@claude-bot analyze` as the PO (`scripts/gh-agent.sh --as po issue comment <n> --body "@claude-bot analyze"`). The no-prior-analyze check is now **in the script** (`last_analyze_comment`) — this fires only when the issue has *never* been analyzed; a stalled prior run is `refire_analyze` instead. Fires even when a stale `Awaiting` would otherwise quiet the item, because `ready-for-analysis` already proves the log is in; stands down when the item has Stage 2 history (`analyzed` / `needs-human-review`), the card holds `Awaiting: maintainer` (see Autonomous spend), or the Analysis column is at its WIP limit (`analysis_deferred`) |
-| `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label. `set_awaiting` also fires when the board field still reads `analysis` but a Stage 2 label (`analyzed` / `needs-human-review`) is on — a stale "needs Stage 2" placeholder that no other rule contradicts, so it pins the item in *Analysis* until you re-point `Awaiting` at the real wait or clear it |
+| `set_awaiting` / `set_priority` / `triage_labels` | grooming debt: write the board field or label. **A label-implied `reporter` wait must be checked against the thread first — see "Verify before a public write", rule 1.** `set_awaiting` also fires when the board field still reads `analysis` but a Stage 2 label (`analyzed` / `needs-human-review`) is on — a stale "needs Stage 2" placeholder that no other rule contradicts, so it pins the item in *Analysis* until you re-point `Awaiting` at the real wait or clear it |
 | `add_card` | open issue, no card on the board at all — add it to Project #1 first, **then** set `Priority`; until both exist it is unrankable and invisible to every board pass |
 | `move_card` | the card sits somewhere the evidence does not support — always move it to match `column`, never re-derive `column` to match the card |
 | `archive_pr_card` | a **PullRequest** card whose PR has closed or merged (#638). A PR card only carries a deferral while its PR is open; once it merges move the card to *Done*, once it closes unmerged delete it. Also listed under `orphans` as `stale_pr_card` |

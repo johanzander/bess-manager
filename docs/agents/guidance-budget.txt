@@ -1,0 +1,10 @@
+# Max line counts for agent guidance. See scripts/check-guidance-budget.py.
+docs/agents/rules.md 170
+docs/agents/patterns.md 126
+docs/agents/testing.md 349
+docs/agents/workflow.md 191
+docs/agents/architecture.md 88
+.claude/skills/implement-issue/SKILL.md 979
+.claude/skills/add-inverter-platform/SKILL.md 263
+.claude/agents/bess-analyst.md 394
+.github/claude-bot.md 66

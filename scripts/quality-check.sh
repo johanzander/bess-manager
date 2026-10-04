@@ -14,6 +14,15 @@ if [ ! -f "CLAUDE.md" ]; then
     exit 1
 fi
 
+# A linked worktree has `.git` as a file, and starts with no .venv or
+# node_modules. Without this check the gate reports four "tool not found"
+# errors whose own advice (create a venv) is wrong here, and every fresh
+# worktree rediscovers the cause.
+if [ -f ".git" ] && [ ! -e ".venv" ]; then
+    echo "❌ This worktree has no .venv. Run ./scripts/worktree-setup.sh once, then re-run."
+    exit 1
+fi
+
 # Initialize counters
 ERRORS=0
 WARNINGS=0
@@ -768,6 +777,15 @@ if [ -n "$MD_FILES" ]; then
     fi
 else
     echo "ℹ️  No markdown files found to check"
+fi
+
+echo ""
+echo "📋 Checking agent-guidance size budget..."
+echo "-----------------------------------"
+if python3 scripts/check-guidance-budget.py; then
+    echo "✅ Guidance files within budget"
+else
+    ERRORS=$((ERRORS + 1))
 fi
 
 echo ""

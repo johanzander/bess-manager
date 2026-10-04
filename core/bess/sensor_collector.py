@@ -370,15 +370,20 @@ class SensorCollector:
             )
             try:
                 current_soc = self.ha_controller.get_battery_soc()
-                current_readings[battery_soc_end_key] = current_soc
-                logger.info(
-                    f"Period {period}: Using current SOC from HA as fallback: {current_soc}%"
-                )
             except Exception as e:
                 raise KeyError(
                     f"Period {period}: Missing end SOC sensor '{battery_soc_end_key}' in current readings "
                     f"and failed to read from Home Assistant: {e}"
                 ) from e
+            if current_soc is None:
+                raise KeyError(
+                    f"Period {period}: Missing end SOC sensor '{battery_soc_end_key}' in current readings "
+                    "and the live SOC is unavailable (sensor is unknown/unavailable in Home Assistant)"
+                )
+            current_readings[battery_soc_end_key] = current_soc
+            logger.info(
+                f"Period {period}: Using current SOC from HA as fallback: {current_soc}%"
+            )
 
         # Check for SOC in previous readings, fallback to current value if missing
         if battery_soc_end_key not in previous_readings:
@@ -388,15 +393,20 @@ class SensorCollector:
             )
             try:
                 current_soc = self.ha_controller.get_battery_soc()
-                previous_readings[battery_soc_end_key] = current_soc
-                logger.info(
-                    f"Period {period}: Using current SOC from HA for previous reading as fallback: {current_soc}%"
-                )
             except Exception as e:
                 raise KeyError(
                     f"Period {period}: Missing start SOC sensor '{battery_soc_end_key}' in previous readings "
                     f"and failed to read from Home Assistant: {e}"
                 ) from e
+            if current_soc is None:
+                raise KeyError(
+                    f"Period {period}: Missing start SOC sensor '{battery_soc_end_key}' in previous readings "
+                    "and the live SOC is unavailable (sensor is unknown/unavailable in Home Assistant)"
+                )
+            previous_readings[battery_soc_end_key] = current_soc
+            logger.info(
+                f"Period {period}: Using current SOC from HA for previous reading as fallback: {current_soc}%"
+            )
 
         battery_soc_end = current_readings[battery_soc_end_key]
         battery_soc_start = previous_readings[battery_soc_end_key]

@@ -681,31 +681,28 @@ If you cannot produce a mutation that reddens your test, you have not
 demonstrated the bug — say so in the PR and stop, rather than filling the
 section in with the suite result.
 
-**Escape analysis is fed evidence, not self-assessment.** Before writing it,
-collect: what the Step 11 review round caught (a finding the implementer's own
-checks missed is an escape), CI failures on this branch, whether the Step 3
-diagnosis changed during implementation, and any point where the user
-corrected a process miss in this session. If the user did, propose the
-guidance edit yourself — do not wait to be asked (#798 needed asking). Write
-the section after Step 11, so the review verdict is among the evidence: open
-the PR with the section stubbed `pending Step 11`, then fill it with
-`gh pr edit` before marking the PR ready.
+**Escape analysis is fed evidence, not self-assessment.** Collect: what the
+Step 11 review caught (a finding your own checks missed is an escape), CI
+failures on this branch, whether the Step 3 diagnosis changed, and any point
+where the user corrected a process miss — if so, propose the guidance edit
+yourself, do not wait to be asked (#798 needed asking). Write it after Step 11
+so the verdict is evidence: open the PR with the section stubbed `pending
+Step 11`, then `gh pr edit` it before marking the PR ready.
 
-**Pick the first guard that fits, in this order:** (1) a mechanical check — a
-test, a lint, a `quality-check.sh` rule, a hook; (2) a change to a skill step;
-(3) a prose rule. A prose rule needs a stated reason why (1) and (2) cannot do
-it, a **generic** principle (no instance in the rule text; `(#NNN)` as its
-origin citation is required), and either a second documented escape of the
-same class (grep the `(#NNN)` citations in `docs/agents/`) or a mechanical
-guard it points at. One occurrence of a class gets (1) or (2), not a rule.
+**Pick the first guard that fits:** (1) a mechanical check — test, lint,
+`quality-check.sh` rule, hook; (2) a skill-step change; (3) a prose rule. A
+prose rule needs a reason (1) and (2) cannot do it, a **generic** principle (no
+instance in the rule text; `(#NNN)` origin citation required), and a second
+documented escape of the same class (grep the `(#NNN)` citations in
+`docs/agents/`) or a mechanical guard it points at. One occurrence gets (1) or
+(2), not a rule.
 
-**No bloat.** Guidance edits go in their own commit in this PR. Prefer
-editing or merging an existing rule over appending, and delete any rule a test
-now enforces. `docs/agents/guidance-budget.txt` caps the line count of the
-guidance files and `quality-check.sh` fails above it; raising a cap is a
-visible diff the Stage 4 reviewer must accept, with the reason in this
-section's Budget line. `none, because …` is a valid, common outcome — a bug
-no gate could reasonably have caught adds no guidance.
+**No bloat.** Guidance edits go in their own commit. Prefer editing or merging
+a rule over appending, and delete any rule a test now enforces.
+`docs/agents/guidance-budget.txt` caps guidance file line counts and
+`quality-check.sh` fails above it; raising a cap is a visible diff the Stage 4
+reviewer must accept, reason in the Budget line. `none, because …` is a valid,
+common outcome — a bug no gate could reasonably have caught adds no guidance.
 
 ### 10. Watch this PR to green (and only this PR)
 

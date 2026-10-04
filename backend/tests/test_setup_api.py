@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from core.bess.ha_api_controller import HomeAssistantAPIController
+from core.bess.settings import POWER_DOWN_EXPORT_KW, POWER_DOWN_EXPORT_MINUTES
 
 _test_app = FastAPI()
 _test_app.include_router(router)
@@ -213,6 +214,17 @@ class TestGetSetupStatus:
         assert body["configuredSensors"] == 1
 
 
+_OCTOPUS_WIZARD_PAYLOAD: dict = {
+    "sensors": {"battery_soc": "sensor.growatt_battery_soc"},
+    "provider": "octopus",
+    "currency": "GBP",
+    "octopusImportTodayEntity": "event.octopus_electricity_import_current_day_rates",
+    "octopusImportTomorrowEntity": "event.octopus_electricity_import_next_day_rates",
+    "octopusExportTodayEntity": "event.octopus_electricity_export_current_day_rates",
+    "octopusExportTomorrowEntity": "event.octopus_electricity_export_next_day_rates",
+}
+
+
 class TestSetupCompleteLegacy:
     """POST /api/setup/complete — legacy persistence tests."""
 
@@ -292,6 +304,66 @@ class TestSetupCompleteLegacy:
             ep["octopus"]["power_up_calendar_entity"]
             == "calendar.octopus_energy_a_982b3d40_octoplus_power_up"
         )
+
+    def test_rerunning_wizard_keeps_power_down_settings(
+        self, mock_controller: MagicMock
+    ) -> None:
+        """The wizard doesn't collect Power Down settings, so a re-run must
+        leave the configured ones in place rather than rebuilding the section."""
+        stored_octopus = {
+            "import_today_entity": "event.old_import_today",
+            "import_tomorrow_entity": "event.old_import_tomorrow",
+            "export_today_entity": "event.old_export_today",
+            "export_tomorrow_entity": "event.old_export_tomorrow",
+            "free_import_price": 0.02,
+            "power_up_calendar_entity": "",
+            "power_down_enabled": True,
+            "power_down_calendar_entity": "calendar.octoplus_power_down",
+            "power_down_export_kw": 2.5,
+            "power_down_export_minutes": 30,
+            "power_down_events_entity": "event.octoplus_power_down_events",
+        }
+        mock_controller.settings_store.get_section.side_effect = lambda name: (
+            {"provider": "octopus", "octopus": dict(stored_octopus)}
+            if name == "energy_provider"
+            else {}
+        )
+
+        resp = _client.post("/api/setup/complete", json=_OCTOPUS_WIZARD_PAYLOAD)
+        assert resp.status_code == 200
+
+        octopus = mock_controller.settings_store.save_all.call_args[0][0][
+            "energy_provider"
+        ]["octopus"]
+        assert octopus["power_down_enabled"] is True
+        assert octopus["power_down_calendar_entity"] == "calendar.octoplus_power_down"
+        assert octopus["power_down_export_kw"] == 2.5
+        assert octopus["power_down_export_minutes"] == 30
+        assert octopus["power_down_events_entity"] == "event.octoplus_power_down_events"
+        assert octopus["free_import_price"] == 0.02
+        assert (
+            octopus["import_today_entity"]
+            == "event.octopus_electricity_import_current_day_rates"
+        )
+
+    def test_first_octopus_wizard_run_writes_every_octopus_setting(
+        self, mock_controller: MagicMock
+    ) -> None:
+        """A store that has never had an octopus section gets the full set of
+        keys the schedule reads, not just the ones the wizard collects."""
+        mock_controller.settings_store.get_section.return_value = {}
+
+        resp = _client.post("/api/setup/complete", json=_OCTOPUS_WIZARD_PAYLOAD)
+        assert resp.status_code == 200
+
+        octopus = mock_controller.settings_store.save_all.call_args[0][0][
+            "energy_provider"
+        ]["octopus"]
+        assert octopus["power_down_enabled"] is False
+        assert octopus["power_down_calendar_entity"] == ""
+        assert octopus["power_down_export_kw"] == POWER_DOWN_EXPORT_KW
+        assert octopus["power_down_export_minutes"] == POWER_DOWN_EXPORT_MINUTES
+        assert octopus["power_down_events_entity"] == ""
 
     def test_persists_without_octopus_entities(self, mock_controller):
         """Non-Octopus wizard completion does not create octopus section."""

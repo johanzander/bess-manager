@@ -3362,22 +3362,27 @@ async def setup_complete(payload: APISetupCompletePayload):
                 ep["nordpool_hacs"] = {"entity": payload.nordpoolEntity}
             # Persist Octopus entity IDs when provider is octopus
             if payload.provider == "octopus" and payload.octopusImportTodayEntity:
-                from core.bess.settings import FREE_IMPORT_PRICE
+                from core.bess.settings_store import SettingsStore
 
-                ep["octopus"] = {
+                # Update only the fields the wizard collects: the Power Down
+                # settings live in the same section and must survive a wizard
+                # run. Defaults first, for an install that has never had an
+                # octopus section (the load-time migration only backfills keys
+                # into one that already exists).
+                octopus = {
+                    **SettingsStore._bootstrap_defaults()["energy_provider"]["octopus"],
+                    **ep.get("octopus", {}),
                     "import_today_entity": payload.octopusImportTodayEntity,
                     "import_tomorrow_entity": payload.octopusImportTomorrowEntity,
                     "export_today_entity": payload.octopusExportTodayEntity,
                     "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
-                    "free_import_price": (
-                        payload.octopusFreeImportPrice
-                        if payload.octopusFreeImportPrice is not None
-                        else FREE_IMPORT_PRICE
-                    ),
                     "power_up_calendar_entity": (
                         payload.octopusPowerUpCalendarEntity or ""
                     ),
                 }
+                if payload.octopusFreeImportPrice is not None:
+                    octopus["free_import_price"] = payload.octopusFreeImportPrice
+                ep["octopus"] = octopus
             # Persist ENTSO-e entity when provider is entsoe
             if payload.provider == "entsoe" and payload.entsoeEntity:
                 ep["entsoe"] = {"entity": payload.entsoeEntity}

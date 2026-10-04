@@ -1393,7 +1393,12 @@
             "export_today_entity": "event.octopus_energy_electricity_export_current_day_rates",
             "export_tomorrow_entity": "event.octopus_energy_electricity_export_next_day_rates",
             "free_import_price": 0.0,
-            "power_up_calendar_entity": ""
+            "power_up_calendar_entity": "",
+            "power_down_enabled": false,
+            "power_down_calendar_entity": "",
+            "power_down_export_kw": 1.0,
+            "power_down_export_minutes": 15,
+            "power_down_events_entity": ""
           }
         },
         "sensors": {
@@ -1482,7 +1487,12 @@
             "export_today_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_current_day_rates",
             "export_tomorrow_entity": "event.octopus_energy_electricity_21l4726831_2000023585834_export_next_day_rates",
             "free_import_price": 0.0,
-            "power_up_calendar_entity": ""
+            "power_up_calendar_entity": "",
+            "power_down_enabled": false,
+            "power_down_calendar_entity": "",
+            "power_down_export_kw": 1.0,
+            "power_down_export_minutes": 15,
+            "power_down_events_entity": ""
           }
         },
         "sensors": {

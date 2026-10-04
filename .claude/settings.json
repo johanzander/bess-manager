@@ -57,6 +57,7 @@
       "Bash(gh pr checks *)",
       "Bash(gh pr ready *)",
       "Bash(gh pr comment *)",
+      "Bash(gh search repos *)",
       "Bash(gh run list *)",
       "Bash(gh run view *)",
       "Bash(gh run watch *)",

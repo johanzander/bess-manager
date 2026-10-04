@@ -182,3 +182,4 @@ When a draft PR is opened by the issue fixer, two notifications fire:
 ## Quality Gate
 
 Before any PR: `./scripts/quality-check.sh` must pass with zero errors.
+Fix PRs also carry `## Escape analysis` (`implement-issue` Step 9; caps in `docs/agents/guidance-budget.txt`).

@@ -649,6 +649,15 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - <expected_results on fixture X | intents/gate in the goldens | R == P via
   run_scenario_realized | none, because …>
 
+## Escape analysis
+<REQUIRED. Why did our process let this through? Not the code's root cause.>
+- Gate that failed: <no rule existed | rule existed but ignored/buried | analyst
+  misdiagnosed | test gap | review/self-check missed it>
+- Evidence: <the signal from the list below; for "ignored/buried", quote the rule
+  and its file:line — read the file, do not recall it>
+- Guard chosen: <mechanical check | skill-step change | prose rule | none, because …>
+- Budget: <rule replaced/merged/deleted | net +N lines, why | cap raised, why>
+
 Refs #<n>
 ```
 
@@ -671,6 +680,29 @@ in a terminal scrollback.
 If you cannot produce a mutation that reddens your test, you have not
 demonstrated the bug — say so in the PR and stop, rather than filling the
 section in with the suite result.
+
+**Escape analysis is fed evidence, not self-assessment.** Collect: what the
+Step 11 review caught (a finding your own checks missed is an escape), CI
+failures on this branch, whether the Step 3 diagnosis changed, and any point
+where the user corrected a process miss — if so, propose the guidance edit
+yourself, do not wait to be asked (#798 needed asking). Write it after Step 11
+so the verdict is evidence: open the PR with the section stubbed `pending
+Step 11`, then `gh pr edit` it before marking the PR ready.
+
+**Pick the first guard that fits:** (1) a mechanical check — test, lint,
+`quality-check.sh` rule, hook; (2) a skill-step change; (3) a prose rule. A
+prose rule needs a reason (1) and (2) cannot do it, a **generic** principle (no
+instance in the rule text; `(#NNN)` origin citation required), and a second
+documented escape of the same class (grep the `(#NNN)` citations in
+`docs/agents/`) or a mechanical guard it points at. One occurrence gets (1) or
+(2), not a rule.
+
+**No bloat.** Guidance edits go in their own commit. Prefer editing or merging
+a rule over appending, and delete any rule a test now enforces.
+`docs/agents/guidance-budget.txt` caps guidance file line counts and
+`quality-check.sh` fails above it; raising a cap is a visible diff the Stage 4
+reviewer must accept, reason in the Budget line. `none, because …` is a valid,
+common outcome — a bug no gate could reasonably have caught adds no guidance.
 
 ### 10. Watch this PR to green (and only this PR)
 
@@ -784,57 +816,24 @@ report — and whoever acts on it — is what sets `Awaiting: maintainer`.
 
 ## After Merge
 
-A **separate, later invocation** — often a different session, sometimes days
-later once CI is green and the user has reviewed. Not part of the numbered
-flow above, which stops at a green, bot-approved, ready-for-review PR that
-the maintainer has not merged yet, per the Step 12 constraints.
+A **separate, later invocation** — often days later, after the maintainer has
+reviewed. Best-effort only: it depends on someone returning, so it reliably
+does not happen; Step 4's prune is the cleanup that actually runs.
 
-**Treat this as best-effort, not the cleanup mechanism.** Because it depends
-on someone returning after the merge, it reliably does not happen; Step 4's
-prune is the one that actually runs. If you are here, do it — but the safety
-net is upstream, not this section.
-
-1. Confirm the merge:
-
-   ```bash
-   gh pr view <n> --json state,mergedAt,mergeCommit
-   ```
-
-   `state == "MERGED"` is authoritative — that's the standard signal, no need
-   to separately diff branch content against `main`. Squash merges break
-   `git branch -d`'s normal ancestry check (the branch's commits never become
-   reachable from `main`), so force-delete below is expected, not a sign
-   something's wrong.
-
-2. Remove the worktree — via `ExitWorktree action=remove discard_changes=true`
-   if the session is still in it. That is the harness doing it, so it is not
-   sandboxed and it works.
-
-   If the session has already left, **emit one `!`-prefixed command that
-   removes the worktree and force-deletes the branch together**, in that
-   order — the branch delete has to ride the same deferred command: git
-   refuses `git branch -D` while the worktree registration persists, and the
-   command below is what clears the registration:
+1. `gh pr view <n> --json state,mergedAt,mergeCommit` — `state == "MERGED"` is
+   authoritative. Squash merges break `git branch -d`'s ancestry check, so the
+   force-delete below is expected, not a sign something is wrong.
+2. In the session that still holds the worktree: `ExitWorktree action=remove
+   discard_changes=true` (the harness does it, so it is not sandboxed), then
+   `git branch -D <branch-name>` and `git fetch origin --prune`.
+3. From any other session, **emit, do not execute**, one `!`-prefixed command.
+   The order is load-bearing: git refuses `branch -D` while the worktree
+   registration persists, and a sandboxed `git worktree remove` half-deletes
+   the tree (Step 4):
 
    ```bash
-   # Emit this; do not execute it. It must run unsandboxed.
    git worktree remove --force <path> && git branch -D <branch-name>
    ```
-
-   Running `git worktree remove` from a sandboxed Bash half-deletes the
-   worktree and then fails (see Step 4), so the agent must not run it either.
-
-3. In-session only — when item 2 completed via `ExitWorktree`, the
-   registration is gone and `git branch -D` is safe. Force-delete the local
-   branch and prune stale remote refs:
-
-   ```bash
-   git branch -D <branch-name>
-   git fetch origin --prune
-   ```
-
-   GitHub auto-deletes the remote branch on merge by default; `--prune` just
-   clears the now-stale local tracking ref.
 
 ## Rationalizations — Reality
 

@@ -253,8 +253,9 @@ class BatterySystemManager:
 
         # Power Down session outcome records for today, seeded from disk on
         # restart by _load_today_from_disk. Appended by
-        # _record_power_down_session_outcomes as sessions end; never cleared
-        # intraday (DailyViewStore keeps every day forever).
+        # _record_power_down_session_outcomes as sessions end; cleared only
+        # at the midnight rollover in _handle_special_cases (DailyViewStore
+        # keeps every earlier day forever).
         self._power_down_session_outcomes: list[PowerDownSessionOutcome] = []
         # Rate-limits the Octopoints backfill's HA entity read -- see
         # _backfill_power_down_octopoints.
@@ -1989,6 +1990,9 @@ class BatterySystemManager:
             # dashboard is still showing today, and clearing there wiped
             # today's real sensor data early (issue #380 follow-up).
             self.historical_store.clear()
+            # Yesterday's Power Down outcomes are already in yesterday's file;
+            # the new day's view starts with none.
+            self._power_down_session_outcomes = []
             try:
                 if self._controller is not None:
                     current_soc = self._controller.get_battery_soc()

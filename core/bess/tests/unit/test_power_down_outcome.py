@@ -197,6 +197,39 @@ class TestSessionOutcomeRecording:
         assert len(system._power_down_session_outcomes) == 1
 
     @patch("core.bess.time_utils.datetime")
+    def test_midnight_rollover_starts_the_new_day_with_no_sessions(
+        self,
+        mock_datetime: Any,
+        system: BatterySystemManager,
+        tmp_path: Any,
+    ) -> None:
+        system.daily_view_store = DailyViewStore(persist_dir=tmp_path)
+        _enable_power_down(system)
+        _set_session_window(system)
+        _freeze(mock_datetime, datetime(2026, 9, 13, 17, 45, tzinfo=TIMEZONE))
+        _store_planned_schedule(system, dict.fromkeys(SESSION_PERIODS, (0.1, 0.0)))
+        _freeze(mock_datetime, datetime(2026, 9, 13, 19, 15, tzinfo=TIMEZONE))
+        system._record_power_down_session_outcomes()
+        system._persist_today_view()
+        day_one = time_utils.today()
+
+        # The add-on stays up: the 00:00 tick rolls over to the next day.
+        _freeze(mock_datetime, datetime(2026, 9, 14, 0, 0, tzinfo=TIMEZONE))
+        system._handle_special_cases(0, prepare_next_day=False, is_first_run=False)
+        _store_planned_schedule(system, {0: (0.1, 0.0)}, optimization_period=0)
+        system._record_power_down_session_outcomes()
+        system._persist_today_view()
+
+        day_two_view = system.daily_view_store.load_day(time_utils.today())
+        assert day_two_view is not None
+        assert day_two_view.power_down_sessions == []
+        day_one_view = system.daily_view_store.load_day(day_one)
+        assert day_one_view is not None
+        assert [s.session_start for s in day_one_view.power_down_sessions] == [
+            SESSION_START
+        ]
+
+    @patch("core.bess.time_utils.datetime")
     def test_no_record_before_session_ends(
         self, mock_datetime: Any, system: BatterySystemManager
     ) -> None:

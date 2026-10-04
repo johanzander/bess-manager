@@ -30,14 +30,23 @@ if ! [[ "$repo" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
   echo "invalid repo: $repo (expected owner/repo)" >&2
   exit 2
 fi
-if ! [[ "$ref" =~ ^[A-Za-z0-9_./-]+$ ]] || [[ "$ref" == *..* ]]; then
+if ! [[ "$ref" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "$ref" == *..* ]]; then
   echo "invalid ref: $ref" >&2
   exit 2
 fi
-if ! [[ "$path" =~ ^[A-Za-z0-9_./-]+$ ]] || [[ "$path" == *..* ]]; then
+if ! [[ "$path" =~ ^[A-Za-z0-9_][A-Za-z0-9_./-]*$ ]] || [[ "$path" == *..* ]]; then
   echo "invalid path: $path" >&2
   exit 2
 fi
+# The output is written with the caller's file permissions, and this script is
+# allowed without a prompt, so an unchecked path would be an arbitrary file
+# write (e.g. overwriting scripts/gh-agent.sh with upstream content). Confine it
+# to a temp directory.
+case "$out" in
+  *..*) echo "invalid output path: $out" >&2; exit 2 ;;
+  "${TMPDIR:-/nonexistent}"/* | /tmp/* | /private/tmp/*) ;;
+  *) echo "output must be under \$TMPDIR or /tmp, got: $out" >&2; exit 2 ;;
+esac
 
 gh api -H "Accept: application/vnd.github.raw" \
   "repos/$repo/contents/$path?ref=$ref" > "$out"

@@ -3097,13 +3097,6 @@ async def run_setup_discovery():
             }
             suffix_map = _suffix_maps.get(effective_platform, ha.GROWATT_MIN_SUFFIX_MAP)
             all_bess_keys = list(set(suffix_map.values()))
-            # Single-segment TOU: Modbus GEN4 only needs slot 1 entities
-            if effective_platform == "solax_modbus_growatt_min":
-                all_bess_keys = [
-                    k
-                    for k in all_bess_keys
-                    if not (k.startswith("tou_time_") and k[9:10] in "23456789")
-                ]
             # A disabled sensor is not "missing" — the entity exists and the
             # user only has to switch it on.  Keep the two conditions apart
             # so the wizard can give the actionable message (#549).

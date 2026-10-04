@@ -113,3 +113,14 @@ shape; re-ask the question, don't grep for these.
   construction sites papering over an ordering gap (`app.py` fetched the
   timezone *before* constructing the manager, which owns the tracker).
   Shipped fix: move the fetch after construction — no parameter, no fallback.
+
+### One fact, one declaration
+
+- **Issue #794 (restated slot count):** "Growatt GEN4 uses only TOU slot 1"
+  lived in four places that disagreed — `SOLAX_GROWATT_MIN_SUFFIX_MAP` declared
+  slots 1–9, the setup wizard carried a hand-written `[2-9]` filter to cut it
+  back, and the health check hardcoded slot 1. The filter was the symptom: a
+  patch compensating for a map that was too wide. Shipped fix:
+  `SOLAX_GROWATT_MIN_TOU_SLOTS` is declared once and the map, wizard and health
+  check all derive from it. Tests can't see this either — each place was
+  internally consistent.

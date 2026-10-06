@@ -13,6 +13,7 @@ from typing import Any
 from core.bess.dp_battery_algorithm import (
     _period_flows,
     optimize_battery_schedule,
+    period_import_caps_kwh,
 )
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import (
@@ -216,6 +217,12 @@ def run_scenario_realized(scenario: dict) -> tuple:
         inp["initial_soe"],
         settings,
         dt,
+        import_cap_kwh=period_import_caps_kwh(
+            inp.get("home_settings"),
+            inp.get("peak_shaving_import_cap_per_period"),
+            len(commands),
+            dt,
+        ),
     )
     return result, sim.realized_cost
 

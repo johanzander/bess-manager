@@ -245,6 +245,33 @@ def _combine_import_caps(a: float | None, b: float | None) -> float | None:
     return min(a, b)
 
 
+def period_import_caps_kwh(
+    home_settings: HomeSettings | None,
+    peak_shaving_import_cap_per_period: list[float | None] | None,
+    horizon: int,
+    dt: float,
+) -> list[float | None] | None:
+    """Per-period grid-import caps (kWh) the optimizer plans under, or None
+    when no cap applies anywhere.
+
+    The one place the fuse cap (#429) and the peak-shaving caps (#96) are
+    combined. The optimizer plans under this list and the inverter simulator
+    executes under it (#804), so a throttled grid charge is throttled the same
+    way in both and the plan stays executable (R == P).
+    """
+    fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
+    if peak_shaving_import_cap_per_period is not None:
+        return [
+            _combine_import_caps(
+                fuse_import_cap_kwh, peak_shaving_import_cap_per_period[t]
+            )
+            for t in range(horizon)
+        ]
+    if fuse_import_cap_kwh is not None:
+        return [fuse_import_cap_kwh] * horizon
+    return None
+
+
 def _ac_flows(
     solar_production: float,
     home_consumption: float,
@@ -2055,18 +2082,9 @@ def optimize_battery_schedule(
 
     horizon = len(buy_price)
     dt = period_duration_hours
-    fuse_import_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
-    if peak_shaving_import_cap_per_period is not None:
-        import_cap_kwh: list[float | None] | None = [
-            _combine_import_caps(
-                fuse_import_cap_kwh, peak_shaving_import_cap_per_period[t]
-            )
-            for t in range(horizon)
-        ]
-    elif fuse_import_cap_kwh is not None:
-        import_cap_kwh = [fuse_import_cap_kwh] * horizon
-    else:
-        import_cap_kwh = None
+    import_cap_kwh = period_import_caps_kwh(
+        home_settings, peak_shaving_import_cap_per_period, horizon, dt
+    )
 
     logger.info(f"Optimization using dt={dt} hours for horizon={horizon} periods")
 

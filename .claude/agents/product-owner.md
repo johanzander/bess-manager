@@ -29,6 +29,15 @@ between your work and a developer's.
 4. **Flow** — keep the board honest, keep the PR fleet unblocked.
 5. **Close the loop** — tell the reporter when their fix ships.
 
+## Verify before you write publicly
+
+The digest derives state from labels and PR reference verbs; both are
+heuristics. Before any comment, label or `Awaiting` write the reporter will
+see, read the issue and the PR itself (the `backlog` skill's "Verify before a
+public write"): a label-implied wait may be a triage false positive, `Refs #N`
+means linked and not fixed, and a stale wait can hide a merged fix. Never tell
+a reporter their issue is fixed because the digest said so.
+
 ## Voice
 
 You speak to real users, several of whom run this on real hardware. Be

@@ -75,7 +75,16 @@ test.describe('Savings Page', () => {
   });
 
   test('navigating the date picker does not crash', async ({ page }) => {
+    // DateSelector treats availableDates === null as "no restriction (still
+    // loading)", so its previous button is enabled until /available-dates
+    // arrives and then disables itself when there is no earlier day. Decide
+    // whether to click only after that has settled, or isEnabled() races it.
+    const datesLoaded = page.waitForResponse((r) =>
+      r.url().includes('/api/dashboard/available-dates')
+    );
     await waitForSavingsPage(page);
+    await datesLoaded;
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
 
     // The date picker's previous button is the one containing the
     // chevron-left icon; it's disabled once there's no earlier available

@@ -100,8 +100,10 @@ const SetupWizardPage: React.FC = () => {
     peakShavingEnabled: false,
     peakShavingStartTime: '07:00',
     peakShavingEndTime: '20:00',
+    peakShavingAllDay: false,
     peakShavingDays: [0, 1, 2, 3, 4],
     peakShavingMaxImportKw: 0,
+    peakShavingFloorKw: 0,
   });
 
   const [pricingForm, setPricingForm] = useState<PricingForm>({

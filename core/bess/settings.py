@@ -319,6 +319,13 @@ class PeakShavingSettings:
     end_time: str = "20:00"
     days: list[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
     max_import_kw: float = 0.0
+    # No time-of-day window: the cap applies from 00:00 to 24:00 on `days`
+    # (a tariff that bills every quarter-hour, e.g. the Flemish one).
+    all_day: bool = False
+    # Level below which a peak costs nothing under the user's tariff (2.5 kW on
+    # the Flemish capacity tariff). Only used when a month-peak entity is
+    # configured; see `peak_shaving_import_cap_per_period`.
+    floor_kw: float = 0.0
 
     def from_ha_config(self, config: dict) -> "PeakShavingSettings":
         """Load from add-on config."""
@@ -330,13 +337,29 @@ class PeakShavingSettings:
             self.end_time = peak_shaving_config.get("end_time", "20:00")
             self.days = peak_shaving_config.get("days", [0, 1, 2, 3, 4])
             self.max_import_kw = peak_shaving_config.get("max_import_kw", 0.0)
+            self.all_day = peak_shaving_config.get("all_day", False)
+            self.floor_kw = peak_shaving_config.get("floor_kw", 0.0)
         return self
+
+
+@dataclass(frozen=True)
+class MonthPeak:
+    """The highest import power already recorded in a calendar month.
+
+    `month` is "YYYY-MM" in local time -- the month the reading belongs to, so
+    a horizon that crosses into the next month does not plan against a peak
+    that has reset.
+    """
+
+    month: str
+    kw: float
 
 
 def peak_shaving_import_cap_per_period(
     peak_shaving: PeakShavingSettings,
     timestamps: list[str],
     dt: float,
+    month_peak: MonthPeak | None = None,
 ) -> list[float | None] | None:
     """Per-period grid-import energy cap (kWh) for a peak-shaving window.
 
@@ -348,6 +371,13 @@ def peak_shaving_import_cap_per_period(
     `min()` (#429) -- so this only ever tightens the constraint, never
     loosens it.
 
+    With `month_peak` (a capacity tariff billed on the month's highest
+    import), importing below the month's existing peak -- or below the
+    tariff's free `floor_kw` -- costs nothing, while importing above it raises
+    the bill. The cap is then `min(max_import_kw, max(floor_kw, peak))`, with
+    `max_import_kw` still the hard ceiling. Periods in a later month than the
+    reading get `floor_kw`, because the peak resets on the 1st.
+
     Returns None when disabled, matching `_get_temperature_derated_charge_limits`'s
     convention for an inactive per-period constraint.
 
@@ -355,7 +385,8 @@ def peak_shaving_import_cap_per_period(
     "06:00"): the portion after midnight is attributed to the day the
     window *started* on, one calendar day earlier, so `days` selects the
     window's start day consistently regardless of which side of midnight a
-    given period falls on.
+    given period falls on. With `all_day` the window times are ignored and
+    only `days` selects periods.
     """
     if not peak_shaving.enabled:
         return None
@@ -364,7 +395,10 @@ def peak_shaving_import_cap_per_period(
     for ts in timestamps:
         local_dt = datetime.strptime(ts, "%Y-%m-%d %H:%M")
         time_str = local_dt.strftime("%H:%M")
-        if not overnight:
+        if peak_shaving.all_day:
+            in_time_window = True
+            window_day = local_dt.weekday()
+        elif not overnight:
             in_time_window = peak_shaving.start_time <= time_str < peak_shaving.end_time
             window_day = local_dt.weekday()
         elif time_str >= peak_shaving.start_time:
@@ -377,7 +411,14 @@ def peak_shaving_import_cap_per_period(
             in_time_window = False
             window_day = local_dt.weekday()
         in_window = in_time_window and window_day in peak_shaving.days
-        caps.append(peak_shaving.max_import_kw * dt if in_window else None)
+        if not in_window:
+            caps.append(None)
+            continue
+        cap_kw = peak_shaving.max_import_kw
+        if month_peak is not None:
+            peak_kw = month_peak.kw if ts[:7] == month_peak.month else 0.0
+            cap_kw = min(cap_kw, max(peak_shaving.floor_kw, peak_kw))
+        caps.append(cap_kw * dt)
     return caps
 
 

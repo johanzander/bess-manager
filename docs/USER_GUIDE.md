@@ -438,6 +438,32 @@ To prevent this, BESS auto-detects any `binary_sensor` whose entity ID ends with
 
 The discharge inhibit only affects discharging — it does not change the TOU schedule, trigger battery charging, or interfere with the EV charging session in any way.
 
+### Peak Shaving (capacity tariffs)
+
+Some grid tariffs charge for your **highest power draw** rather than only for the energy you use — the Swedish *effektavgift*, the Flemish *capaciteitstarief*, and similar. A single quarter-hour or hour of high import can then cost far more than the spot-price saving that caused it. Left alone, BESS optimizes only for energy cost, so it can happily grid-charge at full power in the cheapest hour and set a new peak.
+
+**Peak shaving** limits how much BESS may import from the grid. Enable it in **Settings → Home → Peak Shaving**:
+
+- **Max grid import** — the cap, in kW. During the window the battery covers any load above it, and grid-charging is throttled so that house load plus charging stays under it.
+- **Only during a time window** — on (the default), the cap applies between the start and end times on the days you tick, for tariffs that only measure certain hours (for example weekdays 07:00–19:00). Off, it applies around the clock on the days you tick, for tariffs that measure every quarter-hour.
+
+This is a fixed cap. It doesn't know what your tariff costs, so set it to the level you want to stay under.
+
+**Letting the cap follow your month's peak (optional).** On a tariff billed on the month's highest import, importing *below the peak you have already set this month* costs nothing extra — the bill is already at that level. Only importing *above* it raises the bill. If your meter exposes a "highest import this month" value (on a Belgian P1 meter, *maximum demand current month*), map it in **Settings → Sensors → Peak Shaving Month Peak**. BESS then uses, for each period:
+
+> cap = the larger of your **free peak level** and this month's peak so far — but never more than **Max grid import**
+
+- **Free peak level** is the peak your tariff doesn't charge for — 2.5 kW in Flanders, where a month below that counts as 2.5 kW. Set it in the Peak Shaving settings. Leave it at 0 if your tariff has no free level.
+- **Max grid import** stays the hard ceiling, for months where winter heating, an EV or night charging genuinely need more.
+
+For example, with Max grid import 5 kW and a free level of 2.5 kW: early in a month where your peak is 1.4 kW, BESS holds imports to 2.5 kW instead of charging at 5 kW and setting a new 4.8 kW peak. Later in the month, after a cold evening has pushed your peak to 4 kW, the cap rises to 4 kW and BESS can use that headroom freely. On the 1st the peak resets and the cap drops back to the free level.
+
+A few things to know:
+
+- The entity must report kW or W. If it is missing, unavailable or reports anything else, BESS stops planning and shows an error on the dashboard rather than guessing — planning against the wrong peak could set a new one. Remove the entity mapping to go back to the fixed cap.
+- The cap shapes BESS's *plan*. A load BESS did not forecast, such as an EV starting, is not held back by it.
+- If your forecast load alone is above the cap, BESS cannot avoid importing — it imports as little as it can, and the next run sees the higher peak.
+
 ## Advanced Features
 
 ### Decision Intelligence

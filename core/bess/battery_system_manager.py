@@ -29,6 +29,7 @@ from .exceptions import (
     HAStatisticsUnavailableError,
     HistoricalDataUnavailableError,
     ManagedLoadsError,
+    PeakShavingSensorError,
     SystemConfigurationError,
 )
 from .execution_model import PlatformCapabilities, intra_period_discharge_gate
@@ -67,6 +68,7 @@ from .settings import (
     FREE_IMPORT_PRICE,
     BatterySettings,
     HomeSettings,
+    MonthPeak,
     PeakShavingSettings,
     PriceSettings,
     TemperatureDeratingSettings,
@@ -2391,6 +2393,9 @@ class BatterySystemManager:
         fetch, since window membership only needs the calendar day/time,
         already known for every period in the plan.
 
+        When a month-peak entity is configured, the cap follows the month's
+        highest import so far (see `peak_shaving_import_cap_per_period`).
+
         Args:
             remaining_entries: Price entries for the remaining horizon (same
                 slice `_run_optimization` extracts buy/sell prices from).
@@ -2399,9 +2404,43 @@ class BatterySystemManager:
         Returns:
             List of per-period import caps (kWh), or None if peak-shaving is
             disabled.
+
+        Raises:
+            PeakShavingSensorError: If the month-peak entity is configured but
+                unusable. Not caught into the fixed cap: planning against the
+                wrong peak could set a new monthly peak.
         """
+        if not self.peak_shaving.enabled:
+            return None
         timestamps = [entry["timestamp"] for entry in remaining_entries]
-        return peak_shaving_import_cap_per_period(self.peak_shaving, timestamps, dt)
+        month_peak = self._read_month_peak()
+        return peak_shaving_import_cap_per_period(
+            self.peak_shaving, timestamps, dt, month_peak
+        )
+
+    def _read_month_peak(self) -> MonthPeak | None:
+        """Read the month-peak entity, or None when none is configured."""
+        try:
+            peak_kw = self.controller.get_peak_shaving_month_peak_kw()
+        except PeakShavingSensorError as e:
+            # Propagates -- no silent fallback to the fixed cap. Recording it
+            # first is what puts it on the dashboard: the caller's blanket
+            # handler logs and returns False, which on its own leaves the
+            # schedule frozen at the last good one with no user-visible signal.
+            logger.error("Peak shaving month peak is unusable: %s", e)
+            self._runtime_failure_tracker.record_failure_once(
+                category="PEAK_SHAVING_SENSOR",
+                operation=(
+                    "Peak shaving month peak entity could not be read — "
+                    "optimization is blocked until it reports a kW value"
+                ),
+                error=e,
+            )
+            raise
+        self._runtime_failure_tracker.dismiss_by_category("PEAK_SHAVING_SENSOR")
+        if peak_kw is None:
+            return None
+        return MonthPeak(month=time_utils.now().strftime("%Y-%m"), kw=peak_kw)
 
     def _extract_buy_sell_prices(
         self, entries: list[dict[str, Any]]

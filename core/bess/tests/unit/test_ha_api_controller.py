@@ -1498,6 +1498,102 @@ class TestConsumptionOverlayBlocksStateGating:
                 overlay_ctrl.get_consumption_overlay_blocks()
 
 
+class TestPeakShavingMonthPeak:
+    """The optional month-peak entity behind the dynamic peak-shaving cap (#96).
+
+    Not configured is a supported setup (the fixed cap keeps working). Once
+    configured, anything but a usable kW/W reading must fail loudly: a silent
+    fallback would plan against the wrong peak and could set a new one.
+    """
+
+    ENTITY = "sensor.electricity_meter_maximale_vraag_huidige_maand"
+
+    @staticmethod
+    def _ctrl(sensors: dict[str, str]) -> HomeAssistantAPIController:
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=_settings_store(sensors),
+            service_domain="growatt_server",
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.failure_tracker = RuntimeFailureTracker()
+        return c
+
+    @pytest.fixture
+    def peak_ctrl(self) -> HomeAssistantAPIController:
+        return self._ctrl({"peak_shaving_month_peak": self.ENTITY})
+
+    def test_not_configured_returns_none(self) -> None:
+        assert self._ctrl({}).get_peak_shaving_month_peak_kw() is None
+
+    def test_reads_a_kw_value(self, peak_ctrl: HomeAssistantAPIController) -> None:
+        with patch.object(
+            peak_ctrl,
+            "_api_request",
+            return_value={
+                "state": "1.396",
+                "attributes": {"unit_of_measurement": "kW"},
+            },
+        ):
+            assert peak_ctrl.get_peak_shaving_month_peak_kw() == pytest.approx(1.396)
+
+    def test_converts_a_w_value_to_kw(
+        self, peak_ctrl: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(
+            peak_ctrl,
+            "_api_request",
+            return_value={
+                "state": "4828",
+                "attributes": {"unit_of_measurement": "W"},
+            },
+        ):
+            assert peak_ctrl.get_peak_shaving_month_peak_kw() == pytest.approx(4.828)
+
+    @pytest.mark.parametrize("state", ["unavailable", "unknown", "not-a-number"])
+    def test_unusable_state_raises(
+        self, peak_ctrl: HomeAssistantAPIController, state: str
+    ) -> None:
+        from core.bess.exceptions import PeakShavingSensorError
+
+        with patch.object(
+            peak_ctrl,
+            "_api_request",
+            return_value={"state": state, "attributes": {"unit_of_measurement": "kW"}},
+        ):
+            with pytest.raises(PeakShavingSensorError, match=self.ENTITY):
+                peak_ctrl.get_peak_shaving_month_peak_kw()
+
+    @pytest.mark.parametrize("attributes", [{"unit_of_measurement": "A"}, {}])
+    def test_wrong_or_missing_unit_raises(
+        self, peak_ctrl: HomeAssistantAPIController, attributes: dict
+    ) -> None:
+        from core.bess.exceptions import PeakShavingSensorError
+
+        with patch.object(
+            peak_ctrl,
+            "_api_request",
+            return_value={"state": "4.8", "attributes": attributes},
+        ):
+            with pytest.raises(PeakShavingSensorError, match="unit"):
+                peak_ctrl.get_peak_shaving_month_peak_kw()
+
+    def test_negative_reading_raises(
+        self, peak_ctrl: HomeAssistantAPIController
+    ) -> None:
+        from core.bess.exceptions import PeakShavingSensorError
+
+        with patch.object(
+            peak_ctrl,
+            "_api_request",
+            return_value={"state": "-1", "attributes": {"unit_of_measurement": "kW"}},
+        ):
+            with pytest.raises(PeakShavingSensorError, match="negative"):
+                peak_ctrl.get_peak_shaving_month_peak_kw()
+
+
 class TestGetCalendarWindows:
     """An HA calendar entity read through HA's calendar REST API."""
 

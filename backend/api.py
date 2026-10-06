@@ -485,6 +485,10 @@ async def patch_settings(updates: dict):
                         obj.days = ps["days"]
                     if "max_import_kw" in ps:
                         obj.max_import_kw = ps["max_import_kw"]
+                    if "all_day" in ps:
+                        obj.all_day = ps["all_day"]
+                    if "floor_kw" in ps:
+                        obj.floor_kw = ps["floor_kw"]
 
             elif store_key == "electricity_price":
                 # PriceSettings attribute names match the store field names directly

@@ -264,6 +264,8 @@ def test_peak_shaving_defaults() -> None:
     assert settings.end_time == "20:00"
     assert settings.days == [0, 1, 2, 3, 4]
     assert settings.max_import_kw == 0.0
+    assert settings.floor_kw == 0.0
+    assert settings.all_day is False
 
 
 def test_peak_shaving_from_ha_config() -> None:
@@ -277,15 +279,19 @@ def test_peak_shaving_from_ha_config() -> None:
                 "end_time": "22:00",
                 "days": [0, 1, 2, 3, 4, 5, 6],
                 "max_import_kw": 2.5,
+                "floor_kw": 1.5,
+                "all_day": True,
             }
         }
     }
     settings.from_ha_config(config)
+    assert settings.all_day is True
     assert settings.enabled is True
     assert settings.start_time == "06:00"
     assert settings.end_time == "22:00"
     assert settings.days == [0, 1, 2, 3, 4, 5, 6]
     assert settings.max_import_kw == 2.5
+    assert settings.floor_kw == 1.5
 
 
 def test_peak_shaving_from_ha_config_disabled() -> None:

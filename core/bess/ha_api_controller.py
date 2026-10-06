@@ -23,6 +23,7 @@ from .energy_balance import derive_load_consumption
 from .exceptions import (
     CalendarWindowError,
     ConsumptionOverlayError,
+    PeakShavingSensorError,
     SystemConfigurationError,
 )
 from .runtime_failure_tracker import RuntimeFailureTracker
@@ -369,6 +370,13 @@ class HomeAssistantAPIController:
             "name": "Planned Consumption Changes",
             "unit": "list",
             "precision": None,
+            "conversion_threshold": None,
+        },
+        "get_peak_shaving_month_peak_kw": {
+            "sensor_key": "peak_shaving_month_peak",
+            "name": "Peak Shaving Month Peak",
+            "unit": "kW",
+            "precision": 2,
             "conversion_threshold": None,
         },
         # Solar forecast
@@ -1555,6 +1563,66 @@ class HomeAssistantAPIController:
             f"Planned consumption changes entity '{entity_id}' has no 'blocks' "
             f"attribute (found: {sorted(attributes)})"
         )
+
+    def get_peak_shaving_month_peak_kw(self) -> float | None:
+        """Read the highest import power already recorded this month (issue #96).
+
+        Returns:
+            The peak in kW, or None when no entity is configured. "No entity"
+            is a supported configuration: the fixed peak-shaving cap applies.
+
+        Raises:
+            PeakShavingSensorError: If an entity IS configured but is
+                unavailable, non-numeric, negative, or not in kW or W. The
+                dynamic cap is derived from this value, so guessing here
+                could let the optimizer set a new monthly peak.
+
+        """
+        if not self.sensors.get("peak_shaving_month_peak"):
+            return None
+
+        entity_id, _ = self._resolve_entity_id("peak_shaving_month_peak")
+        response = self._api_request(
+            "get",
+            f"/api/states/{entity_id}",
+            operation="Read peak shaving month peak",
+            category="sensor_read",
+            context={"entity_id": entity_id},
+        )
+        if not response:
+            raise PeakShavingSensorError(
+                f"Peak shaving month peak entity '{entity_id}' returned no state"
+            )
+
+        state = response.get("state")
+        if state in ("unavailable", "unknown", None):
+            raise PeakShavingSensorError(
+                f"Peak shaving month peak entity '{entity_id}' is {state}"
+            )
+        try:
+            value = float(state)
+        except (ValueError, TypeError) as e:
+            raise PeakShavingSensorError(
+                f"Peak shaving month peak entity '{entity_id}' has non-numeric "
+                f"state {state!r}"
+            ) from e
+
+        unit = (response.get("attributes") or {}).get("unit_of_measurement")
+        if unit == "kW":
+            value_kw = value
+        elif unit == "W":
+            value_kw = value / 1000.0
+        else:
+            raise PeakShavingSensorError(
+                f"Peak shaving month peak entity '{entity_id}' has unit {unit!r}; "
+                "expected kW or W"
+            )
+        if value_kw < 0:
+            raise PeakShavingSensorError(
+                f"Peak shaving month peak entity '{entity_id}' reports a negative "
+                f"value ({value_kw} kW)"
+            )
+        return value_kw
 
     def get_calendar_windows(
         self, entity_id: str, start: datetime, end: datetime

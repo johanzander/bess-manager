@@ -67,7 +67,7 @@ export interface PerPlatformSensors {
 /** IDs of non-inverter (shared) integrations. */
 export const SHARED_INTEGRATION_IDS = new Set([
   'nordpool', 'solar_forecast', 'consumption_forecast', 'consumption_overlay',
-  'phase_current', 'discharge_inhibit', 'weather',
+  'peak_shaving_month_peak', 'phase_current', 'discharge_inhibit', 'weather',
 ]);
 
 /** Create an empty per-platform sensors structure. */
@@ -559,6 +559,21 @@ export const INTEGRATIONS: IntegrationDef[] = [
         name: 'Planned Changes',
         sensors: [
           { key: 'consumption_overlay', label: 'Planned Consumption Changes', required: false },
+        ],
+      },
+    ],
+  },
+  {
+    id: 'peak_shaving_month_peak',
+    name: 'Peak Shaving Month Peak',
+    required: false,
+    description:
+      'Optional. Your highest grid import so far this month, in kW or W — on a Belgian P1 meter, "maximum demand current month". With it, peak shaving only caps import down to that peak (never below the free peak level), so BESS can use the headroom you have already paid for.',
+    sensorGroups: [
+      {
+        name: 'Month Peak',
+        sensors: [
+          { key: 'peak_shaving_month_peak', label: 'Highest Import This Month', required: false },
         ],
       },
     ],

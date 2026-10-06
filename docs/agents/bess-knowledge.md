@@ -694,8 +694,8 @@ horizon-wide scalar; `BatterySystemManager.peak_shaving` (a `PeakShavingSettings
 block: `enabled`, `start_time`/`end_time`, `days`, `max_import_kw`) adds a
 *per-period* grid-import cap, active only during a user-configured window
 (e.g. a capacity-tariff peak window), combined with the fuse cap via `min()`
-(`_combine_import_caps`, `dp_battery_algorithm.py`) — whichever is tighter
-applies. This is a generic peak-fighting control, deliberately not a modeled
+(`period_import_caps_kwh`, `dp_battery_algorithm.py`, which the inverter
+simulator also executes under) — whichever is tighter applies. This is a generic peak-fighting control, deliberately not a modeled
 capacity/demand tariff (that design, "Option A", was parked — see #96's
 thread): it reuses the exact "constrain, don't raise" mechanism above
 (grid-charging throttled, discharge forced to cover load) rather than adding

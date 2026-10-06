@@ -41,6 +41,11 @@ In **scenario tests**, use the helper `run_scenario_realized(scenario)` (in
 `R == P` alongside the normal plan checks. `test_scenarios.py` does this for every
 scenario.
 
+A plan made under a grid-import cap (fuse #429, peak shaving #96) must be
+simulated under the same cap: pass `import_cap_kwh=period_import_caps_kwh(...)`
+to `simulate()` (the helper does this for scenarios). Without it a throttled grid
+charge runs at full rate and shows a false `R != P` (#804).
+
 ## When to use it — REQUIRED for any optimizer or control change
 
 If you touch the **DP** (`dp_battery_algorithm.py`), the **intent classification**

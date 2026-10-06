@@ -250,13 +250,22 @@ def simulate(
     settings: BatterySettings,
     dt: float,
     currency: str = "SEK",
+    import_cap_kwh: list[float | None] | None = None,
 ) -> SimulationResult:
     """Execute the command sequence period-by-period, carrying SoC forward, using
     the optimizer's own _state_transition + _build_period_data for accounting
-    parity. Returns realized PeriodData and total realized cost."""
+    parity. Returns realized PeriodData and total realized cost.
+
+    `import_cap_kwh` is the per-period grid-import cap the plan was made under
+    (fuse #429, peak shaving #96). A grid charge is throttled to the headroom
+    it leaves, exactly as in the DP's transition (#804); without it the
+    simulator would charge at the full rate and a throttled plan could never
+    show R == P."""
+    ac_cap_kwh = _effective_ac_cap_kwh(settings, dt)
     soe = initial_soe
     period_data = []
     for t, cmd in enumerate(commands):
+        period_cap = import_cap_kwh[t] if import_cap_kwh is not None else None
         power = mode_to_power(
             cmd, solar_production[t], home_consumption[t], soe, settings, dt
         )
@@ -274,6 +283,8 @@ def simulate(
                 dt,
                 solar_production=solar_production[t],
                 home_consumption=home_consumption[t],
+                ac_cap_kwh=ac_cap_kwh,
+                import_cap_kwh=period_cap,
             )
         flows = _period_flows(
             power=power,
@@ -283,6 +294,7 @@ def simulate(
             solar_production=solar_production[t],
             battery_settings=settings,
             dt=dt,
+            import_cap_kwh=period_cap,
         )
         pd = _build_period_data(
             flows=flows,

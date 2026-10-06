@@ -102,6 +102,46 @@ def test_peak_shaving_cap_is_not_vacuous() -> None:
     )
 
 
+def test_throttled_grid_charge_executes_as_planned() -> None:
+    """A grid charge the import cap throttled executes at the throttled rate,
+    so the realized cost equals the planned cost (R == P) -- #804.
+
+    Period 0 is cheap and every later period expensive, so the plan grid-charges
+    in period 0. The 5 kW charger could take 5.0 kWh, but a 2.5 kWh import cap
+    (load 0.5 + at most 2.0 charge) throttles it. The simulator used to ignore
+    the cap and charge the full 5.0 kWh, importing 5.5 kWh against a plan of 2.5.
+    """
+    cap_kwh = 2.5
+    scenario = {
+        "battery": {
+            "max_soe_kwh": 10.0,
+            "min_soe_kwh": 1.0,
+            "max_charge_power_kw": 5.0,
+            "max_discharge_power_kw": 5.0,
+            "efficiency_charge": 1.0,
+            "efficiency_discharge": 1.0,
+            "cycle_cost_per_kwh": 0.0,
+            "initial_soe": 1.0,
+            "initial_cost_basis": 0.0,
+        },
+        "buy_price": [0.01, 1.0, 1.0],
+        "sell_price": [0.0, 1.0, 1.0],
+        "home_consumption": [0.5, 0.5, 0.5],
+        "solar_production": [0.0, 0.0, 0.0],
+        "period_duration_hours": 1.0,
+        "peak_shaving_import_cap_per_period": [cap_kwh, cap_kwh, cap_kwh],
+    }
+    result, realized_cost = run_scenario_realized(scenario)
+
+    # Guard against a vacuous pass: the plan really is a throttled grid charge.
+    planned_import = result.period_data[0].energy.grid_imported
+    assert planned_import == pytest.approx(cap_kwh), "period 0 should be cap-bound"
+
+    assert realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=1e-9
+    ), "executed plan's realized cost must match the planned cost (R == P)"
+
+
 def test_peak_shaving_import_cap_per_period_disabled_returns_none() -> None:
     """Disabled (the default) means no additional constraint at all."""
     settings = PeakShavingSettings()

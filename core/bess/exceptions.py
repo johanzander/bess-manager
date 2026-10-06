@@ -95,6 +95,14 @@ class PWLEndSoeOutOfRangeError(ValueError):
     """
 
 
+class PeakShavingSensorError(BESSException):
+    """The configured month-peak entity could not be read as a kW value.
+
+    Raised rather than falling back to the fixed cap: planning against the
+    wrong peak can set a new monthly peak that is billed for a year.
+    """
+
+
 class ConsumptionOverlayError(BESSException):
     """The Planned Consumption Changes entity could not be read as blocks.
 

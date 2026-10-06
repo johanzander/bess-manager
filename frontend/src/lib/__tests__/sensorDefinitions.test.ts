@@ -51,4 +51,15 @@ describe('SHARED_INTEGRATION_IDS', () => {
       'sensor.bess_consumption_overlay',
     );
   });
+
+  it('routes the peak-shaving month-peak entity through to the flat backend payload', () => {
+    const sensors = emptyPerPlatformSensors('huawei_solar_luna2000');
+    sensors.shared = {
+      peak_shaving_month_peak: 'sensor.electricity_meter_maximale_vraag_huidige_maand',
+    };
+
+    expect(getActiveSensorsFlat(sensors)['peak_shaving_month_peak']).toBe(
+      'sensor.electricity_meter_maximale_vraag_huidige_maand',
+    );
+  });
 });

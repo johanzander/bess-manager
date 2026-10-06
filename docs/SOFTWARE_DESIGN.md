@@ -100,7 +100,9 @@ def start() -> None
 - An optional peak-shaving window (`BatterySystemManager.peak_shaving`) — a
   user-configured per-period grid-import cap, active only during a
   configured time window/weekdays, combined with the fuse cap above via
-  `min()`. See the same section's "Peak-shaving window extension" (#96).
+  `min()`. With an optional month-peak sensor (`peak_shaving_month_peak`) the
+  cap follows the month's highest import so far, between a free `floor_kw` and
+  `max_import_kw`. See the same section's "Peak-shaving window extension" (#96).
 
 **Outputs**:
 

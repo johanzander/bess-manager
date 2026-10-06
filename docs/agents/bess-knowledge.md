@@ -702,7 +702,33 @@ thread): it reuses the exact "constrain, don't raise" mechanism above
 a new tariff cost term to the reward. `peak_shaving_import_cap_per_period`
 (`settings.py`) builds the per-period array from each period's local
 timestamp; `BatterySystemManager._get_peak_shaving_import_cap_limits` wires
-it into `optimize_battery_schedule`.
+it into `optimize_battery_schedule`. `all_day` drops the time-of-day window
+(only `days` selects periods); `start_time == end_time` is unchanged and still
+an empty window.
+
+*Dynamic cap (month-peak entity).* Under a tariff billed on the month's
+highest import (the Flemish capacity tariff: the 12-month average of monthly
+15-minute peaks, with a free floor of 2.5 kW), the DP sees any import below
+the fixed cap as free, so it will grid-charge at full power for a cent-sized
+spread and set a new peak that is billed for a year (#96: 0.20 EUR gained
+against about 10 EUR of tariff). When the optional `peak_shaving_month_peak`
+sensor is mapped, the cap per period becomes
+`min(max_import_kw, max(floor_kw, month_peak_kw))`: importing at or below the
+peak the month already has (or the tariff's free `floor_kw`) costs nothing, and
+`max_import_kw` stays the hard ceiling. It is still a constraint, not a cost
+term, and still only ever tightens. `_read_month_peak` reads the entity and
+attaches the current month; periods in a later month get `floor_kw` because the
+peak resets on the 1st. The sensor is read in kW or W; anything else, or an
+unavailable/negative reading, raises `PeakShavingSensorError`, which is recorded
+as the `PEAK_SHAVING_SENSOR` runtime failure and blocks optimization — never a
+silent fallback to the fixed cap, since planning against the wrong peak is what
+sets a new one. No entity configured keeps the fixed cap exactly. A cap that
+forecast load alone exceeds is unavoidable (same "constrain, never raise" rule);
+the next run reads the raised peak and the cap ratchets up. The cap shapes the
+*plan*: unforecast spikes (an EV starting) are not controlled by it. The
+inverter simulator does not apply the import cap to grid charging (it calls the
+state transition without it), so plan-faithfulness for a throttled grid charge
+cannot be shown with `run_scenario_realized`; the discharge side can.
 
 ### Export curtailment and the charge-early tie-break (#269)
 

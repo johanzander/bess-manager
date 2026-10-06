@@ -16,7 +16,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- **Peak-shaving: cap grid import during a configured window** — set a time window, weekdays and a max import power, and BESS suppresses grid-charging and discharges to cover load during that window, independent of spot price. Useful for capacity/demand tariffs. ([#96](https://github.com/johanzander/bess-manager/issues/96))
+- **Peak-shaving: cap grid import during a configured window** — set a time window, weekdays and a max import power, and BESS suppresses grid-charging and discharges to cover load during that window, independent of spot price. Useful for capacity/demand tariffs. Optionally map your meter's month-peak entity so the cap follows the month's highest import so far (Flemish capacity tariff); turn off "Only during a time window" to apply the cap around the clock. ([#96](https://github.com/johanzander/bess-manager/issues/96))
 - **Octopus free power windows are planned as free** — in Electricity Pricing settings, point BESS at the Octopus Energy integration's Octoplus power-up calendar (disabled by default in Home Assistant) and booked Weekend Happy Hours and Power Up sessions are priced at your "price during free windows" (default 0p) instead of the unchanged Agile rate. BESS then fills the battery in the window rather than paying earlier, and stops discharging to cover load that costs nothing; plan, dashboard and savings all use the free price. Bookings made during the day reach the plan within 15 minutes, and saving pricing settings now rebuilds the plan immediately. ([#762](https://github.com/johanzander/bess-manager/pull/762))
 ### Removed
 

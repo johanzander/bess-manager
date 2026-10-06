@@ -49,7 +49,8 @@ const EMPTY_HOME: HomeForm = {
   phaseCount: 3, powerMonitoringEnabled: true,
   managedLoadSensors: [],
   peakShavingEnabled: false, peakShavingStartTime: '07:00', peakShavingEndTime: '20:00',
-  peakShavingDays: [0, 1, 2, 3, 4], peakShavingMaxImportKw: 0,
+  peakShavingAllDay: false,
+  peakShavingDays: [0, 1, 2, 3, 4], peakShavingMaxImportKw: 0, peakShavingFloorKw: 0,
 };
 const EMPTY_PRICING: PricingForm = {
   currency: 'SEK',
@@ -198,8 +199,10 @@ const SettingsPage: React.FC = () => {
         peakShavingEnabled: home_s.peakShaving?.enabled ?? false,
         peakShavingStartTime: home_s.peakShaving?.startTime ?? '07:00',
         peakShavingEndTime: home_s.peakShaving?.endTime ?? '20:00',
+        peakShavingAllDay: home_s.peakShaving?.allDay ?? false,
         peakShavingDays: home_s.peakShaving?.days ?? [0, 1, 2, 3, 4],
         peakShavingMaxImportKw: home_s.peakShaving?.maxImportKw ?? 0,
+        peakShavingFloorKw: home_s.peakShaving?.floorKw ?? 0,
       };
       setHomeForm(h);
       savedHome.current = JSON.stringify(h);
@@ -419,8 +422,10 @@ const SettingsPage: React.FC = () => {
             enabled: homeForm.peakShavingEnabled,
             startTime: homeForm.peakShavingStartTime,
             endTime: homeForm.peakShavingEndTime,
+            allDay: homeForm.peakShavingAllDay,
             days: homeForm.peakShavingDays,
             maxImportKw: homeForm.peakShavingMaxImportKw,
+            floorKw: homeForm.peakShavingFloorKw,
           },
         },
       });

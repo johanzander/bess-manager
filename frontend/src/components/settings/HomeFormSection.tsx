@@ -18,9 +18,14 @@ export interface HomeForm {
   peakShavingEnabled: boolean;
   peakShavingStartTime: string;
   peakShavingEndTime: string;
+  /** No time-of-day window: the cap applies around the clock on the active days. */
+  peakShavingAllDay: boolean;
   /** ISO weekday numbers, 0 = Monday .. 6 = Sunday. */
   peakShavingDays: number[];
   peakShavingMaxImportKw: number;
+  /** Peak below which the tariff charges nothing (issue #96). Only used when a
+   * "Month peak" entity is mapped under Sensors. */
+  peakShavingFloorKw: number;
 }
 
 const WEEKDAY_LABELS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -257,21 +262,27 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
 
       <SectionCard
         title="Peak Shaving"
-        description="Cap grid import during a configured window — the battery discharges to cover load above the cap, and grid-charging is suppressed, independent of spot price. Useful for a capacity/demand tariff that charges by your peak import power rather than energy price."
+        description="For tariffs that charge by your highest power draw. BESS keeps grid import under the cap: the battery covers load above it, and grid-charging is throttled to stay under it, whatever the spot price. Optional: map your meter's “highest import this month” under Sensors → Peak Shaving Month Peak, and the cap then follows that peak. BESS may import up to the peak you have already set this month, or the free peak level if that is higher, since more would raise your bill, but never more than Max grid import. See “Peak Shaving” in the User Guide."
       >
         {toggle('Enable peak shaving', form.peakShavingEnabled,
           v => onChange({ ...form, peakShavingEnabled: v }))}
         {form.peakShavingEnabled && (
           <>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {timeField('Window start', form.peakShavingStartTime,
-                v => onChange({ ...form, peakShavingStartTime: v }))}
-              {timeField('Window end', form.peakShavingEndTime,
-                v => onChange({ ...form, peakShavingEndTime: v }))}
-            </div>
+            {toggle('Only during a time window', !form.peakShavingAllDay,
+              v => onChange({ ...form, peakShavingAllDay: !v }))}
+            {!form.peakShavingAllDay && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {timeField('Window start', form.peakShavingStartTime,
+                  v => onChange({ ...form, peakShavingStartTime: v }))}
+                {timeField('Window end', form.peakShavingEndTime,
+                  v => onChange({ ...form, peakShavingEndTime: v }))}
+              </div>
+            )}
             {dayPicker(form.peakShavingDays, v => onChange({ ...form, peakShavingDays: v }))}
             {numField('Max grid import during window', form.peakShavingMaxImportKw,
               v => onChange({ ...form, peakShavingMaxImportKw: v }), { unit: 'kW', min: 0, step: 0.1 })}
+            {numField('Free peak level (month-peak entity only)', form.peakShavingFloorKw,
+              v => onChange({ ...form, peakShavingFloorKw: v }), { unit: 'kW', min: 0, step: 0.1 })}
           </>
         )}
       </SectionCard>

@@ -7,6 +7,10 @@ export default defineConfig({
   timeout: 30_000,
   expect: { timeout: 10_000 },
   retries: 1,
+  // One shared backend: specs that PATCH settings or switch platform re-run
+  // system start-up, which transiently flips /api/setup/status to
+  // wizardNeeded and bounces any page another worker is loading to /setup.
+  workers: 1,
   reporter: [['html', { open: 'never' }], ['list']],
   use: {
     baseURL,

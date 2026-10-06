@@ -199,16 +199,17 @@ def test_non_destructive_forms_keep_an_escape_hatch(
     )
 
 
-def test_gh_api_is_blanket_ask(rules: dict[str, list[str]]) -> None:
-    """`gh api` reads and writes all resolve to 'ask' under the blanket rule.
+def test_gh_api_reads_allow_and_writes_ask(rules: dict[str, list[str]]) -> None:
+    """A plain `gh api` read resolves to 'allow'; every write form to 'ask'.
 
-    The blanket `Bash(gh api *)` sits in `ask`, so argument position no longer
-    matters — every `gh api` prompts once, reads included. This is the decision
-    quality-check.sh enforces; the enumerated write-form rules that used to
-    live here were removed because they left argument-position holes.
+    `Bash(gh api *)` sits in `allow` (#803), with the write-capable flags
+    enumerated in `ask`. Since `ask` beats `allow`, the safety of this split
+    rests entirely on the enumeration being complete -- a write spelling it
+    misses runs without a prompt. Each spelling is therefore pinned by command
+    string below rather than by asserting which rule happens to catch it.
     """
     endpoint = "repos/johanzander/bess-manager/pulls/614/comments"
-    assert decide(f"gh api {endpoint}", rules) == "ask"
+    assert decide(f"gh api {endpoint}", rules) == "allow"
 
     for write in (
         f"gh api {endpoint} -X POST -f body=hi",
@@ -242,6 +243,12 @@ def test_gh_api_is_blanket_ask(rules: dict[str, list[str]]) -> None:
         f"gh api -fbody=hi {endpoint}",
         f"gh api {endpoint} -Fbody=hi",
         f"gh api -Fbody=hi {endpoint}",
+        # The two forms #803 added: a request body read from a file or stdin,
+        # and GraphQL (which can mutate over the same POST endpoint).
+        f"gh api {endpoint} --input payload.json",
+        f"gh api --input payload.json {endpoint}",
+        "gh api graphql",
+        "gh api graphql -f query=query{viewer{login}}",
     ):
         assert decide(write, rules) == "ask", f"{write!r} must ask"
 

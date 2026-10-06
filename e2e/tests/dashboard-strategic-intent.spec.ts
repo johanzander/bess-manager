@@ -80,8 +80,27 @@ test('Strategic Intent card: curtailment is a separate badge and does not overfl
       body: JSON.stringify({ controlModel: 'tou_register', batteryMode: 'LOAD_FIRST' }),
     });
   });
+  // The dashboard renders AlertBanner when the summary is truthy and any
+  // recovery is pending, and AlertBanner reads criticalIssues -- so the summary
+  // needs its real shape, and recoveries (live state other specs leave behind,
+  // e.g. health-recovery.spec.ts) must be pinned too.
+  await page.route('**/api/dashboard-health-summary', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        hasCriticalErrors: false,
+        hasWarnings: false,
+        criticalIssues: [],
+        totalCriticalIssues: 0,
+        timestamp: '2026-07-11T12:00:00',
+      }),
+    });
+  });
+  await page.route('**/api/health-recoveries', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+  });
   for (const noisy of [
-    '**/api/dashboard-health-summary',
     '**/api/historical-data-status',
     '**/api/system-health**',
   ]) {

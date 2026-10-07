@@ -394,6 +394,15 @@ battery and BMS stayed awake.
 `load_first` self-use. Above the floor the `battery_first` hold is
 unchanged, so #466 is preserved.
 
+**IDLE as a fall-through (issue [#786](https://github.com/johanzander/bess-manager/issues/786)):**
+A planned deficit below `FLOW_NOISE_FLOOR_KWH` cannot be covered by a planned
+discharge, so the period falls through to `IDLE` rather than being chosen. When
+the DP's verdict (`intra_period_discharge_allowed`) is open and that planned
+deficit is within the noise floor (`strategic_intent.idle_hold_releasable`),
+`IDLE` maps to `vpp_power=0`, remote control **disabled**, as at the floor.
+Any other `IDLE` keeps the hold, including an open verdict with a larger
+planned deficit. Not yet real-hardware-validated.
+
 Releasing is chosen over the alternative of writing `vpp_power=0` with
 remote control still *enabled* (`grid_first`) because only the released form
 is flow-neutral: `load_first` still absorbs passive solar surplus exactly as

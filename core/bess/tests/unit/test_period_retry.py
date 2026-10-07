@@ -20,6 +20,11 @@ def _make_bsm_with_mocks():
     bsm._scheduler = MagicMock()
     bsm._last_applied_discharge_rate = 0
     bsm.battery_settings = BatterySettings()
+    # The write path reads the DP's discharge verdict for the period (#786).
+    # No stored period means no verdict, which is the hold -- the case these
+    # retry tests were written for.
+    bsm.schedule_store = MagicMock()
+    bsm.schedule_store.get_period_data_at.return_value = None
     return bsm
 
 
@@ -69,7 +74,38 @@ class TestSchedulePeriodRetry:
         callback = bsm._scheduler.add_job.call_args[0][0]
         callback()
 
-        assert bsm._inverter_controller.apply_period.call_args[0][-1] == 32
+        # charge_rate is positional index 6: (controller, grid_charge,
+        # discharge_rate, block_passive_charging, strategic_intent,
+        # at_reserve_floor, charge_rate, discharge_authorized).
+        assert bsm._inverter_controller.apply_period.call_args[0][6] == 32
+
+    def test_retry_callback_replays_frozen_discharge_authorized(self) -> None:
+        """#786: the DP's verdict is captured at the original period and
+        replayed unchanged on retry, for the same reason as charge_rate -- by
+        the time the retry fires the wall clock may be in a period whose
+        verdict differs."""
+        bsm = _make_bsm_with_mocks()
+        bsm._inverter_controller.apply_period.return_value = (True, "")
+        bsm._controller.get_discharge_inhibit_active.return_value = False
+
+        bsm._schedule_period_retry(68, True, 50, discharge_authorized=True)
+        callback = bsm._scheduler.add_job.call_args[0][0]
+        callback()
+
+        assert bsm._inverter_controller.apply_period.call_args[0][7] is True
+
+    def test_retry_callback_rereads_the_discharge_inhibit(self) -> None:
+        """The captured value is the plan's; the inhibit is live state, so an
+        inhibit that started after the first attempt withdraws the release."""
+        bsm = _make_bsm_with_mocks()
+        bsm._inverter_controller.apply_period.return_value = (True, "")
+        bsm._controller.get_discharge_inhibit_active.return_value = True
+
+        bsm._schedule_period_retry(68, True, 50, discharge_authorized=True)
+        callback = bsm._scheduler.add_job.call_args[0][0]
+        callback()
+
+        assert bsm._inverter_controller.apply_period.call_args[0][7] is False
 
     def test_retry_callback_failure_schedules_second_retry(self):
         bsm = _make_bsm_with_mocks()

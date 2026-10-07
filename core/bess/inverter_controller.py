@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 from .dp_schedule import DPSchedule
 from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
+from .strategic_intent import idle_hold_releasable
 
 if TYPE_CHECKING:
     from .ha_api_controller import HomeAssistantAPIController
@@ -593,6 +594,7 @@ class InverterController(ABC):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -620,6 +622,12 @@ class InverterController(ABC):
                 at the floor. Forced-power platforms use it to stop holding a
                 battery that has nothing left to hold, releasing the inverter
                 so its BMS can sleep -- see #592.
+            discharge_authorized: The DP's verdict that the stored energy is
+                worth no more than the grid price this period
+                (`DecisionData.intra_period_discharge_allowed`, #526).
+                Register-based platforms ignore this. Forced-power platforms
+                use it to release the IDLE hold when the plan itself would
+                rather cover load than import -- see #786.
             charge_rate: The plan's action-derived GRID_CHARGING rate
                 (0-100%, #754), computed by the caller (BatterySystemManager,
                 which knows the exact period and action) rather than
@@ -707,6 +715,7 @@ class InverterController(ABC):
                 block_passive_charging,
                 self._planned_at_reserve_floor(period),
                 charge_rate,
+                self._planned_discharge_authorized(period),
             ),
         }
 
@@ -753,6 +762,30 @@ class InverterController(ABC):
         entering_soe = soe[period - 1] if period > 0 else soe[0]
         return entering_soe <= self.battery_settings.min_soe_kwh
 
+    def _planned_discharge_authorized(self, period: int) -> bool:
+        """The plan's discharge verdict for this period (#786), for display.
+
+        The display counterpart to the rule BatterySystemManager applies on the
+        write path: both call `strategic_intent.idle_hold_releasable`,
+        the one declaration of it. Without it
+        `_mode_display_fields` would show the battery_first hold for an IDLE
+        period production releases.
+
+        False when the plan carries no decision for the period -- absence of an
+        economic basis is not permission (#526), and the hold is the
+        unchanged-behaviour answer.
+        """
+        if self.current_schedule is None:
+            return False
+        period_data = self.current_schedule.period_data
+        if period >= len(period_data):
+            return False
+        planned = period_data[period]
+        return idle_hold_releasable(
+            planned.decision.intra_period_discharge_allowed,
+            planned.energy.grid_imported,
+        )
+
     def _mode_display_fields(
         self,
         intent: str,
@@ -761,6 +794,7 @@ class InverterController(ABC):
         block_passive_charging: bool,
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> dict:
         """Single source of truth for what mode-related fields a period
         gets, branching on CONTROL_MODEL. Never fabricates a label the
@@ -800,6 +834,7 @@ class InverterController(ABC):
                 intent,
                 at_reserve_floor,
                 charge_rate,
+                discharge_authorized,
             )
             return {
                 "vpp_power_pct": power_pct,

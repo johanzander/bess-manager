@@ -29,6 +29,30 @@ _POWER_THRESHOLD_KW = POWER_CLASSIFICATION_THRESHOLD_KW
 FLOW_NOISE_FLOOR_KWH = 0.01
 
 
+def idle_hold_releasable(verdict_open: bool, planned_grid_imported_kwh: float) -> bool:
+    """May a forced-power (VPP) platform release an IDLE hold this period? (#786)
+
+    The one declaration of the rule, read by the write path, the display and the
+    simulator alike. True when both hold:
+
+    * the DP's verdict is open -- the stored energy is worth no more than the
+      grid price (`decision.intra_period_discharge_allowed`, #526), and
+    * the plan's own deficit (`energy.grid_imported`) is within
+      `FLOW_NOISE_FLOOR_KWH`.
+
+    The second condition is what makes IDLE a *fall-through* rather than a
+    choice: `action_selector._residual_cover_p` refuses a cover below the floor,
+    so a sub-floor deficit lands in IDLE although the optimizer never weighed
+    holding against covering. Releasing then costs nothing when forecast equals
+    plan and saves the import when load runs high. A deficit above the floor
+    that the plan left to the grid is a deliberate IDLE -- the verdict is a
+    marginal value at the planned SoE, and releasing would let the battery cover
+    the whole deficit, draining energy the plan reserved for later (measured on
+    the scenario corpus: +3.6 SEK worse in total, +4.5 on one fixture).
+    """
+    return verdict_open and planned_grid_imported_kwh <= FLOW_NOISE_FLOOR_KWH
+
+
 def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     """Classify the strategic intent of a battery action based on power and energy flows.
 

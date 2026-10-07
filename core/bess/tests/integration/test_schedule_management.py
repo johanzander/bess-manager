@@ -635,6 +635,9 @@ class TestChargeRateHardwareWrite:
         # DPSchedule has it. Well above the reserve floor -- this test is
         # about the charge rate, not #592's release.
         mock_schedule.state_of_energy = [25.0] * 96
+        # Likewise `period_data`: the display reads the plan's release decision
+        # (#786) from it. Empty means no decision, i.e. the hold.
+        mock_schedule.period_data = []
         mgr.current_schedule = mock_schedule
 
         mock_controller.calls["charge_rate"].clear()

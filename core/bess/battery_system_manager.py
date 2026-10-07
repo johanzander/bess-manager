@@ -78,6 +78,7 @@ from .settings import (
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
 from .solis_modbus_controller import SolisModbusController
+from .strategic_intent import idle_hold_releasable
 from .terminal_value import TerminalValueCurve, calculate_terminal_curve
 from .time_utils import (
     format_period,
@@ -252,7 +253,14 @@ class BatterySystemManager:
         self._desired_charge_rate: int = (
             100  # GRID_CHARGING rate (#754) alongside the rate above
         )
+        self._desired_discharge_authorized: bool = (
+            False  # DP's discharge verdict (#786) alongside the rate above
+        )
         self._last_applied_discharge_rate: int = 0  # Last rate written to inverter
+        # Release actually written alongside it (#786): the plan's decision
+        # with the discharge inhibit applied, so an inhibit toggling on an IDLE
+        # period (rate 0 either way) still triggers a rewrite.
+        self._last_applied_discharge_authorized: bool = False
 
         # Export-limit curtailment state (#269) — tracks whether the hardware
         # is currently curtailed so release can fire even on a period whose
@@ -3157,6 +3165,8 @@ class BatterySystemManager:
         self._desired_block_passive_charging = block_passive_charging
         self._desired_strategic_intent = strategic_intent
         self._desired_charge_rate = charge_rate
+        self._desired_discharge_authorized = self._planned_discharge_authorized(period)
+        discharge_authorized = self._inhibit_gated(self._desired_discharge_authorized)
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
         if discharge_rate > 0:
@@ -3202,6 +3212,7 @@ class BatterySystemManager:
             strategic_intent,
             at_reserve_floor,
             charge_rate,
+            discharge_authorized,
         )
 
         if not success:
@@ -3222,9 +3233,11 @@ class BatterySystemManager:
                 block_passive_charging,
                 strategic_intent,
                 charge_rate=charge_rate,
+                discharge_authorized=self._desired_discharge_authorized,
             )
         else:
             self._last_applied_discharge_rate = discharge_rate
+            self._last_applied_discharge_authorized = discharge_authorized
 
         # Apply charging power rate (BSM-level concern: uses power monitor)
         self.adjust_charging_power()
@@ -3274,6 +3287,37 @@ class BatterySystemManager:
         current_soe = self.battery_settings.total_capacity * soc / 100.0
         return current_soe <= self.battery_settings.min_soe_kwh
 
+    def _planned_discharge_authorized(self, period: int) -> bool:
+        """Whether the plan lets a forced-power platform release the IDLE hold
+        this period (#786); the rule lives in
+        `strategic_intent.idle_hold_releasable`.
+
+        Resolved by exact timestamp, like the intra-period gate, so the
+        standalone next-day schedule (period_data[0] anchored to tomorrow 00:00
+        despite optimization_period=0) is never misread as today's period.
+
+        False when the schedule store has no period: absence of an economic
+        basis is not permission (#526), and the hold is today's behaviour.
+        """
+        target_timestamp = time_utils.period_index_to_timestamp(period)
+        period_data = self.schedule_store.get_period_data_at(target_timestamp)
+        if period_data is None:
+            return False
+        return idle_hold_releasable(
+            period_data.decision.intra_period_discharge_allowed,
+            period_data.energy.grid_imported,
+        )
+
+    def _inhibit_gated(self, discharge_authorized: bool) -> bool:
+        """A released IDLE hold lets the battery serve the house, which is
+        exactly what the discharge inhibit (e.g. an EV charging) forbids. The
+        inhibit only zeroes a *nonzero* discharge rate, and IDLE's is already
+        0, so the hold was what kept the battery out of the load: with the
+        inhibit active the release is withdrawn (#786)."""
+        return (
+            discharge_authorized and not self.controller.get_discharge_inhibit_active()
+        )
+
     _PERIOD_RETRY_DELAYS_MIN: ClassVar[list[int]] = [
         3,
         8,
@@ -3288,6 +3332,7 @@ class BatterySystemManager:
         strategic_intent: str = "",
         attempt: int = 1,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> None:
         """Schedule a one-shot retry of period hardware write.
 
@@ -3299,6 +3344,12 @@ class BatterySystemManager:
         every other argument -- it must replay this period's actual planned
         rate on retry, not whatever period the wall clock has moved to by
         the time the retry fires.
+
+        discharge_authorized (#786) is captured the same way, for the same
+        reason: it is the plan's decision for *this* period, and the wall clock
+        may have moved into one whose decision differs by the time the retry
+        fires. It is the plan's value, not the inhibit-gated one: the inhibit is
+        re-read when the retry fires.
         """
         max_attempts = len(self._PERIOD_RETRY_DELAYS_MIN)
         if attempt > max_attempts:
@@ -3322,6 +3373,7 @@ class BatterySystemManager:
                 attempt + 1,
                 max_attempts + 1,
             )
+            retry_authorized = self._inhibit_gated(discharge_authorized)
             success, error_msg = self._inverter_controller.apply_period(
                 self.controller,
                 grid_charge,
@@ -3330,6 +3382,7 @@ class BatterySystemManager:
                 strategic_intent,
                 self._at_reserve_floor(),
                 charge_rate,
+                retry_authorized,
             )
             self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
@@ -3350,6 +3403,7 @@ class BatterySystemManager:
                         strategic_intent,
                         attempt + 1,
                         charge_rate,
+                        discharge_authorized,
                     )
                 else:
                     self._runtime_failure_tracker.record_failure(
@@ -3368,6 +3422,7 @@ class BatterySystemManager:
                     attempt,
                 )
                 self._last_applied_discharge_rate = discharge_rate
+                self._last_applied_discharge_authorized = retry_authorized
 
         self._scheduler.add_job(
             retry_period_write,
@@ -4024,7 +4079,11 @@ class BatterySystemManager:
         inhibit_active = self.controller.get_discharge_inhibit_active()
         target_rate = 0 if inhibit_active else self._desired_discharge_rate
 
-        if target_rate == self._last_applied_discharge_rate:
+        authorized = self._desired_discharge_authorized and not inhibit_active
+        if (
+            target_rate == self._last_applied_discharge_rate
+            and authorized == self._last_applied_discharge_authorized
+        ):
             return
 
         if inhibit_active:
@@ -4054,8 +4113,10 @@ class BatterySystemManager:
             # re-assert the battery_first hold #592 released.
             self._at_reserve_floor(),
             self._desired_charge_rate,
+            authorized,
         )
         self._last_applied_discharge_rate = target_rate
+        self._last_applied_discharge_authorized = authorized
 
     def get_settings(self):
         """Get settings - return dataclasses directly for API layer conversion."""

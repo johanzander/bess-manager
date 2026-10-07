@@ -249,6 +249,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings for the current control mode.
 
@@ -278,6 +279,13 @@ class SolaxModbusGrowattController(GrowattMinController):
                 _intent_to_vpp. Derived from a live SoC read, not from the
                 plan: the hold exists to protect stored energy, so what
                 matters is whether any is actually there now.
+            discharge_authorized: The plan allows releasing an IDLE hold this
+                period (`strategic_intent.idle_hold_releasable`: the DP's
+                verdict is open and the planned deficit is within the noise
+                floor, #786). TOU mode ignores this. VPP mode uses it to
+                release the hold -- see _intent_to_vpp. Unlike
+                at_reserve_floor it is the plan's decision, not a live
+                reading.
 
         Returns:
             Tuple of (success, error_message). error_message is empty on success.
@@ -291,6 +299,7 @@ class SolaxModbusGrowattController(GrowattMinController):
                 strategic_intent,
                 at_reserve_floor,
                 charge_rate,
+                discharge_authorized,
             )
         return self._apply_period_tou(controller, grid_charge, discharge_rate)
 
@@ -371,9 +380,10 @@ class SolaxModbusGrowattController(GrowattMinController):
         at_reserve_floor: bool = False,
         load_tracking_active: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate, block_passive_charging,
-        strategic_intent, at_reserve_floor) to
+        strategic_intent, at_reserve_floor, discharge_authorized) to
         (power_pct, remote_control_enabled).
 
         - grid_charge=True                       -> +charge_rate% (#754 --
@@ -441,6 +451,23 @@ class SolaxModbusGrowattController(GrowattMinController):
           inverter. `vpp_simulator` models the release as a hold at
           min_soe_kwh (available == 0), i.e. it assumes the two floors agree.
           Flagged for real-hardware confirmation with #592's reporter.
+        - grid_charge=False, rate=0, intent=IDLE, discharge_authorized=True
+          -> 0%, remote control DISABLED (#786). The DP's own verdict
+          (`intra_period_discharge_allowed`, buy_price >= shadow_price) says
+          the stored energy is worth no more than the grid price, so the
+          battery_first hold protects nothing the plan values: it only turns
+          any load the forecast missed into import at the buy price. Granted
+          only when the planned deficit is also within FLOW_NOISE_FLOOR_KWH
+          (`idle_hold_releasable`): there no cover can be planned, so IDLE is
+          a fall-through, not a choice to save the energy. A larger planned
+          deficit left to the grid is a deliberate IDLE and keeps the hold --
+          the verdict is a marginal value, and releasing would drain the whole
+          deficit. Same release as the reserve-floor case
+          above, so the same flow-neutrality and discharge_stop_soc notes
+          apply; this is the plan's decision where that one is a live reading.
+          With the verdict closed (the energy is worth more later) the hold
+          stays -- that is #466. Not yet real-hardware-validated; ships
+          experimental pending confirmation.
         - grid_charge=False, intent=LOAD_SUPPORT, load_tracking_active=True
           -> +1%, remote control ENABLED (#520). The boundary command for a
           tracked period: the hold, with remote control armed so the tick loop
@@ -469,7 +496,11 @@ class SolaxModbusGrowattController(GrowattMinController):
             return 0, False
         if discharge_rate == 0:
             if strategic_intent == "IDLE":
-                return (0, False) if at_reserve_floor else (1, True)
+                return (
+                    (0, False)
+                    if at_reserve_floor or discharge_authorized
+                    else (1, True)
+                )
             return 0, block_passive_charging
         return -discharge_rate, True
 
@@ -481,6 +512,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[int, bool]:
         """Display-facing alias for _intent_to_vpp().
 
@@ -498,6 +530,10 @@ class SolaxModbusGrowattController(GrowattMinController):
         charge_rate (#754): the plan's actual GRID_CHARGING rate, passed
         through the same way discharge_rate already is, so the displayed
         vpp_power_pct matches what apply_period's write path commands.
+
+        discharge_authorized (#786) is the plan's own release decision, read from
+        the schedule by _planned_discharge_authorized(); the write path applies
+        the same rule, so the displayed period equals the commanded one.
         """
         return self._intent_to_vpp(
             grid_charge,
@@ -506,6 +542,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             strategic_intent,
             at_reserve_floor,
             charge_rate=charge_rate,
+            discharge_authorized=discharge_authorized,
         )
 
     def _ensure_vpp_status_enabled(self, controller) -> None:
@@ -558,6 +595,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[bool, str]:
         """Write one period's VPP power command.
 
@@ -585,6 +623,7 @@ class SolaxModbusGrowattController(GrowattMinController):
             strategic_intent,
             at_reserve_floor,
             charge_rate=charge_rate,
+            discharge_authorized=discharge_authorized,
         )
 
         needs_write = remote_control_enabled or (

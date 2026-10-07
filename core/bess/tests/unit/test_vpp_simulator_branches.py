@@ -19,7 +19,9 @@ import pytest
 from core.bess.dp_battery_algorithm import _state_transition
 from core.bess.simulation.vpp_simulator import (
     VppCommand,
+    VppSimulationResult,
     derive_vpp_commands,
+    simulate_vpp,
     vpp_command_to_power,
 )
 from core.bess.tests.helpers import make_battery_settings
@@ -309,6 +311,128 @@ class TestIdleAtReserveFloor:
             dt=DT,
         )
         assert released is not None and released < 0
+
+
+class TestIdleGateRelease:
+    """#786: an IDLE hold is released when it was a fall-through rather than a
+    choice -- the DP's verdict is open and the plan's own deficit is within the
+    noise floor -- so unplanned load is served from the battery, not imported.
+
+    Asserted as an *outcome* through `simulate_vpp`, which derives each command
+    through the real `_intent_to_vpp`: imports, SoE and realized cost, not the
+    command value. The write-path command is pinned separately in
+    `test_vpp_idle_gate_release.py`, where no execution model sees the verdict.
+
+    The scenario is the report's shape: the plan was IDLE with a sub-floor
+    deficit, and the load arrived anyway (solar 0.0 against a forecast that
+    matched load). That is plan != reality by construction, so the comparison
+    is between the two commands under the *same* reality, which is what
+    isolates the command's effect.
+    """
+
+    N = 3
+    DT = 0.25
+    LOAD_KW = 0.5
+    SMALL_DEFICIT = 0.008
+    LARGE_DEFICIT = 0.5
+
+    def _run(
+        self, allowed: bool, planned_import: float | None = SMALL_DEFICIT
+    ) -> VppSimulationResult:
+        return simulate_vpp(
+            intents=["IDLE"] * self.N,
+            actions_kw=[0.0] * self.N,
+            solar_production=[0.0] * self.N,
+            home_consumption=[self.LOAD_KW * self.DT] * self.N,
+            buy_price=[2.3] * self.N,
+            sell_price=[1.4] * self.N,
+            initial_soe=5.0,
+            settings=_settings(),
+            dt=self.DT,
+            intra_period_discharge_allowed=[allowed] * self.N,
+            planned_grid_imported_kwh=(
+                None if planned_import is None else [planned_import] * self.N
+            ),
+        )
+
+    def test_open_verdict_and_small_deficit_serve_the_load_from_the_battery(
+        self,
+    ) -> None:
+        result = self._run(allowed=True)
+        imported = sum(p.energy.grid_imported for p in result.period_data)
+        assert imported == pytest.approx(0.0, abs=1e-6)
+        assert result.period_data[-1].energy.battery_soe_end < 5.0
+
+    def test_closed_verdict_holds_the_battery_and_imports(self) -> None:
+        """#466 survives: the energy is worth more later, so the hold stays and
+        the house imports at the buy price. This is the discriminating pair."""
+        result = self._run(allowed=False)
+        imported = sum(p.energy.grid_imported for p in result.period_data)
+        assert imported == pytest.approx(self.LOAD_KW * self.DT * self.N)
+        assert result.period_data[-1].energy.battery_soe_end == pytest.approx(5.0)
+
+    def test_open_verdict_with_a_large_planned_deficit_still_holds(self) -> None:
+        """A deficit above the noise floor that the plan left to the grid was
+        a choice. The verdict is a marginal value at the planned SoE, so
+        releasing would let the battery cover the whole deficit and drain
+        energy the plan reserved for later -- measured at +3.6 SEK across the
+        scenario corpus. Same reality as the release case; only the planned
+        deficit differs, which is what discriminates the second condition."""
+        result = self._run(allowed=True, planned_import=self.LARGE_DEFICIT)
+        imported = sum(p.energy.grid_imported for p in result.period_data)
+        assert imported == pytest.approx(self.LOAD_KW * self.DT * self.N)
+        assert result.period_data[-1].energy.battery_soe_end == pytest.approx(5.0)
+
+    def test_release_is_cheaper_than_the_hold_when_the_verdict_is_open(self) -> None:
+        """The cost the hold adds is the import it forces, 0.375 kWh at 2.3.
+        Realized cost excludes the stored energy's own value, so this pins the
+        direction and the size of the avoided import, not an economic verdict
+        (see the module docstring on reading deltas from this model)."""
+        open_cost = self._run(allowed=True).realized_cost
+        closed_cost = self._run(allowed=False).realized_cost
+        assert closed_cost - open_cost > 0
+
+    def test_a_plan_with_no_planned_imports_still_holds(self) -> None:
+        """Without the plan's own deficit the release cannot be decided, so
+        IDLE keeps the hold: the baseline corpus and the #539/#540 pins pass
+        none."""
+        result = self._run(allowed=True, planned_import=None)
+        assert all(
+            c.power_pct == 1 and c.remote_control_enabled for c in result.commands
+        )
+
+    def test_a_plan_with_no_verdicts_still_holds(self) -> None:
+        result = simulate_vpp(
+            intents=["IDLE"] * self.N,
+            actions_kw=[0.0] * self.N,
+            solar_production=[0.0] * self.N,
+            home_consumption=[self.LOAD_KW * self.DT] * self.N,
+            buy_price=[2.3] * self.N,
+            sell_price=[1.4] * self.N,
+            initial_soe=5.0,
+            settings=_settings(),
+            dt=self.DT,
+            planned_grid_imported_kwh=[self.SMALL_DEFICIT] * self.N,
+        )
+        assert all(
+            c.power_pct == 1 and c.remote_control_enabled for c in result.commands
+        )
+
+    def test_inconsistent_series_lengths_raise(self) -> None:
+        with pytest.raises(ValueError, match="inconsistent"):
+            simulate_vpp(
+                intents=["IDLE"] * self.N,
+                actions_kw=[0.0] * self.N,
+                solar_production=[0.0] * self.N,
+                home_consumption=[0.1] * self.N,
+                buy_price=[2.3] * self.N,
+                sell_price=[1.4] * self.N,
+                initial_soe=5.0,
+                settings=_settings(),
+                dt=self.DT,
+                intra_period_discharge_allowed=[True] * self.N,
+                planned_grid_imported_kwh=[0.0],
+            )
 
 
 class TestPlanShape:

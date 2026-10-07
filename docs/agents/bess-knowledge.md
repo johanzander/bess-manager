@@ -357,6 +357,18 @@ cost and SoE are unchanged to 0.000000000000** — the commands moving with the
 energy fixed is the evidence, not a regression. Above the floor, nothing
 changes.
 
+**Exception — fall-through IDLE** (issue #786): below `FLOW_NOISE_FLOOR_KWH`
+no residual cover can be planned, so a tiny deficit lands in IDLE although the
+optimizer never weighed holding against covering. VPP-mode IDLE is released
+(same command as the floor case) when `strategic_intent.idle_hold_releasable`
+holds: the DP's verdict `intra_period_discharge_allowed` is open **and** the
+plan's own `grid_imported` is within the noise floor. The second condition is
+load-bearing: the verdict is a marginal value at the planned SoE, so releasing
+a deliberate IDLE with a large planned deficit lets the battery cover all of
+it (corpus: +3.6 SEK worse, +4.5 on one fixture, versus 0.00 for the narrow
+rule). Flow-neutral when reality matches the plan; the benefit is under
+forecast error.
+
 ### BATTERY_EXPORT vs SOLAR_EXPORT (why the split exists)
 
 Both export to grid, but they are different situations and need different

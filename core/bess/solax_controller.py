@@ -121,6 +121,7 @@ class SolaxController(InverterController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[bool, str]:
         """Write period control settings to hardware.
 
@@ -198,6 +199,7 @@ class SolaxController(InverterController):
         strategic_intent: str = "",
         at_reserve_floor: bool = False,
         charge_rate: int = 100,
+        discharge_authorized: bool = False,
     ) -> tuple[int, bool]:
         """Map (grid_charge, discharge_rate) to (power_pct, remote_control_enabled)
         for display, mirroring _write_period_to_hardware()'s three branches
@@ -212,6 +214,7 @@ class SolaxController(InverterController):
         change SolaxController's own behavior. at_reserve_floor (#592) is in
         that same category: native SolaX never received the Growatt VPP IDLE
         hold (#466) that #592 releases, so there is nothing here to release.
+        discharge_authorized (#786) is in the same category for the same reason.
 
         charge_rate (#754) is NOT in that category: unlike the others, it
         does change what this reports, mirroring how _write_period_to_hardware

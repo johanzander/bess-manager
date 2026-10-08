@@ -1238,6 +1238,12 @@ async def get_inverter_status():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _planned_load_kwh(period_data: PeriodData) -> float:
+    """Net planned managed load (#428 overlay) of one period, 0.0 when none."""
+    breakdown = period_data.consumption_breakdown
+    return breakdown.planned if breakdown is not None else 0.0
+
+
 @router.get("/api/inverter/schedule")
 @router.get("/api/growatt/detailed_schedule")
 async def get_growatt_detailed_schedule():
@@ -1401,6 +1407,7 @@ async def get_growatt_detailed_schedule():
             today_soc_values: list[float | None] = []
             today_actions: list[float] = []
             today_curtailed: list[bool] = []
+            today_planned_loads: list[float] = []
             today_reconciled_intents: list[str] | None = None
             if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
@@ -1437,16 +1444,19 @@ async def get_growatt_detailed_schedule():
                             else planned_intent
                         )
                         today_curtailed.append(pd_today.decision.curtailed)
+                        today_planned_loads.append(_planned_load_kwh(pd_today))
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
                         today_reconciled_intents.append(planned_intent)
                         today_curtailed.append(False)
+                        today_planned_loads.append(0.0)
             raw_groups = schedule_manager.get_detailed_period_groups(
                 intents=today_reconciled_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
                 curtailed=today_curtailed if today_curtailed else None,
+                planned_loads=today_planned_loads if today_planned_loads else None,
             )
             prev_soc: float | None = None
             for group in raw_groups:
@@ -1488,6 +1498,7 @@ async def get_growatt_detailed_schedule():
                         "soc_end_pct": soc_end,
                         "soc_delta_kwh": soc_delta_kwh,
                         "curtailed": group["curtailed"],
+                        "planned_load_kwh": group["planned_load_kwh"],
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1505,6 +1516,7 @@ async def get_growatt_detailed_schedule():
                 tomorrow_actions: list[float] = []
                 tomorrow_soc_values: list[float | None] = []
                 tomorrow_curtailed: list[bool] = []
+                tomorrow_planned_loads: list[float] = []
                 # Resolved by exact timestamp (not positional index -
                 # optimization_period) so a standalone next-day schedule
                 # (period_data[0] anchored to tomorrow 00:00 despite
@@ -1527,6 +1539,7 @@ async def get_growatt_detailed_schedule():
                             else None
                         )
                         tomorrow_curtailed.append(pd.decision.curtailed)
+                        tomorrow_planned_loads.append(_planned_load_kwh(pd))
                     else:
                         tomorrow_soc_values.append(None)
                         tomorrow_curtailed.append(False)
@@ -1536,6 +1549,7 @@ async def get_growatt_detailed_schedule():
                         actions=tomorrow_actions,
                         soc_values=tomorrow_soc_values,
                         curtailed=tomorrow_curtailed,
+                        planned_loads=tomorrow_planned_loads,
                     )
                     tomorrow_period_groups = []
                     prev_soc_tmr: float | None = None
@@ -1584,6 +1598,7 @@ async def get_growatt_detailed_schedule():
                                 "soc_end_pct": soc_end,
                                 "soc_delta_kwh": soc_delta_kwh_tmr,
                                 "curtailed": group["curtailed"],
+                                "planned_load_kwh": group["planned_load_kwh"],
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:

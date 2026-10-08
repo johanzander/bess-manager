@@ -188,3 +188,43 @@ class TestChargeRateFromSchedule:
         groups = controller.get_detailed_period_groups()
         storage_group = next(g for g in groups if g["intent"] == "SOLAR_STORAGE")
         assert storage_group["charge_rate"] == 100
+
+
+class TestPlannedLoadPerGroup:
+    """Planned managed load (#428/#749) is summed per group for the schedule UI (#813)."""
+
+    def test_group_sums_planned_load_of_its_periods(
+        self, controller: GrowattMinController
+    ) -> None:
+        intents = ["LOAD_SUPPORT"] * 8
+        planned = [0.0, 0.0, 0.75, 0.75, 0.75, 0.75, 0.0, 0.0]
+        controller.strategic_intents = intents
+
+        groups = controller.get_detailed_period_groups(planned_loads=planned)
+
+        # Planned load alone never splits a group: control is unchanged.
+        assert len(groups) == 1
+        assert groups[0]["planned_load_kwh"] == pytest.approx(3.0)
+
+    def test_groups_split_by_intent_get_their_own_sums(
+        self, controller: GrowattMinController
+    ) -> None:
+        intents = ["IDLE"] * 4 + ["LOAD_SUPPORT"] * 4
+        planned = [0.5, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0]
+        controller.strategic_intents = intents
+
+        groups = controller.get_detailed_period_groups(planned_loads=planned)
+
+        assert [g["planned_load_kwh"] for g in groups] == [
+            pytest.approx(1.0),
+            pytest.approx(1.0),
+        ]
+
+    def test_no_planned_loads_gives_zero(
+        self, controller: GrowattMinController
+    ) -> None:
+        controller.strategic_intents = ["IDLE"] * 4
+
+        groups = controller.get_detailed_period_groups()
+
+        assert groups[0]["planned_load_kwh"] == 0.0

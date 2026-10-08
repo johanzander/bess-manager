@@ -93,6 +93,7 @@ interface PeriodGroup {
   socEndPct?: number;
   socDeltaKwh?: number | null;
   curtailed?: boolean; // planned PV curtailment (#501), distinct from a profitable SOLAR_EXPORT
+  plannedLoadKwh: number; // net Planned Consumption Changes (#428) energy in this group (#813); negative for a subtract block
 }
 
 interface InverterSchedule {
@@ -285,6 +286,22 @@ interface DashboardData {
     netBatteryPowerFormatted?: string;
   };
 }
+
+
+// Planned managed load (e.g. an evcc EV session fed via Planned Consumption
+// Changes). Shown beside the intent badge because the load does not change the
+// inverter control -- it only explains why the quarters look busier (#813).
+// 0.01 kWh matches the backend's classification epsilon used elsewhere here.
+const PlannedLoadChip: React.FC<{ kwh: number }> = ({ kwh }) =>
+  Math.abs(kwh) > 0.01 ? (
+    <span
+      data-testid="planned-load-chip"
+      className="ml-2 px-2 py-0.5 rounded text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300"
+      title="Planned managed load declared via Planned Consumption Changes"
+    >
+      {kwh > 0 ? '+' : '−'}{Math.abs(kwh).toFixed(2)} kWh planned load
+    </span>
+  ) : null;
 
 const InverterStatusDashboard: React.FC = () => {
   const [inverterStatus, setInverterStatus] = useState<InverterStatus | null>(null);
@@ -844,6 +861,7 @@ const InverterStatusDashboard: React.FC = () => {
                           <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent, group.curtailed)}`}>
                             {getIntentLabel(group.dominantIntent, group.curtailed)}
                           </span>
+                          <PlannedLoadChip kwh={group.plannedLoadKwh} />
                         </td>
                         {/* Solar column: SOLAR_STORAGE and passive IDLE gains.
                             Threshold/precision must match the backend's own
@@ -956,6 +974,7 @@ const InverterStatusDashboard: React.FC = () => {
                                 <span className={`px-2 py-0.5 rounded text-xs font-medium ${getIntentColor(group.dominantIntent, group.curtailed)}`}>
                                   {getIntentLabel(group.dominantIntent, group.curtailed)}
                                 </span>
+                                <PlannedLoadChip kwh={group.plannedLoadKwh} />
                               </td>
                               {/* Solar column -- threshold/precision must match
                                   the backend's own classification epsilon,

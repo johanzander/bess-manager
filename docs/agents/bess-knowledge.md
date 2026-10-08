@@ -1009,6 +1009,13 @@ a period with no split (overlay-free install, missing placeholder) falls back
 to residual == total == `homeConsumption`, planned == 0. This is reporting
 only — the optimizer still sees the single composed array, unchanged.
 
+The Planned Schedule (Inverter page, `/api/inverter/schedule`) shows the same
+fact per period group (issue #813): each group carries `planned_load_kwh`, the
+sum of `consumption_breakdown.planned` over its periods, rendered as a chip
+beside the intent badge. It is display-only — planned load never splits a
+group or changes any control value, so a block inside a longer Load Support
+group tags that group rather than carving it up.
+
 
 ### Managed Loads (issue #706)
 

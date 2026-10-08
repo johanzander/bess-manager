@@ -889,6 +889,7 @@ class InverterController(ABC):
         actions: list[float] | None = None,
         soc_values: list[float | None] | None = None,
         curtailed: list[bool] | None = None,
+        planned_loads: list[float] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -908,6 +909,10 @@ class InverterController(ABC):
                        from PeriodData.decision.curtailed. Defaults to all
                        False when omitted -- callers without curtailment
                        data get the pre-#501 grouping behavior unchanged.
+            planned_loads: Optional per-period net planned managed load in kWh
+                           (PeriodData.consumption_breakdown.planned, #813).
+                           Summed into each group's planned_load_kwh for
+                           display only -- it never affects grouping.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -963,6 +968,11 @@ class InverterController(ABC):
                     "discharge_rate": discharge_rate,
                     "action_kwh": action_kwh,
                     "curtailed": period_curtailed,
+                    "planned_load_kwh": (
+                        planned_loads[period]
+                        if planned_loads is not None and period < len(planned_loads)
+                        else 0.0
+                    ),
                 }
             )
 
@@ -983,6 +993,7 @@ class InverterController(ABC):
                 current_group["end_period"] = ps["period"]
                 current_group["count"] += 1
                 current_group["total_action_kwh"] += ps["action_kwh"]
+                current_group["planned_load_kwh"] += ps["planned_load_kwh"]
             else:
                 if current_group is not None:
                     groups.append(current_group)
@@ -997,6 +1008,7 @@ class InverterController(ABC):
                     "curtailed": ps["curtailed"],
                     "count": 1,
                     "total_action_kwh": ps["action_kwh"],
+                    "planned_load_kwh": ps["planned_load_kwh"],
                 }
 
         if current_group is not None:
@@ -1030,6 +1042,7 @@ class InverterController(ABC):
                     "total_action_kwh": group["total_action_kwh"],
                     "soc_end_pct": soc_end,
                     "curtailed": group["curtailed"],
+                    "planned_load_kwh": group["planned_load_kwh"],
                 }
             )
         return result

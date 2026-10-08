@@ -6,7 +6,8 @@ produce broken UI (wrong platform badge, "Segment #undefined" labels).
 """
 
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -284,6 +285,7 @@ def _group_per_period(**kwargs) -> list[dict]:
             "total_action_kwh": 0.0,
             "soc_end_pct": None,
             "curtailed": False,
+            "planned_load_kwh": 0.0,
         }
         for i in range(len(intents))
     ]
@@ -388,6 +390,80 @@ class TestPeriodGroupsNextDaySchedule:
         assert period_0_group["dominantIntent"] == "LOAD_SUPPORT"
 
 
+class TestPeriodGroupsPlannedLoad:
+    """period_groups carry the planned managed load of their periods (#813)."""
+
+    def test_group_reports_planned_load_from_consumption_breakdown(self) -> None:
+        from core.bess.models import ConsumptionBreakdown
+
+        ctrl = _make_controller("growatt_server_sph")
+        sm = ctrl.system._inverter_controller
+        sm.strategic_intents = ["IDLE"] * 96
+
+        def _fake_groups(**kwargs: Any) -> list[dict]:
+            planned = kwargs["planned_loads"]
+            return [
+                {
+                    "start_time": "00:00",
+                    "end_time": "23:59",
+                    "intent": "IDLE",
+                    "period_count": len(planned),
+                    "duration_minutes": 15 * len(planned),
+                    "charge_rate": 100,
+                    "discharge_rate": 0,
+                    "grid_charge": False,
+                    "total_action_kwh": 0.0,
+                    "soc_end_pct": None,
+                    "curtailed": False,
+                    "planned_load_kwh": sum(planned),
+                }
+            ]
+
+        sm.get_detailed_period_groups.side_effect = _fake_groups
+
+        num_periods = time_utils.get_period_count(time_utils.today())
+        period_data = []
+        for i in range(num_periods):
+            pd = _make_period_data(i, "predicted", "IDLE", None)
+            if 18 <= i < 22:  # 04:30-05:30: the EV block
+                pd.consumption_breakdown = ConsumptionBreakdown(
+                    residual=0.2, planned=0.75, total=0.95
+                )
+            period_data.append(pd)
+        # Tomorrow's quarters live after today's in the same schedule; an EV
+        # block there must reach tomorrowPeriodGroups the same way (#813).
+        tomorrow_count = time_utils.get_period_count(
+            time_utils.today() + timedelta(days=1)
+        )
+        for i in range(num_periods, num_periods + tomorrow_count):
+            pd = _make_period_data(i, "predicted", "IDLE", None)
+            if i in (num_periods + 20, num_periods + 21):
+                pd.consumption_breakdown = ConsumptionBreakdown(
+                    residual=0.2, planned=0.5, total=0.7
+                )
+            period_data.append(pd)
+        ctrl.system.schedule_store.get_latest_schedule.return_value = StoredSchedule(
+            timestamp=datetime.now(),
+            optimization_period=0,
+            optimization_result=OptimizationResult(
+                input_data={}, period_data=period_data
+            ),
+        )
+        by_timestamp = {p.timestamp: p for p in period_data}
+        ctrl.system.schedule_store.get_period_data_at.side_effect = (
+            lambda ts: by_timestamp.get(ts)
+        )
+
+        app_module: Any = sys.modules["app"]
+        app_module.bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+
+        assert resp.json()["periodGroups"][0]["plannedLoadKwh"] == pytest.approx(3.0)
+        tomorrow = resp.json()["tomorrowPeriodGroups"]
+        assert tomorrow[0]["plannedLoadKwh"] == pytest.approx(1.0)
+
+
 # ===========================================================================
 # GET /api/growatt/detailed_schedule — period_groups vpp_power field
 # propagation (issue #415)
@@ -416,6 +492,7 @@ def _group_per_period_vpp(**kwargs) -> list[dict]:
             "total_action_kwh": 0.0,
             "soc_end_pct": None,
             "curtailed": False,
+            "planned_load_kwh": 0.0,
         }
         for i in range(len(intents))
     ]

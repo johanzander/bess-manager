@@ -333,9 +333,16 @@ persistent mode, see the SOLAR_EXPORT and IDLE hardware-mapping notes below):
 - LOAD_SUPPORT → load_first mode
 - BATTERY_EXPORT → grid_first mode (battery discharge to grid)
 - SOLAR_STORAGE / SOLAR_EXPORT / IDLE → load_first mode (solar serves home first)
+  Same mode, **not** same behaviour: for SOLAR_STORAGE, SOLAR_EXPORT and
+  LOAD_SUPPORT the write path raises the discharge rate to 100% when
+  `decision.intra_period_discharge_allowed` is true (battery energy worth no
+  more than the grid price, #526), so a forecast miss is covered from the
+  battery. IDLE is not in that set (`BatterySystemManager._apply_period_schedule`),
+  so its written discharge rate stays 0% and it does not cover an unplanned
+  deficit.
 
-This `load_first` mapping is what register-based platforms (Growatt
-TOU/cloud/SPH) use for all three. **VPP-style platforms diverge for IDLE**
+This `load_first` mode is what register-based platforms (Growatt
+TOU/cloud/SPH) use for all three (with the discharge-rate difference above). **VPP-style platforms diverge for IDLE**
 (issue #466): `load_first` self-use discharges the battery to cover house
 load, but IDLE's own DP cost model (`_idle_battery_flows` in
 `dp_battery_algorithm.py`) never credits battery discharge — only passive

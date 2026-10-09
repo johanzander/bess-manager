@@ -14,7 +14,10 @@ from typing import Any
 
 import pytest
 
-from core.bess.dp_battery_algorithm import optimize_battery_schedule
+from core.bess.dp_battery_algorithm import (
+    optimize_battery_schedule,
+    period_import_caps_kwh,
+)
 from core.bess.tests.helpers import _scenario_inputs, run_scenario_realized
 from core.bess.tests.unit.test_grid_import_cap import (
     IMPORT_CAP_KWH,
@@ -188,6 +191,41 @@ def test_session_cap_binds_tighter_than_a_looser_fuse_cap() -> None:
         f"{spike.energy.grid_imported:.2f} kWh is not below the fuse-alone "
         f"result (~{IMPORT_CAP_KWH:.2f} kWh)"
     )
+    assert realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=0.01
+    ), "Plan is not faithfully executable (R != P)"
+
+
+def test_session_and_peak_shaving_caps_combine_tightest_per_period() -> None:
+    """period_import_caps_kwh is the one combine rule the optimizer plans
+    under and the simulator executes under (#804). A session cap overlapping
+    a peak-shaving window must take the tighter of the two in each period,
+    and either alone must apply where the other is absent."""
+    peak_shaving: list[float | None] = [None, 2.0, 0.2, 2.0]
+    session: list[float | None] = [0.5, None, 0.5, 0.0]
+
+    caps = period_import_caps_kwh(
+        None, peak_shaving, PERIODS, DT, session_import_cap_kwh_per_period=session
+    )
+
+    assert caps == [0.5, 2.0, 0.2, 0.0]
+
+
+def test_power_down_session_inside_a_peak_shaving_window_imports_nothing() -> None:
+    """A joined Power Down session (cap 0.0) overlapping a looser peak-shaving
+    window (cap 1.0) at the same period: the session cap binds, so a full
+    battery covers the load and exports the target with zero grid import, and
+    the plan executes as planned (R == P)."""
+    scenario = _session_scenario(initial_soe=10.0)
+    peak_shaving: list[float | None] = [None] * PERIODS
+    peak_shaving[TARGET_PERIOD] = 1.0
+    scenario["peak_shaving_import_cap_per_period"] = peak_shaving
+
+    result, realized_cost = run_scenario_realized(scenario)
+    period = result.period_data[TARGET_PERIOD]
+
+    assert period.energy.grid_imported == 0.0
+    assert period.energy.grid_exported >= EXPORT_TARGET_KWH
     assert realized_cost == pytest.approx(
         result.economic_summary.battery_solar_cost, abs=0.01
     ), "Plan is not faithfully executable (R != P)"

@@ -146,6 +146,7 @@ def test_fixed_cap_exports_into_tomorrow_evening_and_plan_is_faithful():
             pd.decision.battery_action / dt,
             settings,
             intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=pd.energy.grid_imported,
         )
         for pd in result.period_data
     ]

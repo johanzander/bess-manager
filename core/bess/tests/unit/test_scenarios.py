@@ -683,6 +683,7 @@ def test_466_sunrise_crossover_covers_residual_load_instead_of_idle():
             pd.decision.battery_action / dt,
             inp["battery_settings"],
             intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=pd.energy.grid_imported,
         )
         for pd in result.period_data
     ]
@@ -789,6 +790,7 @@ def test_352_low_rate_export_is_not_planned_when_exact_cover_exists():
             p.decision.battery_action / dt,
             inp["battery_settings"],
             intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=p.energy.grid_imported,
         )
         for p in result.period_data
     ]
@@ -946,6 +948,7 @@ def test_exact_cover_is_delivered_in_the_round_down_band():
             p.decision.battery_action / inp["period_duration_hours"],
             inp["battery_settings"],
             intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=p.energy.grid_imported,
         )
         for p in result.period_data
     ]
@@ -1015,6 +1018,7 @@ def test_grid_charge_plan_is_deliverable_by_the_written_command():
             p.decision.battery_action / dt,
             inp["battery_settings"],
             intra_period_discharge_allowed=p.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=p.energy.grid_imported,
         )
         for p in result.period_data
     ]

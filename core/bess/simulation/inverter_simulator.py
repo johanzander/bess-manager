@@ -20,6 +20,7 @@ from core.bess.execution_model import (
 from core.bess.inverter_controller import InverterController
 from core.bess.models import PeriodData  # noqa: F401  (type clarity)
 from core.bess.settings import BatterySettings
+from core.bess.strategic_intent import discharge_ceiling_lifts
 
 
 @dataclass(frozen=True)
@@ -37,6 +38,7 @@ def derive_control_command(
     battery_action_kw: float,
     settings: BatterySettings,
     intra_period_discharge_allowed: bool | None = None,
+    planned_grid_imported_kwh: float | None = None,
 ) -> ControlCommand:
     """Map a plan period (intent + planned battery power) to the applied command,
     reusing the production controller mappings so the simulator executes exactly
@@ -50,6 +52,11 @@ def derive_control_command(
     ``BatterySystemManager._apply_period_schedule`` for the two solar intents,
     not for all three.
 
+    ``planned_grid_imported_kwh`` is the plan's own deficit for the period
+    (``EnergyData.grid_imported``). IDLE lifts only when it is a fall-through
+    (``strategic_intent.discharge_ceiling_lifts``, #811), so it is required
+    whenever the gate is exercised for an IDLE period.
+
     ``None`` means "this caller is not exercising the gate" and leaves it
     closed -- distinct from ``False``, which is the DP deciding against opening
     it. Keeping the opt-out its own value is what stops the parameter from
@@ -57,7 +64,11 @@ def derive_control_command(
     ``shadow_price``."""
     battery_mode = InverterController.INTENT_TO_MODE.get(strategic_intent, "load_first")
     grid_charge, discharge_rate_pct, charge_rate_pct = _map_rates(
-        strategic_intent, battery_action_kw, settings, intra_period_discharge_allowed
+        strategic_intent,
+        battery_action_kw,
+        settings,
+        intra_period_discharge_allowed,
+        planned_grid_imported_kwh,
     )
     return ControlCommand(
         battery_mode=battery_mode,
@@ -90,6 +101,7 @@ def _map_rates(
     action_kw: float,
     settings: BatterySettings,
     intra_period_discharge_allowed: bool | None = None,
+    planned_grid_imported_kwh: float | None = None,
 ) -> tuple[bool, int, int]:
     """Mirror of InverterController._map_intent_to_rates without needing a live
     controller instance. Returns (grid_charge, discharge_rate_pct, charge_rate_pct)."""
@@ -108,7 +120,17 @@ def _map_rates(
             charge_rate_pct = 100
         return True, 0, charge_rate_pct
     if intent == "IDLE":
-        return False, 0, 100
+        if intra_period_discharge_allowed is None:
+            return False, 0, 100
+        if planned_grid_imported_kwh is None:
+            raise ValueError(
+                "IDLE with the discharge gate exercised needs "
+                "planned_grid_imported_kwh (#811)"
+            )
+        lifts = discharge_ceiling_lifts(
+            "IDLE", intra_period_discharge_allowed, planned_grid_imported_kwh
+        )
+        return False, _gated_discharge_rate(0, lifts), 100
     if intent == "SOLAR_STORAGE":
         rate = _gated_discharge_rate(0, intra_period_discharge_allowed)
         return False, rate, 100

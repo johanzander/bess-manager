@@ -337,6 +337,7 @@ def _plan_and_execute_through_price_manager(
                 action / dt,
                 settings,
                 intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+                planned_grid_imported_kwh=pd.energy.grid_imported,
             )
         )
     return simulate(commands, solar, load, buy, sell, initial_soe, settings, dt)

@@ -78,7 +78,7 @@ from .settings import (
 from .solax_controller import SolaxController
 from .solax_modbus_growatt_controller import SolaxModbusGrowattController
 from .solis_modbus_controller import SolisModbusController
-from .strategic_intent import idle_hold_releasable
+from .strategic_intent import discharge_ceiling_lifts, idle_hold_releasable
 from .terminal_value import TerminalValueCurve, calculate_terminal_curve
 from .time_utils import (
     format_period,
@@ -3089,23 +3089,29 @@ class BatterySystemManager:
         # True, so the planner and this write path read the same hardware two
         # different ways. Solis now declares both explicitly; routing through
         # the capability is what keeps a future platform from re-opening it.
-        if (
-            strategic_intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT")
-            and self.platform_capabilities.discharge_rate_is_load_following
-        ):
+        if self.platform_capabilities.discharge_rate_is_load_following:
             # Resolved by exact timestamp (not positional index -
             # optimization_period) so the standalone next-day schedule
             # (period_data[0] anchored to tomorrow 00:00 despite
             # optimization_period=0) is never misread as today's period.
             target_timestamp = time_utils.period_index_to_timestamp(period)
             period_data = self.schedule_store.get_period_data_at(target_timestamp)
-            if period_data is not None:
-                discharge_rate = max(
-                    discharge_rate,
-                    intra_period_discharge_gate(
-                        period_data.decision.intra_period_discharge_allowed
-                    ),
-                )
+            # Which intents lift, and IDLE's fall-through condition (#811), live
+            # in `strategic_intent.discharge_ceiling_lifts`.
+            if period_data is not None and discharge_ceiling_lifts(
+                strategic_intent,
+                period_data.decision.intra_period_discharge_allowed,
+                period_data.energy.grid_imported,
+            ):
+                discharge_rate = max(discharge_rate, intra_period_discharge_gate(True))
+                if strategic_intent == "IDLE":
+                    logger.info(
+                        "Period %d: IDLE discharge ceiling lifted to %d%% "
+                        "(open verdict, planned import %.4f kWh within noise floor)",
+                        period,
+                        discharge_rate,
+                        period_data.energy.grid_imported,
+                    )
 
         # PV export-limit curtailment (issue #269): opt-in, platform-agnostic
         # decision — curtail whenever this period is exporting at a sell

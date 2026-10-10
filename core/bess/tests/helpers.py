@@ -205,6 +205,7 @@ def run_scenario_realized(scenario: dict) -> tuple:
             pd.decision.battery_action / dt,
             settings,
             intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+            planned_grid_imported_kwh=pd.energy.grid_imported,
         )
         for pd in result.period_data
     ]

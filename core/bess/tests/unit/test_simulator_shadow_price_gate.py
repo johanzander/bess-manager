@@ -107,6 +107,7 @@ def test_load_support_simulator_does_not_open_gate_on_favorable_shadow_price():
         pd.decision.battery_action / dt,
         settings,
         intra_period_discharge_allowed=pd.decision.intra_period_discharge_allowed,
+        planned_grid_imported_kwh=pd.energy.grid_imported,
     )
     baseline = min(
         100,

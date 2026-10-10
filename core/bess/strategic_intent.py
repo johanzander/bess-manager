@@ -53,6 +53,25 @@ def idle_hold_releasable(verdict_open: bool, planned_grid_imported_kwh: float) -
     return verdict_open and planned_grid_imported_kwh <= FLOW_NOISE_FLOOR_KWH
 
 
+def discharge_ceiling_lifts(
+    intent: str, verdict_open: bool, planned_grid_imported_kwh: float
+) -> bool:
+    """Does the DP's open verdict raise this slot's discharge ceiling on a
+    load-following platform (Growatt MIN TOU/cloud)? (#811)
+
+    The one declaration of which intents get the lift, read by the write path
+    and the simulator. SOLAR_EXPORT / SOLAR_STORAGE / LOAD_SUPPORT lift on an
+    open verdict (#526). IDLE lifts only when it is a fall-through
+    (`idle_hold_releasable`): a near-balanced slot lands in IDLE, and with a
+    ceiling of 0 it cannot cover solar coming in low or load coming in high.
+    """
+    if intent in ("SOLAR_EXPORT", "SOLAR_STORAGE", "LOAD_SUPPORT"):
+        return verdict_open
+    if intent == "IDLE":
+        return idle_hold_releasable(verdict_open, planned_grid_imported_kwh)
+    return False
+
+
 def classify_strategic_intent(power: float, energy_data: EnergyData) -> str:
     """Classify the strategic intent of a battery action based on power and energy flows.
 

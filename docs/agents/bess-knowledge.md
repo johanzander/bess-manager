@@ -507,6 +507,15 @@ Raising, never lowering, the plan-scaled ceiling: gate closed → plan-scaled ca
 and the deficit is imported; gate open → ceiling raised and the deficit is
 covered from the battery.
 
+**IDLE gets the lift only as a fall-through (#811).** A near-balanced slot
+(every flow within `FLOW_NOISE_FLOOR_KWH`) classifies IDLE, and IDLE used to be
+written at rate 0, so solar coming in low or load coming in high was imported.
+`strategic_intent.discharge_ceiling_lifts` is the one declaration of which
+intents lift; for IDLE it requires `idle_hold_releasable` (open verdict **and**
+planned grid import within the noise floor). A deliberate IDLE with a larger
+planned deficit stays at 0% — releasing every open-verdict IDLE measured +3.6
+SEK worse over the corpus (#810). Not yet measured on real TOU hardware.
+
 This settles a change that flipped twice (#384/#385 shipped it, #393 reverted
 it, #520 re-landed it). **Do not re-revert on #393's reasoning**, which was:
 "a broad override of the #147 reservation pacing." That double-counts the

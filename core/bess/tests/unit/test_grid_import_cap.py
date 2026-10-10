@@ -7,6 +7,8 @@ docs/agents/bess-knowledge.md and the issue for the economics/behavior this
 pins.
 """
 
+from typing import Any
+
 import pytest
 
 from core.bess.dp_battery_algorithm import _effective_import_cap_kwh
@@ -40,7 +42,7 @@ def test_effective_import_cap_scales_with_phase_count():
     assert cap_3p == pytest.approx(cap_1p * 3)
 
 
-IMPORT_CAP_SCENARIO = {
+IMPORT_CAP_SCENARIO: dict[str, Any] = {
     "battery": {
         "max_soe_kwh": 10.0,
         "min_soe_kwh": 1.0,

@@ -413,6 +413,30 @@ async def patch_settings(updates: dict):
                         ),
                     )
 
+            if store_key == "energy_provider":
+                octopus_update = snake_data.get("octopus")
+                if isinstance(octopus_update, dict):
+                    export_kw = octopus_update.get("power_down_export_kw")
+                    if export_kw is not None and export_kw <= 0:
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"power_down_export_kw must be > 0, got {export_kw!r}",
+                        )
+                    export_minutes = octopus_update.get("power_down_export_minutes")
+                    if export_minutes is not None and export_minutes not in (
+                        15,
+                        30,
+                        45,
+                        60,
+                    ):
+                        raise HTTPException(
+                            status_code=422,
+                            detail=(
+                                "power_down_export_minutes must be one of "
+                                f"15, 30, 45, 60, got {export_minutes!r}"
+                            ),
+                        )
+
             # Read-modify-write: merge into the existing section.
             # Use deep merge so that partial updates to nested sub-dicts (e.g.
             # nordpool_official.config_entry_id) do not erase sibling keys.
@@ -3338,22 +3362,27 @@ async def setup_complete(payload: APISetupCompletePayload):
                 ep["nordpool_hacs"] = {"entity": payload.nordpoolEntity}
             # Persist Octopus entity IDs when provider is octopus
             if payload.provider == "octopus" and payload.octopusImportTodayEntity:
-                from core.bess.settings import FREE_IMPORT_PRICE
+                from core.bess.settings_store import SettingsStore
 
-                ep["octopus"] = {
+                # Update only the fields the wizard collects: the Power Down
+                # settings live in the same section and must survive a wizard
+                # run. Defaults first, for an install that has never had an
+                # octopus section (the load-time migration only backfills keys
+                # into one that already exists).
+                octopus = {
+                    **SettingsStore._bootstrap_defaults()["energy_provider"]["octopus"],
+                    **ep.get("octopus", {}),
                     "import_today_entity": payload.octopusImportTodayEntity,
                     "import_tomorrow_entity": payload.octopusImportTomorrowEntity,
                     "export_today_entity": payload.octopusExportTodayEntity,
                     "export_tomorrow_entity": payload.octopusExportTomorrowEntity,
-                    "free_import_price": (
-                        payload.octopusFreeImportPrice
-                        if payload.octopusFreeImportPrice is not None
-                        else FREE_IMPORT_PRICE
-                    ),
                     "power_up_calendar_entity": (
                         payload.octopusPowerUpCalendarEntity or ""
                     ),
                 }
+                if payload.octopusFreeImportPrice is not None:
+                    octopus["free_import_price"] = payload.octopusFreeImportPrice
+                ep["octopus"] = octopus
             # Persist ENTSO-e entity when provider is entsoe
             if payload.provider == "entsoe" and payload.entsoeEntity:
                 ep["entsoe"] = {"entity": payload.entsoeEntity}

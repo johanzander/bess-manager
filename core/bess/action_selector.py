@@ -495,14 +495,19 @@ class Candidate:
         """kWh imported from the grid under this candidate."""
         return self.flows.grid_imported
 
+    @property
+    def grid_exported(self) -> float:
+        """kWh exported to the grid under this candidate."""
+        return self.flows.grid_exported
+
 
 def _tie_margin(candidates: list[Candidate], best_index: int) -> float:
     """Value gap between the chosen candidate and the best *behaviourally
     distinct* alternative (#450).
 
     `candidates` are the evaluated candidates built by `select_action`,
-    already filtered against the import cap (#429) so every entry here is an
-    action the house's fuse can actually support.
+    already filtered against the import cap (#429) and the minimum export, so
+    every entry here is an action the plan may actually take.
 
     A raw best-minus-second-best gap over the full candidate list is not a
     usable ambiguity signal, because several of those candidates are the
@@ -565,6 +570,7 @@ class PeriodInputs:
     dt: float
     max_charge_power_per_period: list[float] | None = None
     import_cap_kwh: list[float | None] | None = None
+    min_grid_export_kwh: list[float] | None = None
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES
     sell_price_floored: list[bool] | None = None
 
@@ -620,6 +626,10 @@ def select_action(
     against it afterwards, so the cap's "constrain, don't raise" floor --
     the minimum grid_imported any candidate actually achieves -- is
     computable before anything is discarded.
+
+    `period_inputs.min_grid_export_kwh` is the period's minimum grid export
+    (the Octopus Power Down export pulse), filtered with the same "constrain,
+    don't raise" floor, after the import cap -- see the comment at the filter.
     """
     period_max_charge = (
         period_inputs.max_charge_power_per_period[t]
@@ -630,6 +640,11 @@ def select_action(
     import_cap_kwh = (
         period_inputs.import_cap_kwh[t]
         if period_inputs.import_cap_kwh is not None
+        else None
+    )
+    min_grid_export_kwh = (
+        period_inputs.min_grid_export_kwh[t]
+        if period_inputs.min_grid_export_kwh is not None
         else None
     )
     home = period_inputs.home_consumption[t]
@@ -736,10 +751,29 @@ def select_action(
             c for c in candidates if c.grid_imported <= effective_import_cap + 1e-9
         ]
 
+    # Minimum-export filtering, same "constrain, don't raise" shape as the
+    # import cap: a battery that cannot export the whole target exports the
+    # most it can rather than making the period infeasible.
+    #
+    # It runs AFTER the import cap, and the order is not arbitrary. The fuse
+    # cap is physical; the export target is a preference about which feasible
+    # action to take. Measuring the achievable export over the fuse-feasible
+    # set means the target can never talk the plan into an action the fuse
+    # already ruled out. The two backward passes apply the masks in the same
+    # order, over the same columns (the SOLAR_EXPORT bypass and residual cover
+    # included), so V is built under the constraint this selector enforces.
+    if min_grid_export_kwh is not None and candidates:
+        required_export = min(
+            min_grid_export_kwh, max(c.grid_exported for c in candidates)
+        )
+        candidates = [
+            c for c in candidates if c.grid_exported >= required_export - 1e-9
+        ]
+
     # Plain IDLE is offered unconditionally and holds soe within bounds at
-    # every state, so it is always feasible, and the import-cap filter above
-    # cannot empty a non-empty list (its threshold is floored at the minimum
-    # grid_imported any candidate achieves, so that candidate always
+    # every state, so it is always feasible, and neither filter above can
+    # empty a non-empty list (each threshold is floored at what the best
+    # candidate in the set actually achieves, so that candidate always
     # survives) -- `candidates` is never empty and an IndexError below would
     # be a real bug, not a case to defend against.
     #

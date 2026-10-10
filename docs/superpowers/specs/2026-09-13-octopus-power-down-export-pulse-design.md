@@ -1,9 +1,11 @@
 # Design: Octopus Power Down sessions, a guaranteed export pulse
 
 **Date**: 2026-09-13
-**Status**: Proposed. Not implemented. **Depends on**
-`2026-09-13-octopus-power-up-price-overlay-design.md` for the calendar read
-path (`_get_calendar_windows`, `CalendarWindow`), so it lands second.
+**Status**: Implemented on `feat/octopus-power-down-export-pulse` (see
+"Implementation notes" at the end for where the code departs from this text).
+**Depends on** `2026-09-13-octopus-power-up-price-overlay-design.md` for the
+calendar read path (`get_calendar_windows`, `CalendarWindow`), so it lands
+second.
 **Related**: #429 (house-fuse import cap: the "constrain, don't raise"
 candidate filter this design copies), #352 (closed; `grid_first` at a
 sub-load rate imports the shortfall), P1/P3 in
@@ -127,14 +129,11 @@ threaded exactly the way `import_cap_kwh` is today:
 - `optimize_battery_schedule` gains the keyword, default `None`, meaning
   today's behavior exactly.
 
-**No grid import in the window.** `import_cap_kwh` becomes per-period, with
-the session periods capped at `0.0`. The existing "constrain, don't raise"
-floor already means an empty battery still imports the load it must, rather
-than failing. This reuses the filter that exists instead of adding a second
-one. The scalar-to-list change touches every `import_cap_kwh` site listed by
-`grep -n import_cap_kwh core/bess/{action_selector,dp_battery_algorithm,pwl_window_dp}.py`.
-That's mechanical but wide, so it goes in its own commit with the parity
-test passing before and after.
+**No grid import in the window.** `import_cap_kwh` is already per-period
+(#772 made it so for the peak-shaving window), so the session periods are
+capped at `0.0` through it. The existing "constrain, don't raise" floor
+already means an empty battery still imports the load it must, rather than
+failing. This reuses the filter that exists instead of adding a second one.
 
 ### 3. Building the per-period targets (`BatterySystemManager`)
 
@@ -237,8 +236,6 @@ instead of one install's five sessions.
   A later run after the target is met sets no further targets.
 - **Disabled by default**: with `power_down.enabled = False`, plans are
   bit-identical to today's across the fixture corpus.
-- **Import cap refactor**: the scalar-to-per-period `import_cap_kwh` change
-  alone leaves every existing fixture's plan unchanged.
 
 ## Non-goals
 
@@ -250,3 +247,54 @@ instead of one install's five sessions.
   would. This design exists to replace that approach.
 - `TURN_UP` Power Up baseline rewards. See the companion spec's known
   limitation.
+
+## Implementation notes
+
+Built on the Power Up branch (`15f88983`). Where the implementation differs
+from the text:
+
+- **Configuration is Octopus-only, under `energy_provider.octopus`**, following
+  the Power Up implementation notes rather than §1/§5's sensor keys:
+  `power_down_enabled` (default false), `power_down_calendar_entity`,
+  `power_down_events_entity`, `power_down_export_kw` (default 1.0) and
+  `power_down_export_minutes` (15/30/45/60, default 15, replacing
+  `export_periods`). There are no `octoplus_power_down_*` sensor keys; BSM
+  passes the configured entity to `get_calendar_windows`, and the events
+  entity is read through `get_entity_state_raw`.
+- **§4 open item, resolved: no gate.** BESS has no model of an
+  export-forbidden install. `export_curtailment_*` is a sell-price policy
+  (#269), and it is only actuated on platforms with
+  `supports_export_limit_control`; `PlatformCapabilities` has no
+  export-permission fact; and every controller maps `BATTERY_EXPORT` and
+  `SOLAR_EXPORT` to a real command. So the settings block shows for every
+  Octopus user, and its help text states that the grid connection must allow
+  export. The "constrain, don't raise" floor still reduces the target to what
+  the install can export. Known interaction: with curtailment enabled on a
+  supporting platform, the per-period export-limit write can zero a planned
+  pulse when that period's sell price is below the floor. Each outcome record
+  carries `export_curtailment_active` so that case is visible.
+- **The session import cap is its own keyword.**
+  `optimize_battery_schedule(session_import_cap_kwh_per_period=...)` is
+  combined element-wise (`_combine_import_caps`) with the fuse cap and the
+  peak-shaving cap (#772). The horizon-level `import_cap_kwh` is a
+  `list[float | None]`, where `None` means no cap in that period.
+- **Selector order.** The minimum-export filter runs after the import-cap
+  filter, in the selector and in both backward passes, so the achievable
+  export is measured over the fuse-feasible set. The grid backward pass
+  excludes sub-resolution (`_discharge_is_unexecutable`) discharges from that
+  measure; `optimizer-architecture.md` P1 records why.
+- **Placement and rollover.** Session periods are counted against the pulse
+  duration whether or not they delivered. The shortfall goes on the first
+  `max(1, ceil(minutes/15) − completed session periods)` remaining periods,
+  split evenly. So a 30-minute pulse whose first slot delivered puts the
+  remainder on the next slot only, and does not stretch the pulse.
+- **Session windows** are fetched and cached by `PriceManager` beside the Power
+  Up windows (`get_power_down_windows()`), and are never applied to prices.
+  No health-check component was added for them.
+- **Outcome records.** One new frozen dataclass, `PowerDownSessionOutcome`
+  (`core/bess/power_down_outcome.py`), stored as
+  `DailyView.power_down_sessions` and persisted through `DailyViewStore` in
+  the same tick the session's last period is recorded. "Planned" is the
+  stored schedule current at session start. Octopoints are backfilled hourly
+  for the last 14 days, matched on session start. Today's records are exported
+  as `power_down_sessions_today` in the debug bundle.

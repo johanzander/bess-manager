@@ -1885,6 +1885,50 @@ class TestDiscoverOctopusEntities:
             "powerUpCalendarDisabledBy": "integration",
         }
 
+    def test_octoplus_power_down_calendar_and_events_discovered(self) -> None:
+        registry = [
+            *self._octopus_registry(),
+            _entity(
+                "calendar.octopus_energy_a_982b3d40_octoplus_power_down",
+                "octopus_energy",
+                "octopus_energy_A-982B3D40_octoplus_power_down",
+            ),
+            _entity(
+                "event.octopus_energy_a_982b3d40_octoplus_power_down_events",
+                "octopus_energy",
+                "octopus_energy_A-982B3D40_octoplus_power_down_events",
+            ),
+            # Deprecated entity family must not match.
+            _entity(
+                "event.octopus_energy_a_982b3d40_octoplus_saving_sessions",
+                "octopus_energy",
+                "octopus_energy_A-982B3D40_octoplus_saving_sessions",
+            ),
+        ]
+        result = self.ctrl.discover_octopus_entities(registry)
+        assert (
+            result["powerDownCalendar"]
+            == "calendar.octopus_energy_a_982b3d40_octoplus_power_down"
+        )
+        assert (
+            result["powerDownEvents"]
+            == "event.octopus_energy_a_982b3d40_octoplus_power_down_events"
+        )
+        assert "powerDownCalendarDisabledBy" not in result
+
+    def test_disabled_power_down_calendar_is_reported_as_disabled(self) -> None:
+        entry = _entity(
+            "calendar.octopus_energy_a_982b3d40_octoplus_power_down",
+            "octopus_energy",
+            "octopus_energy_A-982B3D40_octoplus_power_down",
+        )
+        entry["disabled_by"] = "integration"
+        result = self.ctrl.discover_octopus_entities([entry])
+        assert result == {
+            "powerDownCalendar": "calendar.octopus_energy_a_982b3d40_octoplus_power_down",
+            "powerDownCalendarDisabledBy": "integration",
+        }
+
     def test_empty_registry(self):
         assert self.ctrl.discover_octopus_entities([]) == {}
 

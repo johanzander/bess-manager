@@ -334,8 +334,8 @@ class TestAdjustChargingPowerSkipsUnsupported:
         """The same transient HA failure hitting the *second* read must not
         crash the cron job either (issue #643).
 
-        `adjust_battery_charging` reads the current rate after the headroom. `get_charging_power_rate`
-        goes through `_get_raw_state`, which already degrades a
+        `adjust_battery_charging` reads the current rate after the headroom.
+        `get_charging_power_rate` goes through `_get_raw_state`, which already degrades a
         `RequestException` to `None` -- and `None` then reached
         `abs(target_power - current_power)` as a `TypeError`, escaping the
         5-minute job exactly as the unguarded first read did. A Supervisor

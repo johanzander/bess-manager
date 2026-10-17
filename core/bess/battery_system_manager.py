@@ -4570,9 +4570,9 @@ class BatterySystemManager:
             KeyError,
             requests.RequestException,
         ) as e:
-            # RequestException: grid_charge_enabled() reads through
-            # _api_request, which re-raises once its retries are exhausted.
-            # A transient HA failure skips this tick rather than escaping to
+            # RequestException: the charge-rate write goes through
+            # _service_call_with_retry, which re-raises once its retries are
+            # exhausted. A transient HA failure skips this tick rather than escaping to
             # APScheduler; the inverter keeps its current rate (issue #643).
             logger.error("Failed to adjust charging power: %s", str(e))
 

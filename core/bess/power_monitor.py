@@ -4,7 +4,8 @@ It does this by:
 
 1. Power Monitoring:
    - Continuously monitors current draw on electrical phases (single or three-phase)
-   - Calculates total power consumption per phase
+   - Calculates house power consumption per phase (the battery's own charging
+     draw is subtracted: the phase sensors are grid-side meters)
    - Considers house fuse limits (e.g., 25A per phase)
    - Maintains a safety margin to prevent tripping fuses
 
@@ -102,12 +103,17 @@ class HomePowerMonitor:
             ]
 
         if self.home_settings.phase_count == 1:
-            all_methods = ["get_l1_current", "get_charging_power_rate"]
+            all_methods = [
+                "get_l1_current",
+                "get_battery_charge_power",
+                "get_charging_power_rate",
+            ]
         else:
             all_methods = [
                 "get_l1_current",
                 "get_l2_current",
                 "get_l3_current",
+                "get_battery_charge_power",
                 "get_charging_power_rate",
             ]
 
@@ -181,12 +187,35 @@ class HomePowerMonitor:
             readings["current_l3"] * voltage,
         )
 
+    def get_house_phase_loads_w(self) -> tuple[float, ...]:
+        """Get the load each phase would carry without the battery charging.
+
+        The phase-current sensors are grid-side meters, so while the battery
+        charges they read house load plus the battery's own draw. The draw is
+        split evenly across phases and subtracted. Charging fed by solar does
+        not reach the meter, so subtracting the full draw yields house load
+        net of PV -- exactly the baseline the grid-sourced charge adds to --
+        and is clamped at zero.
+
+        Raises:
+            ValueError: If the battery charge power sensor cannot be read.
+        """
+        battery_w = self.controller.get_battery_charge_power()
+        if battery_w is None:
+            raise ValueError(
+                "Cannot calculate house load: battery_charge_power sensor read "
+                "returned None"
+            )
+        phase_loads = self.get_current_phase_loads_w()
+        battery_per_phase_w = battery_w / len(phase_loads)
+        return tuple(max(0.0, load - battery_per_phase_w) for load in phase_loads)
+
     def calculate_available_charging_power(self) -> float:
         """Calculate safe battery charging power based on most loaded phase and target power."""
         phase_count = self.home_settings.phase_count
 
-        # Get current loads in watts (variable-length tuple matching phase count)
-        phase_loads = self.get_current_phase_loads_w()
+        # House-only loads in watts (variable-length tuple matching phase count)
+        phase_loads = self.get_house_phase_loads_w()
 
         # Find most loaded phase in watts
         max_load_w = max(phase_loads)
@@ -238,8 +267,15 @@ class HomePowerMonitor:
 
         return max(0, charging_power_pct)
 
-    def adjust_battery_charging(self) -> None:
-        if not self.controller.grid_charge_enabled():
+    def adjust_battery_charging(self, grid_charging: bool) -> None:
+        """Set the charging power rate for the current period.
+
+        Args:
+            grid_charging: Whether the current period's plan grid-charges. This
+                comes from the plan, not from the inverter's grid-charge state,
+                which still reads off for a few seconds after a period starts.
+        """
+        if not grid_charging:
             # Solar-only charging: no fuse risk, allow full target charging power
             target_power = self.target_charging_power_pct
         else:

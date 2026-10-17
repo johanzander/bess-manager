@@ -20,6 +20,8 @@ class MockController:
         self.l3_current = l3_current
         self.grid_charge = False
         self.charging_power_rate = 0
+        # Phase currents here are house-only; no battery draw to subtract.
+        self.battery_charge_power = 0.0
 
     def get_l1_current(self):
         return self.l1_current
@@ -29,6 +31,9 @@ class MockController:
 
     def get_l3_current(self):
         return self.l3_current
+
+    def get_battery_charge_power(self) -> float:
+        return self.battery_charge_power
 
     def grid_charge_enabled(self):
         return self.grid_charge

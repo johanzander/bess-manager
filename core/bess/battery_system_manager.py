@@ -4550,7 +4550,9 @@ class BatterySystemManager:
 
             if self._power_monitor:
                 self._power_monitor.update_target_charging_power(charge_rate)
-                self._power_monitor.adjust_battery_charging()
+                self._power_monitor.adjust_battery_charging(
+                    grid_charging=settings["grid_charge"]
+                )
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a

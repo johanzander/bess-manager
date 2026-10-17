@@ -528,8 +528,8 @@ considered clean — regardless of what happens next.
 ### 8. Local run & observe (never skip this)
 
 Invoke the `verify` skill: actually exercise the fix and capture real
-output — the reproducing mock-HA scenario via
-`docker compose -f docker-compose.ci.yml`, a dev-server flow for frontend
+output — for scheduling/control changes a `from_debug_log.py` +
+`./mock-run.sh` replay (the `ci-*` fixtures can't schedule; see `verify`), a dev-server flow for frontend
 changes, or the relevant CLI/pytest path with output inspected, not just its
 exit code. A green test suite is necessary, not sufficient — this step is
 what makes this skill worth running instead of the bot pipeline, and it is

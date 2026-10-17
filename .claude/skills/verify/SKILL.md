@@ -9,6 +9,25 @@ Use `docker-compose.ci.yml` (works with `podman-compose`) to run the real
 backend against a scripted mock Home Assistant instance, then hit the actual
 HTTP API (or load the served frontend) to observe the change.
 
+## Pick the fixture first — most `ci-*` scenarios cannot run the scheduler
+
+The `ci-*` scenarios and `e2e/ci-bess-settings*.json` exist for the setup
+wizard and UI smoke tests. `ci-normal-day` has no Growatt `device_id` and no
+solar-forecast sensor, so the backend never computes a schedule: every control
+path (power monitor, charge rate, TOU writes) just logs `No strategic intents
+available`, and the change under test is never reached (#816).
+
+- **Change touches scheduling or control** (optimizer, `adjust_charging_power`,
+  power monitor, inverter writes): replay a real debug bundle with
+  `from_debug_log.py` + `./mock-run.sh <timestamp>` (`docs/agents/testing.md`,
+  "Bug Reproduction with Mock HA"). It carries a complete config, prices and
+  forecast. The only `ci-*` fixture that also solves is
+  `ci-wizard-huawei-luna2000`, and only on Huawei.
+- **Change touches health, settings or the UI only:** `ci-normal-day` below.
+
+Before relying on a stack, check it produced a schedule: the log must show
+`Period N (HH:MM): Intent=…`, not `No strategic intents available`.
+
 ## One-time setup
 
 - In a fresh worktree, run `./scripts/worktree-setup.sh` first — it shares

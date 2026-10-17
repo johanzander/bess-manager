@@ -428,10 +428,11 @@ class BESSController:
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 
-        # Charging power adjustment (every 5 minutes)
+        # Charging power adjustment (every minute: fuse protection must react
+        # to a new household load before the fuse does)
         self.scheduler.add_job(
             self.system.adjust_charging_power,
-            CronTrigger(minute="*/5"),
+            CronTrigger(minute="*"),
             misfire_grace_time=30,  # Allow 30 seconds of misfire before warning
         )
 

@@ -4550,7 +4550,9 @@ class BatterySystemManager:
 
             if self._power_monitor:
                 self._power_monitor.update_target_charging_power(charge_rate)
-                self._power_monitor.adjust_battery_charging()
+                self._power_monitor.adjust_battery_charging(
+                    grid_charging=settings["grid_charge"]
+                )
             else:
                 # Power monitor disabled — write charge rate directly so the
                 # inverter register is not left at a stale value (e.g. 0% from a
@@ -4568,9 +4570,9 @@ class BatterySystemManager:
             KeyError,
             requests.RequestException,
         ) as e:
-            # RequestException: grid_charge_enabled() reads through
-            # _api_request, which re-raises once its retries are exhausted.
-            # A transient HA failure skips this tick rather than escaping to
+            # RequestException: the charge-rate write goes through
+            # _service_call_with_retry, which re-raises once its retries are
+            # exhausted. A transient HA failure skips this tick rather than escaping to
             # APScheduler; the inverter keeps its current rate (issue #643).
             logger.error("Failed to adjust charging power: %s", str(e))
 

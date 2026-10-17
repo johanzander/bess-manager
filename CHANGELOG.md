@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Fuse protection no longer swings grid charging between 0% and 100%** — it now excludes the battery's own draw from house load and checks every minute. ([#816](https://github.com/johanzander/bess-manager/issues/816))
 - **Growatt VPP: no more needless grid import in near-idle periods** — when the plan only fell through to idle, the battery now covers load that arrives unexpectedly. ([#786](https://github.com/johanzander/bess-manager/issues/786))
 - **Growatt TOU/cloud: no more needless grid import in near-idle periods** — a near-balanced period now lets the battery cover unexpected load, like the other intents. ([#811](https://github.com/johanzander/bess-manager/issues/811))
 - **Growatt GEN4 (solax_modbus) no longer maps unused TOU slots 2–9** — new setups only bind slot 1, ending the 404 error noise in debug exports. ([#794](https://github.com/johanzander/bess-manager/issues/794))

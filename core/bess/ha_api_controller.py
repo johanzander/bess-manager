@@ -954,7 +954,10 @@ class HomeAssistantAPIController:
         "storage_discharging_cutoff_capacity": "battery_discharge_stop_soc",
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
-        "active_power": "local_load_power",
+        # No household-load entry: the huawei_solar integration has no load
+        # register outside an EMMA. active_power (32080) is the inverter's
+        # signed AC output and goes negative while the battery charges from the
+        # grid, so mapping it as local_load_power showed negative Home Usage (#818).
         # PV production, NOT accumulated_yield_energy (#569).  That register
         # (32106, "Total yield") is the inverter's accumulated AC *output*:
         # on a LUNA2000 hybrid it rises while the battery discharges and

@@ -891,7 +891,6 @@
       "import_power",
       "export_power",
       "pv_power",
-      "local_load_power",
       "lifetime_battery_charged",
       "lifetime_battery_discharged",
       "lifetime_solar_energy",

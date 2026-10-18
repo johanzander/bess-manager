@@ -20,6 +20,11 @@ export interface InverterForm {
    * domain; set it for an integration exposing the same services under its
    * own domain name. */
   serviceDomain?: string;
+  /** Huawei only: sign of the mapped grid power sensor. "" = the platform
+   * default (export-positive, the separate power meter); "import_positive"
+   * for a sensor that reads positive while importing, e.g. an EMMA feed-in
+   * sensor (#818). */
+  gridPowerPolarity?: '' | 'import_positive' | 'export_positive';
   /** Domain currently in effect, computed server-side — display only. */
   resolvedServiceDomain?: string;
 }
@@ -554,6 +559,31 @@ export function SensorConfigSection({ sensors, onChange, inverterForm, onInverte
                 </label>
 
                 <ServiceDomainField inverterForm={inverterForm} onInverterChange={onInverterChange} />
+
+                <label className="flex items-start gap-2 mt-3">
+                  <input
+                    type="checkbox"
+                    data-testid="huawei-grid-import-positive"
+                    checked={inverterForm.gridPowerPolarity === 'import_positive'}
+                    onChange={e =>
+                      onInverterChange({
+                        ...inverterForm,
+                        gridPowerPolarity: e.target.checked ? 'import_positive' : '',
+                      })
+                    }
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Grid power is import-positive
+                    </span>
+                    <span className="block text-[11px] text-gray-500 dark:text-gray-400">
+                      Leave off for the separate power meter (positive = export). Turn on
+                      if your grid power sensor reads positive while importing, e.g. a
+                      Huawei EMMA feed-in sensor.
+                    </span>
+                  </span>
+                </label>
               </TabsContent>
             </Tabs>
           );

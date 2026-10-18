@@ -46,7 +46,11 @@ from core.bess.influxdb_helper import is_influxdb_configured
 from core.bess.models import PeriodData
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import canonicalize_consumption_strategy
-from core.bess.settings_store import VALID_PLATFORMS, flatten_sensors
+from core.bess.settings_store import (
+    VALID_GRID_POWER_POLARITIES,
+    VALID_PLATFORMS,
+    flatten_sensors,
+)
 from core.bess.time_utils import get_period_count
 
 router = APIRouter()
@@ -410,6 +414,15 @@ async def patch_settings(updates: dict):
                         status_code=422,
                         detail=(
                             f"Invalid Home Assistant integration domain: {domain!r}"
+                        ),
+                    )
+                polarity = snake_data.get("grid_power_polarity")
+                if polarity and polarity not in VALID_GRID_POWER_POLARITIES:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=(
+                            f"grid_power_polarity must be one of "
+                            f"{VALID_GRID_POWER_POLARITIES}, got {polarity!r}"
                         ),
                     )
 

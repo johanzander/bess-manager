@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Huawei: Home Usage no longer goes negative while grid-charging** — inverter active power is no longer auto-mapped as household load, and the field is now labelled "Household Load Power". Existing Huawei installs that mapped it should clear or replace it in Settings. ([#818](https://github.com/johanzander/bess-manager/issues/818))
+- **Huawei: grid power sign is configurable** — Settings → Integrations → Huawei has a new "Grid power is import-positive" switch for sensors, such as an EMMA feed-in sensor, that read positive while importing. ([#818](https://github.com/johanzander/bess-manager/issues/818))
 - **Fuse protection no longer swings grid charging between 0% and 100%** — it now excludes the battery's own draw from house load and checks every minute. ([#816](https://github.com/johanzander/bess-manager/issues/816))
 - **Growatt VPP: no more needless grid import in near-idle periods** — when the plan only fell through to idle, the battery now covers load that arrives unexpectedly. ([#786](https://github.com/johanzander/bess-manager/issues/786))
 - **Growatt TOU/cloud: no more needless grid import in near-idle periods** — a near-balanced period now lets the battery cover unexpected load, like the other intents. ([#811](https://github.com/johanzander/bess-manager/issues/811))

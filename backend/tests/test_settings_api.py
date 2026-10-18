@@ -369,6 +369,57 @@ class TestPatchSettingsServiceDomainValidation:
         assert resp.status_code == 200
 
 
+class TestPatchSettingsGridPowerPolarity:
+    """inverter.grid_power_polarity overrides the Huawei platform's grid sign
+    (#818). It is edited via PATCH, so the value is validated here and the live
+    controller's polarity is refreshed without a restart."""
+
+    def test_override_persisted_and_live_polarity_refreshed(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "gridPowerPolarity": "import_positive",
+                }
+            },
+        )
+        assert resp.status_code == 200
+        assert (
+            mock_controller.settings_store.data["inverter"]["grid_power_polarity"]
+            == "import_positive"
+        )
+        mock_controller.refresh_power_polarities.assert_called()
+
+    def test_unknown_value_rejected(self, mock_controller: MagicMock) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "gridPowerPolarity": "positive_up",
+                }
+            },
+        )
+        assert resp.status_code == 422
+
+    def test_empty_value_accepted_as_reset_to_platform_default(
+        self, mock_controller: MagicMock
+    ) -> None:
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "inverter": {
+                    "platform": "huawei_solar_luna2000",
+                    "gridPowerPolarity": "",
+                }
+            },
+        )
+        assert resp.status_code == 200
+
+
 class TestPatchSettingsLegacyInverterType:
     """The legacy growatt.inverterType path was removed — platform changes go
     through the "inverter" section only. A stray legacy key must not switch

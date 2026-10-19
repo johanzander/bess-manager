@@ -514,16 +514,12 @@ Fix any CONFIRMED findings and any failing suite in the same worktree,
 re-running the check if the fix was non-trivial, before this step is
 considered clean — regardless of what happens next.
 
-- **Diff is backend-only (no `frontend/**`, no `*.tsx`/`*.jsx`/`*.css`) and
-  the report is fully clean:** don't stop. State what passed in one line
-  and continue straight through Step 8 into Step 9 — this is the
-  fully-automatic path for non-UI work.
-- **Diff touches the frontend, OR the report isn't fully clean and you
-  can't get it clean yourself:** stop and present the report to the user
-  (suite results, any findings, what you fixed). Wait for explicit
-  go-ahead before Step 8 — same reasoning as Step 3, cheap insurance
-  against shipping a finding-blocked, slow-suite-broken, or unreviewed UI
-  change.
+- **The report is fully clean:** don't stop, frontend diff or not (#706,
+  #818). State what passed in one line and continue straight through Step 8
+  into Step 9 — the draft PR is the review point.
+- **It isn't, and you can't get it clean yourself:** stop and present the
+  report (suite results, any findings, what you fixed). Wait for explicit
+  go-ahead before Step 8.
 
 ### 8. Local run & observe (never skip this)
 
@@ -614,11 +610,10 @@ PR that is already `CONFLICTING` is worse than it sounds: GitHub creates **no
 workflow run at all** for it, so the PR shows no checks rather than a
 conflict, and the first reader concludes CI dropped the event.
 
-**Frontend diffs only:** before pushing, show the user the diff and the
-Step 8 verification output (screenshot/dev-server observation) and wait for
-explicit go-ahead. This is the one point in the fully-automatic flow where a
-human looks before anything is pushed — backend-only diffs skip straight to
-push, no pause here.
+**Do not pause before pushing, frontend or not** — the draft PR is the review
+point. For a frontend diff, put the Step 8 observation (dev-server output,
+screenshot) in the PR's Test plan so the reviewer sees what you saw (#818
+stopped here for a "go-ahead" the maintainer had already waived).
 
 Open a draft PR against `main` via
 `superpowers:finishing-a-development-branch` (Option 2: push + PR) —
@@ -733,9 +728,14 @@ Reading "no checks" as green is how a red PR gets handed over as finished.
 
 Then, on this PR only:
 
-- **Checks fail:** read `gh run view --log-failed`, fix in the worktree,
-  re-run `./scripts/quality-check.sh`, push. This is your diff, so a real
-  test failure is yours to fix — not merely to report.
+- **Checks fail:** read the failed log yourself, in this turn — never end
+  the turn to wait for it. `--log-failed` returns nothing until the whole run
+  finishes, so `gh run watch <run-id>` first. In the sandbox it needs
+  `XDG_CACHE_HOME=$TMPDIR` and the Actions log hosts in `allowed_domains`.
+  Fix in the worktree, re-run `./scripts/quality-check.sh`, push. This is
+  your diff, so a real failure is yours to fix — not merely to report. CI's
+  mypy can differ from the local ratchet (annotating a test function makes
+  mypy check its body, #818): also run `scripts/mypy-changed.sh .venv/bin/mypy`.
 - **Went `CONFLICTING`** (another PR merged in the minutes since Step 9):
   `git merge origin/main`, resolve, `quality-check.sh`, push.
 - **Green and mergeable:** continue to Step 11's review loop — a green PR is
@@ -890,10 +890,9 @@ does not happen; Step 4's prune is the cleanup that actually runs.
 - About to relaunch an issue that has already died twice without saying so.
 - About to commit or open the PR without having actually run/observed the
   fix — only ran automated tests.
-- About to skip the Step 3 confirm gate, or the Step 7 gate for a frontend
-  diff or an unresolved-findings diff, because of time pressure. (Skipping
-  Step 7 for a clean, backend-only diff is the intended fully-automatic
-  path — that's not this red flag.)
+- About to skip the Step 3 confirm gate, or the Step 7 gate for an
+  unresolved-findings diff, because of time pressure. (Skipping Step 7 for
+  a clean diff is the intended fully-automatic path.)
 - About to open the PR before `/code-review` CONFIRMED findings are
   resolved.
 - About to re-run the full `bess-analyst` diagnosis when a verified bot
@@ -939,7 +938,7 @@ does not happen; Step 4's prune is the cleanup that actually runs.
 | 4. Worktree | `using-git-worktrees` | No |
 | 5. TDD | `test-driven-development` | No |
 | 6. Quality gate + code review | `quality-check.sh` + slow suite + `code-review` (background agent) | No |
-| 7. Confirm gate 2 | — | Conditional (auto-continue if backend-only + clean; otherwise No) |
+| 7. Confirm gate 2 | — | Conditional (auto-continue if clean; otherwise No) |
 | 8. Local run & observe | `verify` | **Never** |
 | 9. Commit + PR | `finishing-a-development-branch` (incl. pre-push `git merge origin/main`) | No |
 | 10. Watch this PR to green | `gh pr checks --watch` — this PR only | No |

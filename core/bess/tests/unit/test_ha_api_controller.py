@@ -1812,7 +1812,7 @@ class TestGridPolarityOverride:
         )
         c.max_attempts = 1
         c.retry_base_delay = 0
-        c.session.get = _session_method_mock(
+        c.session.get = _session_method_mock(  # type: ignore[method-assign]
             "get", return_value=_mock_response({"state": "10815"})
         )
         return c

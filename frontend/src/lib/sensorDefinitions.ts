@@ -492,7 +492,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
       {
         name: 'Power Monitoring',
         sensors: [
-          { key: 'local_load_power', label: 'Inverter Active Power', required: false },
+          { key: 'local_load_power', label: 'Household Load Power', required: false },
           { key: 'pv_power', label: 'Solar PV Power (Input Power)', required: false },
           { key: 'import_power', label: 'Grid Power (power meter, net signed)', required: false },
         ],

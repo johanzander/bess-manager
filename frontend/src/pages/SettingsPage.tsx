@@ -253,6 +253,7 @@ const SettingsPage: React.FC = () => {
         deviceId: (isHuawei ? invNew.deviceId : growatt_s.deviceId) ?? '',
         controlMode: (invNew.controlMode as 'tou' | 'vpp' | undefined) ?? 'tou',
         serviceDomain: (invNew.serviceDomain as string | undefined) ?? '',
+        gridPowerPolarity: (invNew.gridPowerPolarity as InverterForm['gridPowerPolarity'] | undefined) ?? '',
         resolvedServiceDomain: (invNew.resolvedServiceDomain as string | undefined) ?? '',
       };
       setInverterForm(inv);
@@ -515,7 +516,10 @@ const SettingsPage: React.FC = () => {
       controlMode: inverterForm.controlMode ?? 'tou',
       serviceDomain: inverterForm.serviceDomain ?? '',
       ...(inverterForm.inverterPlatform === 'huawei_solar_luna2000'
-        ? { deviceId: inverterForm.deviceId }
+        ? {
+            deviceId: inverterForm.deviceId,
+            gridPowerPolarity: inverterForm.gridPowerPolarity ?? '',
+          }
         : {}),
     },
   });

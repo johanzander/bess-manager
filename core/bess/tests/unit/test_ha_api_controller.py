@@ -1778,3 +1778,83 @@ class TestSolcastDetailedHourlyToQuarterly:
         )
 
         assert quarterly[36:40] == pytest.approx([0.3] * 4)
+
+
+class TestGridPolarityOverride:
+    """Issue #818: a Huawei EMMA reports grid power import-positive.
+
+    ``PLATFORM_GRID_POWER_POLARITY`` is a per-platform default (the separate
+    power-meter register is export-positive, #438), but the sign belongs to
+    whichever entity the user mapped. ``inverter.grid_power_polarity`` is the
+    per-install override. Built on a real SettingsStore, because the outcome
+    that matters is what the controller reads back through it.
+    """
+
+    ENTITY = "sensor.huawei_emma_a02_feed_in_power"
+
+    def _ctrl(self, override: str | None) -> HomeAssistantAPIController:
+        platform = "huawei_solar_luna2000"
+        store = SettingsStore()
+        inverter = {"platform": platform}
+        if override is not None:
+            inverter["grid_power_polarity"] = override
+        store.data["inverter"] = inverter
+        store.data["sensors"] = {
+            "platform": platform,
+            platform: {"import_power": self.ENTITY},
+        }
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=store,
+            battery_power_polarity=store.get_battery_power_polarity(),
+            grid_power_polarity=store.get_grid_power_polarity(),
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        c.session.get = _session_method_mock(  # type: ignore[method-assign]
+            "get", return_value=_mock_response({"state": "10815"})
+        )
+        return c
+
+    def test_import_positive_override_reads_grid_charging_as_import(self) -> None:
+        """The reporter's bundle: +10815 W while charging the battery from the grid."""
+        ctrl = self._ctrl("import_positive")
+        assert ctrl.get_import_power() == 10815.0
+        assert ctrl.get_export_power() == 0.0
+
+    @pytest.mark.parametrize("override", [None, ""])
+    def test_no_override_keeps_the_platform_default(self, override: str | None) -> None:
+        ctrl = self._ctrl(override)
+        assert ctrl.get_export_power() == 10815.0
+        assert ctrl.get_import_power() == 0.0
+
+    def test_explicit_export_positive_override(self) -> None:
+        ctrl = self._ctrl("export_positive")
+        assert ctrl.get_export_power() == 10815.0
+
+    def test_override_is_ignored_off_huawei(self) -> None:
+        """Solis's sign is a fixed register fact, not an install choice."""
+        store = SettingsStore()
+        store.data["inverter"] = {
+            "platform": "solis_modbus",
+            "grid_power_polarity": "export_positive",
+        }
+        assert store.get_grid_power_polarity() == "import_positive"
+
+    def test_override_ignored_on_platform_without_a_shared_signed_sensor(self) -> None:
+        store = SettingsStore()
+        store.data["inverter"] = {
+            "platform": "growatt_server_min",
+            "grid_power_polarity": "import_positive",
+        }
+        assert store.get_grid_power_polarity() == ""
+
+    def test_unknown_override_raises(self) -> None:
+        store = SettingsStore()
+        store.data["inverter"] = {
+            "platform": "huawei_solar_luna2000",
+            "grid_power_polarity": "positive_up",
+        }
+        with pytest.raises(ValueError, match="grid_power_polarity"):
+            store.get_grid_power_polarity()

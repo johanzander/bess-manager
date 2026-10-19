@@ -86,7 +86,8 @@ PLATFORM_SERVICE_DOMAIN = {
 # Sign convention for platforms exposing grid power as a single signed sensor
 # instead of separate import/export entities. Unlike PLATFORM_SERVICE_DOMAIN,
 # this is a fixed hardware/integration fact, not something an install can
-# override. "" (the default for any platform not listed) means the platform
+# override — except for the platforms in GRID_POWER_POLARITY_OVERRIDABLE.
+# "" (the default for any platform not listed) means the platform
 # has no signed-shared-sensor split to perform — every other consumer reads
 # import_power/export_power independently as always.
 #
@@ -96,6 +97,14 @@ PLATFORM_GRID_POWER_POLARITY = {
     "solis_modbus": "import_positive",  # Grid Power Net register 33263/33264
     "huawei_solar_luna2000": "export_positive",  # power_meter_active_power (#438)
 }
+
+# Platforms whose grid sensor is whatever entity the user mapped, so the sign
+# is the entity's, not the platform's: a Huawei EMMA feed-in sensor reads
+# import-positive where the separate power meter is export-positive (#818).
+# inverter.grid_power_polarity overrides the PLATFORM_GRID_POWER_POLARITY
+# default for these; Solis stays a fixed register fact.
+GRID_POWER_POLARITY_OVERRIDABLE = frozenset({"huawei_solar_luna2000"})
+VALID_GRID_POWER_POLARITIES = ("import_positive", "export_positive")
 
 # Same idea, one layer down: platforms exposing BATTERY power as a single
 # signed register instead of separate charge/discharge entities (#542). Also a
@@ -307,11 +316,22 @@ class SettingsStore:
         """Return the sign convention for this platform's grid power sensor.
 
         "" for platforms with separate import/export entities (no split
-        needed) and for an unconfigured install. Not user-overridable —
-        see PLATFORM_GRID_POWER_POLARITY.
+        needed) and for an unconfigured install. Fixed per platform —
+        see PLATFORM_GRID_POWER_POLARITY — except on the platforms in
+        GRID_POWER_POLARITY_OVERRIDABLE, where a non-empty
+        ``inverter.grid_power_polarity`` wins (#818).
         """
         inverter = self.data.get("inverter", {})
-        return PLATFORM_GRID_POWER_POLARITY.get(inverter.get("platform", ""), "")
+        platform = inverter.get("platform", "")
+        override: str = inverter.get("grid_power_polarity", "")
+        if override and platform in GRID_POWER_POLARITY_OVERRIDABLE:
+            if override not in VALID_GRID_POWER_POLARITIES:
+                raise ValueError(
+                    f"inverter.grid_power_polarity must be one of "
+                    f"{VALID_GRID_POWER_POLARITIES}, got {override!r}"
+                )
+            return override
+        return PLATFORM_GRID_POWER_POLARITY.get(platform, "")
 
     def get_battery_power_polarity(self) -> str:
         """Return the sign convention for this platform's battery power sensor.
@@ -580,6 +600,7 @@ class SettingsStore:
                 "device_id": "",
                 "control_mode": "tou",
                 "service_domain": "",
+                "grid_power_polarity": "",
             },
             "sensors": {
                 "platform": "",

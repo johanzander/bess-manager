@@ -304,3 +304,39 @@ test.describe('Inverter service domain override', () => {
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });
 });
+
+test.describe('Huawei grid power polarity override (#818)', () => {
+  // The e2e backend is a Growatt install, so the Huawei tab is selected in the
+  // form only and the PATCH is intercepted: saving for real would switch the
+  // shared backend's platform and break every later spec.
+  test('toggle is off by default and sends gridPowerPolarity on save', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    await page.getByRole('tab', { name: /Huawei/ }).click();
+
+    const toggle = page.getByTestId('huawei-grid-import-positive');
+    await expect(toggle).toBeVisible();
+    await expect(toggle).not.toBeChecked();
+
+    await toggle.check();
+
+    const patchBodies: unknown[] = [];
+    await page.route('**/api/settings', async route => {
+      if (route.request().method() === 'PATCH') {
+        patchBodies.push(route.request().postDataJSON());
+        await route.abort();
+      } else {
+        await route.continue();
+      }
+    });
+
+    await page.getByRole('button', { name: /^Battery( Unsaved changes)?$/ }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+
+    await expect.poll(() => patchBodies.length).toBeGreaterThan(0);
+    const inverter = (patchBodies[0] as { inverter: Record<string, unknown> }).inverter;
+    expect(inverter.platform).toBe('huawei_solar_luna2000');
+    expect(inverter.gridPowerPolarity).toBe('import_positive');
+  });
+});

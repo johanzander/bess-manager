@@ -2487,7 +2487,23 @@ class TestHuaweiDiscovery:
             result["battery_discharge_stop_soc"]
             == "number.huawei_battery_discharging_cutoff_capacity"
         )
-        assert len(result) == 17
+        assert len(result) == 16
+
+    def test_inverter_active_power_is_not_household_load(self) -> None:
+        """Issue #818: active_power (32080) is the inverter's signed AC output.
+
+        It goes negative while the battery charges from the grid, so mapping it
+        as local_load_power showed negative Home Usage. The registry fixture
+        carries that entity; discovery must leave local_load_power unmapped.
+        """
+        assert any(
+            e["entity_id"] == "sensor.huawei_inverter_active_power"
+            for e in _huawei_registry()
+        )
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert "local_load_power" not in result
 
     def test_huawei_power_monitoring_sensors_mapped(self):
         """issue #438: real-time PV power and signed grid power (single

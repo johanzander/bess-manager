@@ -43,6 +43,7 @@ export interface HourlyData {
   observedIntent?: string;     // what actually happened (set for past periods only)
   curtailed?: boolean;         // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
   isFreeImport?: boolean;      // inside an Octoplus free-import window (Power Up / Happy Hour) — buyPrice is already the overlaid free price
+  shadowPrice?: FormattedValue | null; // plan's marginal value of stored energy per kWh delivered; null for elapsed periods and at the reserve floor
 
   // All user-facing data via FormattedValue - canonical naming
   buyPrice?: FormattedValue;

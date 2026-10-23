@@ -482,6 +482,7 @@ export const INTEGRATIONS: IntegrationDef[] = [
           // block wizard completion for exactly the installs this serves.
           { key: 'huawei_working_mode', label: 'Working Mode (select)', required: false },
           { key: 'huawei_tou_periods', label: 'TOU Charging/Discharging Periods (readback)', required: false },
+          { key: 'huawei_excess_pv_mode', label: 'Excess PV Energy Use in TOU (select)', required: false },
           { key: 'battery_charging_power_rate', label: 'Maximum Charging Power', required: false },
           { key: 'battery_discharging_power_rate', label: 'Maximum Discharging Power', required: false },
           { key: 'battery_charge_stop_soc', label: 'Charging Cutoff Capacity', required: true },

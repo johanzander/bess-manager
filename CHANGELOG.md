@@ -49,6 +49,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **A malformed Planned Consumption Changes block no longer freezes the schedule** — BESS now ignores the bad block, keeps planning on the base forecast and logs the error, instead of blocking optimization until the template is fixed. ([#824](https://github.com/johanzander/bess-manager/pull/824))
 - **DST change days: the scheduler and inverter schedules now follow real time too** — the 15-minute cycle, startup and sensor collection still counted the current period from the wall clock, and TOU / charge-period times were still written as `period // 4`, so after the repeated hour every action ran an hour after the price it was planned on. Growatt MIN no longer programs overlapping segments in the repeated hour, and the dashboard no longer fails with `hour must be in 0..23` for the day's last hour. ([#844](https://github.com/johanzander/bess-manager/pull/844))
 - **Octopus free-import windows on the 25-hour fall-back day** — each period now shows its own free-import flag instead of the wrong hour's. ([#833](https://github.com/johanzander/bess-manager/issues/833))
+### Fixed
+
+- **Huawei: solar surplus follows the plan during Solar Export** — BESS now sets the battery's "Excess PV energy use in TOU" select per period, so planned export no longer charges the battery.
 
 ## [11.1.0] - 2026-10-20
 

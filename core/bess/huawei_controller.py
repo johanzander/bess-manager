@@ -15,6 +15,11 @@ Huawei Intent Mapping:
 - GRID_CHARGING              → charge period (+)
 - LOAD_SUPPORT/BATTERY_EXPORT → discharge period (-)
 - SOLAR_STORAGE/SOLAR_EXPORT/IDLE → no period (self-consumption default)
+
+Outside a period the battery routes PV surplus by its excess-PV select, so
+that select follows each period's plan: "fed_to_grid" when the plan blocks
+passive solar charging (SOLAR_EXPORT, and the discharging intents), "charge"
+otherwise.
 """
 
 import logging
@@ -32,6 +37,11 @@ from .settings import BatterySettings
 logger = logging.getLogger(__name__)
 
 WORKING_MODE_TOU = "time_of_use_luna2000"
+
+# huawei_solar's excess-PV select options: the lowercased names of
+# huawei-solar-lib's StorageExcessPvEnergyUseInTOU (FED_TO_GRID=0, CHARGE=1).
+EXCESS_PV_CHARGE = "charge"
+EXCESS_PV_FED_TO_GRID = "fed_to_grid"
 
 # Working-mode select options that mean "BESS-controlled Time Of Use", across
 # the integrations that front a Huawei battery. Stock huawei_solar exposes
@@ -138,7 +148,30 @@ class HuaweiController(InverterController):
         discharge_rate: int,
         block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
-        """No-op: Huawei deploys the full schedule atomically via set_tou_periods."""
+        """Point the battery's PV surplus where this period's plan sends it.
+
+        Charge/discharge windows are deployed atomically by sync_to_hardware
+        via set_tou_periods; this per-period write only covers what that list
+        cannot say — whether surplus outside a window charges the battery or
+        goes to the grid. The select is a persistent config register, so it is
+        read first and written only when the destination actually changes.
+        Skipped when the select is unmapped (EMMA installs expose none).
+        """
+        if not controller.is_sensor_configured("huawei_excess_pv_mode"):
+            return True, ""
+
+        target = EXCESS_PV_FED_TO_GRID if block_passive_charging else EXCESS_PV_CHARGE
+        current = controller.get_huawei_excess_pv_mode()
+        if current == target:
+            return True, ""
+
+        logger.info(
+            "HUAWEI HARDWARE: excess PV use is %r, setting to %r", current, target
+        )
+        try:
+            controller.set_huawei_excess_pv_mode(target)
+        except Exception as e:
+            return False, f"set_huawei_excess_pv_mode({target}) failed: {e}"
         return True, ""
 
     @property

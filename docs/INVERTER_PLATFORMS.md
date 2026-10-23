@@ -618,6 +618,16 @@ targets whichever domain `inverter.service_domain` resolves to (default
 `huawei_solar`) — see "Bring-your-own integration" above for when and how to
 change it.
 
+**Solar surplus outside a period (optional).** Periods only say when to
+charge from or discharge to the grid; outside them the battery routes PV
+surplus by its "Excess PV energy use in TOU" select (register 47299, options
+`charge` / `fed_to_grid`). When `huawei_excess_pv_mode` is mapped, BESS points
+it at each 15-minute period's plan — `fed_to_grid` when the plan blocks
+passive solar charging (SOLAR_EXPORT and the discharging intents), `charge`
+otherwise — reading first and writing only on change, since it is a
+persistent config register. Unmapped (e.g. EMMA installs), it is left alone
+and surplus follows whatever the select is set to.
+
 **Schedule readback (optional, #431).** `huawei_solar` has no
 `read_tou_periods` service, but its TOU period sensor publishes the
 programmed periods as `Period N` extra state attributes, in the very text
@@ -955,6 +965,7 @@ slot and reports the missing entities in the health check.
 | `grid_charge` | switch | `storage_charge_from_grid_function` | Grid charge enable |
 | `huawei_working_mode` | select | `storage_working_mode_settings` | Battery working mode (gating TOU writes) |
 | `huawei_tou_periods` | sensor | `storage_huawei_luna2000_time_of_use_charging_and_discharging_periods` | Optional: programmed TOU periods, read back at startup (#431) |
+| `huawei_excess_pv_mode` | select | `storage_excess_pv_energy_use_in_tou` | Optional: PV surplus to battery or grid outside a TOU period, set per period from the plan |
 | `local_load_power` | sensor | `active_power` | Home consumption (W) |
 | `pv_power` | sensor | `input_power` | Real-time solar PV power (W) |
 | `import_power` / `export_power` | sensor | `power_meter_active_power` (separate power-meter device, signed) | Net grid power (W); both keys map to this entity, split by sign at read time (`grid_power_polarity`, `"export_positive"` — issue #438) |

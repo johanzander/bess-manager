@@ -37,6 +37,7 @@ from fastapi import APIRouter, HTTPException, Query
 from loguru import logger
 
 from core.bess import time_utils
+from core.bess.dp_battery_algorithm import has_value_cell_below
 from core.bess.exceptions import SystemConfigurationError
 from core.bess.health_check import (
     group_components_by_device,
@@ -45,7 +46,7 @@ from core.bess.health_check import (
 from core.bess.influxdb_helper import is_influxdb_configured
 from core.bess.models import PeriodData
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
-from core.bess.settings import canonicalize_consumption_strategy
+from core.bess.settings import BatterySettings, canonicalize_consumption_strategy
 from core.bess.settings_store import (
     VALID_GRID_POWER_POLARITIES,
     VALID_PLATFORMS,
@@ -682,6 +683,10 @@ def _aggregate_quarterly_to_hourly(
             else last_period.observedIntent
         )
 
+        quarter_shadow_prices = [
+            p.shadowPrice.value for p in quarter_periods if p.shadowPrice is not None
+        ]
+
         # Sum energy values across the 4 quarters
         hourly_period = APIDashboardHourlyData(
             period=hour,
@@ -856,11 +861,38 @@ def _aggregate_quarterly_to_hourly(
             curtailed=hour_curtailed,
             directSolar=sum(p.directSolar for p in quarter_periods),
             isFreeImport=any(p.isFreeImport for p in quarter_periods),
+            shadowPrice=(
+                create_formatted_value(
+                    sum(quarter_shadow_prices) / len(quarter_shadow_prices),
+                    "price",
+                    currency,
+                )
+                if quarter_shadow_prices
+                else None
+            ),
         )
 
         hourly_periods.append(hourly_period)
 
     return hourly_periods
+
+
+def _plan_shadow_price(
+    period_data: PeriodData, battery_settings: BatterySettings
+) -> float | None:
+    """The plan's shadow price for a period, or None where the plan holds none.
+
+    DecisionData.shadow_price defaults to 0.0 where the DP never computed one,
+    which a consumer would read as "stored energy is free". Report None for
+    those periods instead: an elapsed period carries measured data, not a plan
+    decision, and a period starting at the reserve floor has no stored kWh
+    below it to price (the same rule the DP applies, via has_value_cell_below).
+    """
+    if period_data.data_source != "predicted":
+        return None
+    if not has_value_cell_below(period_data.energy.battery_soe_start, battery_settings):
+        return None
+    return period_data.decision.shadow_price
 
 
 @router.get("/api/dashboard/available-dates")
@@ -956,7 +988,8 @@ async def get_dashboard_data(
         # Get system components
         controller = bess_controller.ha_controller
         settings = bess_controller.system.get_settings()
-        battery_capacity = settings["battery"].total_capacity
+        battery_settings = settings["battery"]
+        battery_capacity = battery_settings.total_capacity
         currency = bess_controller.system.home_settings.currency
 
         # Free-import window lookup, keyed by "YYYY-MM-DD HH:MM" timestamp —
@@ -982,6 +1015,11 @@ async def get_dashboard_data(
                 battery_capacity,
                 currency,
                 is_free_import=_is_free_import(period_data),
+                shadow_price=(
+                    None
+                    if is_historical
+                    else _plan_shadow_price(period_data, battery_settings)
+                ),
             )
             for period_data in daily_view.periods
         ]
@@ -1047,6 +1085,7 @@ async def get_dashboard_data(
                                 if p.timestamp is not None
                                 else False
                             ),
+                            shadow_price=_plan_shadow_price(p, battery_settings),
                         )
                         for p in tomorrow_periods
                     ]

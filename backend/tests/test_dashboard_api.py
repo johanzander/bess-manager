@@ -21,6 +21,7 @@ from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.daily_view_builder import DailyView
 from core.bess.exceptions import SystemConfigurationError
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
+from core.bess.settings import BatterySettings
 
 _test_app = FastAPI()
 _test_app.include_router(router)
@@ -135,7 +136,9 @@ def _make_started_controller() -> MagicMock:
     _wire_schedule_store(ctrl, period_data=[])
 
     ctrl.system.get_current_daily_view.return_value = _make_daily_view()
-    ctrl.system.get_settings.return_value = {"battery": MagicMock(total_capacity=30.0)}
+    ctrl.system.get_settings.return_value = {
+        "battery": BatterySettings(total_capacity=30.0)
+    }
     ctrl.system.home_settings.currency = "SEK"
 
     sm = ctrl.system._inverter_controller
@@ -310,6 +313,131 @@ class TestDashboardFullHorizonCost:
         # tomorrow: 96 periods * (grid_cost=0.1, grid_only_cost=0.2) -> netGrid=9.6, gridOnly=19.2
         assert summary["netGridCostFullHorizon"]["value"] == pytest.approx(9.6)
         assert summary["netSavingsFullHorizon"]["value"] == pytest.approx(57.6)
+
+
+class TestDashboardShadowPrice:
+    """Each planned period exposes the plan's value of stored energy, so an
+    external flexible load can price its consumption against the battery plan.
+    A value the DP never computed must read as absent, never as free energy.
+    """
+
+    _RESERVE_FLOOR_KWH = BatterySettings(total_capacity=30.0).min_soe_kwh
+
+    @staticmethod
+    def _period(
+        period: int,
+        *,
+        day: date = date(2025, 7, 13),
+        data_source: str = "predicted",
+        soe_start: float = 15.0,
+        shadow_price: float = 0.42,
+    ) -> PeriodData:
+        base = _make_period(period)
+        return replace(
+            base,
+            timestamp=datetime.combine(
+                day,
+                datetime.min.time().replace(hour=period // 4, minute=(period % 4) * 15),
+                tzinfo=time_utils.TIMEZONE,
+            ),
+            data_source=data_source,
+            energy=replace(base.energy, battery_soe_start=soe_start),
+            decision=replace(base.decision, shadow_price=shadow_price),
+        )
+
+    @staticmethod
+    def _controller_with_today(periods: list[PeriodData]) -> MagicMock:
+        ctrl = _make_started_controller()
+        ctrl.system.get_current_daily_view.return_value = DailyView(
+            date=date(2025, 7, 13),
+            periods=periods,
+            total_savings=0.0,
+            actual_count=sum(1 for p in periods if p.data_source == "actual"),
+            predicted_count=sum(1 for p in periods if p.data_source == "predicted"),
+        )
+        return ctrl
+
+    def test_planned_period_reports_the_plans_shadow_price(self) -> None:
+        sys.modules["app"].bess_controller = self._controller_with_today(  # type: ignore[attr-defined]
+            [self._period(i) for i in range(96)]
+        )
+
+        resp = _client.get("/api/dashboard")
+
+        assert resp.status_code == 200
+        assert resp.json()["hourlyData"][10]["shadowPrice"]["value"] == (
+            pytest.approx(0.42)
+        )
+
+    def test_elapsed_period_has_no_shadow_price(self) -> None:
+        periods = [self._period(0, data_source="actual", shadow_price=0.0)] + [
+            self._period(i) for i in range(1, 96)
+        ]
+        sys.modules["app"].bess_controller = self._controller_with_today(periods)  # type: ignore[attr-defined]
+
+        hourly_data = _client.get("/api/dashboard").json()["hourlyData"]
+
+        assert hourly_data[0]["shadowPrice"] is None
+        assert hourly_data[1]["shadowPrice"]["value"] == pytest.approx(0.42)
+
+    def test_period_starting_at_reserve_floor_has_no_shadow_price(self) -> None:
+        periods = [
+            self._period(0, soe_start=self._RESERVE_FLOOR_KWH, shadow_price=0.0)
+        ] + [self._period(i) for i in range(1, 96)]
+        sys.modules["app"].bess_controller = self._controller_with_today(periods)  # type: ignore[attr-defined]
+
+        hourly_data = _client.get("/api/dashboard").json()["hourlyData"]
+
+        assert hourly_data[0]["shadowPrice"] is None
+        assert hourly_data[1]["shadowPrice"]["value"] == pytest.approx(0.42)
+
+    def test_hourly_averages_the_quarters_that_have_a_shadow_price(self) -> None:
+        periods = [
+            self._period(0, data_source="actual", shadow_price=0.0),
+            self._period(1, shadow_price=0.4),
+            self._period(2, shadow_price=0.6),
+            self._period(3, shadow_price=0.8),
+            *(self._period(i, data_source="actual") for i in range(4, 8)),
+            *(self._period(i) for i in range(8, 96)),
+        ]
+        sys.modules["app"].bess_controller = self._controller_with_today(periods)  # type: ignore[attr-defined]
+
+        hourly_data = _client.get("/api/dashboard?resolution=hourly").json()[
+            "hourlyData"
+        ]
+
+        assert hourly_data[0]["shadowPrice"]["value"] == pytest.approx(0.6)
+        assert hourly_data[1]["shadowPrice"] is None
+
+    def test_tomorrow_periods_report_the_plans_shadow_price(self) -> None:
+        today = time_utils.today()
+        tomorrow = today + timedelta(days=1)
+        ctrl = _make_started_controller()
+        _wire_schedule_store(
+            ctrl,
+            [self._period(i, day=today) for i in range(96)]
+            + [self._period(i, day=tomorrow, shadow_price=0.55) for i in range(96)],
+        )
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        tomorrow_data = _client.get("/api/dashboard").json()["tomorrowData"]
+
+        assert tomorrow_data[0]["shadowPrice"]["value"] == pytest.approx(0.55)
+
+    def test_historical_day_has_no_shadow_price(self) -> None:
+        ctrl = _make_started_controller()
+        ctrl.system.daily_view_store.load_day.return_value = DailyView(
+            date=date(2020, 1, 1),
+            periods=[self._period(i) for i in range(96)],
+            total_savings=0.0,
+            actual_count=0,
+            predicted_count=96,
+        )
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        hourly_data = _client.get("/api/dashboard?date=2020-01-01").json()["hourlyData"]
+
+        assert all(p["shadowPrice"] is None for p in hourly_data)
 
 
 class TestDashboardAvailableDates:

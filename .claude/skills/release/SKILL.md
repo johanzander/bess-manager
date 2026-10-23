@@ -20,9 +20,10 @@
 
    `--since-ref` is the previous beta's sync point — the merge-base of `origin/main` and `beta/main` — which is precise, unlike the previous release's *publish* timestamp (a PR can merge after the cut but before the release is published). `--section <beta-version>` targets the renamed `## [<beta-version>]` section explicitly rather than assuming it is the topmost `## [` heading (finding: after a stable release, the topmost section is the stable version).
 
-   `check` asserts two invariants against that section (with `--beta-ref`/`--beta-file` omitted it skips the prepend-only check, which only makes sense after the step-5 merge):
+   `check` asserts three invariants against that section (with `--beta-ref`/`--beta-file` omitted it skips the prepend-only check, which only makes sense after the step-5 merge):
    - **coverage** — every `(#N)` merge commit on `origin/main` since the previous beta's sync point must appear as a `[#N](...)` link in this section — by its PR number or by an issue it references. A missing link is a real gap: it merged with no changelog entry, not just already-shipped content to curate away. Do not silently drop it.
    - **no re-announcing** — every `[#N](...)` link in this section must correspond to a PR that merged *after* that same sync point (by its number or a referenced issue). Anything merged before already shipped in an earlier `bN` and must be dropped, not re-listed (see the `v9.9.0b10`/`v9.9.0b11` entries for the pattern). Getting this wrong silently double-announces old work as new in every subsequent release — it compounds.
+   - **structure** — no repeated `###` heading, a blank line above each, and a `[#N](...)` link on every bullet (#822). Fix the section, don't work around it: merge duplicate headings into one block.
 
    Iterate until `check` exits 0. When it flags a coverage gap, read the PR's diff/description (`gh pr view <N> --repo johanzander/bess-manager`) and judge whether it's user-facing (a real user would notice the behavior/UI change) or purely internal (refactor, CI wiring, doc/skill-only) — internal PRs correctly have no entry and need none, so add their numbers to a comma-separated `--internal` list and re-run. For user-facing gaps, draft a one-line entry in the existing style and present it in chat for confirmation. Once confirmed, add it both to `origin/main` (a small separate PR against `origin/main`'s `CHANGELOG.md` `Unreleased` section, since that file is the canonical source of truth for every future release, per `CLAUDE.md`) and to this beta's `## [<beta-version>]` section.
 
@@ -115,8 +116,12 @@
 5. **Rename the changelog heading** — `## [Unreleased]` becomes `## [<version>] - <date>` in `CHANGELOG.md` on `origin/main`. This is the only changelog edit a production release makes; do not also hand-add entries, they should already be there from each PR's merge.
 6. **Run `black --check .` and `ruff check .`** — fix any formatting issues.
 7. **Create a PR** against `origin/main` (a version-bump-only PR, branched from `origin/main`), wait for CI.
-8. **Get explicit user approval, then merge, tag, and push the tag** to `origin`.
+8. **Get explicit user approval, then merge, tag, and push the tag** to `origin`. Put step 10's issue list in the same message, so one approval covers both.
 9. **Create a GitHub Release**: `gh release create v<version> --title "v<version>" --notes "<changelog>"`.
+10. **Close the issues this release ships** — stable only, never from a beta (a beta PR must not close the reporter's issue). Run inline; do not hand this to `advance-pr`.
+    - **List** (before step 8, so the approval covers it): `scripts/release-issues.sh v<previous> origin/main`, unsandboxed (the digest it reads calls `claude agents`). It reads `merged_prs` from `scripts/backlog-digest.sh`, the one place that decides which issue a PR belongs to, so do not re-derive that with `git log | grep`. Each line is `resolved` or `partial` (another PR still open).
+    - **Confirm each line yourself — the script cannot.** `Refs` only says "related". Read the shipped PR's title: a test, docs or CI PR that merely mentions an issue (v11.1.0: #795 linked #791) does not resolve it, and a multi-PR feature may be only partly delivered. Show the user the list with your call on each.
+    - **Close** only what the user approved, after step 9: `scripts/gh-agent.sh --as po issue close <n> --repo johanzander/bess-manager --comment "Shipped in v<version>."`. The board card moves to Done through the normal reconcile.
 
 ## Hotfix Release (`release hotfix`)
 

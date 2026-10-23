@@ -1454,26 +1454,31 @@ class BatterySystemManager:
 
         Returns:
             The composed forecast, or the input unchanged when no overlay
-            entity is configured.
+            entity is configured or its blocks are malformed (the latter is
+            recorded as a runtime failure).
 
         """
         try:
             blocks = self.controller.get_consumption_overlay_blocks()
         except ConsumptionOverlayError as e:
-            # The error still propagates — no silent fallback. Recording it
-            # first is what puts it on the dashboard: the caller's blanket
-            # handler logs and returns False, which on its own leaves the
-            # schedule frozen at the last good one with no user-visible signal.
-            logger.error("Planned consumption changes are unusable: %s", e)
+            # Not a silent fallback: the failure goes on the dashboard and the
+            # log at ERROR, so the user knows their declared changes are being
+            # ignored. Raising instead would let one bad render of an external
+            # feed (e.g. a heat-pump planner) freeze battery planning at the
+            # last good schedule.
+            logger.error(
+                "Planned consumption changes are unusable, planning without them: %s",
+                e,
+            )
             self._runtime_failure_tracker.record_failure_once(
                 category="CONSUMPTION_OVERLAY",
                 operation=(
                     "Planned consumption changes entity could not be read — "
-                    "optimization is blocked until the template is fixed"
+                    "they are being ignored until the template is fixed"
                 ),
                 error=e,
             )
-            raise
+            return consumption_predictions
         self._runtime_failure_tracker.dismiss_by_category("CONSUMPTION_OVERLAY")
 
         if not blocks:

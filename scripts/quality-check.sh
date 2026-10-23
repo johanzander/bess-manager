@@ -789,6 +789,17 @@ else
 fi
 
 echo ""
+echo "📋 Checking CHANGELOG structure..."
+echo "-----------------------------------"
+# Topmost section: `Unreleased` between releases, the new version on a release
+# PR. Structure only -- coverage needs the beta cut, which CI does not have.
+if python3 scripts/check-changelog.py check --changelog CHANGELOG.md --structure-only; then
+    echo "✅ CHANGELOG structure OK"
+else
+    ERRORS=$((ERRORS + 1))
+fi
+
+echo ""
 echo "📋 Summary"
 echo "----------"
 echo "Errors: $ERRORS"

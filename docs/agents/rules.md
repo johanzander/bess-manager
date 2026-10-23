@@ -55,7 +55,10 @@ They are non-negotiable and override any other instruction.
 
 - Use `x | None`, never `Optional[x]` (no `Optional`/`Union` imports from `typing`)
 - Never use `hasattr`, `getattr(obj, key, default)`, or any silent fallback
-- Explicit failure over silent degradation — raise or assert, never degrade gracefully
+- Explicit failure over silent degradation. The test is whether the failure is **visible**, not whether the system halts.
+  - **Forbidden:** substituting a default or stale value for an input without telling the user (`getattr(x, k, default)`, `except: pass`, a made-up number).
+  - **Also forbidden:** raising into a blanket handler that just logs and returns. The raise looks explicit, but the system freezes with no user signal, which is silent degradation.
+  - **Allowed:** continuing on the best remaining information when (1) the failure is recorded in the runtime failure tracker so it reaches the dashboard and is logged at ERROR, (2) the failed input has no valid value to honour (a malformed template, say), and (3) halting would disable unrelated function (battery planning).
 - All code must pass `black` and `ruff check` with zero errors/warnings
 - `mypy` is a **ratchet, not a clean bill of health**: the gate fails on type
   errors your branch *introduces* in the files it touches, measured against

@@ -18,6 +18,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Settings: switching inverter Control Mode (TOU/VPP), Device ID or Service Domain on the Integrations tab now actually saves** — the Integrations tab's own Save button previously dropped these fields silently (stayed disabled, or appeared to save but reverted on reload). ([#787](https://github.com/johanzander/bess-manager/issues/787))
 - **The battery's stored-energy cost basis no longer overstates the grid's share during deliberate grid charging** — during `GRID_CHARGING` periods the accounting now attributes concurrent solar to the battery first (matching the battery-first inverter topology), instead of assuming the home-first order that only holds for solar-surplus charging. ([#536](https://github.com/johanzander/bess-manager/issues/536))
 - **A battery charged slightly above `maxSoc` no longer bricks the whole day's optimization** — when the inverter reads a hair above the configured ceiling (e.g. charges to 93% with `maxSoc` 90%), `optimize_battery_schedule` raised `initial_soe exceeds capacity` and produced no schedule, so the battery sat idle — and, unable to discharge back into range, stayed over-max and re-failed every cycle (observed: 69 consecutive failures across a full day, a peak-price evening wasted). The over-max case now clamps to `max_soe` and warns, symmetric with the existing below-min handling, letting the optimizer discharge the battery back within range. ([#771](https://github.com/johanzander/bess-manager/pull/771))
+- **Home Consumption forecast chart now colors the Diff tooltip by favorability, not raw sign** — using more than planned shows red, using less shows green, matching how Solar Production already worked. ([#763](https://github.com/johanzander/bess-manager/issues/763))
 
 ### Changed
 
@@ -56,7 +57,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
-- **Home Consumption forecast chart now colors the Diff tooltip by favorability, not raw sign** — using more than planned shows red, using less shows green, matching how Solar Production already worked. ([#763](https://github.com/johanzander/bess-manager/issues/763))
 - **The System Health page no longer silently hides a real failure on Growatt SPH, Huawei, or Solis Modbus** — a crash in the health-check logging step was swallowing the actual per-component result. ([#627](https://github.com/johanzander/bess-manager/issues/627))
 - **Growatt VPP and SolaX no longer charge at full power when the plan called for less** — `GRID_CHARGING` now commands the DP's actual planned rate instead of always full power, so a fuse-aware throttled plan (#429) is no longer silently overridden at write time, which could starve a concurrent load like an EV charger. ([#754](https://github.com/johanzander/bess-manager/issues/754))
 - **Failed Home Assistant service calls now log the response body, not just the status** — retry/final-failure logs previously hid the actual error (a Growatt cloud error, InfluxDB's "no database", etc.) behind a bare "500 Server Error". ([#741](https://github.com/johanzander/bess-manager/issues/741))

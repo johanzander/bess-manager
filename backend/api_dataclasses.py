@@ -454,6 +454,13 @@ class APIDashboardHourlyData:
     # manager's cache carries isFreeImport per entry; defaults to False
     # elsewhere (e.g. historical days).
     isFreeImport: bool = False
+    # The plan's marginal value of stored energy, per kWh delivered
+    # (DecisionData.shadow_price): what drawing one more kWh from the battery
+    # in this period costs the rest of the plan. Lets an external flexible
+    # load (heat pump, immersion, EV) price its consumption against the plan
+    # instead of the raw buy price. None where the plan holds no such value:
+    # elapsed periods, and periods starting at or below the reserve floor.
+    shadowPrice: FormattedValue | None = None
 
     @classmethod
     def from_internal(
@@ -462,6 +469,7 @@ class APIDashboardHourlyData:
         battery_capacity: float,
         currency: str,
         is_free_import: bool = False,
+        shadow_price: float | None = None,
     ) -> APIDashboardHourlyData:
         """Convert internal HourlyData to API format using pure dataclass approach."""
 
@@ -617,6 +625,11 @@ class APIDashboardHourlyData:
             curtailed=hourly.decision.curtailed,
             directSolar=direct_solar,
             isFreeImport=is_free_import,
+            shadowPrice=(
+                create_formatted_value(shadow_price, "price", currency)
+                if shadow_price is not None
+                else None
+            ),
         )
 
 

@@ -1701,7 +1701,9 @@ def has_value_cell_below(soe: float, battery_settings: BatterySettings) -> bool:
     Exposed because tests need to select exactly the periods where the shadow
     price is (or is not) computable. Re-deriving that rule test-side is what
     #571 broke: the selectors mirrored the DP's old `round()` snapping and kept
-    passing while production moved to the interpolant's cell.
+    passing while production moved to the interpolant's cell. The dashboard API
+    uses it for the same reason, to report a never-computed shadow price as
+    absent rather than as 0.0.
     """
     return _snapped_grid_index(soe, battery_settings) > 0.0
 

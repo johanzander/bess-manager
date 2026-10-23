@@ -52,6 +52,7 @@ build_release_changelog = check_changelog.build_release_changelog
 check_coverage = check_changelog.check_coverage
 check_no_reannouncing = check_changelog.check_no_reannouncing
 check_prepend_only = check_changelog.check_prepend_only
+check_structure = check_changelog.check_structure
 extract_new_section = check_changelog.extract_new_section
 parse_merged_prs = check_changelog.parse_merged_prs
 parse_pr_refs = check_changelog.parse_pr_refs
@@ -240,6 +241,72 @@ def test_parse_pr_refs_ignores_bare_hash_refs_in_prose() -> None:
     assert parse_pr_refs(text) == {512}
 
 
+# --- structure ---------------------------------------------------------------
+#
+# #822: v11.1.0's Unreleased section reached release prep with two `### Fixed`
+# blocks, no blank line before `### Removed`, and two bullets with no PR link —
+# each PR recreated the headings it needed and nothing checked the result.
+
+_CLEAN_SECTION = (
+    "## [Unreleased]\n"
+    "\n"
+    "### Fixed\n"
+    "\n" + _entry("Entry A", 680) + _entry("Entry B", 681) + "\n"
+    "### Added\n"
+    "\n" + _entry("Entry C", 682) + "\n"
+)
+
+
+def test_structure_accepts_a_clean_section() -> None:
+    assert check_structure(_CLEAN_SECTION) == []
+
+
+def test_structure_flags_a_repeated_heading() -> None:
+    section = _CLEAN_SECTION + "### Fixed\n\n" + _entry("Entry D", 683)
+    violations = check_structure(section)
+    assert len(violations) == 1
+    assert "duplicate" in violations[0] and "### Fixed" in violations[0]
+
+
+def test_structure_flags_a_heading_with_no_blank_line_above() -> None:
+    # The v11.1.0 shape: a bullet runs straight into `### Removed`.
+    section = _CLEAN_SECTION.replace("\n### Added", "### Added")
+    violations = check_structure(section)
+    assert len(violations) == 1
+    assert "blank line" in violations[0] and "### Added" in violations[0]
+
+
+def test_structure_flags_a_bullet_with_no_pr_link() -> None:
+    section = _CLEAN_SECTION + "- An entry nobody linked.\n"
+    violations = check_structure(section)
+    assert len(violations) == 1
+    assert "no [#N](...) link" in violations[0] and "An entry nobody linked" in (
+        violations[0]
+    )
+
+
+def test_structure_reads_a_wrapped_bullet_as_one_entry() -> None:
+    # The link may sit on a continuation line; the bullet is the whole block.
+    section = _CLEAN_SECTION + (
+        "- A long entry that wraps\n"
+        "  onto a second line. ([#690](https://example.test/690))\n"
+    )
+    assert check_structure(section) == []
+
+
+def test_structure_reports_every_problem_not_just_the_first() -> None:
+    section = (
+        "## [Unreleased]\n"
+        "### Fixed\n"  # no blank above
+        "\n"
+        "- Unlinked.\n"
+        "\n"
+        "### Fixed\n"  # duplicate
+        "\n" + _entry("Entry A", 680)
+    )
+    assert len(check_structure(section)) == 3
+
+
 def test_parse_merged_prs_from_git_log_bodies() -> None:
     # NUL-separated full bodies (git log --format=%B%x00). GitHub embeds the
     # PR body, so "Closes #N" / "Refs #N" are the issue links. `release:` and
@@ -395,3 +462,81 @@ def test_check_cli_section_missing_is_clean_error(tmp_path: Path) -> None:
     )
     assert proc.returncode == 1
     assert "no `## [` section whose heading starts with" in proc.stderr
+
+
+def test_check_cli_structure_only_needs_no_git(tmp_path: Path) -> None:
+    # --structure-only is the quality-gate mode: it must not consult git at all
+    # (CI has no beta remote, and a local merge-base would run the coverage
+    # check on every PR). The shim fails any git call, so a pass proves it.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    beta_path = tmp_path / "beta.md"
+    log_path = tmp_path / "log.txt"
+    beta_path.write_text(BETA_MAIN)
+    log_path.write_text("")
+    _write_git_shim(bin_dir, beta_path, log_path)
+    (bin_dir / "git").write_text("#!/bin/sh\necho 'git must not run' >&2; exit 1\n")
+
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(PREAMBLE + _CLEAN_SECTION)
+
+    # The stray --beta-ref and unreadable --internal-file would each fail a
+    # run that consulted them first; structure-only must not look at either.
+    proc = _run_cli(
+        [
+            "check",
+            "--changelog",
+            str(changelog),
+            "--structure-only",
+            "--beta-ref",
+            "beta/main",
+            "--internal-file",
+            str(tmp_path / "missing.txt"),
+        ],
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "OK" in proc.stdout
+
+
+def test_check_cli_structure_only_rejects_a_duplicate_heading(tmp_path: Path) -> None:
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(
+        PREAMBLE + _CLEAN_SECTION + "### Fixed\n\n" + _entry("Entry D", 683)
+    )
+
+    proc = _run_cli(["check", "--changelog", str(changelog), "--structure-only"])
+    assert proc.returncode == 1
+    assert "structure" in proc.stderr and "duplicate" in proc.stderr
+
+
+def test_check_cli_full_check_also_reports_structure(tmp_path: Path) -> None:
+    # Outside --structure-only (the release flow) the structure check runs
+    # alongside coverage and prepend-only rather than being skipped.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    beta_path = tmp_path / "beta.md"
+    log_path = tmp_path / "log.txt"
+    beta_path.write_text(BETA_MAIN)
+    log_path.write_text("fix: a merged PR (#680)\n\nCloses #680\n\x00")
+    _write_git_shim(bin_dir, beta_path, log_path)
+
+    changelog = tmp_path / "changelog.md"
+    changelog.write_text(
+        BUILT.replace("### Fixed\n\n", "### Fixed\n\n### Fixed\n\n", 1)
+    )
+
+    proc = _run_cli(
+        [
+            "check",
+            "--changelog",
+            str(changelog),
+            "--since",
+            "2026-08-21T00:00:00Z",
+        ],
+        PATH=f"{bin_dir}:{os.environ['PATH']}",
+        GIT_SHIM_BETA=str(beta_path),
+        GIT_SHIM_LOG=str(log_path),
+    )
+    assert proc.returncode == 1
+    assert "structure" in proc.stderr and "duplicate" in proc.stderr

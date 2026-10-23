@@ -17,7 +17,7 @@ This script has two subcommands:
     it.
 
 ``check``
-    Assert three invariants on a CHANGELOG, each replacing a rule the release
+    Assert four invariants on a CHANGELOG, each replacing a rule the release
     skill used to describe in prose:
 
     1. **Prepend-only** (needs ``--beta-ref``/``--beta-file``) — strip the new
@@ -35,6 +35,11 @@ This script has two subcommands:
        (its number or one of its referenced issues). Nothing already shipped
        may be re-listed.
 
+    4. **Structure** (always; ``--structure-only`` runs it alone, with no git,
+       for `quality-check.sh`) — the section has no repeated `###` heading, a
+       blank line above every `###` heading, and a `[#N](...)` link on every
+       bullet (#822).
+
     The CHANGELOG links issue numbers for most entries, not the PR that fixed
     them, so the coverage and no-re-announcing checks map merged PRs to their
     issues via the merge-commit body (GitHub embeds the PR body there). The
@@ -46,7 +51,7 @@ Usage:
     scripts/check-changelog.py build --new <release-changelog.md> \\
         --beta <beta-changelog.md> [--out <path>] [--section <prefix>]
     scripts/check-changelog.py check --changelog <path> \\
-        [--section <prefix>] \\
+        [--section <prefix>] [--structure-only] \\
         [--since <timestamp>] [--since-ref <git-ref>] \\
         [--internal <comma-separated PRs>] [--internal-file <path>] \\
         [--dismiss <comma-separated numbers>] [--dismiss-file <path>] \\
@@ -248,6 +253,47 @@ def check_no_reannouncing(
     return sorted((section_links - referenced) - dismiss)
 
 
+def check_structure(section: str) -> list[str]:
+    """Structural problems in one `## [` section (empty = pass).
+
+    Each PR recreates whichever `###` headings it needs in `Unreleased`, and
+    nothing else looks at the result: v11.1.0 reached release prep with two
+    `### Fixed` blocks, a bullet running straight into `### Removed`, and two
+    bullets with no PR link (#822). A bullet is the `- ` line plus any wrapped
+    continuation lines, so a link on a continuation line still counts.
+    """
+    lines = section.splitlines()
+    problems: list[str] = []
+    seen: set[str] = set()
+    for i, line in enumerate(lines):
+        if not line.startswith("### "):
+            continue
+        heading = line.strip()
+        if heading in seen:
+            problems.append(
+                f"duplicate heading `{heading}` — merge its entries into one block"
+            )
+        seen.add(heading)
+        if i > 0 and lines[i - 1].strip():
+            problems.append(f"no blank line above `{heading}`")
+
+    i = 0
+    while i < len(lines):
+        if not lines[i].startswith("- "):
+            i += 1
+            continue
+        start = i
+        i += 1
+        while (
+            i < len(lines) and lines[i].strip() and not lines[i].startswith(("- ", "#"))
+        ):
+            i += 1
+        bullet = "\n".join(lines[start:i])
+        if not _PR_LINK_RE.search(bullet):
+            problems.append(f"bullet has no [#N](...) link: {lines[start][:70]}")
+    return problems
+
+
 def _run_git(args: list[str]) -> str:
     proc = subprocess.run(["git", *args], capture_output=True, text=True)
     if proc.returncode != 0:
@@ -310,11 +356,23 @@ def cmd_build(args: argparse.Namespace) -> int:
 
 def cmd_check(args: argparse.Namespace) -> int:
     changelog = Path(args.changelog).read_text()
+    violations: list[str] = []
+
+    try:
+        structure = check_structure(extract_new_section(changelog, args.section))
+    except ChangelogCheckError as exc:
+        violations.append(str(exc))
+    else:
+        violations.extend(f"structure violated: {problem}" for problem in structure)
+
+    # Before the git and number-list lookups below: this mode must not depend on
+    # either, so a stray --beta-ref or --internal-file cannot fail it.
+    if args.structure_only:
+        return _report(violations, set(), set())
+
     beta = _resolve_beta_changelog(args.beta_ref, args.beta_file)
     internal = _parse_number_list(args.internal, args.internal_file)
     dismiss = _parse_number_list(args.dismiss, args.dismiss_file)
-
-    violations: list[str] = []
 
     if beta is not None:
         try:
@@ -348,13 +406,18 @@ def cmd_check(args: argparse.Namespace) -> int:
                     + ", ".join(f"#{n}" for n in reannounced)
                 )
 
+    return _report(violations, internal, dismiss)
+
+
+def _report(violations: list[str], internal: set[int], dismiss: set[int]) -> int:
     if internal:
         print("Internal no-entry list: " + ", ".join(f"#{n}" for n in sorted(internal)))
     if dismiss:
         print("Dismissed links: " + ", ".join(f"#{n}" for n in sorted(dismiss)))
 
     if violations:
-        for violation in violations:
+        # A missing section is raised by several checks; report it once.
+        for violation in dict.fromkeys(violations):
             print(f"ERROR: {violation}", file=sys.stderr)
         return 1
     print("check-changelog: OK")
@@ -387,6 +450,11 @@ def main() -> int:
     check_p.add_argument(
         "--section", help="new section heading prefix (default: topmost)"
     )
+    check_p.add_argument(
+        "--structure-only",
+        action="store_true",
+        help="check only the section's structure; needs no git (quality gate)",
+    )
     check_p.add_argument("--since", help="git log --since value (previous beta's cut)")
     check_p.add_argument(
         "--since-ref", help="git ref/commit to cut the merged-PR range"
@@ -416,7 +484,8 @@ def main() -> int:
 
     if args.command == "check":
         if (
-            args.beta_ref is None
+            not args.structure_only
+            and args.beta_ref is None
             and args.beta_file is None
             and args.since is None
             and args.since_ref is None

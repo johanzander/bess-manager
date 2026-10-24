@@ -79,7 +79,7 @@ class TestGetPriceDataExtended:
     """Test _get_price_data() with extended horizon."""
 
     def test_extends_with_tomorrow_when_available(self, quarterly_prices_24h):
-        """When tomorrow's prices are available, _get_price_data returns up to 192 entries."""
+        """When tomorrow's prices are available, _get_price_data returns both days' entries."""
         source = MockSource(quarterly_prices_24h)
         system = _make_system(source)
 
@@ -87,9 +87,13 @@ class TestGetPriceDataExtended:
 
         assert prices is not None
         assert _price_entries is not None
-        # MockSource returns same prices for any date, so today + tomorrow = 192
-        assert len(prices) == 192
-        assert len(_price_entries) == 192
+        # MockSource returns same prices for any date; the cap is the two real
+        # day lengths (192 on ordinary days, more across a DST fall-back, #832)
+        expected = get_period_count(time_utils.today()) + get_period_count(
+            time_utils.today() + timedelta(days=1)
+        )
+        assert len(prices) == expected
+        assert len(_price_entries) == expected
 
     def test_graceful_fallback_when_tomorrow_unavailable(self, quarterly_prices_24h):
         """When tomorrow's prices aren't available, returns only today's entries."""
@@ -118,7 +122,7 @@ class TestGetPriceDataExtended:
         assert len(prices) == expected
 
     def test_192_period_cap_enforced(self):
-        """Even with very long price arrays, cap at 192 periods."""
+        """Even with very long price arrays, cap at today's + tomorrow's period count."""
         # 150 prices per day = 300 total would exceed cap
         source = MockSource([1.0] * 150)
         system = _make_system(source)
@@ -126,7 +130,9 @@ class TestGetPriceDataExtended:
         prices, _price_entries = system._get_price_data(prepare_next_day=False)
 
         assert prices is not None
-        assert len(prices) <= 192
+        assert len(prices) == get_period_count(time_utils.today()) + get_period_count(
+            time_utils.today() + timedelta(days=1)
+        )
 
 
 class TestGatherOptimizationDataExtended:

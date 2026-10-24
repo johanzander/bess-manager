@@ -2040,7 +2040,7 @@ class BatterySystemManager:
 
         When prepare_next_day=False, attempts to extend today's prices with
         tomorrow's data for improved end-of-day optimization. The extended
-        horizon is capped at 192 periods (2 days).
+        horizon is capped at today's + tomorrow's period count (2 days).
         """
         # Cache-only reads: the quarterly cycle must never fetch prices on the
         # scheduler thread (#709). The cache is kept warm by the dedicated
@@ -2066,10 +2066,14 @@ class BatterySystemManager:
                 logger.warning("No prices available")
                 return None, None
 
-            # Cap at 192 periods (2 days maximum)
-            if len(price_entries) > 192:
-                price_entries = price_entries[:192]
-                logger.info("Capped price entries at 192 periods (2 days)")
+            # Cap at two calendar days. A day is 92, 96 or 100 periods, so the
+            # cap follows the real day lengths instead of a literal 192 (#832).
+            max_periods = get_period_count(time_utils.today()) + get_period_count(
+                time_utils.today() + timedelta(days=1)
+            )
+            if len(price_entries) > max_periods:
+                price_entries = price_entries[:max_periods]
+                logger.info("Capped price entries at %d periods (2 days)", max_periods)
 
             prices = [entry["price"] for entry in price_entries]
 
@@ -2605,7 +2609,8 @@ class BatterySystemManager:
 
         # --- Extend arrays to match period_count when horizon spans tomorrow ---
         if period_count > len(consumption_predictions):
-            # Consumption: repeat the same wall-clock pattern for the following day
+            # Consumption: the same wall-clock pattern laid over the following
+            # day's real periods, so a 96+100 DST horizon is 196 long (#832, #689).
             consumption_predictions = consumption_predictions + (
                 expand_wall_clock_profile(
                     consumption_profile, first_day + timedelta(days=1)
@@ -3020,11 +3025,20 @@ class BatterySystemManager:
             # is the only day present, so this is identical to sell_prices.
             # Still needed after #602: the cap governs the no-PV regime, which
             # is where the concave row's knee cannot bind.
-            terminal_date = remaining_entries[-1]["timestamp"][:10]
+            # The terminal day is located by position, not by timestamp label:
+            # labels are naive wall clock, so on a 100-period day the last four
+            # roll over onto the next date (#832).
+            today_period_count = get_period_count(time_utils.today())
+            terminal_day_start = (
+                today_period_count
+                if not prepare_next_day and len(price_entries) > today_period_count
+                else 0
+            )
             cap_sell_prices = [
                 entry["sellPrice"]
-                for entry in remaining_entries
-                if entry["timestamp"][:10] == terminal_date
+                for entry in price_entries[
+                    max(terminal_day_start, optimization_period) :
+                ]
             ]
 
             # Terminal valuation for end-of-horizon energy.
@@ -3279,7 +3293,7 @@ class BatterySystemManager:
             )
 
             # Truncate all arrays to today's period count before creating DPSchedule.
-            # The optimizer may have used an extended horizon (up to 192 periods) to make
+            # The optimizer may have used an extended horizon (two days) to make
             # better decisions for today, but DPSchedule and InverterController are
             # day-centric and the Growatt inverter has no date awareness in TOU segments.
             if not prepare_next_day:
@@ -3303,7 +3317,7 @@ class BatterySystemManager:
 
             # Recalculate EconomicSummary scoped to today only.
             # The DP algorithm computes economic_summary over the full extended horizon
-            # (up to 192 periods), which inflates profitability gate and prediction snapshots.
+            # (two days), which inflates profitability gate and prediction snapshots.
             if not prepare_next_day:
                 today_period_count = get_period_count(time_utils.today())
                 today_result_count = today_period_count - optimization_period

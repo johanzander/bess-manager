@@ -17,7 +17,10 @@ from core.bess import time_utils
 from core.bess.calendar_windows import CalendarWindow, parse_calendar_events
 from core.bess.dp_battery_algorithm import optimize_battery_schedule
 from core.bess.exceptions import CalendarWindowError
-from core.bess.free_import_overlay import apply_free_import_windows
+from core.bess.free_import_overlay import (
+    apply_free_import_windows,
+    free_import_by_period_start,
+)
 from core.bess.price_manager import MockSource, PriceManager
 from core.bess.settings import BatterySettings
 from core.bess.simulation.inverter_simulator import (
@@ -374,3 +377,24 @@ def test_plan_fills_the_battery_for_free_instead_of_paying_or_discharging() -> N
         f"window cut realized cost by {reduction:.4f}, less than the "
         f"{free_energy_value:.4f} its free energy is worth"
     )
+
+
+def test_flags_by_period_start_tell_the_two_fall_back_hours_apart() -> None:
+    """2026-10-25 repeats 01:00-02:00 London time; each hour keeps its own flag."""
+    day = date(2026, 10, 25)
+    # Only the second 01:00 hour (01:00-02:00 UTC, after the clocks go back).
+    window = _window(
+        datetime(2026, 10, 25, 1, 0, tzinfo=UTC),
+        datetime(2026, 10, 25, 2, 0, tzinfo=UTC),
+    )
+    entries = apply_free_import_windows(_entries(day, 100), day, [window], 0.0)
+
+    flags = free_import_by_period_start(entries, day)
+
+    assert len(flags) == 100
+    first_hour = datetime(2026, 10, 25, 0, 0, tzinfo=UTC)
+    second_hour = datetime(2026, 10, 25, 1, 0, tzinfo=UTC)
+    for quarter in range(4):
+        offset = timedelta(minutes=15 * quarter)
+        assert flags[first_hour + offset] is False
+        assert flags[second_hour + offset] is True

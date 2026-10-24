@@ -813,6 +813,7 @@ The system operates on **quarterly resolution (15-minute periods)** throughout t
 - All components handle variable period counts
 - No hardcoded 24-hour assumptions
 - Validation uses ranges (92-100) not fixed values
+- Consumption and solar forecasts are 96-entry wall-clock profiles laid over the day's real periods by `time_utils.expand_wall_clock_profile`; the repeated fall-back hour reuses that hour's value and the skipped spring-forward hour is dropped (#689)
 
 **Data Flow**:
 

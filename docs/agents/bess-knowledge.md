@@ -933,8 +933,8 @@ is always caused by a specific, identifiable change.
 
 The optimizer needs a consumption forecast.  Four strategies exist:
 
-- **ha_statistics** (recommended): Builds a 96-period time-of-day profile
-  from the past 7 days of HA Recorder data, bucketed by hour-of-day.  For
+- **ha_statistics** (recommended): Builds a 96-entry wall-clock time-of-day
+  profile from the past 7 days of HA Recorder data, bucketed by hour-of-day.  For
   each hour it drops only the single highest (and lowest, if ≥5 samples)
   of the 7 daily values before averaging.  This discounts a one-off
   irregular spike (e.g. an unusual EV charging session on one day) but
@@ -1003,6 +1003,17 @@ with the next day's first four, and "now" an hour behind after the second
 midnight. Aware datetimes sharing a ZoneInfo still compare equal across the
 repeated hour, so anything matching periods by timestamp compares instants
 (`.astimezone(UTC)`), as `ScheduleStore.get_period_data_at` does.
+
+Forecast arrays follow the real day too (#689).  Every consumption strategy
+yields a 96-entry *wall-clock* profile (`_get_consumption_profile`, cached by
+date); `time_utils.expand_wall_clock_profile` lays it over a real day's 92, 96
+or 100 periods, each period taking the value of its own wall-clock quarter-hour.
+So on the fall-back day the repeated hour reuses that hour's value and nothing
+after it is shifted; on the spring-forward day the skipped hour is dropped.
+`fixed` and `sensor` are flat profiles (value x period count).  Solcast's hourly
+forecast is expanded the same way, and `_gather_optimization_data` sizes each
+day's slice by that day's own period count, so the tomorrow part of an extended
+horizon is 92/96/100 long rather than a copy of today's 96.
 
 **Failure behaviour**: a configured overlay entity that is missing,
 unavailable, or malformed raises `ConsumptionOverlayError` rather than being

@@ -262,7 +262,7 @@ class TestHAStatisticsDispatch:
         with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
             mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
             mock_tu.TIMEZONE = TIMEZONE
-            result = manager._get_consumption_forecast()
+            result = manager._get_consumption_profile()
 
         assert len(result) == 96
         assert abs(sum(result) - 36.0) < 0.01  # 1.5 * 24 = 36 kWh/day
@@ -292,7 +292,7 @@ class TestHAStatisticsDispatch:
 
         controller._resolve_entity_id = strict_resolve
 
-        result = manager._get_consumption_forecast()
+        result = manager._get_consumption_profile()
         assert len(result) == 96
         assert all(v == 3.0 / 4.0 for v in result)
 
@@ -315,7 +315,7 @@ class TestHAStatisticsDispatch:
         with patch("core.bess.battery_system_manager.time_utils") as mock_tu:
             mock_tu.today.return_value = datetime(2026, 5, 12, tzinfo=TIMEZONE).date()
             mock_tu.TIMEZONE = TIMEZONE
-            result = manager._get_consumption_forecast()
+            result = manager._get_consumption_profile()
 
         assert len(result) == 96
         assert all(v == 4.0 / 4.0 for v in result)

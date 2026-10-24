@@ -7,7 +7,7 @@ in _aggregate_quarterly_to_hourly.
 
 import sys
 from dataclasses import replace
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -112,9 +112,13 @@ def _wire_schedule_store(
     mock_schedule.optimization_period = optimization_period
     mock_schedule.optimization_result.period_data = period_data
     ctrl.system.schedule_store.get_latest_schedule.return_value = mock_schedule
-    by_timestamp = {p.timestamp: p for p in period_data}
+    # Keyed by instant like the real ScheduleStore: aware datetimes sharing a
+    # ZoneInfo compare equal across the repeated DST fall-back hour.
+    by_timestamp = {
+        p.timestamp.astimezone(UTC): p for p in period_data if p.timestamp is not None
+    }
     ctrl.system.schedule_store.get_period_data_at.side_effect = (
-        lambda ts: by_timestamp.get(ts)
+        lambda ts: by_timestamp.get(ts.astimezone(UTC))
     )
 
 
@@ -292,15 +296,20 @@ class TestDashboardFullHorizonCost:
         ctrl = _make_started_controller()
 
         today = time_utils.today()
+        tomorrow = today + timedelta(days=1)
+        # Real day lengths: tomorrow can be a 92/100-period DST day.
+        today_count = time_utils.get_period_count(today)
+        tomorrow_count = time_utils.get_period_count(tomorrow)
         period_data = [
-            _make_period_with_costs(i, today, grid_cost=0.0, grid_only_cost=0.5)
-            for i in range(96)
+            _make_period_with_costs(0, today, grid_cost=0.0, grid_only_cost=0.5)
+            for _ in range(today_count)
         ] + [
-            _make_period_with_costs(
-                i - 96, today + timedelta(days=1), grid_cost=0.1, grid_only_cost=0.2
-            )
-            for i in range(96, 192)
+            _make_period_with_costs(0, tomorrow, grid_cost=0.1, grid_only_cost=0.2)
+            for _ in range(tomorrow_count)
         ]
+        for index, period in enumerate(period_data):
+            period.period = index
+            period.timestamp = time_utils.period_index_to_timestamp(index)
         _wire_schedule_store(ctrl, period_data)
 
         sys.modules["app"].bess_controller = ctrl
@@ -309,10 +318,14 @@ class TestDashboardFullHorizonCost:
         assert resp.status_code == 200
         summary = resp.json()["summary"]
         assert summary["horizonDays"] == 2
-        # today: 96 periods * (grid_cost=0.0, grid_only_cost=0.5) -> netGrid=0.0, gridOnly=48.0
-        # tomorrow: 96 periods * (grid_cost=0.1, grid_only_cost=0.2) -> netGrid=9.6, gridOnly=19.2
-        assert summary["netGridCostFullHorizon"]["value"] == pytest.approx(9.6)
-        assert summary["netSavingsFullHorizon"]["value"] == pytest.approx(57.6)
+        # today: grid_cost=0.0, grid_only_cost=0.5 per period
+        # tomorrow: grid_cost=0.1, grid_only_cost=0.2 per period
+        net_grid = 0.1 * tomorrow_count
+        grid_only = 0.5 * today_count + 0.2 * tomorrow_count
+        assert summary["netGridCostFullHorizon"]["value"] == pytest.approx(net_grid)
+        assert summary["netSavingsFullHorizon"]["value"] == pytest.approx(
+            grid_only - net_grid
+        )
 
 
 class TestDashboardShadowPrice:

@@ -24,7 +24,7 @@ expanded to the system-wide 96 quarterly (15-minute) period model.
 """
 
 import logging
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import ClassVar
 
 from . import time_utils
@@ -172,6 +172,35 @@ class EntsoeSource(PriceSource):
         filtered.sort(key=lambda item: item[0])
         return [price for _, price in filtered]
 
+    @staticmethod
+    def _restore_repeated_fall_back_hour(
+        prices: list[float], target_date: date
+    ) -> list[float]:
+        """Restore the repeated wall-clock hour of a 25-hour (fall-back) day.
+
+        The ENTSO-e integration keys hourly prices by wall-clock time, so the
+        hour that occurs twice on the fall-back day arrives once: 24 entries,
+        indexed by wall-clock hour 0..23. The second occurrence has no price of
+        its own in that data, so both occurrences take the one price that arrived
+        (which of the two the integration kept is not known).
+        """
+        start = datetime.combine(target_date, time(0, 0), tzinfo=time_utils.TIMEZONE)
+        start_utc = start.astimezone(UTC)
+        wall_hours = [
+            (start_utc + timedelta(hours=h)).astimezone(time_utils.TIMEZONE).hour
+            for h in range(25)
+        ]
+        repeated = next(h for h in range(1, 25) if wall_hours[h] == wall_hours[h - 1])
+        logger.warning(
+            "ENTSO-e returned 24 hourly prices for %s, a 25-hour day: the repeated "
+            "%02d:00 hour is missing upstream, using the single price received for "
+            "that hour for both occurrences (%.4f EUR/kWh)",
+            target_date,
+            wall_hours[repeated],
+            prices[wall_hours[repeated]],
+        )
+        return [prices[wall_hour] for wall_hour in wall_hours]
+
     def _expand_to_quarterly(
         self, prices: list[float], target_date: date
     ) -> list[float]:
@@ -186,6 +215,9 @@ class EntsoeSource(PriceSource):
                 the expected quarterly count.
         """
         quarterly_count = time_utils.get_period_count(target_date)
+
+        if len(prices) == 24 and quarterly_count == 25 * 4:
+            prices = self._restore_repeated_fall_back_hour(prices, target_date)
 
         if len(prices) == 0 or quarterly_count % len(prices) != 0:
             raise PriceDataUnavailableError(

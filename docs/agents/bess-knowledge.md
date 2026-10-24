@@ -994,15 +994,15 @@ nothing until the next day — and would let the extension duplicate today's
 blocks onto tomorrow while dropping blocks genuinely declared for tomorrow.
 
 **DST**: the overlay builds its own period grid with
-`consumption_overlay.period_starts_from`, stepping in UTC and converting back,
-rather than using `time_utils.period_index_to_timestamp`.  That helper does
-wall-clock arithmetic (`day_start + 15min * i`), which on the fall-back day
-steps straight over the repeated local hour: index 11 lands at UTC 00:45 and
-index 12 at UTC 02:00, so every later period is an hour late and the day's
-last four indices collide with the next day's first four.  Harmless for the
-display and logging that helper was written for; not harmless for a consumer
-whose numbers depend on it, which the overlay is the first of.  The helper's
-own flaw is untouched here and still awaits a fix.
+`consumption_overlay.period_starts_from`, stepping in UTC and converting back.
+`time_utils.period_index_to_timestamp` and `timestamp_to_period_index` used to
+do wall-clock arithmetic, which on the fall-back day stepped over the repeated
+local hour (every later period an hour late, the last four indices colliding
+with the next day's first four, and "now" an hour behind after the second
+02:00). Fixed in #830: both now count real elapsed time from the day's local
+midnight. Aware datetimes sharing a ZoneInfo still compare equal across the
+repeated hour, so anything matching periods by timestamp compares instants
+(`.astimezone(UTC)`), as `ScheduleStore.get_period_data_at` does.
 
 **Failure behaviour**: a configured overlay entity that is missing,
 unavailable, or malformed raises `ConsumptionOverlayError` rather than being

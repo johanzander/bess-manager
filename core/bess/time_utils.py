@@ -8,7 +8,7 @@ handling DST transitions correctly.
 """
 
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,22 @@ def get_period_count(target_date: date) -> int:
     return int(elapsed_hours * PERIODS_PER_HOUR)
 
 
+def _local_midnight_utc(target_date: date) -> datetime:
+    """The instant the given local calendar day starts, as an aware UTC datetime."""
+    return datetime.combine(target_date, time(0, 0), tzinfo=TIMEZONE).astimezone(UTC)
+
+
+def _period_start(target_date: date, period_within_day: int) -> datetime:
+    """Start of a period, counted in real elapsed time from the day's midnight.
+
+    Adding a timedelta to a ZoneInfo datetime is wall-clock arithmetic, so on a
+    DST day it would skip (or repeat) the transition hour; elapsed time does not.
+    """
+    start = _local_midnight_utc(target_date)
+    elapsed = timedelta(minutes=period_within_day * INTERVAL_MINUTES)
+    return (start + elapsed).astimezone(TIMEZONE)
+
+
 def timestamp_to_period_index(dt: datetime) -> int:
     """Convert timestamp to continuous period index from today's 00:00.
 
@@ -92,6 +108,7 @@ def timestamp_to_period_index(dt: datetime) -> int:
         raise ValueError("Timestamp must be timezone-aware")
 
     today = datetime.now(tz=TIMEZONE).date()
+    dt = dt.astimezone(TIMEZONE)
     target_date = dt.date()
     days_from_today = (target_date - today).days
 
@@ -105,9 +122,12 @@ def timestamp_to_period_index(dt: datetime) -> int:
             f"Only today and tomorrow supported, got {target_date} (today is {today})"
         )
 
-    # Calculate period within the day
-    day_start = datetime.combine(target_date, time(0, 0), tzinfo=dt.tzinfo)
-    elapsed_minutes = (dt - day_start).total_seconds() / 60
+    # Elapsed real time since the day's local midnight. Subtracting two datetimes
+    # that share a ZoneInfo is wall-clock arithmetic, which loses (or invents) the
+    # DST hour, so both sides go through UTC.
+    elapsed_minutes = (
+        dt.astimezone(UTC) - _local_midnight_utc(target_date)
+    ).total_seconds() / 60
     period_within_day = int(elapsed_minutes / INTERVAL_MINUTES)
 
     if days_from_today == 0:
@@ -149,9 +169,7 @@ def period_index_to_timestamp(period_index: int) -> datetime:
 
     if period_index < today_periods:
         # Today (0-95 normally)
-        day_start = datetime.combine(today, time(0, 0), tzinfo=TIMEZONE)
-        delta = timedelta(minutes=period_index * INTERVAL_MINUTES)
-        return day_start + delta
+        return _period_start(today, period_index)
     else:
         # Tomorrow
         tomorrow = today + timedelta(days=1)
@@ -165,9 +183,7 @@ def period_index_to_timestamp(period_index: int) -> datetime:
             )
 
         period_within_tomorrow = period_index - today_periods
-        day_start = datetime.combine(tomorrow, time(0, 0), tzinfo=TIMEZONE)
-        delta = timedelta(minutes=period_within_tomorrow * INTERVAL_MINUTES)
-        return day_start + delta
+        return _period_start(tomorrow, period_within_tomorrow)
 
 
 def get_current_period_index() -> int:

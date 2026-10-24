@@ -2371,8 +2371,9 @@ class BatterySystemManager:
                 break
             plan_schedule = schedule
 
+        # Keyed by instant: wall-clock equality merges the repeated DST hour.
         period_data_by_timestamp = {
-            pd.timestamp: pd
+            pd.timestamp.astimezone(UTC): pd
             for pd in plan_schedule.optimization_result.period_data
             if pd.timestamp is not None
         }
@@ -2380,7 +2381,7 @@ class BatterySystemManager:
         planned_export = 0.0
         for p in range(start_period, end_period):
             period_data = period_data_by_timestamp.get(
-                time_utils.period_index_to_timestamp(p)
+                time_utils.period_index_to_timestamp(p).astimezone(UTC)
             )
             if period_data is not None:
                 planned_import += period_data.energy.grid_imported

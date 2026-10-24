@@ -18,8 +18,10 @@ from fastapi.testclient import TestClient
 
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.calendar_windows import CalendarWindow
 from core.bess.daily_view_builder import DailyView
 from core.bess.exceptions import SystemConfigurationError
+from core.bess.free_import_overlay import apply_free_import_windows
 from core.bess.models import DecisionData, EconomicData, EnergyData, PeriodData
 from core.bess.settings import BatterySettings
 
@@ -1266,3 +1268,73 @@ def test_hourly_data_exposes_wear_free_net_and_battery_savings():
     # battery_cycle_cost=0.1 — if wear were included this would instead be
     # solar_only_cost - hourly_cost = 6.0 - 2.1 = 3.9).
     assert api_hourly.batterySavings.value == 4.0
+
+
+class TestDashboardFreeImportOnDstFallBack:
+    """On the 25-hour fall-back day the two 02:00 hours share a wall-clock
+    label, so a free-import window covering only the second one must flag only
+    the second one's periods (#833).
+    """
+
+    _DAY = date(2026, 10, 25)
+
+    @classmethod
+    def _period_at(cls, index: int) -> PeriodData:
+        start = datetime.combine(
+            cls._DAY, datetime.min.time(), tzinfo=time_utils.TIMEZONE
+        ).astimezone(UTC) + timedelta(minutes=15 * index)
+        return replace(
+            _make_period(0),
+            period=index,
+            timestamp=start.astimezone(time_utils.TIMEZONE),
+        )
+
+    def test_only_the_second_02_00_hour_is_flagged_free(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(time_utils, "today", lambda: self._DAY)
+        # Second 02:00 hour = 01:00-02:00 UTC = elapsed periods 12-15.
+        window = CalendarWindow(
+            start=datetime(2026, 10, 25, 1, 0, tzinfo=UTC),
+            end=datetime(2026, 10, 25, 2, 0, tzinfo=UTC),
+        )
+        base = datetime.combine(self._DAY, datetime.min.time())
+        entries = apply_free_import_windows(
+            [
+                {
+                    "timestamp": (base + timedelta(minutes=15 * i)).strftime(
+                        "%Y-%m-%d %H:%M"
+                    ),
+                    "price": 1.0,
+                    "buyPrice": 1.0,
+                    "sellPrice": 0.5,
+                }
+                for i in range(100)
+            ],
+            self._DAY,
+            [window],
+            free_price=0.0,
+        )
+        ctrl = _make_started_controller()
+        ctrl.system.get_current_daily_view.return_value = DailyView(
+            date=self._DAY,
+            periods=[self._period_at(i) for i in range(100)],
+            total_savings=0.0,
+            actual_count=0,
+            predicted_count=100,
+        )
+        ctrl.system.price_manager.get_cached_today_prices.return_value = entries
+        ctrl.system.price_manager.get_cached_tomorrow_prices.return_value = []
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        resp = _client.get("/api/dashboard?resolution=quarter-hourly")
+        assert resp.status_code == 200
+        hourly = resp.json()["hourlyData"]
+
+        assert len(hourly) == 100
+        assert [i for i, h in enumerate(hourly) if h["isFreeImport"]] == [
+            12,
+            13,
+            14,
+            15,
+        ]

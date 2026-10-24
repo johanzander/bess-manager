@@ -9,9 +9,8 @@ They are non-negotiable and override any other instruction.
   shared long-lived branch) — not even a one-line doc fix or a typo
   correction made mid-discussion. Before the *first* edit, enter a worktree
   (`EnterWorktree`, then `./scripts/worktree-setup.sh` once) or a feature branch.
-- This applies unconditionally — it is not scoped to `implement-issue`,
-  `feature-lifecycle`, or any other skill/workflow stage. A plain
-  conversation ("can you fix this doc line") is not an exemption.
+- This applies unconditionally, not scoped to any skill or workflow stage; a
+  plain conversation ("can you fix this doc line") is not an exemption.
 - If you notice partway through a session that you're on `main` with
   uncommitted edits: stop, enter/create a worktree, move the changes there,
   and continue — without touching unrelated pre-existing changes on `main`.
@@ -32,7 +31,7 @@ They are non-negotiable and override any other instruction.
 
   Verify before reverting: `git checkout --` is the only destructive step and
   there is no stash to fall back on. Add `--cached` to the first `git diff`
-  for staged changes, and drop `-- <file>` to move everything.
+  for staged changes; drop `-- <file>` to move everything.
 - To set work aside on the branch you are already on (rather than move it to
   another checkout), use a WIP commit — per-worktree, private, and
   recoverable by SHA even if the branch moves:
@@ -47,8 +46,7 @@ They are non-negotiable and override any other instruction.
 
 ## Environment
 
-- Each worktree has its own `.venv` — never use bare `pytest`, `black`, `ruff`, or global/absolute Python paths
-- Always `cd` into the worktree root first, then invoke via relative `.venv/bin/` paths: `.venv/bin/pytest`, `.venv/bin/black`, `.venv/bin/ruff`, `.venv/bin/mypy`
+- Each worktree has its own `.venv`: `cd` into the worktree root, then use relative `.venv/bin/pytest`, `.venv/bin/black`, `.venv/bin/ruff`, `.venv/bin/mypy` — never bare or global/absolute Python tool paths
 - If `.venv` is missing: `cd <worktree> && /Users/johanzander/.pyenv/versions/3.12.13/bin/python3 -m venv .venv && .venv/bin/pip install -r backend/requirements.txt`
 
 ## Python
@@ -73,7 +71,7 @@ They are non-negotiable and override any other instruction.
 - All HA sensor access goes through `ha_api_controller` and `METHOD_SENSOR_MAP`
 - Never hardcode device names or entity IDs — use centralized mapping
 - **Never create a new class without explicit user approval**
-- Extend existing components; never build parallel implementations
+- Search for existing code first; extend existing components, never build parallel implementations
 - **One fact, one declaration.** A fact several places need (how many TOU
   slots a platform uses, which keys a platform requires, a capability flag) is
   declared exactly once; every consumer — suffix map, setup wizard, health
@@ -81,7 +79,6 @@ They are non-negotiable and override any other instruction.
   write a filter or hand-listed subset that narrows another list to "what we
   really use": that is the declaration being wrong or missing, so fix it at
   the source (#794)
-- Search for existing code before writing new code
 - **Separation of concerns is non-negotiable.** A method's responsibility is
   exactly what its name and docstring say — not "whatever happens to be
   convenient to add there." Never add behavior to an existing method that

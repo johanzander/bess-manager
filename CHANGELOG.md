@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - **ENTSO-e: tomorrow's prices are no longer rejected on the 25-hour fall-back day** — the integration sends 24 hourly prices; both occurrences of the repeated hour now use the one price received, with a warning. ([#830](https://github.com/johanzander/bess-manager/issues/830))
 - **DST change days: the current period and schedule timestamps now follow real time** — on the 25-hour day the plan no longer runs an hour late after 02:00, and the last hour is reachable. ([#830](https://github.com/johanzander/bess-manager/issues/830))
+- **Octopus free-import windows on the 25-hour fall-back day** — each period now shows its own free-import flag instead of the wrong hour's. ([#833](https://github.com/johanzander/bess-manager/issues/833))
 
 ## [11.1.0] - 2026-10-20
 

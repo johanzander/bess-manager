@@ -18,6 +18,34 @@ logger = logging.getLogger(__name__)
 PERIOD_DURATION = timedelta(minutes=time_utils.INTERVAL_MINUTES)
 
 
+def _day_start_utc(day: date) -> datetime:
+    """The instant ``day`` starts in local time, as an aware UTC datetime."""
+    return datetime.combine(day, time(0, 0), tzinfo=time_utils.TIMEZONE).astimezone(UTC)
+
+
+def free_import_by_period_start(entries: list[dict], day: date) -> dict[datetime, bool]:
+    """Map each period's start instant (UTC) to its ``isFreeImport`` flag.
+
+    Entry ``i`` is the ``i``-th quarter-hour of elapsed time after local
+    midnight, so on a DST day the repeated (or skipped) hour is addressed by
+    instant. The entries' own ``timestamp`` strings are wall-clock labels and
+    cannot tell the two 02:00 hours of a fall-back day apart.
+
+    Args:
+        entries: One day's price entries as returned by the price manager,
+            each carrying ``isFreeImport``.
+        day: The calendar day ``entries`` belong to.
+
+    Returns:
+        ``{period start (UTC): isFreeImport}``, one key per entry.
+    """
+    day_start = _day_start_utc(day)
+    return {
+        day_start + index * PERIOD_DURATION: entry["isFreeImport"]
+        for index, entry in enumerate(entries)
+    }
+
+
 def apply_free_import_windows(
     entries: list[dict],
     day: date,
@@ -42,8 +70,7 @@ def apply_free_import_windows(
     # Period i is i quarter-hours of *elapsed* time after local midnight --
     # the price sources index a 92/100-period DST day that way -- so period
     # instants are counted in UTC, not by wall clock.
-    midnight = datetime.combine(day, time(0, 0), tzinfo=time_utils.TIMEZONE)
-    day_start = midnight.astimezone(UTC)
+    day_start = _day_start_utc(day)
 
     result = []
     partially_covering: set[CalendarWindow] = set()

@@ -5,8 +5,8 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 import dataclasses
 import threading
+from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
-from datetime import datetime, timedelta
 from typing import Any
 
 from api_conversion import (
@@ -39,6 +39,7 @@ from loguru import logger
 from core.bess import time_utils
 from core.bess.dp_battery_algorithm import has_value_cell_below
 from core.bess.exceptions import SystemConfigurationError
+from core.bess.free_import_overlay import free_import_by_period_start
 from core.bess.health_check import (
     group_components_by_device,
     run_system_health_checks,
@@ -992,21 +993,22 @@ async def get_dashboard_data(
         battery_capacity = battery_settings.total_capacity
         currency = bess_controller.system.home_settings.currency
 
-        # Free-import window lookup, keyed by "YYYY-MM-DD HH:MM" timestamp —
-        # only available for today/tomorrow via the price manager's cache
+        # Free-import window lookup, keyed by period start instant (UTC): the
+        # wall-clock label is ambiguous on the repeated DST fall-back hour.
+        # Only available for today/tomorrow via the price manager's cache
         # (get_price_data), never for a historical day.
-        free_import_by_timestamp: dict[str, bool] = {}
+        free_import_by_instant: dict[datetime, bool] = {}
         if not is_historical:
-            for entry in bess_controller.system.price_manager.get_cached_today_prices():
-                free_import_by_timestamp[entry["timestamp"]] = entry.get(
-                    "isFreeImport", False
-                )
+            free_import_by_instant = free_import_by_period_start(
+                bess_controller.system.price_manager.get_cached_today_prices(),
+                time_utils.today(),
+            )
 
         def _is_free_import(period_data: PeriodData) -> bool:
             ts = period_data.timestamp
             if ts is None:
                 return False
-            return free_import_by_timestamp.get(ts.strftime("%Y-%m-%d %H:%M"), False)
+            return free_import_by_instant.get(ts.astimezone(UTC), False)
 
         # Convert periods to API format (works for both hourly and quarterly)
         hourly_dataclass_instances = [
@@ -1064,23 +1066,18 @@ async def get_dashboard_data(
                     if period_data is not None:
                         tomorrow_periods.append(period_data)
                 if tomorrow_periods:
-                    tomorrow_free_import_by_timestamp: dict[str, bool] = {}
-                    for (
-                        entry
-                    ) in (
-                        bess_controller.system.price_manager.get_cached_tomorrow_prices()
-                    ):
-                        tomorrow_free_import_by_timestamp[entry["timestamp"]] = (
-                            entry.get("isFreeImport", False)
-                        )
+                    tomorrow_free_import_by_instant = free_import_by_period_start(
+                        bess_controller.system.price_manager.get_cached_tomorrow_prices(),
+                        time_utils.today() + timedelta(days=1),
+                    )
                     tomorrow_data = [
                         APIDashboardHourlyData.from_internal(
                             p,
                             battery_capacity,
                             currency,
                             is_free_import=(
-                                tomorrow_free_import_by_timestamp.get(
-                                    p.timestamp.strftime("%Y-%m-%d %H:%M"), False
+                                tomorrow_free_import_by_instant.get(
+                                    p.timestamp.astimezone(UTC), False
                                 )
                                 if p.timestamp is not None
                                 else False

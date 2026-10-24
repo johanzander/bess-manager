@@ -80,6 +80,33 @@ def _period_start(target_date: date, period_within_day: int) -> datetime:
     return (start + elapsed).astimezone(TIMEZONE)
 
 
+def expand_wall_clock_profile(profile: list[float], target_date: date) -> list[float]:
+    """Lay a wall-clock day profile over the real periods of ``target_date``.
+
+    Consumption and solar forecasts are shapes of a 24-hour wall-clock day: 96
+    values, one per quarter-hour 00:00..23:45. A real day is 96, 92 or 100
+    periods, so each real period takes the value of the wall-clock quarter-hour
+    it falls in. On the fall-back day the repeated hour therefore reuses that
+    hour's values, and on the spring-forward day the skipped hour is dropped,
+    leaving every other period on its own wall-clock hour.
+
+    Raises:
+        ValueError: If ``profile`` is not 96 entries.
+    """
+    if len(profile) != PERIODS_PER_DAY_NORMAL:
+        raise ValueError(
+            f"A wall-clock day profile must have {PERIODS_PER_DAY_NORMAL} "
+            f"entries, got {len(profile)}"
+        )
+    expanded: list[float] = []
+    for period in range(get_period_count(target_date)):
+        start = _period_start(target_date, period)
+        expanded.append(
+            profile[start.hour * PERIODS_PER_HOUR + start.minute // INTERVAL_MINUTES]
+        )
+    return expanded
+
+
 def timestamp_to_period_index(dt: datetime) -> int:
     """Convert timestamp to continuous period index from today's 00:00.
 

@@ -1590,7 +1590,7 @@ class TestSetupCompleteRejectsUnusableConsumptionStrategy:
 
     def test_unknown_strategy_is_rejected(self, complete_controller):
         """An unrecognised value otherwise persists fine and only surfaces
-        later, as a ValueError from _get_consumption_forecast on every run."""
+        later, as a ValueError from _get_consumption_profile on every run."""
         payload = _full_wizard_payload(consumptionStrategy="bogus_strategy")
 
         resp = _client.post("/api/setup/complete", json=payload)

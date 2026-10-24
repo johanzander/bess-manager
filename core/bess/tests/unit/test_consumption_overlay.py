@@ -247,7 +247,7 @@ def test_parse_rejects_a_naive_timestamp() -> None:
 #
 # The overlay applies in _gather_optimization_data, after the daily prediction
 # cache and after the tomorrow-horizon extension. Applying it earlier -- inside
-# _get_consumption_forecast -- would bake it into the cached array (so editing
+# _get_consumption_profile -- would bake it into the cached array (so editing
 # the overlay mid-day would do nothing until tomorrow) and would let the
 # extension duplicate today's blocks onto tomorrow. These tests pin the seam,
 # not just the arithmetic.
@@ -366,7 +366,7 @@ def test_editing_the_overlay_takes_effect_without_waiting_for_tomorrow(
     'ha_statistics' and 'load_power_7d_avg' average whole calendar days, so
     their forecast is cached until the date rolls over. The overlay is not
     that kind of value: the user edits it precisely because today changed.
-    Applying it inside _get_consumption_forecast would trap it in that cache.
+    Applying it inside _get_consumption_profile would trap it in that cache.
     """
     system = system_with_overlay
     system.home_settings.consumption_strategy = "ha_statistics"

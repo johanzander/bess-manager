@@ -235,16 +235,12 @@ def knee_kwh_from_forecast(
     differently-derived knee -- bounded by the next cheap charging window rather
     than by sunrise -- which is not in scope here and has no oracle behind it yet.
     """
-    # `strict=False` is deliberate and must stay: the two arrays legitimately
-    # differ in length. `_get_consumption_forecast` hardcodes 96 on every
-    # strategy branch, while `_fetch_tomorrow_solar_forecast`'s no-sensor
-    # fallback sizes itself to `get_period_count(tomorrow)` -- 92 on DST spring,
-    # 100 on DST fall. `strict=True` would raise there, i.e. crash the optimizer
-    # twice a year for every install without a solar sensor, which is worse than
-    # the truncation it would replace: that path yields an all-zero solar array,
-    # so the day has no PV crossover and takes the capped regime at either
-    # length. The real defect is the 96-vs-period-count mismatch upstream, not
-    # the zip.
+    # `strict=False` is deliberate and must stay. Production now hands this the
+    # same length on both sides (`_get_consumption_forecast` and
+    # `_fetch_tomorrow_solar_forecast` are both sized by `get_period_count`, #689),
+    # but this is a shared formula and nothing shows `strict=True` safe for every
+    # caller; a raise here would crash the optimizer to report a symptom, where
+    # the original mismatch was an upstream defect, not the zip.
     net = 0.0
     for consumption, solar in zip(consumption_forecast, solar_forecast, strict=False):
         if consumption <= 0:

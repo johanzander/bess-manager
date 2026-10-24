@@ -1208,10 +1208,11 @@ class TestConsumptionForecastFreshness:
 
         with (
             patch.object(
-                system, "_get_consumption_forecast", return_value=[2.0] * 96
+                system, "_get_consumption_profile", return_value=[2.0] * 96
             ) as mock_fetch,
             patch("core.bess.time_utils.datetime") as mock_datetime,
         ):
+            mock_datetime.combine = datetime.combine
             mock_datetime.now.return_value = datetime(
                 2026, 7, 27, 8, 0, tzinfo=TIMEZONE
             )
@@ -1234,12 +1235,13 @@ class TestConsumptionForecastFreshness:
 
         with (
             patch.object(
-                system, "_get_consumption_forecast", return_value=[2.0] * 96
+                system, "_get_consumption_profile", return_value=[2.0] * 96
             ) as mock_fetch,
             patch("core.bess.time_utils.datetime") as mock_datetime,
         ):
             # Same day, later quarterly tick: the 7-day window can't have
             # changed, so the cache must be reused.
+            mock_datetime.combine = datetime.combine
             mock_datetime.now.return_value = datetime(
                 2026, 7, 27, 20, 0, tzinfo=TIMEZONE
             )

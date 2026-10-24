@@ -83,6 +83,8 @@ from .solis_modbus_controller import SolisModbusController
 from .strategic_intent import discharge_ceiling_lifts, idle_hold_releasable
 from .terminal_value import TerminalValueCurve, calculate_terminal_curve
 from .time_utils import (
+    PERIODS_PER_DAY_NORMAL,
+    expand_wall_clock_profile,
     format_period,
     get_period_count,
     period_index_to_timestamp,
@@ -1311,7 +1313,7 @@ class BatterySystemManager:
                 logger.warning("Cannot fetch predictions: controller is not available")
                 return
 
-            consumption_predictions = self._get_consumption_forecast()
+            consumption_predictions = self._get_consumption_profile()
 
             # Store the predictions (this was missing!)
             if consumption_predictions:
@@ -1678,14 +1680,22 @@ class BatterySystemManager:
             return None, None
         return export_targets, session_import_caps
 
-    def _get_consumption_forecast(self) -> list[float]:
-        """Get consumption forecast based on the configured strategy.
+    def _get_consumption_forecast(self, target_date: date) -> list[float]:
+        """The configured strategy's consumption forecast for ``target_date``.
+
+        One entry per real period of that day (92, 96 or 100), kWh each.
+        """
+        return expand_wall_clock_profile(self._get_consumption_profile(), target_date)
+
+    def _get_consumption_profile(self) -> list[float]:
+        """Get the consumption profile of a wall-clock day for the configured strategy.
 
         Dispatches to the appropriate data source based on
-        home_settings.consumption_strategy.
+        home_settings.consumption_strategy. The profile is a shape, not a
+        particular day: ``_get_consumption_forecast`` lays it over a real day.
 
         Returns:
-            List of 96 float values (kWh per 15-minute period).
+            List of 96 float values (kWh per 15-minute wall-clock quarter-hour).
         """
         strategy = self.home_settings.consumption_strategy
 
@@ -1694,7 +1704,7 @@ class BatterySystemManager:
 
         if strategy == "fixed":
             quarterly = self.home_settings.default_hourly / 4.0
-            return [quarterly] * 96
+            return [quarterly] * PERIODS_PER_DAY_NORMAL
 
         if strategy == "load_power_7d_avg":
             return self._get_load_power_7d_avg_forecast()
@@ -1730,7 +1740,7 @@ class BatterySystemManager:
                         ),
                         error=e,
                     )
-                return [quarterly] * 96
+                return [quarterly] * PERIODS_PER_DAY_NORMAL
 
         raise ValueError(f"Unknown consumption_strategy: '{strategy}'")
 
@@ -2521,11 +2531,16 @@ class BatterySystemManager:
             return None
 
     def _fetch_tomorrow_solar_forecast(self) -> list[float]:
-        """Fetch tomorrow's solar forecast, falling back to zeros if unavailable."""
+        """Fetch tomorrow's solar forecast, falling back to zeros if unavailable.
+
+        One entry per real period of tomorrow (92, 96 or 100).
+        """
+        tomorrow_date = time_utils.today() + timedelta(days=1)
         try:
-            return self.controller.get_solar_forecast_tomorrow()
+            return expand_wall_clock_profile(
+                self.controller.get_solar_forecast_tomorrow(), tomorrow_date
+            )
         except SystemConfigurationError:
-            tomorrow_date = date.today() + timedelta(days=1)
             forecast = [0.0] * get_period_count(tomorrow_date)
             logger.warning(
                 "Tomorrow's solar forecast unavailable (no solar sensor configured), using zeros"
@@ -2565,51 +2580,53 @@ class BatterySystemManager:
                 self._consumption_predictions is not None
                 and self._consumption_predictions_date == time_utils.today()
             ):
-                consumption_predictions = self._consumption_predictions
+                consumption_profile = self._consumption_predictions
             else:
-                consumption_predictions = self._get_consumption_forecast()
-                self._consumption_predictions = consumption_predictions
+                consumption_profile = self._get_consumption_profile()
+                self._consumption_predictions = consumption_profile
                 self._consumption_predictions_date = time_utils.today()
         else:
-            consumption_predictions = self._get_consumption_forecast()
+            consumption_profile = self._get_consumption_profile()
+
+        # Index 0 of the horizon is the first day's midnight; each day's slice is
+        # sized by that day's real period count (92, 96 or 100).
+        first_day = time_utils.today() + timedelta(days=1 if prepare_next_day else 0)
+        consumption_predictions = expand_wall_clock_profile(
+            consumption_profile, first_day
+        )
 
         if prepare_next_day:
             # The next-day schedule must be built from tomorrow's solar forecast, not today's.
             solar_predictions = self._fetch_tomorrow_solar_forecast()
         else:
-            solar_predictions = self.controller.get_solar_forecast()
+            solar_predictions = expand_wall_clock_profile(
+                self.controller.get_solar_forecast(), first_day
+            )
 
         # --- Extend arrays to match period_count when horizon spans tomorrow ---
         if period_count > len(consumption_predictions):
-            # Consumption: repeat today's uniform pattern for tomorrow
-            tomorrow_consumption = consumption_predictions.copy()
-            consumption_predictions = consumption_predictions + tomorrow_consumption
+            # Consumption: repeat the same wall-clock pattern for the following day
+            consumption_predictions = consumption_predictions + (
+                expand_wall_clock_profile(
+                    consumption_profile, first_day + timedelta(days=1)
+                )
+            )
             logger.info(
                 "Extended consumption predictions to %d periods for tomorrow horizon",
                 len(consumption_predictions),
             )
 
-        if period_count > len(solar_predictions):
-            if prepare_next_day:
-                # prepare_next_day already fetched tomorrow's forecast.
-                # Extra periods are the DST fall-back hour (overnight → zero solar).
-                extra = period_count - len(solar_predictions)
-                solar_predictions = solar_predictions + [0.0] * extra
-                logger.info(
-                    "Extended solar predictions with %d zeros for DST fall-back extra periods",
-                    extra,
-                )
-            else:
-                # Extended horizon: fetch tomorrow's actual solar forecast for better optimization.
-                tomorrow_solar = self._fetch_tomorrow_solar_forecast()
-                logger.info(
-                    "Extended solar predictions with tomorrow's forecast (%d periods)",
-                    len(tomorrow_solar),
-                )
-                solar_predictions = solar_predictions + tomorrow_solar
+        if period_count > len(solar_predictions) and not prepare_next_day:
+            # Extended horizon: fetch tomorrow's actual solar forecast for better optimization.
+            tomorrow_solar = self._fetch_tomorrow_solar_forecast()
+            logger.info(
+                "Extended solar predictions with tomorrow's forecast (%d periods)",
+                len(tomorrow_solar),
+            )
+            solar_predictions = solar_predictions + tomorrow_solar
 
         # --- Apply the user's planned consumption changes (issue #428) ---
-        # Deliberately here, not inside _get_consumption_forecast: after the
+        # Deliberately here, not inside _get_consumption_profile: after the
         # daily prediction cache, so editing the overlay takes effect on the
         # next run rather than tomorrow; and after the extension above, so a
         # block declared for tomorrow lands on tomorrow instead of today's
@@ -2790,7 +2807,7 @@ class BatterySystemManager:
         curve = calculate_terminal_curve(
             buy_prices,
             cap_sell_prices,
-            self._get_consumption_forecast(),
+            self._get_consumption_forecast(time_utils.today() + timedelta(days=1)),
             self._fetch_tomorrow_solar_forecast(),
             self.battery_settings,
         )

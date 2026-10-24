@@ -8,7 +8,7 @@ sensor exposes ``prices_today`` / ``prices_tomorrow`` attributes, each a list of
 (96/day) resolution.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -195,11 +195,16 @@ class TestEntsoeSourceFailures:
         with pytest.raises(PriceDataUnavailableError):
             source.get_prices_for_date(tomorrow)
 
-    def test_partially_zero_prices_are_accepted(self):
+    def test_partially_zero_prices_are_accepted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Real markets do have occasional zero-price periods — only an
         entirely flat all-zero array should be rejected.
         """
-        tomorrow = time_utils.today() + timedelta(days=1)
+        # Pinned: the real "tomorrow" can be a 92/100-period DST day, where 96
+        # quarterly entries are (rightly) rejected.
+        monkeypatch.setattr(time_utils, "today", lambda: date(2026, 6, 9))
+        tomorrow = date(2026, 6, 10)
         entries = _make_entries(tomorrow, count=96)
         entries[0]["price"] = 0.0
         source = EntsoeSource(_make_controller(tomorrow_entries=entries), ENTITY)
@@ -220,3 +225,139 @@ class TestEntsoeSourceHealthCheck:
         source = EntsoeSource(_make_controller(today_entries=None), ENTITY)
         result = source.perform_health_check()
         assert result["status"] == "ERROR"
+
+
+class TestEntsoeSourceDstDays:
+    """DST days are 92 or 100 quarterly periods (issue #830).
+
+    The hass-entso-e sensor collapses the repeated fall-back hour by wall-clock
+    time, so it hands over 24 hourly entries for the 25-hour day.
+    """
+
+    FALL_BACK = date(2026, 10, 25)  # 25 hours, 100 periods
+    SPRING_FORWARD = date(2026, 3, 29)  # 23 hours, 92 periods
+
+    @staticmethod
+    def _hourly(target_date: date, count: int, base: float = 0.10) -> list[dict]:
+        """``count`` consecutive hourly entries from local midnight, true offsets."""
+        start = datetime.combine(
+            target_date, datetime.min.time(), tzinfo=time_utils.TIMEZONE
+        )
+        return [
+            {
+                "time": (start.astimezone(UTC) + timedelta(hours=h))
+                .astimezone(time_utils.TIMEZONE)
+                .isoformat(),
+                "price": base + h,
+            }
+            for h in range(count)
+        ]
+
+    @staticmethod
+    def _collapsed_wall_hourly(target_date: date, base: float = 0.10) -> list[dict]:
+        """What the sensor sends on the fall-back day: wall hours 00..23, all +02:00."""
+        return [
+            {
+                "time": f"{target_date.isoformat()} {h:02d}:00:00+02:00",
+                "price": base + h,
+            }
+            for h in range(24)
+        ]
+
+    def _source_for_tomorrow(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        target_date: date,
+        entries: list[dict],
+    ) -> EntsoeSource:
+        monkeypatch.setattr(
+            time_utils, "today", lambda: target_date - timedelta(days=1)
+        )
+        return EntsoeSource(_make_controller(tomorrow_entries=entries), ENTITY)
+
+    def test_fall_back_day_with_collapsed_hour_fills_repeated_hour(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        entries = self._collapsed_wall_hourly(self.FALL_BACK)
+        source = self._source_for_tomorrow(monkeypatch, self.FALL_BACK, entries)
+
+        prices = source.get_prices_for_date(self.FALL_BACK)
+
+        assert len(prices) == 100
+        hourly = list(prices[::4])
+        # Wall-clock hours 00,01,02,02(repeat),03..23: the repeated hour keeps
+        # the 02:00 price, everything after it stays on its own hour.
+        assert hourly == pytest.approx([0.10 + h for h in (0, 1, 2, 2, *range(3, 24))])
+        assert "repeated" in caplog.text
+
+    def test_fall_back_day_full_hourly_needs_no_fill(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        entries = self._hourly(self.FALL_BACK, 25)
+        source = self._source_for_tomorrow(monkeypatch, self.FALL_BACK, entries)
+
+        prices = source.get_prices_for_date(self.FALL_BACK)
+
+        assert len(prices) == 100
+        assert prices[::4] == pytest.approx([0.10 + h for h in range(25)])
+        assert "repeated" not in caplog.text
+
+    def test_fall_back_day_quarterly_passthrough(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        start = datetime.combine(
+            self.FALL_BACK, datetime.min.time(), tzinfo=time_utils.TIMEZONE
+        ).astimezone(UTC)
+        entries = [
+            {
+                "time": (start + timedelta(minutes=15 * i))
+                .astimezone(time_utils.TIMEZONE)
+                .isoformat(),
+                "price": 0.1 + i,
+            }
+            for i in range(100)
+        ]
+        source = self._source_for_tomorrow(monkeypatch, self.FALL_BACK, entries)
+
+        prices = source.get_prices_for_date(self.FALL_BACK)
+
+        assert prices == pytest.approx([0.1 + i for i in range(100)])
+
+    def test_spring_forward_day_hourly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        entries = self._hourly(self.SPRING_FORWARD, 23)
+        source = self._source_for_tomorrow(monkeypatch, self.SPRING_FORWARD, entries)
+
+        prices = source.get_prices_for_date(self.SPRING_FORWARD)
+
+        assert len(prices) == 92
+        assert prices[::4] == pytest.approx([0.10 + h for h in range(23)])
+
+    def test_fall_back_day_other_miscount_still_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        entries = self._hourly(self.FALL_BACK, 23)
+        source = self._source_for_tomorrow(monkeypatch, self.FALL_BACK, entries)
+
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_prices_for_date(self.FALL_BACK)
+
+    def test_price_manager_serves_collapsed_fall_back_day(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End to end: the sensor payload that broke tomorrow's prices in #830."""
+        from core.bess.price_manager import PriceManager
+
+        entries = self._collapsed_wall_hourly(self.FALL_BACK)
+        source = self._source_for_tomorrow(monkeypatch, self.FALL_BACK, entries)
+        manager = PriceManager(
+            price_source=source,
+            markup_rate=0.0,
+            vat_multiplier=1.25,
+            additional_costs=0.0,
+            tax_reduction=0.0,
+            area="BE",
+        )
+
+        data = manager.get_price_data(self.FALL_BACK)
+
+        assert len(data) == 100

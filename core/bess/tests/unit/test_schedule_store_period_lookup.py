@@ -8,7 +8,7 @@ carries its real timestamp, so resolving by timestamp instead removes the
 anchor-assumption entirely. See issue #380.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from core.bess.models import (
@@ -109,3 +109,27 @@ def test_next_day_only_schedule_does_not_shadow_todays_period():
 
     assert result is not None
     assert result.economic.hourly_savings == 10.0
+
+
+def test_repeated_fall_back_hour_resolves_to_its_own_period() -> None:
+    """02:00 happens twice on a DST fall-back day; same wall time, different instant.
+
+    Aware datetimes sharing a ZoneInfo compare by wall time, so a plain == would
+    return the first 02:00 period for the repeated one (issue #830).
+    """
+    midnight = datetime(2026, 10, 24, 22, 0, tzinfo=UTC)
+    stamps = [
+        (midnight + timedelta(minutes=15 * i)).astimezone(TIMEZONE) for i in range(100)
+    ]
+    periods = [_period_data(i, stamps[i], savings=float(i)) for i in range(100)]
+    store = ScheduleStore()
+    store.store_schedule(
+        OptimizationResult(input_data={}, period_data=periods), optimization_period=0
+    )
+
+    first = store.get_period_data_at(stamps[8])  # 02:00 +02:00
+    repeated = store.get_period_data_at(stamps[12])  # 02:00 +01:00
+
+    assert first is not None and repeated is not None
+    assert first.period == 8
+    assert repeated.period == 12

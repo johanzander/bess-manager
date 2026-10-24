@@ -2,7 +2,7 @@
 Test the OctopusEnergySource implementation.
 """
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,10 +27,15 @@ def _make_rates(target_date, count=48, base_value=0.20, export=False):
     """
     rates = []
     for i in range(count):
-        start = datetime.combine(target_date, datetime.min.time()) + timedelta(
-            minutes=30 * i
+        # Real elapsed half-hours from local midnight, so a DST day yields 46/50
+        # rates that stay on target_date instead of spilling onto the next date.
+        midnight = datetime.combine(
+            target_date, datetime.min.time(), tzinfo=time_utils.TIMEZONE
+        ).astimezone(UTC)
+        start = (midnight + timedelta(minutes=30 * i)).astimezone(time_utils.TIMEZONE)
+        end = (midnight + timedelta(minutes=30 * (i + 1))).astimezone(
+            time_utils.TIMEZONE
         )
-        end = start + timedelta(minutes=30)
         value = (
             (base_value + i * 0.01) if not export else (base_value * 0.3 + i * 0.005)
         )

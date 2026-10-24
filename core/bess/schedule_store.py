@@ -7,7 +7,7 @@ Includes JSON persistence to survive restarts.
 import json
 import logging
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 from core.bess.models import OptimizationResult, PeriodData
@@ -124,11 +124,17 @@ class ScheduleStore:
             PeriodData | None: Matching period data, or None if no stored
             schedule contains a period at that timestamp.
         """
+        # Compare instants, not wall times: aware datetimes sharing a ZoneInfo
+        # compare equal across the repeated DST fall-back hour.
+        wanted = timestamp.astimezone(UTC)
         for schedule in sorted(
             self._schedules, key=lambda s: s.timestamp, reverse=True
         ):
             for period_data in schedule.optimization_result.period_data:
-                if period_data.timestamp == timestamp:
+                if (
+                    period_data.timestamp is not None
+                    and period_data.timestamp.astimezone(UTC) == wanted
+                ):
                     return period_data
 
         return None

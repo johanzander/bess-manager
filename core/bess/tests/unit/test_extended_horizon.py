@@ -121,7 +121,7 @@ class TestGetPriceDataExtended:
         # prepare_next_day fetches only tomorrow's prices, no extension
         assert len(prices) == expected
 
-    def test_192_period_cap_enforced(self):
+    def test_two_day_period_cap_enforced(self):
         """Even with very long price arrays, cap at today's + tomorrow's period count."""
         # 150 prices per day = 300 total would exceed cap
         source = MockSource([1.0] * 150)

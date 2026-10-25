@@ -5,7 +5,7 @@ SIMPLIFIED: Always operates on quarterly periods.
 
 import logging
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date
 
 from . import time_utils
 from .historical_data_store import HistoricalDataStore
@@ -71,14 +71,7 @@ class DailyViewBuilder:
         persisted_intent = self.schedule_store.get_persisted_intent(period)
         intent = persisted_intent or "IDLE"
 
-        # Create timestamp for this period
-        hour = period // 4
-        minute = (period % 4) * 15
-        timestamp = datetime.combine(
-            today,
-            datetime.min.time().replace(hour=hour, minute=minute),
-            tzinfo=time_utils.TIMEZONE,
-        )
+        timestamp = time_utils.period_start(today, period)
 
         return PeriodData(
             period=period,

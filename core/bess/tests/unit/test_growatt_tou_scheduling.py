@@ -14,6 +14,7 @@ Key Principles:
 """
 
 import logging
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import pytest  # type: ignore
@@ -21,7 +22,7 @@ import pytest  # type: ignore
 from core.bess import time_utils
 from core.bess.growatt_min_controller import GrowattMinController
 from core.bess.settings import BatterySettings
-from core.bess.tests.helpers import empty_slot_table
+from core.bess.tests.helpers import empty_slot_table, pinned_datetime_class
 
 
 def hourly_to_quarterly(
@@ -482,6 +483,92 @@ class TestEdgeCases:
                     "HA's select_option rejects it (#302)"
                 )
                 assert 0 <= minute <= 59, f"{field}={interval[field]} is invalid"
+
+    # The fall-back day (2026-10-25 in the suite's Europe/Stockholm) runs
+    # 02:00-02:59 twice: periods 8-11 (+02:00), then periods 12-15 (+01:00).
+    # From period 12 on, a period's index is an hour ahead of divmod(index, 4).
+    # These assert the TOU intervals themselves: no execution model simulates
+    # the inverter's response to a segment, so the programmed wall-clock time
+    # is the observable outcome.
+
+    @staticmethod
+    def _pin_clock(monkeypatch: pytest.MonkeyPatch, instant: datetime) -> int:
+        # Pinned in UTC: ticking a ZoneInfo datetime forward is wall-clock
+        # arithmetic, which drops the repeated hour's fold.
+        monkeypatch.setattr(time_utils, "datetime", pinned_datetime_class(instant))
+        return time_utils.get_current_period_index()
+
+    @staticmethod
+    def _segments(scheduler: GrowattMinController) -> list[tuple[str, str, str]]:
+        return [
+            (i["start_time"], i["end_time"], i["batt_mode"])
+            for i in scheduler.tou_intervals
+        ]
+
+    def test_dst_fall_back_segment_is_programmed_at_its_wall_clock_time(
+        self, scheduler: GrowattMinController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A charge planned for 12:00-12:59 on the 25-hour day is programmed
+        for 12:00, not an hour late. Prices and plan are indexed by elapsed
+        time, so writing period 52 as 13:00 runs every action an hour after
+        the price it was planned against."""
+        current_period = self._pin_clock(
+            monkeypatch, datetime(2026, 10, 25, 10, 0, tzinfo=UTC)  # 11:00 CET
+        )
+        noon = 52
+        intents = ["IDLE"] * 100
+        intents[noon : noon + 4] = ["GRID_CHARGING"] * 4
+        scheduler.strategic_intents = intents
+
+        scheduler._consolidate_and_convert_with_strategic_intents(current_period)
+
+        assert self._segments(scheduler) == [("12:00", "12:59", "battery_first")]
+
+    def test_dst_fall_back_repeated_hour_is_decided_by_the_occurrence_ahead(
+        self, scheduler: GrowattMinController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both occurrences of the repeated hour share one wall-clock hour.
+        Before it, the first occurrence's mode is programmed; once the clock
+        has gone back, the second occurrence's is. Programming both would put
+        two overlapping segments on the inverter."""
+        intents = ["IDLE"] * 100
+        intents[8:12] = ["GRID_CHARGING"] * 4
+        intents[12:16] = ["BATTERY_EXPORT"] * 4
+        scheduler.strategic_intents = intents
+
+        before = self._pin_clock(
+            monkeypatch, datetime(2026, 10, 24, 22, 30, tzinfo=UTC)  # 00:30 CEST
+        )
+        scheduler._consolidate_and_convert_with_strategic_intents(before)
+        assert self._segments(scheduler) == [("02:00", "02:59", "battery_first")]
+
+        after = self._pin_clock(
+            monkeypatch, datetime(2026, 10, 25, 1, 15, tzinfo=UTC)  # 02:15 CET
+        )
+        scheduler._consolidate_and_convert_with_strategic_intents(after)
+        assert self._segments(scheduler) == [("02:00", "02:59", "grid_first")]
+
+    def test_dst_fall_back_segment_spanning_the_repeated_hour_stays_ordered(
+        self, scheduler: GrowattMinController, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A charge from 01:30 CEST to 02:29 CET crosses the moment the clock
+        goes back. It must stay one forward-running segment, never an interval
+        that ends before it starts."""
+        intents = ["IDLE"] * 100
+        intents[6:14] = ["GRID_CHARGING"] * 8
+        scheduler.strategic_intents = intents
+
+        before = self._pin_clock(
+            monkeypatch, datetime(2026, 10, 24, 23, 30, tzinfo=UTC)  # 01:30 CEST
+        )
+        scheduler._consolidate_and_convert_with_strategic_intents(before)
+        assert self._segments(scheduler) == [("01:30", "02:59", "battery_first")]
+
+        after = self._pin_clock(
+            monkeypatch, datetime(2026, 10, 25, 1, 15, tzinfo=UTC)  # 02:15 CET
+        )
+        scheduler._consolidate_and_convert_with_strategic_intents(after)
+        assert self._segments(scheduler) == [("02:00", "02:29", "battery_first")]
 
     def test_all_idle_schedule(self, scheduler):
         """Test schedule with only IDLE strategic intents."""

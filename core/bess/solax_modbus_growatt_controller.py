@@ -314,7 +314,7 @@ class SolaxModbusGrowattController(GrowattMinController):
         """
         errors = []
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
 
         mode = "load_first"
         if current_period < len(self.strategic_intents):
@@ -928,7 +928,7 @@ class SolaxModbusGrowattController(GrowattMinController):
 
         # Build display from intent groups (same approach as SolaxController)
         now = time_utils.now()
-        current_p = now.hour * 4 + now.minute // 15
+        current_p = time_utils.timestamp_to_period_index(now)
 
         result = []
         for group in groups:

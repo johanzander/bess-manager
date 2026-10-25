@@ -289,7 +289,7 @@ def _replan_in_background(bess_controller: Any) -> None:
             bess_controller.system.refresh_prices()
             now = time_utils.now()
             bess_controller.system.update_battery_schedule(
-                current_period=now.hour * 4 + now.minute // 15
+                current_period=time_utils.timestamp_to_period_index(now)
             )
             logger.info("Schedule rebuilt after pricing settings change")
         except Exception as e:
@@ -1261,7 +1261,7 @@ async def get_inverter_status():
         try:
             now = time_utils.now()
             schedule_manager = bess_controller.system._inverter_controller
-            current_period = now.hour * 4 + now.minute // 15
+            current_period = time_utils.timestamp_to_period_index(now)
             period_settings = schedule_manager.get_period_settings(current_period)
             if "batt_mode" in period_settings:
                 current_mode_fields = {"battery_mode": period_settings["batt_mode"]}
@@ -2267,7 +2267,7 @@ async def get_savings_aggregate(
             not in bess_controller.system.daily_view_store.list_available_dates()
         ):
             now = time_utils.now()
-            current_period = now.hour * 4 + now.minute // 15
+            current_period = time_utils.timestamp_to_period_index(now)
             today_view = bess_controller.system.daily_view_builder.build_daily_view(
                 current_period, bess_controller.system.export_curtailment_active
             )
@@ -2355,7 +2355,7 @@ async def get_prediction_comparison(
         # Get current state
 
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
 
         # Build current daily view
         current_daily_view = bess_controller.system.daily_view_builder.build_daily_view(
@@ -3574,7 +3574,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                 )
             try:
                 now = time_utils.now()
-                current_period = now.hour * 4 + now.minute // 15
+                current_period = time_utils.timestamp_to_period_index(now)
                 bess_controller.system.update_battery_schedule(
                     current_period=current_period
                 )

@@ -9,6 +9,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, ClassVar
 
+from . import time_utils
 from .dp_schedule import DPSchedule
 from .execution_model import INTENT_TO_MODE, command_index
 from .settings import BatterySettings
@@ -202,12 +203,12 @@ class InverterController(ABC):
     # ── Period utility ────────────────────────────────────────────────────────
 
     def _period_to_time(self, period: int) -> tuple[int, int]:
-        """Convert period number (0-95) to (hour, minute).
+        """Convert one of today's periods to the wall-clock (hour, minute) it starts at.
 
-        Note: During DST fall-back, periods >= 96 produce hour >= 24.
-        Callers must handle this (e.g., cap to 23:59 for TOU schedules).
+        A period past the end of today produces hour >= 24. Callers must handle
+        this (e.g., cap to 23:59 for TOU schedules).
         """
-        return period // 4, (period % 4) * 15
+        return time_utils.period_wall_clock(period)
 
     # ── SM-Period-lists grouping (Growatt SPH, Solis) ─────────────────────────
     # Pure functions of self.strategic_intents / CHARGE_INTENTS / DISCHARGE_INTENTS

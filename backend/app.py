@@ -390,7 +390,7 @@ class BESSController:
         # Quarterly schedule update (every 15 minutes: 0, 15, 30, 45)
         def update_schedule_quarterly():
             now = time_utils.now()
-            current_period = now.hour * 4 + now.minute // 15
+            current_period = time_utils.timestamp_to_period_index(now)
             self.system.update_battery_schedule(current_period=current_period)
 
         self.scheduler.add_job(
@@ -417,7 +417,7 @@ class BESSController:
         # Next day preparation (daily at 23:55)
         def prepare_next_day():
             now = time_utils.now()
-            current_period = now.hour * 4 + now.minute // 15
+            current_period = time_utils.timestamp_to_period_index(now)
             self.system.update_battery_schedule(
                 current_period=current_period, prepare_next_day=True
             )
@@ -516,7 +516,7 @@ class BESSController:
 
         self.startup_status = "Running optimization..."
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
         self.system.update_battery_schedule(current_period=current_period)
         self.startup_status = "Starting scheduler..."
         self.start_scheduler()

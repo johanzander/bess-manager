@@ -169,8 +169,42 @@ class EntsoeSource(PriceSource):
             if entry_dt.date() == target_date:
                 filtered.append((entry_dt, float(price)))
 
+        filtered = self._drop_stale_offset_duplicates(filtered)
         filtered.sort(key=lambda item: item[0])
         return [price for _, price in filtered]
+
+    @staticmethod
+    def _drop_stale_offset_duplicates(
+        entries: list[tuple[datetime, float]],
+    ) -> list[tuple[datetime, float]]:
+        """Drop entries that duplicate a wall-clock slot with an offset it never has.
+
+        After a clock change the integration can leave the pre-auction stub
+        (``00:00+02:00``) beside the real day (``00:00+01:00``..). The stub claims
+        the same wall-clock time as a real entry but with an offset the local zone
+        does not have at that time, so converting it to local time moves it to
+        another wall time. Only such an entry that collides with a consistent one
+        is dropped; a lone entry, and the genuinely repeated hour of a fall-back
+        day (both offsets valid), are kept.
+        """
+
+        def wall(entry_dt: datetime) -> datetime:
+            return entry_dt.replace(tzinfo=None)
+
+        def consistent(entry_dt: datetime) -> bool:
+            if entry_dt.tzinfo is None:
+                return True
+            return wall(entry_dt.astimezone(time_utils.TIMEZONE)) == wall(entry_dt)
+
+        by_wall: dict[datetime, list[tuple[datetime, float]]] = {}
+        for item in entries:
+            by_wall.setdefault(wall(item[0]), []).append(item)
+
+        kept: list[tuple[datetime, float]] = []
+        for group in by_wall.values():
+            valid = [item for item in group if consistent(item[0])]
+            kept.extend(valid if valid else group)
+        return kept
 
     @staticmethod
     def _restore_repeated_fall_back_hour(

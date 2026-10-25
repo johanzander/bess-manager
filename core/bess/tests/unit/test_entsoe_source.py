@@ -321,6 +321,26 @@ class TestEntsoeSourceDstDays:
         assert prices[::4] == pytest.approx([0.10 + h for h in range(25)])
         assert "repeated" not in caplog.text
 
+    def test_orphan_stub_with_stale_offset_is_dropped(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Issue #845: the day after fall-back, hass-entso-e leaves the pre-auction
+        stub ``00:00+02:00`` beside the real day (``00:00+01:00`` .. ``23:00+01:00``).
+        The stub claims the same wall-clock slot with an offset that slot never has,
+        so it is dropped and the 24 real hours are served, not rejected as 25."""
+        target = date(2026, 10, 26)  # normal 24h day, after the fall-back
+        stub = {"time": "2026-10-26 00:00:00+02:00", "price": 9.99}
+        real = [
+            {"time": f"2026-10-26 {h:02d}:00:00+01:00", "price": 0.10 + h}
+            for h in range(24)
+        ]
+        source = self._source_for_tomorrow(monkeypatch, target, [stub, *real])
+
+        prices = source.get_prices_for_date(target)
+
+        assert len(prices) == 96
+        assert prices[::4] == pytest.approx([0.10 + h for h in range(24)])
+
     def test_fall_back_day_quarterly_passthrough(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

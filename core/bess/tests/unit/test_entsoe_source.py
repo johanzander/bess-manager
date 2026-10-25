@@ -175,6 +175,25 @@ class TestEntsoeSourceFailures:
         with pytest.raises(PriceDataUnavailableError):
             source.get_prices_for_date(today)
 
+    def test_single_entry_stub_is_not_a_full_day(self) -> None:
+        """A lone entry (the integration's pre-auction stub) is not tomorrow's prices."""
+        tomorrow = time_utils.today() + timedelta(days=1)
+        source = EntsoeSource(
+            _make_controller(tomorrow_entries=_make_entries(tomorrow, count=24)[:1]),
+            ENTITY,
+        )
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_prices_for_date(tomorrow)
+
+    def test_partial_day_that_divides_evenly_raises(self) -> None:
+        """12 hourly entries divide evenly into 96 periods but cover half a day."""
+        today = time_utils.today()
+        source = EntsoeSource(
+            _make_controller(today_entries=_make_entries(today, count=24)[:12]), ENTITY
+        )
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_prices_for_date(today)
+
     def test_api_failure_raises(self):
         controller = MagicMock()
         controller._api_request = MagicMock(side_effect=RuntimeError("boom"))

@@ -15,6 +15,8 @@ from unittest.mock import patch
 from core.bess.growatt_sph_controller import GrowattSphController
 from core.bess.solax_controller import SolaxController
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
+from core.bess.tests.helpers import pinned_datetime_class
+from core.bess.time_utils import TIMEZONE
 
 PERIOD = 20  # Arbitrary test period (quarter-hour slot)
 
@@ -64,8 +66,10 @@ def _apply_at_period(platform_system, period: int) -> None:
     if _is_solax_modbus(platform_system):
         hour = period // 4
         minute = (period % 4) * 15
-        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
-            mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 5, 20, hour, minute, tzinfo=TIMEZONE)),
+        ):
             platform_system._apply_period_schedule(period)
     else:
         platform_system._apply_period_schedule(period)

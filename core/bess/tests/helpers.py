@@ -8,6 +8,8 @@ Reduces boilerplate across test files by providing:
 - Behavioral assertion helpers for strategic intents and physical constraints
 """
 
+import time
+from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
 from core.bess.dp_battery_algorithm import (
@@ -31,6 +33,25 @@ from core.bess.terminal_value import (
     knee_kwh_from_trailing_darkness,
     pv_covers_load,
 )
+
+
+def pinned_datetime_class(start: datetime) -> type:
+    """A datetime whose now() starts at `start` and advances in real time.
+
+    It ticks (rather than freezing) so code that compares two successive
+    timestamps still sees the second one as later. Patch it over
+    `core.bess.time_utils.datetime` to pin the clock for now(), today() and the
+    period-index helpers together.
+    """
+    t0 = time.monotonic()
+
+    class _PinnedDatetime(datetime):
+        @classmethod
+        def now(cls, tz: tzinfo | None = None) -> datetime:  # type: ignore[override]
+            current = start + timedelta(seconds=time.monotonic() - t0)
+            return current.astimezone(tz) if tz else current.replace(tzinfo=None)
+
+    return _PinnedDatetime
 
 
 def _scenario_inputs(scenario: dict):

@@ -20,7 +20,7 @@ PINNED_NOW = datetime(2026, 9, 16, 12, 0, tzinfo=time_utils.TIMEZONE)
 
 
 @pytest.fixture(autouse=True)
-def _pin_clock(monkeypatch):
+def _pin_clock(monkeypatch: pytest.MonkeyPatch) -> None:
     # time_utils reads the clock through its own `datetime` name, so now(),
     # today() and the period-index helpers all move together.
     monkeypatch.setattr(time_utils, "datetime", pinned_datetime_class(PINNED_NOW))

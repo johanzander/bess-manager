@@ -54,14 +54,10 @@ assert result.total_savings > 0
 
 ## The Clock Is Pinned
 
-The root `conftest.py` pins `core.bess.time_utils` to an ordinary day
-(2026-09-16, ticking in real time) for every test, so results never depend on
-the day CI runs — on a DST transition day the real clock gives 92/100 periods
-and breaks any test that assumes 96. A test that needs a specific date or a DST
-day pins its own with `pinned_datetime_class` from `core/bess/tests/helpers.py`,
-patched over `core.bess.time_utils.datetime` (patching `time_utils.now` alone
-leaves the period-index helpers on the pinned default day). Don't hardcode
-2026-09-16 as a fixture date.
+The root `conftest.py` pins `time_utils` to 2026-09-16 for every test, so DST
+days (92/100 periods) can't break tests assuming 96. To pin another date, patch
+`pinned_datetime_class(...)` (`tests/helpers.py`) over `time_utils.datetime`;
+patching `time_utils.now` alone leaves the period-index helpers on the default.
 
 ## What NOT to Test
 

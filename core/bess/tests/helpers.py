@@ -9,7 +9,7 @@ Reduces boilerplate across test files by providing:
 """
 
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, tzinfo
 from typing import Any
 
 from core.bess.dp_battery_algorithm import (
@@ -47,7 +47,7 @@ def pinned_datetime_class(start: datetime) -> type:
 
     class _PinnedDatetime(datetime):
         @classmethod
-        def now(cls, tz=None):
+        def now(cls, tz: tzinfo | None = None) -> datetime:  # type: ignore[override]
             current = start + timedelta(seconds=time.monotonic() - t0)
             return current.astimezone(tz) if tz else current.replace(tzinfo=None)
 

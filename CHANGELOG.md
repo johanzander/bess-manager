@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **ENTSO-e: an incomplete day of prices is no longer planned on** — a single-entry `prices_tomorrow` stub before the auction no longer creates a flat, idle second day. ([#841](https://github.com/johanzander/bess-manager/issues/841))
 - **ENTSO-e: tomorrow's prices are no longer rejected on the 25-hour fall-back day** — the integration sends 24 hourly prices; both occurrences of the repeated hour now use the one price received, with a warning. ([#830](https://github.com/johanzander/bess-manager/issues/830))
 - **DST change days: the current period and schedule timestamps now follow real time** — on the 25-hour day the plan no longer runs an hour late after 02:00, and the last hour is reachable. ([#830](https://github.com/johanzander/bess-manager/issues/830))
 - **DST change days: consumption and solar forecasts now match the real 92- or 100-period day** — nothing after the repeated hour is shifted by an hour. ([#689](https://github.com/johanzander/bess-manager/issues/689))

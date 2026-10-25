@@ -211,20 +211,23 @@ class EntsoeSource(PriceSource):
         are both handled, including 23h/25h DST days.
 
         Raises:
-            PriceDataUnavailableError: If the raw count does not divide evenly into
-                the expected quarterly count.
+            PriceDataUnavailableError: If the raw count is neither the hourly nor
+                the quarterly count for the day (an incomplete day, such as the
+                single-entry ``prices_tomorrow`` stub before the auction).
         """
         quarterly_count = time_utils.get_period_count(target_date)
 
         if len(prices) == 24 and quarterly_count == 25 * 4:
             prices = self._restore_repeated_fall_back_hour(prices, target_date)
 
-        if len(prices) == 0 or quarterly_count % len(prices) != 0:
+        hourly_count = quarterly_count // 4
+        if len(prices) not in (hourly_count, quarterly_count):
             raise PriceDataUnavailableError(
                 date=target_date,
                 message=(
-                    f"Unexpected ENTSO-e price count {len(prices)} for {target_date}: "
-                    f"does not divide evenly into {quarterly_count} quarterly periods"
+                    f"Incomplete ENTSO-e day for {target_date}: got {len(prices)} "
+                    f"prices, expected {hourly_count} hourly or {quarterly_count} "
+                    f"quarterly"
                 ),
             )
 

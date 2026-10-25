@@ -15,6 +15,7 @@ from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
 from core.bess.price_manager import MockSource
 from core.bess.tests.conftest import MockHomeAssistantController
+from core.bess.tests.helpers import pinned_datetime_class
 from core.bess.time_utils import TIMEZONE, get_period_count
 
 
@@ -26,9 +27,11 @@ class DSTAwareMockSource(MockSource):
 
 
 def _pin(y: int, m: int, d: int, hour: int = 17) -> Any:
+    # Pin the whole of time_utils' clock, not just now(): the period-index
+    # helpers read the date themselves and must agree with the pinned day.
     return patch(
-        "core.bess.time_utils.now",
-        return_value=datetime(y, m, d, hour, 53, tzinfo=TIMEZONE),
+        "core.bess.time_utils.datetime",
+        new=pinned_datetime_class(datetime(y, m, d, hour, 53, tzinfo=TIMEZONE)),
     )
 
 

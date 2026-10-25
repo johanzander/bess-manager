@@ -52,6 +52,13 @@ result = optimizer.run(prices=high_spread_prices, initial_soc=0.2)
 assert result.total_savings > 0
 ```
 
+## The Clock Is Pinned
+
+The root `conftest.py` pins `time_utils` to 2026-09-16 for every test, so DST
+days (92/100 periods) can't break tests assuming 96. To pin another date, patch
+`pinned_datetime_class(...)` (`tests/helpers.py`) over `time_utils.datetime`;
+patching `time_utils.now` alone leaves the period-index helpers on the default.
+
 ## What NOT to Test
 
 ```python

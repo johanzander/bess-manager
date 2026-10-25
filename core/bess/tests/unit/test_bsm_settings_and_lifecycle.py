@@ -26,6 +26,7 @@ from core.bess.models import (
     PeriodData,
 )
 from core.bess.price_manager import MockSource
+from core.bess.tests.helpers import pinned_datetime_class
 from core.bess.time_utils import TIMEZONE
 
 _DEFAULT_OPTIONS = {"inverter": {"platform": "growatt_server_min"}}
@@ -1587,8 +1588,10 @@ class TestLoadTodayFromDisk:
         )
         system.daily_view_store.save_day(view)
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 7, 27, 0, 30, tzinfo=TIMEZONE)),
+        ):
             system._load_today_from_disk(current_period=2)
 
         assert system.historical_store.get_period(0) is not None
@@ -1654,9 +1657,11 @@ class TestBackfillSkipsDiskSeededPeriods:
                 "get_available_prices",
                 return_value=([1.0] * 96, [0.5] * 96),
             ),
-            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+            patch(
+                "core.bess.time_utils.datetime",
+                pinned_datetime_class(datetime(2026, 7, 27, 0, 30, tzinfo=TIMEZONE)),
+            ),
         ):
-            mock_now.return_value = datetime(2026, 7, 27, 0, 30)
             system._fetch_and_initialize_historical_data()
 
         # Period 0 was already seeded (from disk, in this test's setup) —
@@ -1688,9 +1693,11 @@ class TestBackfillNotGatedOnInfluxDB:
                 "get_available_prices",
                 return_value=([1.0] * 96, [0.5] * 96),
             ),
-            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+            patch(
+                "core.bess.time_utils.datetime",
+                pinned_datetime_class(datetime(2026, 7, 27, 1, 0, tzinfo=TIMEZONE)),
+            ),
         ):
-            mock_now.return_value = datetime(2026, 7, 27, 1, 0)  # current_period = 4
             system._fetch_and_initialize_historical_data()
 
         collected_periods = [call.args[0] for call in mock_collect.call_args_list]
@@ -1716,9 +1723,11 @@ class TestBackfillNotGatedOnInfluxDB:
                 "get_available_prices",
                 return_value=([1.0] * 96, [0.5] * 96),
             ),
-            patch("core.bess.battery_system_manager.time_utils.now") as mock_now,
+            patch(
+                "core.bess.time_utils.datetime",
+                pinned_datetime_class(datetime(2026, 7, 27, 1, 0, tzinfo=TIMEZONE)),
+            ),
         ):
-            mock_now.return_value = datetime(2026, 7, 27, 1, 0)  # current_period = 4
             with caplog.at_level(
                 logging.DEBUG, logger="core.bess.battery_system_manager"
             ):

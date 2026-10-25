@@ -1005,7 +1005,7 @@ class APIDashboardResponse:
             )
         else:
             # For quarterly resolution, use period index (0-95)
-            current_index = now.hour * 4 + now.minute // 15
+            current_index = time_utils.timestamp_to_period_index(now)
             logger.debug(
                 "Quarterly mode: currentPeriod=%s (hour=%s, minute=%s)",
                 current_index,

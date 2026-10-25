@@ -9,11 +9,13 @@ a DEBUG comparison when the counter already had a real nonzero delta.
 """
 
 import logging
-from datetime import date
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 from core.bess.sensor_collector import SensorCollector
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import pinned_datetime_class
+from core.bess.time_utils import TIMEZONE
 
 
 def _entity_map():
@@ -68,10 +70,10 @@ class TestRuntimeGapFillFromBuffer:
         collector._power_sample_buffer.record(10, {"battery_discharged": 300.0})
         collector._power_sample_buffer.record(10, {"battery_discharged": 250.0})
 
-        with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45  # current_period = 11
-            mock_time_utils.today.return_value = date(2026, 7, 25)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 7, 25, 2, 45, tzinfo=TIMEZONE)),
+        ):
 
             energy_data = collector.collect_energy_data(10)
 
@@ -86,10 +88,10 @@ class TestRuntimeGapFillFromBuffer:
         # written through as-is.
         collector._power_sample_buffer.record(10, {"battery_discharged": 1400.0})
 
-        with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45
-            mock_time_utils.today.return_value = date(2026, 7, 25)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 7, 25, 2, 45, tzinfo=TIMEZONE)),
+        ):
 
             energy_data = collector.collect_energy_data(10)
 
@@ -99,10 +101,10 @@ class TestRuntimeGapFillFromBuffer:
         collector = _make_runtime_collector()
         # No buffer.record() call for period 10 - buffer empty.
 
-        with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45
-            mock_time_utils.today.return_value = date(2026, 7, 25)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 7, 25, 2, 45, tzinfo=TIMEZONE)),
+        ):
 
             energy_data = collector.collect_energy_data(10)
 
@@ -117,12 +119,12 @@ class TestRuntimeGapFillFromBuffer:
         collector._power_sample_buffer.record(10, {"battery_discharged": 1000.0})
 
         with (
-            patch("core.bess.sensor_collector.time_utils") as mock_time_utils,
+            patch(
+                "core.bess.time_utils.datetime",
+                pinned_datetime_class(datetime(2026, 7, 25, 2, 45, tzinfo=TIMEZONE)),
+            ),
             caplog.at_level(logging.DEBUG, logger="core.bess.sensor_collector"),
         ):
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45
-            mock_time_utils.today.return_value = date(2026, 7, 25)
 
             energy_data = collector.collect_energy_data(10)
 
@@ -137,10 +139,10 @@ class TestRuntimeGapFillFromBuffer:
         collector = _make_runtime_collector()
         collector._power_sample_buffer.record(10, {"battery_discharged": 1400.0})
 
-        with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
-            mock_time_utils.now.return_value.hour = 2
-            mock_time_utils.now.return_value.minute = 45
-            mock_time_utils.today.return_value = date(2026, 7, 25)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 7, 25, 2, 45, tzinfo=TIMEZONE)),
+        ):
 
             collector.collect_energy_data(10)
 

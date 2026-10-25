@@ -10,6 +10,7 @@ from core.bess.time_utils import (
     get_current_period_index,
     get_period_count,
     period_index_to_timestamp,
+    period_wall_clock,
     timestamp_to_period_index,
 )
 
@@ -245,3 +246,37 @@ def test_spring_forward_day_roundtrips(mock_datetime: MagicMock) -> None:
     assert len({s.astimezone(UTC) for s in stamps}) == 92
     assert {s.date() for s in stamps} == {date(2026, 3, 29)}
     assert all(timestamp_to_period_index(s) == i for i, s in enumerate(stamps))
+
+
+@patch("core.bess.time_utils.datetime")
+def test_fall_back_day_wall_clock_follows_the_clock_after_the_repeated_hour(
+    mock_datetime: MagicMock,
+) -> None:
+    _mock_today(mock_datetime, 2026, 10, 25)
+
+    assert period_wall_clock(8) == (2, 0)  # 02:00 +02:00 (first)
+    assert period_wall_clock(12) == (2, 0)  # 02:00 +01:00 (repeated)
+    assert period_wall_clock(52) == (12, 0)
+    assert period_wall_clock(99) == (23, 45)
+    assert period_wall_clock(100) == (24, 0)  # past the end of the day
+
+
+@patch("core.bess.time_utils.datetime")
+def test_spring_forward_day_wall_clock_skips_the_missing_hour(
+    mock_datetime: MagicMock,
+) -> None:
+    _mock_today(mock_datetime, 2026, 3, 29)
+
+    assert period_wall_clock(7) == (1, 45)
+    assert period_wall_clock(8) == (3, 0)
+    assert period_wall_clock(91) == (23, 45)
+    assert period_wall_clock(92) == (24, 0)
+
+
+@patch("core.bess.time_utils.datetime")
+def test_ordinary_day_wall_clock_is_the_quarter_hour(mock_datetime: MagicMock) -> None:
+    _mock_today(mock_datetime, 2025, 11, 15)
+
+    assert [period_wall_clock(i) for i in range(97)] == [
+        (i // 4, (i % 4) * 15) for i in range(97)
+    ]

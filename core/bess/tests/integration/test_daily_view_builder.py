@@ -376,3 +376,35 @@ def test_predicted_period_curtailed_when_export_curtailment_active(
     assert curtailed_view_period.energy.grid_exported == 0.0
     assert curtailed_view_period.economic.export_revenue == 0.0
     assert view.total_savings == 0.0
+
+
+def test_fall_back_day_view_covers_the_last_hour_without_schedule_data(
+    view_builder: DailyViewBuilder,
+    schedule_store: ScheduleStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """On the 25-hour day the last four periods (23:00-23:59) fall outside a
+    plan made before tomorrow's prices arrive. Their placeholders must be
+    stamped 23:00-23:45 that day; deriving the hour as period // 4 gives hour
+    24 and the whole dashboard request fails."""
+    from datetime import UTC
+
+    from core.bess.tests.helpers import pinned_datetime_class
+
+    monkeypatch.setattr(
+        time_utils,
+        "datetime",
+        pinned_datetime_class(datetime(2026, 10, 25, 10, 0, tzinfo=UTC)),
+    )
+    periods = [create_period_data(i, "predicted") for i in range(96)]
+    schedule_store.store_schedule(
+        OptimizationResult(input_data={}, period_data=periods),
+        optimization_period=0,
+    )
+
+    view = view_builder.build_daily_view(current_period=48)
+
+    assert len(view.periods) == 100
+    tail = [p.timestamp for p in view.periods[96:] if p.timestamp is not None]
+    assert [(t.hour, t.minute) for t in tail] == [(23, 0), (23, 15), (23, 30), (23, 45)]
+    assert {t.date() for t in tail} == {datetime(2026, 10, 25).date()}

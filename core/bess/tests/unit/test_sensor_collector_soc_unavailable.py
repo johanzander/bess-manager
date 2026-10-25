@@ -10,13 +10,15 @@ No execution model applies here: this is a data-collection error path, not a
 schedule/control mapping, so the outcome asserted is the raised error itself.
 """
 
-from datetime import date
+from datetime import datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from core.bess.sensor_collector import SensorCollector
 from core.bess.settings import BatterySettings
+from core.bess.tests.helpers import pinned_datetime_class
+from core.bess.time_utils import TIMEZONE
 
 _ENERGY_READINGS = {
     "battery_charged_entity": 100.0,
@@ -66,10 +68,10 @@ def test_unavailable_soc_fallback_raises_naming_the_sensor(
     )
     collector._get_period_readings = MagicMock(side_effect=readings)  # type: ignore[method-assign]
 
-    with patch("core.bess.sensor_collector.time_utils") as mock_time_utils:
-        mock_time_utils.now.return_value.hour = 3
-        mock_time_utils.now.return_value.minute = 0  # current_period = 12
-        mock_time_utils.today.return_value = date(2026, 7, 25)
+    with patch(
+        "core.bess.time_utils.datetime",
+        pinned_datetime_class(datetime(2026, 7, 25, 3, 0, tzinfo=TIMEZONE)),
+    ):
 
         # period=5 < current_period-1 -> historical backfill branch.
         with pytest.raises(KeyError, match=r"Period 5.*SOC.*soc_entity.*unavailable"):

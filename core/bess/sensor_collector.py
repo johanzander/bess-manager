@@ -181,7 +181,7 @@ class SensorCollector:
 
         # Check if this period is complete
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
         if period >= current_period:
             raise ValueError(
                 f"Period {period} is still in progress or in the future, cannot collect complete data"
@@ -799,7 +799,7 @@ class SensorCollector:
             return
 
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
         self._power_sample_buffer.record(current_period, readings)
 
     def warm_readings_cache(self) -> None:

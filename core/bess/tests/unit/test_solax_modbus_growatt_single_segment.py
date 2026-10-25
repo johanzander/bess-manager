@@ -15,6 +15,8 @@ from core.bess.dp_schedule import DPSchedule
 from core.bess.settings import BatterySettings
 from core.bess.solax_modbus_growatt_controller import SolaxModbusGrowattController
 from core.bess.tests.conftest import MockHomeAssistantController
+from core.bess.tests.helpers import pinned_datetime_class
+from core.bess.time_utils import TIMEZONE
 
 
 def hourly_to_quarterly(
@@ -96,8 +98,10 @@ class TestApplyPeriod:
         hour = period // 4
         minute = (period % 4) * 15
 
-        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
-            mock_time.now.return_value = datetime(2026, 5, 20, hour, minute, 0)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 5, 20, hour, minute, tzinfo=TIMEZONE)),
+        ):
             grid_charge, discharge_rate, block_passive_charging = (
                 controller.compute_rates_for_period(period, 0.0)
             )
@@ -272,8 +276,10 @@ class TestApplyPeriod:
         controller.apply_intents(schedule, current_period=0)
         controller._last_written_tou_mode = "load_first"
 
-        with patch("core.bess.solax_modbus_growatt_controller.time_utils") as mock_time:
-            mock_time.now.return_value = datetime(2026, 5, 20, 0, 0, 0)
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(datetime(2026, 5, 20, 0, 0, tzinfo=TIMEZONE)),
+        ):
             # -2.0 kW discharge -> non-zero discharge_rate for LOAD_SUPPORT
             grid_charge, discharge_rate, block_passive_charging = (
                 controller.compute_rates_for_period(0, -2.0)

@@ -13,6 +13,7 @@ import pytest
 
 from core.bess import time_utils
 from core.bess.models import PeriodData
+from core.bess.tests.helpers import pinned_datetime_class
 
 
 class TestScheduleCreation:
@@ -509,9 +510,10 @@ class TestChargeRateHardwareWrite:
         self._inject_intent(battery_system, "SOLAR_STORAGE", hour=12)
         mock_controller.calls["charge_rate"].clear()
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 12
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=12, minute=0)),
+        ):
             battery_system._apply_period_schedule(48)  # period 48 = hour 12
 
         assert mock_controller.calls[
@@ -530,9 +532,10 @@ class TestChargeRateHardwareWrite:
         self._inject_intent(battery_system, "GRID_CHARGING", hour=2)
         mock_controller.calls["charge_rate"].clear()
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 2
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=2, minute=0)),
+        ):
             battery_system._apply_period_schedule(8)  # period 8 = hour 2
 
         assert mock_controller.calls[
@@ -549,9 +552,10 @@ class TestChargeRateHardwareWrite:
         self._inject_intent(battery_system, "LOAD_SUPPORT", hour=19)
         mock_controller.calls["charge_rate"].clear()
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 19
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=19, minute=0)),
+        ):
             battery_system._apply_period_schedule(76)  # period 76 = hour 19
 
         assert mock_controller.calls[
@@ -574,9 +578,10 @@ class TestChargeRateHardwareWrite:
 
         # Period 1: LOAD_SUPPORT sets charge_rate=0
         self._inject_intent(battery_system, "LOAD_SUPPORT", hour=18)
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 18
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=18, minute=0)),
+        ):
             battery_system._apply_period_schedule(72)
 
         charge_after_load_support = mock_controller.calls["charge_rate"][-1]
@@ -586,9 +591,10 @@ class TestChargeRateHardwareWrite:
         self._inject_intent(battery_system, "SOLAR_STORAGE", hour=12)
         mock_controller.calls["charge_rate"].clear()
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 12
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=12, minute=0)),
+        ):
             battery_system._apply_period_schedule(48)
 
         assert mock_controller.calls[
@@ -642,9 +648,10 @@ class TestChargeRateHardwareWrite:
 
         mock_controller.calls["charge_rate"].clear()
 
-        with patch("core.bess.battery_system_manager.time_utils.now") as mock_now:
-            mock_now.return_value.hour = 2
-            mock_now.return_value.minute = 0
+        with patch(
+            "core.bess.time_utils.datetime",
+            pinned_datetime_class(time_utils.now().replace(hour=2, minute=0)),
+        ):
             battery_system._apply_period_schedule(8)
 
         assert mock_controller.calls[

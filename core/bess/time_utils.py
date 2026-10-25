@@ -69,7 +69,7 @@ def _local_midnight_utc(target_date: date) -> datetime:
     return datetime.combine(target_date, time(0, 0), tzinfo=TIMEZONE).astimezone(UTC)
 
 
-def _period_start(target_date: date, period_within_day: int) -> datetime:
+def period_start(target_date: date, period_within_day: int) -> datetime:
     """Start of a period, counted in real elapsed time from the day's midnight.
 
     Adding a timedelta to a ZoneInfo datetime is wall-clock arithmetic, so on a
@@ -100,7 +100,7 @@ def expand_wall_clock_profile(profile: list[float], target_date: date) -> list[f
         )
     expanded: list[float] = []
     for period in range(get_period_count(target_date)):
-        start = _period_start(target_date, period)
+        start = period_start(target_date, period)
         expanded.append(
             profile[start.hour * PERIODS_PER_HOUR + start.minute // INTERVAL_MINUTES]
         )
@@ -196,7 +196,7 @@ def period_index_to_timestamp(period_index: int) -> datetime:
 
     if period_index < today_periods:
         # Today (0-95 normally)
-        return _period_start(today, period_index)
+        return period_start(today, period_index)
     else:
         # Tomorrow
         tomorrow = today + timedelta(days=1)
@@ -210,7 +210,7 @@ def period_index_to_timestamp(period_index: int) -> datetime:
             )
 
         period_within_tomorrow = period_index - today_periods
-        return _period_start(tomorrow, period_within_tomorrow)
+        return period_start(tomorrow, period_within_tomorrow)
 
 
 def get_current_period_index() -> int:
@@ -225,6 +225,28 @@ def get_current_period_index() -> int:
     """
     now = datetime.now(tz=TIMEZONE)
     return timestamp_to_period_index(now)
+
+
+def period_wall_clock(period_index: int) -> tuple[int, int]:
+    """Local wall-clock (hour, minute) at which one of today's periods starts.
+
+    This is the time an inverter schedule has to be written with. It is not
+    ``divmod(period_index, 4)``: after the fall-back hour that lags the clock by
+    an hour, and after the spring-forward hour it leads it.
+
+    A period past the end of today has no wall-clock time today. It keeps
+    counting on from 24:00 so callers can recognise and skip it.
+    """
+    day = today()
+    day_periods = get_period_count(day)
+    if period_index >= day_periods:
+        beyond = period_index - day_periods
+        return (
+            24 + beyond // PERIODS_PER_HOUR,
+            (beyond % PERIODS_PER_HOUR) * INTERVAL_MINUTES,
+        )
+    start = period_start(day, period_index)
+    return start.hour, start.minute
 
 
 def format_period(period_index: int) -> str:

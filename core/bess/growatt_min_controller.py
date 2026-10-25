@@ -207,9 +207,7 @@ class GrowattMinController(InverterController):
         if not intents:
             return []
 
-        # current_period is derived from the wall clock, so on a spring-forward
-        # day it reaches 95 while the schedule holds only 92 periods. There is
-        # nothing left to group past the end of the day.
+        # There is nothing left to group past the end of the schedule.
         if start_period >= len(intents):
             return []
 
@@ -273,76 +271,124 @@ class GrowattMinController(InverterController):
 
         return groups
 
-    def _groups_to_tou_intervals(self, groups: list[dict]) -> list[dict]:
+    def _groups_to_tou_intervals(
+        self, groups: list[dict], current_period: int
+    ) -> list[dict]:
         """Convert period groups to Growatt TOU intervals.
 
         Only creates intervals for non-default modes (battery_first, grid_first).
         load_first is the inverter default and doesn't need explicit TOU segments.
 
+        TOU intervals are wall-clock times, and on the DST fall-back day one
+        wall-clock hour holds two hours of periods. A group is therefore split
+        wherever the wall clock runs backwards, runs that have already ended are
+        dropped, and a run is clipped to the wall-clock time an earlier period
+        has not already decided. On any other day none of this changes the
+        result.
+
         Args:
             groups: List of period groups from _group_periods_by_mode()
+            current_period: Current 15-minute period
 
         Returns:
             List of TOU intervals ready for Growatt
         """
         intervals = []
         segment_id = 1
+        decided_until_minute = -1
 
         for group in groups:
-            # Skip load_first - it's the inverter default
-            if group["mode"] == "load_first":
-                continue
+            for run_start, run_end in self._wall_clock_runs(
+                group["start_period"], group["end_period"]
+            ):
+                if run_end < current_period:
+                    continue
 
-            start_hour, start_minute = self._period_to_time(group["start_period"])
-            end_hour, end_minute = self._period_to_time(group["end_period"])
-            # End minute should be the last minute of the period (14, 29, 44, or 59)
-            end_minute = end_minute + 14
+                start_hour, start_minute = self._period_to_time(run_start)
+                end_hour, end_minute = self._period_to_time(run_end)
+                # End minute should be the last minute of the period (14, 29, 44, or 59)
+                end_minute = end_minute + 14
 
-            # Handle DST fall-back: periods >= 96 produce hour >= 24
-            # Skip segments that start beyond 23:59 (can't represent in TOU)
-            if start_hour >= 24:
-                logger.warning(
-                    "Skipping DST fall-back segment starting at hour %d (beyond 23:59)",
-                    start_hour,
+                # Periods past the end of today produce hour >= 24.
+                # Skip segments that start beyond 23:59 (can't represent in TOU)
+                if start_hour >= 24:
+                    logger.warning(
+                        "Skipping segment starting at hour %d (beyond 23:59)",
+                        start_hour,
+                    )
+                    continue
+
+                # Cap end time to 23:59
+                if end_hour >= 24:
+                    end_hour = 23
+                    end_minute = 59
+
+                start = max(start_hour * 60 + start_minute, decided_until_minute + 1)
+                end = end_hour * 60 + end_minute
+                decided_until_minute = max(decided_until_minute, end)
+
+                # Skip load_first - it's the inverter default
+                if group["mode"] == "load_first" or start > end:
+                    continue
+
+                run_intents = group["intents"][
+                    run_start
+                    - group["start_period"] : run_end
+                    - group["start_period"]
+                    + 1
+                ]
+
+                # Summarize intents for logging
+                intent_counts: dict[str, int] = {}
+                for intent in run_intents:
+                    intent_counts[intent] = intent_counts.get(intent, 0) + 1
+                intent_summary = ", ".join(
+                    f"{intent}({count})"
+                    for intent, count in sorted(
+                        intent_counts.items(), key=lambda x: -x[1]
+                    )
                 )
-                continue
 
-            # Cap end time to 23:59
-            if end_hour >= 24:
-                end_hour = 23
-                end_minute = 59
+                interval = {
+                    "segment_id": segment_id,
+                    "batt_mode": group["mode"],
+                    "start_time": self._minutes_to_time(start),
+                    "end_time": self._minutes_to_time(end),
+                    "enabled": True,
+                    "strategic_intent": intent_summary,
+                }
+                intervals.append(interval)
+                segment_id += 1
 
-            # Summarize intents for logging
-            intent_counts: dict[str, int] = {}
-            for intent in group["intents"]:
-                intent_counts[intent] = intent_counts.get(intent, 0) + 1
-            intent_summary = ", ".join(
-                f"{intent}({count})"
-                for intent, count in sorted(intent_counts.items(), key=lambda x: -x[1])
-            )
-
-            interval = {
-                "segment_id": segment_id,
-                "batt_mode": group["mode"],
-                "start_time": f"{start_hour:02d}:{start_minute:02d}",
-                "end_time": f"{end_hour:02d}:{end_minute:02d}",
-                "enabled": True,
-                "strategic_intent": intent_summary,
-            }
-            intervals.append(interval)
-            segment_id += 1
-
-            logger.info(
-                "TOU segment #%d: %s-%s (%s) from %d periods: %s",
-                interval["segment_id"],
-                interval["start_time"],
-                interval["end_time"],
-                interval["batt_mode"],
-                len(group["intents"]),
-                intent_summary,
-            )
+                logger.info(
+                    "TOU segment #%d: %s-%s (%s) from %d periods: %s",
+                    interval["segment_id"],
+                    interval["start_time"],
+                    interval["end_time"],
+                    interval["batt_mode"],
+                    len(run_intents),
+                    intent_summary,
+                )
 
         return intervals
+
+    def _wall_clock_runs(
+        self, start_period: int, end_period: int
+    ) -> list[tuple[int, int]]:
+        """Split a period range wherever the wall clock runs backwards.
+
+        That happens only at the DST fall-back, where the repeated hour starts.
+        """
+        runs = []
+        run_start = start_period
+        for period in range(start_period + 1, end_period + 1):
+            if self._period_to_minute_of_day(period) < self._period_to_minute_of_day(
+                period - 1
+            ):
+                runs.append((run_start, period - 1))
+                run_start = period
+        runs.append((run_start, end_period))
+        return runs
 
     def _select_hardware_intervals(
         self, intervals: list[dict], current_period: int
@@ -373,9 +419,7 @@ class GrowattMinController(InverterController):
             List of up to 9 imminent, non-expired intervals for hardware.
         """
         # Calculate current time in minutes from the period
-        current_hour = current_period // 4
-        current_minute = (current_period % 4) * 15
-        current_minutes = current_hour * 60 + current_minute
+        current_minutes = self._period_to_minute_of_day(current_period)
         horizon_minutes = current_minutes + self.WRITE_HORIZON_MINUTES
 
         # An already-active interval has start_time <= now, so it is always
@@ -623,7 +667,7 @@ class GrowattMinController(InverterController):
                 len(group["intents"]),
             )
 
-        new_intervals = self._groups_to_tou_intervals(period_groups)
+        new_intervals = self._groups_to_tou_intervals(period_groups, current_period)
         new_intervals.sort(key=lambda x: x["start_time"])
         for i, interval in enumerate(new_intervals, 1):
             interval["segment_id"] = i
@@ -700,7 +744,7 @@ class GrowattMinController(InverterController):
             parts = interval["end_time"].split(":")
             return int(parts[0]) * 60 + int(parts[1])
 
-        from_minute = from_period * 15
+        from_minute = self._period_to_minute_of_day(from_period)
 
         relevant_current = []
         relevant_new = []
@@ -783,8 +827,7 @@ class GrowattMinController(InverterController):
         Uses 15-minute period granularity to match TOU segment resolution.
         """
         from_period = current_period
-        from_hour = from_period // 4
-        from_min_in_hour = (from_period % 4) * 15
+        from_hour, from_min_in_hour = self._period_to_time(from_period)
 
         logger.info(
             "Comparing TOU intervals from period %d (%02d:%02d) onwards",
@@ -816,7 +859,7 @@ class GrowattMinController(InverterController):
         # the comparison cannot report a difference that is only the clock
         # moving — that fired on every segment's expiry and cost a hardware
         # read producing no writes.
-        from_minute = from_period * 15
+        from_minute = self._period_to_minute_of_day(from_period)
 
         def eligible_content(intervals: list[dict]) -> set[tuple]:
             return {
@@ -951,7 +994,7 @@ class GrowattMinController(InverterController):
         # the write path while the display path calls it pending — the amber
         # "Pending Write" badge this change exists to clear.
         if current_period is not None:
-            current_minutes = (current_period // 4) * 60 + (current_period % 4) * 15
+            current_minutes = self._period_to_minute_of_day(current_period)
         else:
             now = time_utils.now()
             current_minutes = ((now.hour * 60 + now.minute) // 15) * 15
@@ -1032,6 +1075,11 @@ class GrowattMinController(InverterController):
             )
 
         return result
+
+    def _period_to_minute_of_day(self, period: int) -> int:
+        """Wall-clock minute of the day at which one of today's periods starts."""
+        hour, minute = self._period_to_time(period)
+        return hour * 60 + minute
 
     def _time_to_minutes(self, time_str: str) -> int:
         """Convert time string (HH:MM) to minutes since midnight."""
@@ -1209,7 +1257,7 @@ class GrowattMinController(InverterController):
             return
 
         now = time_utils.now()
-        current_period = now.hour * 4 + now.minute // 15
+        current_period = time_utils.timestamp_to_period_index(now)
 
         lines = [
             "\n╔═══════════════╦══════════╦══════════════════╦═══════════════╦═════════════╦═════════════╦═══════════════╗",
@@ -1350,7 +1398,7 @@ class GrowattMinController(InverterController):
         # out-of-range segment_id with 500.
         new_tou = self.active_tou_intervals
 
-        effective_minute = effective_period * 15
+        effective_minute = self._period_to_minute_of_day(effective_period)
 
         def start_minute(interval: dict) -> int:
             parts = interval["start_time"].split(":")
@@ -1421,10 +1469,9 @@ class GrowattMinController(InverterController):
         to_update: list[dict] = []
 
         logger.info(
-            "Analyzing TOU changes from period %d (%02d:%02d) onwards...",
+            "Analyzing TOU changes from period %d (%s) onwards...",
             effective_period,
-            effective_period // 4,
-            (effective_period % 4) * 15,
+            time_utils.format_period(effective_period),
         )
 
         # When new schedule is empty, disable ALL currently-enabled segments.

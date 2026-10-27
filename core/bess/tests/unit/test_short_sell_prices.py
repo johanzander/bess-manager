@@ -1,8 +1,9 @@
 """A sell price list shorter than the buy list trims the day instead of failing.
 
 Some import/export tariff combinations project import prices further ahead
-than export prices: an Octopus Agile export day has come back with 46 of 48
-half-hours while import was complete. Indexing the short list raised
+than export prices. Octopus Cosy import is a fixed three-band time-of-use
+tariff, so the full day is always known, while Agile export is published day
+by day and has come back with 46 of 48 half-hours. Indexing the short list raised
 IndexError, today's prices were never cached, and the optimizer reported "No
 prices available" on every cycle.
 """
@@ -57,7 +58,7 @@ def _make_system(source: MockSource) -> BatterySystemManager:
     return system
 
 
-def test_today_is_trimmed_to_the_sell_prices():
+def test_today_is_trimmed_to_the_sell_prices() -> None:
     system = _make_system(ShortSellMockSource())
 
     entries = system._price_manager.get_cached_today_prices()
@@ -65,7 +66,7 @@ def test_today_is_trimmed_to_the_sell_prices():
     assert len(entries) == get_period_count(time_utils.today()) - MISSING
 
 
-def test_short_today_is_not_extended_with_tomorrow():
+def test_short_today_is_not_extended_with_tomorrow() -> None:
     """Tomorrow 00:00 must not be appended onto today's 23:00 slot."""
     system = _make_system(ShortSellMockSource())
     assert system._price_manager.get_cached_tomorrow_prices()
@@ -78,7 +79,7 @@ def test_short_today_is_not_extended_with_tomorrow():
     assert entries[-1]["timestamp"].startswith(time_utils.today().isoformat())
 
 
-def test_tomorrow_never_stands_in_for_a_missing_today():
+def test_tomorrow_never_stands_in_for_a_missing_today() -> None:
     """With today uncached, tomorrow's entries must not be read as today's."""
     system = _make_system(ShortSellMockSource())
     pm = system._price_manager
@@ -92,7 +93,7 @@ def test_tomorrow_never_stands_in_for_a_missing_today():
     assert entries is None
 
 
-def test_available_prices_not_extended_when_today_short():
+def test_available_prices_not_extended_when_today_short() -> None:
     system = _make_system(ShortSellMockSource())
 
     buy, sell = system._price_manager.get_available_prices()
@@ -100,7 +101,7 @@ def test_available_prices_not_extended_when_today_short():
     assert len(buy) == len(sell) == get_period_count(time_utils.today()) - MISSING
 
 
-def test_refresh_fills_in_once_the_sell_prices_arrive():
+def test_refresh_fills_in_once_the_sell_prices_arrive() -> None:
     source = ShortSellMockSource()
     system = _make_system(source)
 
@@ -111,7 +112,7 @@ def test_refresh_fills_in_once_the_sell_prices_arrive():
     assert len(entries) == get_period_count(time_utils.today())
 
 
-def test_refresh_keeps_the_short_day_when_the_refetch_fails():
+def test_refresh_keeps_the_short_day_when_the_refetch_fails() -> None:
     source = ShortSellMockSource()
     system = _make_system(source)
 
@@ -126,7 +127,7 @@ def test_refresh_keeps_the_short_day_when_the_refetch_fails():
 
 @pytest.mark.slow
 @patch("core.bess.battery_system_manager.SensorCollector", MockSensorCollector)
-def test_schedule_builds_on_a_short_day():
+def test_schedule_builds_on_a_short_day() -> None:
     system = _make_system(ShortSellMockSource())
 
     assert system.update_battery_schedule(current_period=40, prepare_next_day=False)
@@ -137,7 +138,7 @@ def test_schedule_builds_on_a_short_day():
 
 @pytest.mark.slow
 @patch("core.bess.battery_system_manager.SensorCollector", MockSensorCollector)
-def test_period_past_the_trimmed_end_does_not_crash():
+def test_period_past_the_trimmed_end_does_not_crash() -> None:
     """Once the clock passes the last priced period the cycle gives up cleanly."""
     system = _make_system(ShortSellMockSource())
     assert system.update_battery_schedule(current_period=40, prepare_next_day=False)
@@ -146,7 +147,7 @@ def test_period_past_the_trimmed_end_does_not_crash():
     system.update_battery_schedule(current_period=last, prepare_next_day=False)
 
 
-def test_tomorrow_unaffected():
+def test_tomorrow_unaffected() -> None:
     system = _make_system(ShortSellMockSource())
     tomorrow = time_utils.today() + timedelta(days=1)
 

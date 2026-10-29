@@ -363,3 +363,37 @@ class TestAdjustChargingPowerSkipsUnsupported:
         )
 
         system.adjust_charging_power()  # must not raise
+
+
+def _all_controller_subclasses(base: type[Any]) -> list[type[Any]]:
+    found: list[type[Any]] = []
+    for sub in base.__subclasses__():
+        found.append(sub)
+        found.extend(_all_controller_subclasses(sub))
+    return found
+
+
+class TestWriteSignatureConformance:
+    """apply_period calls _write_period_to_hardware with the base's arguments,
+    so an override that drops one raises TypeError on every period (#850)."""
+
+    def test_every_override_accepts_the_base_arguments(self) -> None:
+        import inspect
+
+        # Importing the manager registers every platform controller as a subclass.
+        import core.bess.battery_system_manager  # noqa: F401
+
+        base = list(
+            inspect.signature(InverterController._write_period_to_hardware).parameters
+        )
+        mismatched = {}
+        for cls in _all_controller_subclasses(InverterController):
+            override = cls.__dict__.get("_write_period_to_hardware")
+            if override is None:
+                continue
+            params = inspect.signature(override).parameters
+            missing = [name for name in base if name not in params]
+            if missing:
+                mismatched[cls.__name__] = missing
+
+        assert mismatched == {}

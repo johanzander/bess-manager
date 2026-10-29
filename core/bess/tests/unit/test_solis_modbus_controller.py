@@ -321,3 +321,23 @@ class TestHealthCheck:
         result = manager.check_health(controller)
 
         assert result[0]["status"] == "ERROR"
+
+
+# ── Per-period apply (#850) ──────────────────────────────────────────────────
+
+
+class TestApplyPeriod:
+    def test_apply_period_with_battery_system_manager_call_shape_succeeds(
+        self, manager: SolisModbusController
+    ) -> None:
+        # Command-level check: Solis has no per-period execution model (the TOU
+        # schedule is deployed by sync_to_hardware), so the outcome to assert is
+        # that the shared apply_period path does not raise and reports success.
+        # BatterySystemManager passes every argument positionally, including
+        # block_passive_charging; the Solis override once rejected it (#850).
+        success, error_msg = manager.apply_period(
+            MagicMock(), False, 20, False, "LOAD_SUPPORT", False, 100, False
+        )
+
+        assert success is True
+        assert error_msg == ""

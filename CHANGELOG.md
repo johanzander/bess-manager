@@ -9,6 +9,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **Solis: the per-period update no longer fails with an argument-count error** — the scheduled write and the discharge-inhibit restore now complete instead of raising, so BESS keeps running on Solis. ([#850](https://github.com/johanzander/bess-manager/issues/850))
+- **Planned Schedule no longer logs an error per elapsed hour, nor shows made-up IDLE rows for them** — a mid-day plan has no decision for hours already passed, and the display now treats that as "no discharge authorisation". ([#847](https://github.com/johanzander/bess-manager/issues/847))
 - **ENTSO-e: an incomplete day of prices is no longer planned on** — a leftover `prices_tomorrow` stub no longer creates a flat, idle second day, or hides a complete day published beside it. ([#841](https://github.com/johanzander/bess-manager/issues/841), [#845](https://github.com/johanzander/bess-manager/issues/845))
 - **ENTSO-e: tomorrow's prices are no longer rejected on the 25-hour fall-back day** — the integration sends 24 hourly prices; both occurrences of the repeated hour now use the one price received, with a warning. ([#830](https://github.com/johanzander/bess-manager/issues/830))
 - **DST change days: the current period and schedule timestamps now follow real time** — on the 25-hour day the plan no longer runs an hour late after 02:00, and the last hour is reachable. ([#830](https://github.com/johanzander/bess-manager/issues/830))

@@ -565,12 +565,37 @@ class PriceManager:
             if cached_tomorrow is not None:
                 return cached_tomorrow
 
+        return self._fetch_price_data(target_date)
+
+    def _fetch_price_data(self, target_date: date) -> list:
+        """Fetch target_date's prices from the source and cache them.
+
+        get_price_data() without the cache check. refresh_cache() calls it
+        directly to re-fetch a day that was cached short.
+        """
         try:
             # Get raw prices from the source
             raw_prices = self.price_source.get_prices_for_date(target_date)
 
             # Check for separate sell/export prices (e.g., Octopus Energy)
             direct_sell_prices = self.price_source.get_sell_prices_for_date(target_date)
+
+            # Some import/export tariff combinations project import prices
+            # further ahead than export prices, so the sell list can stop short
+            # of the buy list. Keep only the periods both lists cover, so the
+            # day ends early instead of failing outright. refresh_cache()
+            # re-fetches a short day.
+            if direct_sell_prices is not None and len(direct_sell_prices) < len(
+                raw_prices
+            ):
+                self._logger.warning(
+                    "Only %d of %d sell prices available for %s, "
+                    "trimming buy prices to match",
+                    len(direct_sell_prices),
+                    len(raw_prices),
+                    target_date,
+                )
+                raw_prices = raw_prices[: len(direct_sell_prices)]
 
             # Format prices with timestamp and calculations
             price_data = []
@@ -689,17 +714,28 @@ class PriceManager:
         self._refresh_power_down_windows(today)
 
         try:
-            self.get_price_data(today)
+            self._refresh_day(today)
         except Exception as e:
             self._logger.warning("Price refresh: today's prices unavailable: %s", e)
 
         if self._tomorrow_publication_reached():
             try:
-                self.get_price_data(today + timedelta(days=1))
+                self._refresh_day(today + timedelta(days=1))
             except Exception as e:
                 self._logger.debug(
                     "Price refresh: tomorrow's prices not yet available: %s", e
                 )
+
+    def _refresh_day(self, day: date) -> None:
+        """Cache a day's prices, re-fetching a day that was cached short.
+
+        A day trimmed to a short sell price list (see _fetch_price_data) is
+        fetched again on every refresh until the source fills it in. If that
+        fetch fails, the short day stays cached.
+        """
+        cached = self.get_price_data(day)
+        if len(cached) < time_utils.get_period_count(day):
+            self._fetch_price_data(day)
 
     def _refresh_free_import_windows(self, today: date) -> None:
         """Replace the free-import windows for today and tomorrow.
@@ -850,6 +886,15 @@ class PriceManager:
         # Get today's quarterly prices (already quarterly resolution from Nordpool)
         buy_prices = self.get_buy_prices(target_date=today)
         sell_prices = self.get_sell_prices(target_date=today)
+
+        # Tomorrow's index 0 must land on tomorrow 00:00, so a today cut short
+        # by missing sell prices is never extended.
+        if len(buy_prices) < time_utils.get_period_count(today):
+            logger.info(
+                "Today's prices end early (%d periods), not extending with tomorrow",
+                len(buy_prices),
+            )
+            return (buy_prices, sell_prices)
 
         # Try tomorrow (full day from 00:00)
         # Fetch price data once and extract both buy and sell to avoid duplicate API calls

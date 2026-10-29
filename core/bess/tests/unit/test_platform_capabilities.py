@@ -365,8 +365,8 @@ class TestAdjustChargingPowerSkipsUnsupported:
         system.adjust_charging_power()  # must not raise
 
 
-def _all_controller_subclasses(base: type) -> list[type]:
-    found: list[type] = []
+def _all_controller_subclasses(base: type[Any]) -> list[type[Any]]:
+    found: list[type[Any]] = []
     for sub in base.__subclasses__():
         found.append(sub)
         found.extend(_all_controller_subclasses(sub))

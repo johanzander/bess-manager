@@ -95,13 +95,20 @@ class SolisModbusController(InverterController):
         self._discharge_periods: list[dict] = []
 
     def _write_period_to_hardware(
-        self, controller, grid_charge: bool, discharge_rate: int
+        self,
+        controller,
+        grid_charge: bool,
+        discharge_rate: int,
+        block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
         """No-op: Solis deploys the full schedule via sync_to_hardware.
 
         Solis has no per-period entity controls beyond the TOU schedule
         itself (no separate grid_charge switch / discharge rate number) —
         the entire period list is written in ``sync_to_hardware``.
+
+        ``block_passive_charging`` is accepted to match the base signature
+        (``apply_period`` passes it to every platform) and is unused here.
         """
         return True, ""
 

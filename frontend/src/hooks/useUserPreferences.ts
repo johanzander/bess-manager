@@ -1,17 +1,20 @@
 import { useState } from 'react';
 
 export type DataResolution = 'hourly' | 'quarter-hourly';
+export type ScheduleLayout = 'bar' | 'rows' | 'list' | 'combo';
 
 interface UserPreferences {
   dataResolution: DataResolution;
   showSellPrice: boolean;
+  scheduleLayout: ScheduleLayout;
 }
 
 const PREFERENCES_KEY = 'bess_user_preferences';
 
 const defaultPreferences: UserPreferences = {
   dataResolution: 'quarter-hourly',
-  showSellPrice: false
+  showSellPrice: false,
+  scheduleLayout: 'bar'
 };
 
 export function useUserPreferences() {
@@ -44,12 +47,18 @@ export function useUserPreferences() {
     setPreferences({ showSellPrice });
   };
 
+  const setScheduleLayout = (scheduleLayout: ScheduleLayout) => {
+    setPreferences({ scheduleLayout });
+  };
+
   return {
     preferences,
     setPreferences,
     dataResolution: preferences.dataResolution,
     setDataResolution,
     showSellPrice: preferences.showSellPrice,
-    setShowSellPrice
+    setShowSellPrice,
+    scheduleLayout: preferences.scheduleLayout,
+    setScheduleLayout
   };
 }

@@ -455,8 +455,8 @@ mappings, battery settings, inverter config) — is generated from the debug log
 
 ### Generating a Debug Log
 
-**Option A — System Health page:** Open the BESS UI, go to System Health, and click
-the **Export Debug Data** button. Save the downloaded `.md` file anywhere accessible.
+**Option A — Settings page:** Open the BESS UI, go to Settings → System →
+Diagnostics, and click the **Export Debug Data** button. Save the downloaded `.md` file anywhere accessible.
 
 **Option B — Via Claude Code (MCP):** With a running BESS instance and the MCP server
 configured, ask Claude to fetch and generate a scenario in one step:

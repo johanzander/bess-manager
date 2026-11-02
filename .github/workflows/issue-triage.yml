@@ -161,8 +161,10 @@ jobs:
             ──────────────────────────────────────────────────────────────────
             - labels: `bug`, `bot-analyzed`, `needs-debug-log`
             - comment: politely ask the user to attach a debug log.
-              Steps: System Health → Download Debug Report → paste the JSON
-              in a comment or attach the file.
+              Steps: in the BESS Manager web UI (NOT Home Assistant's System
+              Health) go to Settings → System → Diagnostics → Export Debug
+              Data. This downloads a `.md` file; attach it to a comment on
+              the issue (or link it as a gist).
               Explain: deep analysis can't run without the log because the
               code path depends on configuration and sensor state.
 

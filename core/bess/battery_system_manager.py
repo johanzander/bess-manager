@@ -2052,9 +2052,21 @@ class BatterySystemManager:
             else:
                 price_entries = self._price_manager.get_cached_today_prices()
 
-                # Extend with tomorrow's prices when available
+                # Extend with tomorrow's prices when available. Not when today
+                # is missing or ends early (sell prices missing for its last
+                # periods): the horizon is indexed by period, so tomorrow 00:00
+                # would land on a today slot, or on today's midnight.
                 tomorrow_entries = self._price_manager.get_cached_tomorrow_prices()
-                if tomorrow_entries:
+                today_period_count = get_period_count(time_utils.today())
+                if len(price_entries) < today_period_count:
+                    if price_entries:
+                        logger.warning(
+                            "Today's prices end early (%d of %d periods), "
+                            "not extending the horizon with tomorrow",
+                            len(price_entries),
+                            today_period_count,
+                        )
+                elif tomorrow_entries:
                     price_entries = price_entries + tomorrow_entries
                     logger.info(
                         "Extended price horizon with %d tomorrow entries (total: %d)",

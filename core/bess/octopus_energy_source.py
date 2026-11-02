@@ -104,6 +104,11 @@ class OctopusEnergySource(PriceSource):
         Returns:
             List of 96 quarterly export rates in GBP/kWh (expanded from 48 raw),
             or None if no export entity configured
+
+        Raises:
+            PriceDataUnavailableError: If an export entity is configured but its
+                rates cannot be fetched. None would send PriceManager to the sell
+                price formula, which for Octopus reproduces the import rate.
         """
         if not self.export_today_entity and not self.export_tomorrow_entity:
             return None
@@ -122,11 +127,7 @@ class OctopusEnergySource(PriceSource):
         if not entity_id:
             return None
 
-        try:
-            return self._fetch_rates(entity_id, target_date, "export")
-        except PriceDataUnavailableError:
-            logger.warning(f"Export rates unavailable for {target_date}")
-            return None
+        return self._fetch_rates(entity_id, target_date, "export")
 
     def _fetch_rates(
         self, entity_id: str, target_date: date, rate_type: str

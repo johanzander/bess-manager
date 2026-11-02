@@ -230,19 +230,98 @@ class TestExportRateFetching:
 
         assert source.get_sell_prices_for_date(today) is None
 
-    def test_export_failure_returns_none(self):
-        """Export rate failure should return None, not raise."""
+    def test_export_failure_raises(self) -> None:
+        """None means no export tariff, so a failed fetch must not look like it."""
         today = time_utils.today()
         controller = MagicMock()
         controller._api_request = MagicMock(side_effect=ConnectionError("timeout"))
         source = _make_source(controller)
 
-        assert source.get_sell_prices_for_date(today) is None
+        with pytest.raises(PriceDataUnavailableError):
+            source.get_sell_prices_for_date(today)
 
     def test_default_get_sell_prices_for_date_returns_none(self):
         """Base PriceSource returns None for sell prices."""
         mock = MockSource([1.0])
         assert mock.get_sell_prices_for_date(time_utils.today()) is None
+
+
+IMPORT_TODAY = "event.octopus_import_today"
+IMPORT_TOMORROW = "event.octopus_import_tomorrow"
+EXPORT_TODAY = "event.octopus_export_today"
+EXPORT_TOMORROW = "event.octopus_export_tomorrow"
+
+
+def _price_manager_reading(rate_cards: dict[str, list[dict]]) -> PriceManager:
+    """Build a PriceManager over HA day-rate entities a test can publish to."""
+    controller = MagicMock()
+    controller._api_request = MagicMock(
+        side_effect=lambda _method, path: {
+            "attributes": {"rates": rate_cards[path.rsplit("/", 1)[-1]]}
+        }
+    )
+    return PriceManager(
+        _make_source(controller),
+        markup_rate=0,
+        vat_multiplier=1,
+        additional_costs=0,
+        tax_reduction=0,
+        area="UK",
+    )
+
+
+class TestExportRatesLaggingImport:
+    """A fixed import tariff is known days ahead; Agile export is published daily."""
+
+    def test_tomorrow_waits_for_export_rates_instead_of_copying_import(self) -> None:
+        today = time_utils.today()
+        tomorrow = today + timedelta(days=1)
+        export_rates = _make_rates(tomorrow, export=True)
+        rate_cards = {
+            IMPORT_TODAY: _make_rates(today),
+            EXPORT_TODAY: _make_rates(today, export=True),
+            IMPORT_TOMORROW: _make_rates(tomorrow),
+            EXPORT_TOMORROW: [],
+        }
+        price_manager = _price_manager_reading(rate_cards)
+
+        buy, sell = price_manager.get_available_prices()
+
+        assert len(buy) == len(sell) == time_utils.get_period_count(today)
+
+        rate_cards[EXPORT_TOMORROW] = export_rates
+        _, sell = price_manager.get_available_prices()
+
+        tomorrow_periods = time_utils.get_period_count(tomorrow)
+        assert sell[-tomorrow_periods:] == [
+            rate["value_inc_vat"] for rate in export_rates for _ in range(2)
+        ]
+
+    def test_short_today_survives_an_export_outage(self) -> None:
+        today = time_utils.today()
+        rate_cards = {
+            IMPORT_TODAY: _make_rates(today),
+            EXPORT_TODAY: _make_rates(today, count=46, export=True),
+            IMPORT_TOMORROW: [],
+            EXPORT_TOMORROW: [],
+        }
+        price_manager = _price_manager_reading(rate_cards)
+        price_manager.refresh_cache()
+        short_day = price_manager.get_cached_today_prices()
+
+        rate_cards[EXPORT_TODAY] = []
+        price_manager.refresh_cache()
+
+        assert price_manager.get_cached_today_prices() == short_day
+
+    def test_today_without_export_rates_is_unavailable(self) -> None:
+        today = time_utils.today()
+        price_manager = _price_manager_reading(
+            {IMPORT_TODAY: _make_rates(today), EXPORT_TODAY: []}
+        )
+
+        with pytest.raises(PriceDataUnavailableError):
+            price_manager.get_price_data(today)
 
 
 class TestDateFilteringAndSorting:
@@ -308,6 +387,16 @@ class TestHealthCheck:
         assert result["status"] == "ERROR"
         assert result["checks"][0]["status"] == "ERROR"
 
+    def test_missing_export_rates_warn(self) -> None:
+        today = time_utils.today()
+        controller = _make_ha_controller(_make_rates(today), export_rates=[])
+        source = _make_source(controller)
+
+        result = source.perform_health_check()
+
+        assert result["status"] == "WARNING"
+        assert result["checks"][1]["status"] == "WARNING"
+
 
 class TestPriceManagerIntegration:
     """Test OctopusEnergySource integration with PriceManager."""
@@ -342,7 +431,7 @@ class TestPriceManagerIntegration:
         """Timestamps should be 15 minutes apart (quarterly resolution)."""
         today = time_utils.today()
         rates = _make_rates(today)
-        controller = _make_ha_controller(rates)
+        controller = _make_ha_controller(rates, _make_rates(today, export=True))
         source = _make_source(controller)
 
         pm = PriceManager(

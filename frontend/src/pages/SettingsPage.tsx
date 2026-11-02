@@ -148,6 +148,18 @@ const SettingsPage: React.FC = () => {
   const [lastDiscoveredAt, setLastDiscoveredAt] = useState<string | null>(null);
   const [powerDownCalendarDisabledBy, setPowerDownCalendarDisabledBy] = useState<string | undefined>(undefined);
 
+  // ── warn before a refresh/close discards unsaved edits (#857) ─────────
+  const hasUnsavedChanges = !loading && Object.values(isDirty).some(Boolean);
+  useEffect(() => {
+    if (!hasUnsavedChanges) return;
+    const warn = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasUnsavedChanges]);
+
   // ── auto-dismiss toast ────────────────────────────────────────────────
   useEffect(() => {
     if (!toast) return;

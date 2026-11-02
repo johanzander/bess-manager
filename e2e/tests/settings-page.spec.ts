@@ -75,6 +75,31 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/Nord Pool/i).first()).toBeVisible();
   });
 
+  test('refresh is guarded only while there are unsaved edits (#857)', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+
+    // A page-level beforeunload handler that calls preventDefault() is what
+    // makes the browser ask before discarding edits.
+    const guardsUnload = () =>
+      page.evaluate(() => {
+        const e = new Event('beforeunload', { cancelable: true });
+        window.dispatchEvent(e);
+        return e.defaultPrevented;
+      });
+
+    expect(await guardsUnload()).toBe(false);
+
+    await page.getByRole('button', { name: 'Battery', exact: true }).click();
+    const capacityInput = page.locator('label').filter({ hasText: /Total Capacity/i }).locator('input');
+    const originalValue = await capacityInput.inputValue();
+    await capacityInput.fill(String(Number(originalValue) + 1));
+    expect(await guardsUnload()).toBe(true);
+
+    await capacityInput.fill(originalValue);
+    expect(await guardsUnload()).toBe(false);
+  });
+
   test('editing battery capacity enables save and persists', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });

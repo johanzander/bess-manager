@@ -43,6 +43,7 @@ describe('useUserPreferences', () => {
     expect(JSON.parse(localStorage.getItem('bess_user_preferences')!)).toEqual({
       dataResolution: 'hourly',
       showSellPrice: false,
+      scheduleLayout: 'bar',
     })
   })
 
@@ -53,7 +54,11 @@ describe('useUserPreferences', () => {
       result.current.setPreferences({ dataResolution: 'hourly' })
     })
 
-    expect(result.current.preferences).toEqual({ dataResolution: 'hourly', showSellPrice: false })
+    expect(result.current.preferences).toEqual({
+      dataResolution: 'hourly',
+      showSellPrice: false,
+      scheduleLayout: 'bar',
+    })
   })
 
   it('defaults showSellPrice to false', () => {
@@ -73,6 +78,24 @@ describe('useUserPreferences', () => {
     expect(JSON.parse(localStorage.getItem('bess_user_preferences')!)).toEqual({
       dataResolution: 'quarter-hourly',
       showSellPrice: true,
+      scheduleLayout: 'bar',
     })
+  })
+
+  it('defaults scheduleLayout to bar', () => {
+    const { result } = renderHook(() => useUserPreferences())
+
+    expect(result.current.scheduleLayout).toBe('bar')
+  })
+
+  it('setScheduleLayout updates state and localStorage', () => {
+    const { result } = renderHook(() => useUserPreferences())
+
+    act(() => {
+      result.current.setScheduleLayout('rows')
+    })
+
+    expect(result.current.scheduleLayout).toBe('rows')
+    expect(JSON.parse(localStorage.getItem('bess_user_preferences')!).scheduleLayout).toBe('rows')
   })
 })

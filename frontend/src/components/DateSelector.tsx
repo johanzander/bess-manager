@@ -44,13 +44,13 @@ const DateSelector = ({
     }
     if (resolution === 'week') {
       const monday = mondayOf(date);
-      return `Week of ${monday.toLocaleDateString('sv-SE', {
+      return `Week of ${monday.toLocaleDateString(undefined, {
         day: 'numeric',
         month: 'short',
         year: 'numeric',
       })}`;
     }
-    return date.toLocaleDateString('sv-SE', {
+    return date.toLocaleDateString(undefined, {
       weekday: 'short',
       year: 'numeric',
       month: 'short',

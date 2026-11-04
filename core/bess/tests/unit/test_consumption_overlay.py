@@ -589,3 +589,49 @@ def test_removing_the_offending_block_clears_the_clamp_warning(
     assert not system._runtime_failure_tracker.has_active_failure(
         "CONSUMPTION_OVERLAY_CLAMPED"
     )
+
+
+class TestDeclaredVsMeasuredHourly:
+    """#863: debug export pairs declared blocks with measured managed-load energy."""
+
+    def test_block_apportioned_by_overlap_beside_measured(self) -> None:
+        from core.bess.consumption_overlay import declared_vs_measured_hourly
+
+        # 2 kWh declared across 23:30-00:30 -> 1 kWh in each hour.
+        block = OverlayBlock(
+            start=datetime(2026, 11, 3, 23, 30, tzinfo=TZ),
+            end=datetime(2026, 11, 4, 0, 30, tzinfo=TZ),
+            energy_kwh=2.0,
+            mode="add",
+        )
+        h23 = datetime(2026, 11, 3, 23, 0, tzinfo=TZ)
+        stats: dict[str, list[dict]] = {
+            "sensor.ev": [
+                {"start": h23.isoformat(), "change": 0.4},
+                {"start": int(h23.timestamp() * 1000), "change": 0.1},  # epoch ms
+            ],
+            "sensor.dehumidifier": [{"start": h23.isoformat(), "change": 0.25}],
+        }
+
+        rows = declared_vs_measured_hourly([block], stats, TZ)
+
+        assert [r["hour"] for r in rows] == [
+            "2026-11-03T23:00:00+01:00",
+            "2026-11-04T00:00:00+01:00",
+        ]
+        assert rows[0]["declared_kwh"] == pytest.approx(1.0)
+        assert rows[0]["measured_kwh"] == pytest.approx(0.75)  # summed over entries
+        assert rows[1]["declared_kwh"] == pytest.approx(1.0)
+        assert rows[1]["measured_kwh"] is None  # no sensor reported that hour
+
+    def test_measured_hour_without_block_is_zero_declared(self) -> None:
+        from core.bess.consumption_overlay import declared_vs_measured_hourly
+
+        h = datetime(2026, 11, 3, 5, 0, tzinfo=TZ)
+        rows = declared_vs_measured_hourly(
+            [], {"sensor.ev": [{"start": h.isoformat(), "change": 3.0}]}, TZ
+        )
+
+        assert rows == [
+            {"hour": h.isoformat(), "declared_kwh": 0.0, "measured_kwh": 3.0}
+        ]

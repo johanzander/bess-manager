@@ -15,7 +15,11 @@ import requests
 
 from . import time_utils
 from .calendar_windows import CalendarWindow
-from .consumption_overlay import apply_overlay, period_starts_from
+from .consumption_overlay import (
+    apply_overlay,
+    declared_vs_measured_hourly,
+    period_starts_from,
+)
 from .daily_view_builder import DailyView, DailyViewBuilder
 from .daily_view_store import DailyViewStore
 from .dp_battery_algorithm import (
@@ -1960,6 +1964,53 @@ class BatterySystemManager:
         except (HAStatisticsUnavailableError, ManagedLoadsError):
             return None
         return {"statistic_id": statistic_id, "stats": stats}
+
+    def get_consumption_overlay_for_debug_export(self) -> dict:
+        """Declared overlay blocks beside the managed loads' measured energy (#863).
+
+        Lets a debug bundle show whether a managed load (e.g. an EV charger)
+        actually followed the blocks the user declared, which the bundle could
+        not otherwise tell apart from BESS ignoring them. Only the blocks the
+        overlay entity reports *now* are available — past declarations are not
+        stored — so the hourly table pairs those with the last 48 h of
+        measured managed-load energy.
+
+        Returns:
+            ``{"configured": False}`` when no overlay entity is set, else
+            ``blocks``, ``managed_load_sensors`` and ``hourly`` (see
+            ``declared_vs_measured_hourly``). Failures to read blocks or
+            statistics propagate; the exporter records them explicitly.
+        """
+        if self._controller is None or not self._controller.sensors.get(
+            "consumption_overlay"
+        ):
+            return {"configured": False}
+
+        blocks = self._controller.get_consumption_overlay_blocks()
+        sensors = list(self.home_settings.managed_load_sensors)
+        end_dt = time_utils.now()
+        start_dt = end_dt - timedelta(hours=48)
+        managed_stats: dict[str, list[dict]] = {}
+        for sensor in sensors:
+            _, stats = self._fetch_recorder_change_stats(sensor, start_dt, end_dt)
+            managed_stats[sensor] = stats
+
+        return {
+            "configured": True,
+            "blocks": [
+                {
+                    "start": b.start.isoformat(),
+                    "end": b.end.isoformat(),
+                    "energy_kwh": b.energy_kwh,
+                    "mode": b.mode,
+                }
+                for b in blocks
+            ],
+            "managed_load_sensors": sensors,
+            "hourly": declared_vs_measured_hourly(
+                blocks, managed_stats, time_utils.TIMEZONE
+            ),
+        }
 
     def _get_ha_statistics_forecast(self) -> list[float]:
         """Get consumption forecast from HA Recorder long-term statistics.

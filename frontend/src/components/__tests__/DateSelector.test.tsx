@@ -200,4 +200,29 @@ describe('DateSelector resolution', () => {
     const nextButtonAfter = buttonsAfter[buttonsAfter.length - 1];
     expect(nextButtonAfter).not.toBeDisabled();
   });
+
+  // Regression for #862: day/week labels were hardcoded to 'sv-SE', so an
+  // English UI showed "tis" for Tuesday. The label must follow the browser
+  // locale (locale argument undefined), like the month view does.
+  it.each(['day', 'week'] as const)(
+    'formats the %s label with the browser locale, not a hardcoded one',
+    (resolution) => {
+      const spy = vi.spyOn(Date.prototype, 'toLocaleDateString');
+      try {
+        render(
+          <DateSelector
+            selectedDate={new Date(2026, 10, 3)}
+            onDateChange={vi.fn()}
+            resolution={resolution}
+          />
+        );
+        expect(spy).toHaveBeenCalled();
+        for (const [locale] of spy.mock.calls) {
+          expect(locale).toBeUndefined();
+        }
+      } finally {
+        spy.mockRestore();
+      }
+    }
+  );
 });

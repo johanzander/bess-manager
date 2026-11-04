@@ -873,6 +873,7 @@ mock-run.sh                 ← starts Docker Compose
 | `historical_periods` | Actual measured energy flows — seeded directly into the historical store, no recorder query needed |
 | `price_data` | Raw quarterly prices for `nordpool_official` service call responses |
 | `addon_options` | Complete sensor entity IDs, inverter device ID, price provider config |
+| `consumption_overlay` | Declared Planned Consumption Changes blocks paired hour-by-hour with measured managed-load energy (last 48 h); analysis only, not replayed |
 | `inverter_tou_segments` | Current inverter memory state for `read_time_segments` responses |
 | `export_timestamp` + `timezone` | Pins `mock_time` so BESS computes the same optimization period |
 

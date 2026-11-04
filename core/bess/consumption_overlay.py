@@ -12,7 +12,7 @@ no overlay entity keeps exactly the forecast it has today.
 """
 
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 
 from .exceptions import ConsumptionOverlayError
 from .time_utils import INTERVAL_MINUTES
@@ -233,3 +233,69 @@ def _overlap_seconds(period_start: datetime, block: OverlayBlock) -> float:
     latest_start = max(period_start, block.start)
     earliest_end = min(period_end, block.end)
     return max(0.0, (earliest_end - latest_start).total_seconds())
+
+
+def _stat_hour_start(raw: object, tz: tzinfo) -> datetime:
+    """Parse a Recorder statistics ``start`` (epoch seconds/ms or ISO string)."""
+    if isinstance(raw, (int, float)):
+        seconds = raw / 1000 if raw > 1e12 else raw
+        return datetime.fromtimestamp(seconds, tz=UTC).astimezone(tz)
+    return datetime.fromisoformat(str(raw)).astimezone(tz)
+
+
+def declared_vs_measured_hourly(
+    blocks: list[OverlayBlock],
+    managed_stats: dict[str, list[dict]],
+    tz: tzinfo,
+) -> list[dict]:
+    """Per hour: energy the overlay declares vs. energy the managed loads drew.
+
+    Debug-export view (#863) answering "did the load follow the blocks the
+    user declared?" without needing the user's automation history. Each
+    block's ``energy_kwh`` is apportioned to hours by time overlap, the same
+    rule ``apply_overlay`` uses for periods. Hours appear if any block
+    overlaps them or any managed sensor has a statistics entry for them.
+
+    Args:
+        blocks: Currently declared overlay blocks.
+        managed_stats: Raw Recorder ``{"start", "change"}`` entries per
+            managed-load sensor, hourly.
+        tz: Zone the output hour labels are expressed in.
+
+    Returns:
+        Rows sorted by hour: ``hour`` (ISO), ``declared_kwh`` and
+        ``measured_kwh`` (None when no sensor reported that hour).
+
+    """
+    hour_length = timedelta(hours=1)
+    declared: dict[datetime, float] = {}
+    for block in blocks:
+        span = (block.end - block.start).total_seconds()
+        cursor = block.start.astimezone(UTC).replace(minute=0, second=0, microsecond=0)
+        while cursor < block.end:
+            overlap = (
+                min(cursor + hour_length, block.end) - max(cursor, block.start)
+            ).total_seconds()
+            if overlap > 0:
+                key = cursor.astimezone(tz)
+                declared[key] = declared.get(key, 0.0) + block.energy_kwh * (
+                    overlap / span
+                )
+            cursor += hour_length
+
+    measured: dict[datetime, float] = {}
+    for entries in managed_stats.values():
+        for entry in entries:
+            if entry.get("change") is None:
+                continue
+            hour = _stat_hour_start(entry["start"], tz)
+            measured[hour] = measured.get(hour, 0.0) + float(entry["change"])
+
+    return [
+        {
+            "hour": hour.isoformat(),
+            "declared_kwh": round(declared.get(hour, 0.0), 4),
+            "measured_kwh": round(measured[hour], 4) if hour in measured else None,
+        }
+        for hour in sorted(set(declared) | set(measured))
+    ]

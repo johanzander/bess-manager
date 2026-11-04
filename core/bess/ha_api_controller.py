@@ -1181,7 +1181,9 @@ class HomeAssistantAPIController:
         """Validate sensors for multiple methods at once."""
         return [self.get_method_sensor_info(method) for method in method_list]
 
-    def get_entity_state_raw(self, entity_id: str) -> dict | None:
+    def get_entity_state_raw(
+        self, entity_id: str, optional: bool = False
+    ) -> dict | None:
         """Fetch raw HA state dict for a known entity ID.
 
         Intended for debug/export use where the caller already has a resolved
@@ -1190,6 +1192,11 @@ class HomeAssistantAPIController:
 
         Args:
             entity_id: Fully-qualified HA entity ID (e.g. "sensor.battery_soc")
+            optional: True when the caller is probing and a missing entity is
+                an expected outcome (e.g. a user-disabled TOU slot that has a
+                registry entry but no state). A 404 is then logged at debug
+                level instead of ERROR; it still raises, so the caller decides
+                what a missing entity means.
 
         Returns:
             Full HA state dict, or None if the entity does not exist
@@ -1199,6 +1206,7 @@ class HomeAssistantAPIController:
             f"/api/states/{entity_id}",
             operation=f"Fetch raw state for '{entity_id}'",
             category="sensor_read",
+            optional=optional,
         )
 
     def _api_request(

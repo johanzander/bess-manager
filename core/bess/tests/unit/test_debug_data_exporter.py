@@ -7,6 +7,7 @@ because BESS never saw the actual config-entry shape).
 """
 
 from datetime import timedelta
+from typing import Any
 from unittest.mock import MagicMock
 
 from core.bess import time_utils
@@ -446,10 +447,12 @@ class TestSerializeEntitySnapshot:
             # Growatt VPP register — same gap, resolved via _get_raw_state.
             "growatt_vpp_status": "select.pv_growatt_vpp_status",
         }
-        controller.get_entity_state_raw.side_effect = lambda entity_id: {
-            "entity_id": entity_id,
-            "state": "42",
-        }
+        controller.get_entity_state_raw.side_effect = (
+            lambda entity_id, optional=False: {
+                "entity_id": entity_id,
+                "state": "42",
+            }
+        )
         agg = self._make_aggregator(controller)
 
         out = agg._serialize_entity_snapshot()
@@ -467,7 +470,7 @@ class TestSerializeEntitySnapshot:
             "broken": "sensor.broken",
         }
 
-        def fake_get(entity_id):
+        def fake_get(entity_id: str, optional: bool = False) -> dict:
             if entity_id == "sensor.broken":
                 raise RuntimeError("HA unreachable")
             return {"entity_id": entity_id, "state": "1"}
@@ -480,3 +483,112 @@ class TestSerializeEntitySnapshot:
         assert out == {
             "sensor.battery_soc": {"entity_id": "sensor.battery_soc", "state": "1"}
         }
+
+    def test_entities_without_ha_state_are_summarised_not_logged_one_by_one(
+        self, caplog: Any
+    ) -> None:
+        """#863: a persisted sensor map can reference user-disabled registry
+        entries (no state in HA). Each used to log an ERROR plus a warning;
+        now they are probed as optional and reported in one line."""
+        import logging
+
+        import requests
+
+        controller = MagicMock()
+        controller.sensors = {
+            "battery_soc": "sensor.battery_soc",
+            "tou_time_8_update": "button.inv_time_8_update",
+            "tou_time_9_update": "button.inv_time_9_update",
+        }
+
+        def fake_get(entity_id: str, optional: bool = False) -> dict:
+            if "time_" in entity_id:
+                assert optional, "missing-entity probe must be optional"
+                resp = MagicMock()
+                resp.status_code = 404
+                raise requests.HTTPError(response=resp)
+            return {"entity_id": entity_id, "state": "1"}
+
+        controller.get_entity_state_raw.side_effect = fake_get
+        agg = self._make_aggregator(controller)
+
+        with caplog.at_level(logging.WARNING):
+            out = agg._serialize_entity_snapshot()
+
+        assert set(out) == {"sensor.battery_soc"}
+        warnings = [r.getMessage() for r in caplog.records]
+        assert not any("Failed to fetch entity" in m for m in warnings)
+        summary = [m for m in warnings if "no state in HA" in m]
+        assert len(summary) == 1
+        assert "button.inv_time_8_update" in summary[0]
+        assert "button.inv_time_9_update" in summary[0]
+
+
+class TestSerializeConsumptionOverlay:
+    """#863: the bundle must say why the declared-vs-measured comparison is
+    missing rather than omit it, and must never break the rest of the export."""
+
+    def _agg(self, system: Any) -> Any:
+        agg = DebugDataAggregator.__new__(DebugDataAggregator)
+        agg.system = system
+        return agg
+
+    def test_returns_manager_view(self) -> None:
+        system = MagicMock()
+        system.get_consumption_overlay_for_debug_export.return_value = {
+            "configured": True,
+            "blocks": [],
+            "managed_load_sensors": [],
+            "hourly": [],
+        }
+        assert self._agg(system)._serialize_consumption_overlay()["configured"]
+
+    def test_failure_is_reported_in_the_section(self) -> None:
+        system = MagicMock()
+        system.get_consumption_overlay_for_debug_export.side_effect = RuntimeError(
+            "recorder down"
+        )
+        assert self._agg(system)._serialize_consumption_overlay() == {
+            "error": "recorder down"
+        }
+
+    def test_manager_reports_unconfigured_overlay(self) -> None:
+        from core.bess.battery_system_manager import BatterySystemManager
+
+        fake = MagicMock()
+        fake._controller.sensors = {}
+        assert BatterySystemManager.get_consumption_overlay_for_debug_export(fake) == {
+            "configured": False
+        }
+
+
+class TestFormatConsumptionOverlay:
+    def _fmt(self, overlay: Any) -> str:
+        from core.bess.debug_report_formatter import DebugReportFormatter
+
+        export = MagicMock()
+        export.consumption_overlay = overlay
+        return DebugReportFormatter()._format_consumption_overlay(export)
+
+    def test_table_rows(self) -> None:
+        out = self._fmt(
+            {
+                "configured": True,
+                "blocks": [
+                    {"start": "s", "end": "e", "energy_kwh": 2.0, "mode": "add"}
+                ],
+                "managed_load_sensors": ["sensor.ev"],
+                "hourly": [
+                    {"hour": "H1", "declared_kwh": 1.0, "measured_kwh": 0.75},
+                    {"hour": "H2", "declared_kwh": 1.0, "measured_kwh": None},
+                ],
+            }
+        )
+        assert "| H1 | 1.00 | 0.75 |" in out
+        assert "| H2 | 1.00 | — |" in out
+
+    def test_error_and_unconfigured_are_explicit(self) -> None:
+        assert "Unavailable: boom" in self._fmt({"error": "boom"})
+        assert "No planned consumption entity configured" in self._fmt(
+            {"configured": False}
+        )

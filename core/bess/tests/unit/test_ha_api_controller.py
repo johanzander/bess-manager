@@ -7,6 +7,7 @@ code paths without needing a live Home Assistant instance.
 
 import logging
 from datetime import UTC, datetime
+from typing import Any
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -1373,6 +1374,23 @@ class TestGetEntityStateRaw:
         )
         result = ctrl.get_entity_state_raw("sensor.battery_soc")
         assert result["state"] == "50"
+
+    def test_optional_404_raises_without_error_log(
+        self, ctrl: Any, caplog: Any
+    ) -> None:
+        """#863: probing a disabled entity must not log an ERROR per entity."""
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(requests.HTTPError):
+                ctrl.get_entity_state_raw("button.inv_time_7_update", optional=True)
+        assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    def test_default_404_still_logs_error(self, ctrl: Any, caplog: Any) -> None:
+        ctrl.session.get = _session_method_mock("get", return_value=_mock_404())
+        with caplog.at_level(logging.DEBUG):
+            with pytest.raises(requests.HTTPError):
+                ctrl.get_entity_state_raw("sensor.missing")
+        assert [r for r in caplog.records if r.levelno >= logging.ERROR]
 
 
 # ── run_request helper ───────────────────────────────────────────────────────

@@ -54,6 +54,8 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from . import time_utils
 from .battery_system_manager import BatterySystemManager
 from .debug_findings import build_key_findings
@@ -401,6 +403,7 @@ class DebugDataExport:
     todays_log_content: str
     log_file_info: dict
     ha_ws_discovery: dict = field(default_factory=dict)
+    consumption_overlay: dict = field(default_factory=dict)
     key_findings: dict = field(default_factory=dict)
     compact: bool = True
 
@@ -491,6 +494,7 @@ class DebugDataAggregator:
             todays_log_content=self._read_todays_log(compact=compact),
             log_file_info=self._get_log_file_info(),
             ha_ws_discovery=self._serialize_ha_ws_discovery(),
+            consumption_overlay=self._serialize_consumption_overlay(),
             compact=compact,
         )
         export.key_findings = build_key_findings(
@@ -766,12 +770,25 @@ class DebugDataAggregator:
         """Return a copy of a HA state dict with HA-internal metadata removed."""
         return {k: v for k, v in state.items() if k not in self._HA_METADATA_KEYS}
 
-    def _capture_entity_state(self, snapshot: dict, controller, entity_id: str) -> None:
-        """Fetch one entity's raw state into snapshot, logging (not raising) on failure."""
+    def _capture_entity_state(
+        self, snapshot: dict, controller, entity_id: str, missing: list[str]
+    ) -> None:
+        """Fetch one entity's raw state into snapshot, logging (not raising) on failure.
+
+        An entity HA has no state for (404 — typically a user-disabled
+        registry entry still referenced by a persisted sensor map) is appended
+        to ``missing`` rather than logged one by one: the caller reports them
+        in a single line.
+        """
         try:
-            state = controller.get_entity_state_raw(entity_id)
+            state = controller.get_entity_state_raw(entity_id, optional=True)
             if state:
                 snapshot[entity_id] = self._strip_ha_metadata(state)
+        except requests.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                missing.append(entity_id)
+            else:
+                logger.warning("Failed to fetch entity %s: %s", entity_id, e)
         except Exception as e:
             logger.warning("Failed to fetch entity %s: %s", entity_id, e)
 
@@ -790,6 +807,7 @@ class DebugDataAggregator:
             logger.warning("No HA controller available — skipping entity snapshot")
             return {}
         snapshot: dict = {}
+        missing: list[str] = []
 
         # controller.sensors is the single source of truth for every
         # entity_id this installation is configured to know about — every
@@ -804,7 +822,7 @@ class DebugDataAggregator:
         seen_entities: set[str] = set(controller.sensors.values())
         for entity_id in seen_entities:
             if entity_id:
-                self._capture_entity_state(snapshot, controller, entity_id)
+                self._capture_entity_state(snapshot, controller, entity_id, missing)
 
         # Price provider entities (not in controller.sensors)
         config = self.system._energy_provider_config
@@ -813,7 +831,7 @@ class DebugDataAggregator:
         if provider == "nordpool_hacs":
             entity_id = config["nordpool_hacs"].get("entity")
             if entity_id:
-                self._capture_entity_state(snapshot, controller, entity_id)
+                self._capture_entity_state(snapshot, controller, entity_id, missing)
 
         elif provider == "octopus":
             octopus_cfg = config["octopus"]
@@ -825,12 +843,12 @@ class DebugDataAggregator:
             ):
                 entity_id = octopus_cfg.get(key)
                 if entity_id:
-                    self._capture_entity_state(snapshot, controller, entity_id)
+                    self._capture_entity_state(snapshot, controller, entity_id, missing)
 
         elif provider == "entsoe":
             entity_id = config["entsoe"].get("entity")
             if entity_id:
-                self._capture_entity_state(snapshot, controller, entity_id)
+                self._capture_entity_state(snapshot, controller, entity_id, missing)
 
         elif provider != "nordpool_official":
             # nordpool_official uses service calls — no entity state to capture
@@ -839,6 +857,13 @@ class DebugDataAggregator:
                 provider,
             )
 
+        if missing:
+            logger.warning(
+                "Entity snapshot: %d configured entit(y/ies) have no state in HA "
+                "(disabled or removed): %s",
+                len(missing),
+                ", ".join(sorted(missing)),
+            )
         logger.info("Entity snapshot captured: %d entities", len(snapshot))
         return snapshot
 
@@ -859,6 +884,19 @@ class DebugDataAggregator:
         except Exception as e:
             logger.warning("Failed to serialize inverter TOU segments: %s", e)
             return []
+
+    def _serialize_consumption_overlay(self) -> dict:
+        """Declared overlay blocks beside measured managed-load energy (#863).
+
+        A failure is reported in the section itself (``error``) so the bundle
+        says why the comparison is missing instead of silently omitting it;
+        it must never break the rest of the export.
+        """
+        try:
+            return self.system.get_consumption_overlay_for_debug_export()
+        except Exception as e:
+            logger.warning("Failed to serialize consumption overlay: %s", e)
+            return {"error": str(e)}
 
     def _serialize_ha_statistics(self) -> dict:
         """Serialize the raw HA Recorder statistics behind the ha_statistics

@@ -37,6 +37,7 @@ class DebugReportFormatter:
                 self._format_addon_options(export),
                 self._format_entity_snapshot(export),
                 self._format_ha_statistics(export),
+                self._format_consumption_overlay(export),
                 self._format_inverter_tou(export),
                 self._format_historical_data(export),
                 self._format_previous_days(export),
@@ -364,6 +365,44 @@ Findings (top) and System Logs (bottom).*
 ```json
 {self._format_json(ha_stats)}
 ```"""
+
+    def _format_consumption_overlay(self, export: DebugDataExport) -> str:
+        """Declared Planned Consumption Changes vs measured managed-load energy."""
+        overlay = export.consumption_overlay
+        header = "## Planned Consumption Changes vs Measured Managed Loads"
+
+        if not overlay:
+            return f"{header}\n\n*Not captured in this export*"
+        if "error" in overlay:
+            return f"{header}\n\n*Unavailable: {overlay['error']}*"
+        if not overlay.get("configured"):
+            return f"{header}\n\n*No planned consumption entity configured*"
+
+        sensors = overlay.get("managed_load_sensors", [])
+        rows = [
+            f"**Declared blocks**: {len(overlay.get('blocks', []))}",
+            f"**Managed-load sensors**: {', '.join(sensors) if sensors else 'none'}",
+            "",
+            "Only blocks currently on the entity are shown; past declarations are "
+            "not stored, so 0.00 declared for an earlier hour means unknown, not "
+            '"nothing declared". Declared sums every block\'s energy regardless of '
+            "mode (`set` replaces the forecast, a negative `add` removes load) — "
+            "see the blocks below.",
+            "",
+            "| Hour | Declared kWh | Measured kWh |",
+            "|------|--------------|--------------|",
+        ]
+        for row in overlay.get("hourly", []):
+            measured = row["measured_kwh"]
+            rows.append(
+                f"| {row['hour']} | {row['declared_kwh']:.2f} | "
+                f"{'—' if measured is None else f'{measured:.2f}'} |"
+            )
+        return (
+            f"{header}\n\n"
+            + "\n".join(rows)
+            + f"\n\n```json\n{self._format_json(overlay.get('blocks', []))}\n```"
+        )
 
     def _format_inverter_tou(self, export: DebugDataExport) -> str:
         segments = export.inverter_tou_segments

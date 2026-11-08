@@ -75,8 +75,8 @@ assert len(intervals) == 9
 ## Running the Test Suite
 
 ```bash
-pytest -m "not slow"                # fast tests only (~3s, 280+ tests)
-pytest -m slow                      # algorithm/integration tests (~30min)
+pytest -m "not slow" -n auto        # fast tests in parallel (~2min)
+pytest -m slow -n auto              # algorithm/integration tests in parallel (~3min)
 pytest                              # all tests
 pytest core/bess/tests/unit/        # unit tests only (fast, no HA required)
 pytest core/bess/tests/integration/ # integration tests
@@ -96,8 +96,8 @@ CI runs automatically on every PR and push to `main` (`.github/workflows/ci.yml`
 
 | Job | Trigger | What it runs |
 |-----|---------|-------------|
-| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow"` (~3s, 333 tests) |
-| **Algorithm tests** | `core/bess/` changed | `pytest -m slow` (~30min, 116 tests) |
+| **Fast tests** | `backend/` or `core/` changed | `pytest -m "not slow" -n auto` |
+| **Algorithm tests** | `core/bess/` changed | `pytest -m slow -n auto` |
 | **Frontend checks** | `frontend/` changed | `npm test` + type-check + lint |
 | **E2E tests** | backend/frontend/e2e/docker changed | Playwright: 2 phases (smoke + wizard) against docker-compose mock HA |
 | **Code quality** | Always | Black + Ruff formatting/linting |

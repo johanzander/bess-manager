@@ -39,6 +39,7 @@ class DebugReportFormatter:
                 self._format_ha_statistics(export),
                 self._format_consumption_overlay(export),
                 self._format_inverter_tou(export),
+                self._format_inverter_schedule_view(export),
                 self._format_historical_data(export),
                 self._format_previous_days(export),
                 self._format_schedules(export),
@@ -420,6 +421,27 @@ Findings (top) and System Logs (bottom).*
 ```json
 {self._format_json(segments)}
 ```"""
+
+    def _format_inverter_schedule_view(self, export: DebugDataExport) -> str:
+        view = export.inverter_schedule_view
+        heading = "## Inverter Schedule View"
+
+        if not view:
+            return f"{heading}\n\n*Not captured in this export*"
+        if "error" in view:
+            return f"{heading}\n\n*Unavailable at export time: {view['error']}*"
+
+        return "\n\n".join(
+            [
+                heading,
+                "What `/api/inverter/schedule` returned at export time: the values"
+                " behind the Inverter page's Schedule Overview.",
+                "### Today",
+                f"```json\n{self._format_json(view['periodGroups'])}\n```",
+                "### Tomorrow",
+                f"```json\n{self._format_json(view['tomorrowPeriodGroups'])}\n```",
+            ]
+        )
 
     def _build_period_table(self, periods: list[dict | None]) -> str:
         """Render a period list as the shared intent/observed/SOE/solar/import/savings table.

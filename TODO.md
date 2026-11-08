@@ -1,6 +1,13 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Schedule Overview: elapsed row labels stay the plan while Solar and Grid are measured**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `backend/api.py`, `frontend/src/components/InverterStatusDashboard.tsx`
+
+**Description**: Since #866, an elapsed row's energy is measured but its intent label is still planned, so a slot planned as IDLE that really grid-charged shows no Grid value. Using observed intents would change elapsed rows' grouping, so it needs its own decision.
+
+
 ### **Commanded-value trace duplicated across the four number-like setters**
 
 **Impact**: Low | **Effort**: Low | **Dependencies**: `core/bess/ha_api_controller.py`

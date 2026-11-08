@@ -893,6 +893,8 @@ class InverterController(ABC):
         soc_values: list[float | None] | None = None,
         curtailed: list[bool] | None = None,
         planned_loads: list[float] | None = None,
+        solar_to_battery: list[float] | None = None,
+        grid_to_battery: list[float] | None = None,
     ) -> list[dict]:
         """Get period groups with full control parameters for display/API.
 
@@ -916,6 +918,12 @@ class InverterController(ABC):
                            (PeriodData.consumption_breakdown.planned, #813).
                            Summed into each group's planned_load_kwh for
                            display only -- it never affects grouping.
+            solar_to_battery: Optional per-period solar energy into the battery
+                              in kWh (#866). Summed into each group's
+                              solar_to_battery_kwh for display only.
+            grid_to_battery: Optional per-period grid energy into the battery
+                             in kWh (#866). Summed into each group's
+                             grid_to_battery_kwh for display only.
 
         Returns:
             List of period groups with all control parameters and time strings
@@ -976,6 +984,17 @@ class InverterController(ABC):
                         if planned_loads is not None and period < len(planned_loads)
                         else 0.0
                     ),
+                    "solar_to_battery_kwh": (
+                        solar_to_battery[period]
+                        if solar_to_battery is not None
+                        and period < len(solar_to_battery)
+                        else 0.0
+                    ),
+                    "grid_to_battery_kwh": (
+                        grid_to_battery[period]
+                        if grid_to_battery is not None and period < len(grid_to_battery)
+                        else 0.0
+                    ),
                 }
             )
 
@@ -997,6 +1016,8 @@ class InverterController(ABC):
                 current_group["count"] += 1
                 current_group["total_action_kwh"] += ps["action_kwh"]
                 current_group["planned_load_kwh"] += ps["planned_load_kwh"]
+                current_group["solar_to_battery_kwh"] += ps["solar_to_battery_kwh"]
+                current_group["grid_to_battery_kwh"] += ps["grid_to_battery_kwh"]
             else:
                 if current_group is not None:
                     groups.append(current_group)
@@ -1012,6 +1033,8 @@ class InverterController(ABC):
                     "count": 1,
                     "total_action_kwh": ps["action_kwh"],
                     "planned_load_kwh": ps["planned_load_kwh"],
+                    "solar_to_battery_kwh": ps["solar_to_battery_kwh"],
+                    "grid_to_battery_kwh": ps["grid_to_battery_kwh"],
                 }
 
         if current_group is not None:
@@ -1046,6 +1069,8 @@ class InverterController(ABC):
                     "soc_end_pct": soc_end,
                     "curtailed": group["curtailed"],
                     "planned_load_kwh": group["planned_load_kwh"],
+                    "solar_to_battery_kwh": group["solar_to_battery_kwh"],
+                    "grid_to_battery_kwh": group["grid_to_battery_kwh"],
                 }
             )
         return result

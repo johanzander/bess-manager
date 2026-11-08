@@ -91,9 +91,10 @@ interface PeriodGroup {
   gridCharge: boolean;
   totalActionKwh?: number;
   socEndPct?: number;
-  socDeltaKwh?: number | null;
   curtailed?: boolean; // planned PV curtailment (#501), distinct from a profitable SOLAR_EXPORT
   plannedLoadKwh: number; // net Planned Consumption Changes (#428) energy in this group (#813); negative for a subtract block
+  solarToBatteryKwh: number; // solar energy into the battery in this group: measured once a period has been collected, else planned (#866)
+  gridToBatteryKwh: number; // grid energy into the battery in this group, same sources as solarToBatteryKwh (#866)
 }
 
 interface InverterSchedule {
@@ -871,9 +872,9 @@ const InverterStatusDashboard: React.FC = () => {
                             at all, which reads as a label/data contradiction. */}
                         <td className={`${cell} text-center`}>
                           {!isPast && (group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
-                           group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
+                           group.solarToBatteryKwh > 0.01 ? (
                             <span className="text-amber-500 dark:text-amber-400 font-medium">
-                              +{group.socDeltaKwh.toFixed(2)} kWh
+                              +{group.solarToBatteryKwh.toFixed(2)} kWh
                             </span>
                           ) : (
                             <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -882,9 +883,9 @@ const InverterStatusDashboard: React.FC = () => {
                         {/* Grid / Discharge column */}
                         <td className={`${cell} text-center`}>
                           {!isPast && group.dominantIntent === 'GRID_CHARGING' &&
-                           group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
+                           group.gridToBatteryKwh > 0.01 ? (
                             <span className="text-green-600 dark:text-green-400 font-medium">
-                              +{group.socDeltaKwh.toFixed(2)} kWh
+                              +{group.gridToBatteryKwh.toFixed(2)} kWh
                             </span>
                           ) : !isPast && group.totalActionKwh !== undefined && group.totalActionKwh < -0.01 ? (
                             <span className="text-orange-500 dark:text-orange-400 font-medium">
@@ -981,9 +982,9 @@ const InverterStatusDashboard: React.FC = () => {
                                   same reasoning as the today block above */}
                               <td className={`${cell} text-center`}>
                                 {(group.dominantIntent === 'SOLAR_STORAGE' || group.dominantIntent === 'IDLE') &&
-                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
+                                 group.solarToBatteryKwh > 0.01 ? (
                                   <span className="text-amber-500 dark:text-amber-400 font-medium">
-                                    +{group.socDeltaKwh.toFixed(2)} kWh
+                                    +{group.solarToBatteryKwh.toFixed(2)} kWh
                                   </span>
                                 ) : (
                                   <span className="text-gray-300 dark:text-gray-600">—</span>
@@ -992,9 +993,9 @@ const InverterStatusDashboard: React.FC = () => {
                               {/* Grid / Discharge column */}
                               <td className={`${cell} text-center`}>
                                 {group.dominantIntent === 'GRID_CHARGING' &&
-                                 group.socDeltaKwh != null && group.socDeltaKwh > 0.01 ? (
+                                 group.gridToBatteryKwh > 0.01 ? (
                                   <span className="text-green-600 dark:text-green-400 font-medium">
-                                    +{group.socDeltaKwh.toFixed(2)} kWh
+                                    +{group.gridToBatteryKwh.toFixed(2)} kWh
                                   </span>
                                 ) : group.totalActionKwh !== undefined && group.totalActionKwh < -0.01 ? (
                                   <span className="text-orange-500 dark:text-orange-400 font-medium">

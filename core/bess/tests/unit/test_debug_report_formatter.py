@@ -50,7 +50,8 @@ class TestInverterScheduleView:
         "dominantIntent": "IDLE",
         "totalActionKwh": 0.0,
         "socEndPct": 24.0,
-        "socDeltaKwh": 0.3,
+        "solarToBatteryKwh": 0.0,
+        "gridToBatteryKwh": 0.3,
         "plannedLoadKwh": 0.92,
         "gridCharge": False,
         "chargePowerRate": 100,
@@ -73,8 +74,8 @@ class TestInverterScheduleView:
         for key, value in self._GROUP.items():
             assert f'"{key}": {json.dumps(value)}' in section
 
-    def test_missing_soc_values_stay_null_not_zero(self) -> None:
-        group = {**self._GROUP, "socEndPct": None, "socDeltaKwh": None}
+    def test_missing_soc_value_stays_null_not_zero(self) -> None:
+        group = {**self._GROUP, "socEndPct": None}
         export = _minimal_export(
             inverter_schedule_view={
                 "periodGroups": [group],
@@ -85,7 +86,6 @@ class TestInverterScheduleView:
         report = DebugReportFormatter().format_report(export)
 
         assert '"socEndPct": null' in report
-        assert '"socDeltaKwh": null' in report
 
     def test_tomorrow_groups_are_listed_separately(self) -> None:
         tomorrow = {**self._GROUP, "startTime": "05:00", "endTime": "05:14"}

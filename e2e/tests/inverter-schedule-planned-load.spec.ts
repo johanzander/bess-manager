@@ -98,3 +98,39 @@ test.describe('Planned Schedule shows planned managed load', () => {
     });
   });
 });
+
+// #866: a row's Solar and Grid cells show that row's own energy flows. The
+// stale socDeltaKwh is included so the test fails if the cells read it again.
+test.describe('Planned Schedule shows each row\'s own energy flows', () => {
+  const SOLAR_CELL = 3;
+  const GRID_CELL = 4;
+
+  test('Solar and Grid cells follow the row\'s flows', async ({ page }) => {
+    await mockApis(page, [
+      group({
+        startTime: '02:30', endTime: '02:44', dominantIntent: 'IDLE', socEndPct: 24,
+        socDeltaKwh: 0.3, solarToBatteryKwh: 0, gridToBatteryKwh: 0,
+      }),
+      group({
+        startTime: '10:00', endTime: '10:14', dominantIntent: 'SOLAR_STORAGE', socEndPct: 40,
+        socDeltaKwh: 9, solarToBatteryKwh: 0.5, gridToBatteryKwh: 0,
+      }),
+      group({
+        startTime: '02:45', endTime: '02:59', dominantIntent: 'GRID_CHARGING', socEndPct: 32,
+        socDeltaKwh: 1.19, solarToBatteryKwh: 0, gridToBatteryKwh: 0.75,
+      }),
+    ]);
+
+    await page.goto('/inverter');
+    await expect(page.getByRole('heading', { name: /Schedule Overview/i })).toBeVisible({
+      timeout: 15_000,
+    });
+
+    const cell = (time: string, index: number) =>
+      page.getByRole('row').filter({ hasText: time }).getByRole('cell').nth(index);
+
+    await expect(cell('02:30 - 02:44', SOLAR_CELL)).toHaveText('—');
+    await expect(cell('10:00 - 10:14', SOLAR_CELL)).toHaveText('+0.50 kWh');
+    await expect(cell('02:45 - 02:59', GRID_CELL)).toHaveText('+0.75 kWh');
+  });
+});

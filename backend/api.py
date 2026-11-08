@@ -1317,6 +1317,13 @@ def _planned_load_kwh(period_data: PeriodData) -> float:
     return breakdown.planned if breakdown is not None else 0.0
 
 
+def _battery_inflows_kwh(period_data: PeriodData | None) -> tuple[float, float]:
+    """Solar and grid energy into the battery in one period, 0.0 when no data."""
+    if period_data is None:
+        return 0.0, 0.0
+    return period_data.energy.solar_to_battery, period_data.energy.grid_to_battery
+
+
 @router.get("/api/inverter/schedule")
 @router.get("/api/growatt/detailed_schedule")
 async def get_growatt_detailed_schedule():
@@ -1481,11 +1488,13 @@ async def get_growatt_detailed_schedule():
             today_actions: list[float] = []
             today_curtailed: list[bool] = []
             today_planned_loads: list[float] = []
-            today_reconciled_intents: list[str] | None = None
+            today_solar_to_battery: list[float] = []
+            today_grid_to_battery: list[float] = []
+            today_intents: list[str] | None = None
             if bess_controller.system.schedule_store.get_latest_schedule():
                 today_period_count_local = get_period_count(time_utils.today())
                 planned_intents = schedule_manager.strategic_intents
-                today_reconciled_intents = []
+                today_intents = []
                 # Resolved by exact timestamp (not positional index -
                 # optimization_period) so a standalone next-day schedule
                 # (period_data[0] anchored to tomorrow 00:00 despite
@@ -1500,6 +1509,18 @@ async def get_growatt_detailed_schedule():
                     pd_today = bess_controller.system.schedule_store.get_period_data_at(
                         time_utils.period_index_to_timestamp(period_idx)
                     )
+                    # Each row reports its own flows. Subtracting SOC across
+                    # rows mixes optimizer runs, because every elapsed slot's
+                    # plan comes from the run started in it (#866).
+                    measured = bess_controller.system.historical_store.get_period(
+                        period_idx
+                    )
+                    solar_kwh, grid_kwh = _battery_inflows_kwh(
+                        measured if measured is not None else pd_today
+                    )
+                    today_solar_to_battery.append(solar_kwh)
+                    today_grid_to_battery.append(grid_kwh)
+                    today_intents.append(planned_intent)
                     if pd_today is not None:
                         soe = pd_today.energy.battery_soe_end
                         today_soc_values.append(
@@ -1508,42 +1529,27 @@ async def get_growatt_detailed_schedule():
                             else None
                         )
                         today_actions.append(pd_today.decision.battery_action or 0.0)
-                        # Reconcile with observed_intent for actual periods so the
-                        # label reflects real physical flow, not the stale plan.
-                        observed_intent = pd_today.decision.observed_intent
-                        today_reconciled_intents.append(
-                            observed_intent
-                            if pd_today.data_source == "actual" and observed_intent
-                            else planned_intent
-                        )
                         today_curtailed.append(pd_today.decision.curtailed)
                         today_planned_loads.append(_planned_load_kwh(pd_today))
                     else:
                         today_soc_values.append(None)
                         today_actions.append(0.0)
-                        today_reconciled_intents.append(planned_intent)
                         today_curtailed.append(False)
                         today_planned_loads.append(0.0)
             raw_groups = schedule_manager.get_detailed_period_groups(
-                intents=today_reconciled_intents,
+                intents=today_intents,
                 actions=today_actions if today_actions else None,
                 soc_values=today_soc_values if today_soc_values else None,
                 curtailed=today_curtailed if today_curtailed else None,
                 planned_loads=today_planned_loads if today_planned_loads else None,
+                solar_to_battery=(
+                    today_solar_to_battery if today_solar_to_battery else None
+                ),
+                grid_to_battery=(
+                    today_grid_to_battery if today_grid_to_battery else None
+                ),
             )
-            prev_soc: float | None = None
             for group in raw_groups:
-                soc_end = group["soc_end_pct"]
-                soc_delta_kwh: float | None = None
-                if (
-                    soc_end is not None
-                    and prev_soc is not None
-                    and battery_settings.total_capacity > 0
-                ):
-                    soc_delta_kwh = (
-                        (soc_end - prev_soc) / 100.0 * battery_settings.total_capacity
-                    )
-                prev_soc = soc_end
                 period_groups.append(
                     {
                         "start_time": group["start_time"],
@@ -1568,10 +1574,11 @@ async def get_growatt_detailed_schedule():
                         "discharge_power_rate": group["discharge_rate"],
                         "grid_charge": group["grid_charge"],
                         "total_action_kwh": group["total_action_kwh"],
-                        "soc_end_pct": soc_end,
-                        "soc_delta_kwh": soc_delta_kwh,
+                        "soc_end_pct": group["soc_end_pct"],
                         "curtailed": group["curtailed"],
                         "planned_load_kwh": group["planned_load_kwh"],
+                        "solar_to_battery_kwh": group["solar_to_battery_kwh"],
+                        "grid_to_battery_kwh": group["grid_to_battery_kwh"],
                     }
                 )
         except (ValueError, KeyError, AttributeError) as e:
@@ -1590,6 +1597,8 @@ async def get_growatt_detailed_schedule():
                 tomorrow_soc_values: list[float | None] = []
                 tomorrow_curtailed: list[bool] = []
                 tomorrow_planned_loads: list[float] = []
+                tomorrow_solar_to_battery: list[float] = []
+                tomorrow_grid_to_battery: list[float] = []
                 # Resolved by exact timestamp (not positional index -
                 # optimization_period) so a standalone next-day schedule
                 # (period_data[0] anchored to tomorrow 00:00 despite
@@ -1613,6 +1622,9 @@ async def get_growatt_detailed_schedule():
                         )
                         tomorrow_curtailed.append(pd.decision.curtailed)
                         tomorrow_planned_loads.append(_planned_load_kwh(pd))
+                        solar_kwh, grid_kwh = _battery_inflows_kwh(pd)
+                        tomorrow_solar_to_battery.append(solar_kwh)
+                        tomorrow_grid_to_battery.append(grid_kwh)
                     else:
                         tomorrow_soc_values.append(None)
                         tomorrow_curtailed.append(False)
@@ -1623,23 +1635,11 @@ async def get_growatt_detailed_schedule():
                         soc_values=tomorrow_soc_values,
                         curtailed=tomorrow_curtailed,
                         planned_loads=tomorrow_planned_loads,
+                        solar_to_battery=tomorrow_solar_to_battery,
+                        grid_to_battery=tomorrow_grid_to_battery,
                     )
                     tomorrow_period_groups = []
-                    prev_soc_tmr: float | None = None
                     for group in raw_tomorrow_groups:
-                        soc_end = group["soc_end_pct"]
-                        soc_delta_kwh_tmr: float | None = None
-                        if (
-                            soc_end is not None
-                            and prev_soc_tmr is not None
-                            and battery_settings.total_capacity > 0
-                        ):
-                            soc_delta_kwh_tmr = (
-                                (soc_end - prev_soc_tmr)
-                                / 100.0
-                                * battery_settings.total_capacity
-                            )
-                        prev_soc_tmr = soc_end
                         tomorrow_period_groups.append(
                             {
                                 "start_time": group["start_time"],
@@ -1668,10 +1668,11 @@ async def get_growatt_detailed_schedule():
                                 "discharge_power_rate": group["discharge_rate"],
                                 "grid_charge": group["grid_charge"],
                                 "total_action_kwh": group["total_action_kwh"],
-                                "soc_end_pct": soc_end,
-                                "soc_delta_kwh": soc_delta_kwh_tmr,
+                                "soc_end_pct": group["soc_end_pct"],
                                 "curtailed": group["curtailed"],
                                 "planned_load_kwh": group["planned_load_kwh"],
+                                "solar_to_battery_kwh": group["solar_to_battery_kwh"],
+                                "grid_to_battery_kwh": group["grid_to_battery_kwh"],
                             }
                         )
         except (AttributeError, KeyError, ValueError) as e:

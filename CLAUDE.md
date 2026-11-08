@@ -45,8 +45,8 @@ interface for managing battery schedules and monitoring energy flows.
 ### Backend (Python)
 
 ```bash
-.venv/bin/pytest -m "not slow"           # fast tests (~3s, recommended)
-.venv/bin/pytest -m slow                 # algorithm/integration tests (~4min)
+.venv/bin/pytest -m "not slow" -n auto   # fast tests in parallel (~2min, recommended)
+.venv/bin/pytest -m slow -n auto         # algorithm/integration tests in parallel (~3min)
 .venv/bin/pytest                         # run all tests
 .venv/bin/black . && .venv/bin/ruff check --fix .  # format and lint
 ./scripts/quality-check.sh               # full quality gate

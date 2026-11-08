@@ -116,7 +116,7 @@ jobs:
       - name: Run fast tests
         if: needs.changes.outputs.backend == 'true'
         run: |
-          pytest -m "not slow" --tb=short -q \
+          pytest -m "not slow" -n auto --tb=short -q \
             --cov=backend --cov=core/bess --cov-report=term-missing \
             --cov-report=xml
 
@@ -154,7 +154,7 @@ jobs:
           pip install -r requirements-dev.txt
 
       - name: Run algorithm tests
-        run: pytest -m slow --tb=short -q
+        run: pytest -m slow -n auto --tb=short -q
 
   # ── Frontend: type-check + lint ─────────────────────────────────
   test-frontend:

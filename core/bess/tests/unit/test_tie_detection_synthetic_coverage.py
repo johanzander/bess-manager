@@ -107,17 +107,21 @@ TIE_MISS_BUDGET_SEK = 0.05
 # assertion alone can be satisfied by a single surviving data point, so a
 # regression that made most of the matrix unmeasurable (a solver raise on more
 # perturbations, a near-miss selector that stopped forming ratios) would pass
-# silently while the suite had effectively stopped measuring. Set with real
-# headroom around the current 86-measured / 4-infeasible split so ordinary
-# fixture drift does not trip them, but a collapse does.
-_MIN_IMPACTS_MEASURED = 75
-_MAX_INFEASIBLE_SCENARIOS = 10
+# silently while the suite had effectively stopped measuring. Applied per base
+# fixture (24 scenarios each), with real headroom around the worst fixture's
+# current 20-measured / 4-infeasible split so ordinary fixture drift does not
+# trip them, but a collapse does.
+_MIN_IMPACTS_MEASURED = 18
+_MAX_INFEASIBLE_SCENARIOS = 6
 
 
-def test_synthetic_scenario_tie_coverage():
+@pytest.mark.parametrize("base_fixture", _BASE_FIXTURES)
+def test_synthetic_scenario_tie_coverage(base_fixture: str) -> None:
+    # One case per base fixture so parallel test workers can share the matrix.
+    scenarios = [entry for entry in _SCENARIO_MATRIX if entry[0] == base_fixture]
     aggregate_ratio_counts: dict[str, int] = {}
     worst_impact: float | None = None
-    worst_impact_scenario = None
+    worst_impact_scenario: tuple[str, int, PerturbationParams] | None = None
     impacts_measured = 0
     blind_scenarios = 0  # every period had zero epsilon -- nothing could ever form
     # Not fully blind (some periods have a real slope), but no period yielded
@@ -130,7 +134,7 @@ def test_synthetic_scenario_tie_coverage():
     close_scenarios = 0  # formable ratio < _CLOSE_CALL_RATIO -- a genuine near miss
     infeasible_scenarios: list[tuple[str, int, PerturbationParams]] = []
 
-    for base_name, seed, params in _SCENARIO_MATRIX:
+    for base_name, seed, params in scenarios:
         base = load_test_scenario(base_name)
         scenario = perturb_scenario(base, seed=seed, params=params)
         try:
@@ -159,20 +163,18 @@ def test_synthetic_scenario_tie_coverage():
                 worst_impact = measurement.financial_impact_sek
                 worst_impact_scenario = (base_name, seed, params)
 
-    print(
-        f"\nAggregate margin-ratio distribution across {len(_SCENARIO_MATRIX)} scenarios:"
-    )
+    print(f"\nAggregate margin-ratio distribution across {len(scenarios)} scenarios:")
     for bucket, count in aggregate_ratio_counts.items():
         print(f"  {bucket}: {count}")
 
     print(
         f"\nInfeasible (below-floor initial SOE, PWLEndSoeOutOfRangeError caught): "
-        f"{len(infeasible_scenarios)} of {len(_SCENARIO_MATRIX)} scenarios"
+        f"{len(infeasible_scenarios)} of {len(scenarios)} scenarios"
     )
     for base_name, seed, params in infeasible_scenarios:
         print(f"  {base_name} seed={seed} {params}")
 
-    measured_scenarios = len(_SCENARIO_MATRIX) - len(infeasible_scenarios)
+    measured_scenarios = len(scenarios) - len(infeasible_scenarios)
     print(
         f"\nNear-miss ratio breakdown across {measured_scenarios} measured scenarios:"
         f"\n  fully detector-blind (zero epsilon everywhere): {blind_scenarios}"
@@ -197,7 +199,7 @@ def test_synthetic_scenario_tie_coverage():
         )
 
     assert len(infeasible_scenarios) <= _MAX_INFEASIBLE_SCENARIOS, (
-        f"{len(infeasible_scenarios)} of {len(_SCENARIO_MATRIX)} scenarios were "
+        f"{len(infeasible_scenarios)} of {len(scenarios)} scenarios were "
         f"skipped as infeasible (limit {_MAX_INFEASIBLE_SCENARIOS}) -- the suite "
         "is measuring far less of its matrix than it was calibrated on, so the "
         "budget assertion below is no longer meaningful evidence"

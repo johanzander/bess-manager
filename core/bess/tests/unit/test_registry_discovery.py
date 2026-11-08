@@ -1372,6 +1372,73 @@ class TestDiscoverSensorsFromRegistry:
         assert solis["solis_charge_enable_1"] == "switch.solis_tou_slot_bit_0"
         assert solis["solis_discharge_enable_6"] == "switch.solis_tou_slot_bit_11"
 
+    def test_solis_discharge_limits_map_to_writable_numbers(self) -> None:
+        """The read-only sensor.* twin of each register must never be picked."""
+        sn = _SOLIS_SERIAL
+        twins = []
+        for slot in range(1, 7):
+            for name, key in (
+                ("cutoff", f"tou_charge_cutoff_discharge_{slot}"),
+                ("current", f"tou_discharge_v2_battery_current_{slot}"),
+            ):
+                uid = f"solis_modbus_{sn}_solis_modbus_inverter_{key}"
+                twins.append(
+                    _entity(f"sensor.solis_{name}_{slot}", "solis_modbus", uid)
+                )
+                twins.append(
+                    _entity(f"number.solis_{name}_{slot}", "solis_modbus", uid)
+                )
+        sensors, _platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            _solis_registry() + twins
+        )
+        solis = sensors["solis_modbus"]
+
+        for slot in range(1, 7):
+            assert (
+                solis[f"solis_discharge_cutoff_soc_{slot}"]
+                == f"number.solis_cutoff_{slot}"
+            )
+            assert (
+                solis[f"solis_discharge_current_{slot}"]
+                == f"number.solis_current_{slot}"
+            )
+
+    def test_solis_discharge_limits_match_older_dict_embedded_ids(self) -> None:
+        """Older integration releases embed the definition dict in number ids too."""
+        unique_id = _solis_dict_embedded_unique_id(
+            "solis_modbus_inverter_tou_charge_cutoff_discharge_2"
+        )
+        sensors, _platform, _disabled = self.ctrl.discover_sensors_from_registry(
+            [
+                *_solis_registry(),
+                _entity("sensor.solis_cutoff_2", "solis_modbus", unique_id),
+                _entity("number.solis_cutoff_2", "solis_modbus", unique_id),
+            ]
+        )
+
+        assert (
+            sensors["solis_modbus"]["solis_discharge_cutoff_soc_2"]
+            == "number.solis_cutoff_2"
+        )
+
+    def test_solis_battery_voltage_matches_both_unique_id_forms(self) -> None:
+        """Older registries keep the dict-embedded id, newer ones a clean suffix."""
+        key = "solis_modbus_inverter_battery_voltage"
+        for unique_id in (
+            f"solis_modbus_{_SOLIS_SERIAL}_{key}",
+            _solis_dict_embedded_unique_id(key),
+        ):
+            sensors, _platform, _disabled = self.ctrl.discover_sensors_from_registry(
+                [
+                    *_solis_registry(),
+                    _entity("sensor.solis_battery_voltage", "solis_modbus", unique_id),
+                ]
+            )
+            assert (
+                sensors["solis_modbus"]["battery_voltage"]
+                == "sensor.solis_battery_voltage"
+            )
+
     def test_solis_modbus_detected_flag(self):
         """detect_inverter_integrations reports solis=True for a solis_modbus registry."""
         detected = self.ctrl.detect_inverter_integrations(_solis_registry())
@@ -1422,7 +1489,8 @@ class TestDiscoverSensorsFromRegistry:
         )
 
         mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
-            [disabled_entity, enabled_entity]
+            [disabled_entity, enabled_entity],
+            self.ctrl.SOLIS_DICT_EMBEDDED_SUFFIX_MAP,
         )
 
         assert mapped["battery_soc"] == "sensor.solis_battery_soc"
@@ -1443,7 +1511,7 @@ class TestDiscoverSensorsFromRegistry:
         disabled_entity["disabled_by"] = "user"
 
         mapped, disabled = self.ctrl._match_solis_dict_embedded_entities(
-            [disabled_entity]
+            [disabled_entity], self.ctrl.SOLIS_DICT_EMBEDDED_SUFFIX_MAP
         )
 
         assert "battery_soc" not in mapped

@@ -257,6 +257,13 @@ class HomeAssistantAPIController:
             "precision": 1,
             "conversion_threshold": None,
         },
+        "get_battery_voltage": {
+            "sensor_key": "battery_voltage",
+            "name": "Battery Voltage",
+            "unit": "V",
+            "precision": 1,
+            "conversion_threshold": None,
+        },
         "get_charging_power_rate": {
             "sensor_key": "battery_charging_power_rate",
             "name": "Battery Charging Power Rate",
@@ -858,6 +865,9 @@ class HomeAssistantAPIController:
         "solis_modbus_inverter_dc_power_1": "pv_power",
         # ── Grid Time of Use v2 charge/discharge period times (6 slots) ───
         # unique key = f"time_entity_{register}" (time_sensors.py:34-63).
+        # Integration releases that fixed the dict-embedded unique_id write a
+        # clean suffix; older registries keep the embedded form (#869).
+        "solis_modbus_inverter_battery_voltage": "battery_voltage",
         "time_entity_43711": "solis_charge_start_1",
         "time_entity_43713": "solis_charge_end_1",
         "time_entity_43753": "solis_discharge_start_1",
@@ -902,6 +912,25 @@ class HomeAssistantAPIController:
         "43707_11": "solis_discharge_enable_6",
     }
 
+    # ── Solis per-slot discharge limits (#869). Matched only against number.*
+    # entities, because the integration also exposes each register as a
+    # read-only sensor.* carrying the identical unique_id suffix, and writing
+    # to that one fails.
+    SOLIS_DISCHARGE_LIMIT_SUFFIX_MAP: ClassVar[dict[str, str]] = {
+        **{
+            f"solis_modbus_inverter_tou_charge_cutoff_discharge_{slot}": (
+                f"solis_discharge_cutoff_soc_{slot}"
+            )
+            for slot in range(1, 7)
+        },
+        **{
+            f"solis_modbus_inverter_tou_discharge_v2_battery_current_{slot}": (
+                f"solis_discharge_current_{slot}"
+            )
+            for slot in range(1, 7)
+        },
+    }
+
     # ── Solis monitoring sensors affected by the dict-embedded unique_id bug
     # (see SOLIS_SUFFIX_MAP docstring above). Matched by a Solis-only
     # substring check on the verified ``'unique': '<key>'`` fragment — this
@@ -912,6 +941,7 @@ class HomeAssistantAPIController:
     # has the bug); values are BESS sensor keys.
     SOLIS_DICT_EMBEDDED_SUFFIX_MAP: ClassVar[dict[str, str]] = {
         "solis_modbus_inverter_battery_soc": "battery_soc",  # hybrid_sensors.py:656
+        "solis_modbus_inverter_battery_voltage": "battery_voltage",  # :665
         "solis_modbus_inverter_household_load_power": "local_load_power",  # :725
         "solis_modbus_inverter_total_battery_charge_energy": "lifetime_battery_charged",  # :811
         "solis_modbus_inverter_total_battery_discharge_energy": "lifetime_battery_discharged",  # :841
@@ -1710,6 +1740,10 @@ class HomeAssistantAPIController:
         """Get the battery state of charge (SOC)."""
         return self._get_sensor_value("battery_soc")
 
+    def get_battery_voltage(self) -> float | None:
+        """Get the battery voltage."""
+        return self._get_sensor_value("battery_voltage")
+
     def get_charge_stop_soc(self):
         """Get the charge stop state of charge (SOC)."""
         return self._get_sensor_value("battery_charge_stop_soc")
@@ -2304,6 +2338,32 @@ class HomeAssistantAPIController:
             operation=f"Solis {direction} slot {slot} enabled={enabled}",
             entity_id=enable_entity,
         )
+
+    def set_solis_discharge_cutoff_soc(self, slot: int, soc: int) -> None:
+        """Set the SOC one Solis discharge slot (1-6) stops discharging at."""
+        entity_id = self._get_entity_for_service(f"solis_discharge_cutoff_soc_{slot}")
+        logger.info("Set Solis discharge slot %d cut-off -> %s%%", slot, soc)
+        self._set_number_like(
+            entity_id, soc, f"Set Solis discharge slot {slot} cut-off"
+        )
+
+    def set_solis_discharge_current(self, slot: int, amps: float) -> None:
+        """Set the battery current one Solis discharge slot (1-6) runs at."""
+        entity_id = self._get_entity_for_service(f"solis_discharge_current_{slot}")
+        logger.info("Set Solis discharge slot %d current -> %s A", slot, amps)
+        self._set_number_like(
+            entity_id, amps, f"Set Solis discharge slot {slot} current"
+        )
+
+    def missing_solis_discharge_limit_sensors(self) -> list[str]:
+        """Sensor keys needed to set discharge limits that are not configured."""
+        missing = []
+        for key in [*self.SOLIS_DISCHARGE_LIMIT_SUFFIX_MAP.values(), "battery_voltage"]:
+            try:
+                self._resolve_entity_id(key)
+            except ValueError:
+                missing.append(key)
+        return missing
 
     def read_solis_periods(self, direction: str) -> list[dict]:
         """Read all 6 Solis Grid TOU v2 periods for one direction from HA entity states.
@@ -4215,7 +4275,7 @@ class HomeAssistantAPIController:
         )
 
     def _match_solis_dict_embedded_entities(
-        self, entities: list[dict]
+        self, entities: list[dict], unique_key_map: dict[str, str]
     ) -> tuple[dict[str, str], dict[str, str]]:
         """Map Solis monitoring entities affected by the dict-embedded unique_id bug.
 
@@ -4241,7 +4301,7 @@ class HomeAssistantAPIController:
         """
         result: dict[str, str] = {}
         disabled_matches: dict[str, str] = {}
-        for key, bess_key in self.SOLIS_DICT_EMBEDDED_SUFFIX_MAP.items():
+        for key, bess_key in unique_key_map.items():
             if bess_key in result:
                 continue
             pattern = re.compile(r"'unique':\s*'" + re.escape(key) + r"'")
@@ -4458,7 +4518,7 @@ class HomeAssistantAPIController:
             # Solis-scoped matcher (see SOLIS_DICT_EMBEDDED_SUFFIX_MAP) —
             # merge them in without touching _map_registry_entities.
             embedded, embedded_disabled = self._match_solis_dict_embedded_entities(
-                entities
+                entities, self.SOLIS_DICT_EMBEDDED_SUFFIX_MAP
             )
             solis_sensors.update(
                 {k: v for k, v in embedded.items() if k not in solis_sensors}
@@ -4466,6 +4526,21 @@ class HomeAssistantAPIController:
             solis_disabled.update(
                 {k: v for k, v in embedded_disabled.items() if k not in solis_disabled}
             )
+            number_entities = [
+                e for e in entities if str(e.get("entity_id", "")).startswith("number.")
+            ]
+            for limit_sensors, limit_disabled in (
+                self._map_registry_entities(
+                    number_entities,
+                    solis_platforms,
+                    self.SOLIS_DISCHARGE_LIMIT_SUFFIX_MAP,
+                ),
+                self._match_solis_dict_embedded_entities(
+                    number_entities, self.SOLIS_DISCHARGE_LIMIT_SUFFIX_MAP
+                ),
+            ):
+                solis_sensors.update(limit_sensors)
+                solis_disabled.update(limit_disabled)
             # Solis has no separate export_power entity — grid_power_net is
             # a single signed sensor (see SOLIS_SUFFIX_MAP comment); pair
             # export_power to it (#475, same reason as SolaX's battery pair

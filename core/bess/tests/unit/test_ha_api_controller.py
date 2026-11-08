@@ -1302,6 +1302,59 @@ class TestWriteSolisPeriod:
         )
 
 
+class TestSolisDischargeLimits:
+    # Command-level on purpose: these pin the HA service each limit reaches.
+    # What the limits do to the battery is asserted in
+    # test_solis_modbus_controller.py against the measured inverter model.
+    @pytest.fixture
+    def limits_ctrl(
+        self, ctrl: HomeAssistantAPIController
+    ) -> HomeAssistantAPIController:
+        ctrl.sensors = {
+            **ctrl.sensors,
+            "solis_discharge_cutoff_soc_3": "number.solis_cutoff_3",
+            "solis_discharge_current_3": "number.solis_current_3",
+        }
+        return ctrl
+
+    def test_cutoff_is_written_to_the_slot_number_entity(
+        self, limits_ctrl: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(limits_ctrl, "_service_call_with_retry") as call:
+            limits_ctrl.set_solis_discharge_cutoff_soc(3, 100)
+
+        call.assert_called_once()
+        assert call.call_args.args[:2] == ("number", "set_value")
+        assert call.call_args.kwargs["entity_id"] == "number.solis_cutoff_3"
+        assert call.call_args.kwargs["value"] == 100
+
+    def test_current_is_written_to_the_slot_number_entity(
+        self, limits_ctrl: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(limits_ctrl, "_service_call_with_retry") as call:
+            limits_ctrl.set_solis_discharge_current(3, 39.1)
+
+        assert call.call_args.kwargs["entity_id"] == "number.solis_current_3"
+        assert call.call_args.kwargs["value"] == 39.1
+
+    def test_unconfigured_slot_fails_loudly(
+        self, limits_ctrl: HomeAssistantAPIController
+    ) -> None:
+        with pytest.raises(ValueError):
+            limits_ctrl.set_solis_discharge_cutoff_soc(1, 100)
+
+    def test_missing_sensors_lists_every_unconfigured_limit(
+        self, limits_ctrl: HomeAssistantAPIController
+    ) -> None:
+        missing = limits_ctrl.missing_solis_discharge_limit_sensors()
+
+        assert "solis_discharge_cutoff_soc_1" in missing
+        assert "solis_discharge_current_6" in missing
+        assert "battery_voltage" in missing
+        assert "solis_discharge_cutoff_soc_3" not in missing
+        assert "solis_discharge_current_3" not in missing
+
+
 class TestGridChargeEnabled:
     def test_switch_on(self, ctrl):
         ctrl.session.get = _session_method_mock(

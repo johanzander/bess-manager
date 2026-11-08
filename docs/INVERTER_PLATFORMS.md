@@ -514,9 +514,34 @@ switch.turn_on/turn_off(entity: solis_charge_enable_N)
 # ...and the same for solis_discharge_{start,end,enable}_N, N = 1..6
 ```
 
-**Per-period control:** none — Solis has no per-period charge/discharge rate
-register exposed by solis_modbus (`supports_charge_rate_control = False`,
-same limitation as SPH).
+**What a discharge slot does** (measured on an S5-EH1P, issue
+[#869](https://github.com/johanzander/bess-manager/issues/869)): an active slot
+is not permission to discharge. It forces the slot's own battery current out
+regardless of load, down to the slot's own cut-off SOC, and at or below that
+cut-off the battery does not discharge at all, leaving the house on the grid.
+With no slot active, Self Use follows the load. The intent mapping follows from
+that:
+
+| Intent | Hardware |
+|--------|----------|
+| `LOAD_SUPPORT` | No slot: Self Use follows the load |
+| `IDLE`, deliberate | Discharge slot with cut-off 100%, so the battery holds |
+| `IDLE` within one SOC point of the floor, or releasable (#786) | No slot |
+| `BATTERY_EXPORT` | Discharge slot, cut-off at the planned end SOC (never below `min_soc`), current from planned power and live battery voltage |
+| `GRID_CHARGING` | Charge slot |
+
+Exports are allocated the six discharge slots before holds. A slot whose limits
+cannot be written stays closed, and `check_health` reports the missing entities.
+
+**Requires Self-use selected in SolisCloud.** A SolisCloud "Timed Plans" schedule
+can hold the battery at 0 W during its Stand-by periods while Home Assistant
+still shows Self-Use, and BESS cannot see that mode.
+
+**Known limitation:** the optimizer can plan a partial cover (battery plus some
+grid import), which Self Use cannot deliver: it covers the whole load until the
+battery is empty. BESS re-plans every 15 minutes, but the battery can run out
+earlier than planned. `supports_charge_rate_control` is still `False`; the
+per-slot discharge current is only used to size exports.
 
 **Verified integration bug (source-cited):** `SolisSensorGroup.__init__`
 (`sensors/solis_base_sensor.py:254`) calls
@@ -888,9 +913,16 @@ GEN4 above (`limit_grid_export` / `grid_export_limit`, registers 122/123) —
 | `solis_discharge_start_N` | time | `time_entity_{register}` (43753/43760/43767/43774/43781/43788) | Discharge slot N start |
 | `solis_discharge_end_N` | time | `time_entity_{register}` (43755/43762/43769/43776/43783/43790) | Discharge slot N end |
 | `solis_discharge_enable_N` | switch | `{register}_{bit}` = `43707_6`..`43707_11` | Discharge slot N enable |
+| `solis_discharge_cutoff_soc_N` | number | `solis_modbus_inverter_tou_charge_cutoff_discharge_N` | Discharge slot N cut-off SOC |
+| `solis_discharge_current_N` | number | `solis_modbus_inverter_tou_discharge_v2_battery_current_N` | Discharge slot N battery current |
+| `battery_voltage` | sensor | `solis_modbus_inverter_battery_voltage` | Converts planned export power to slot current |
 
 Only slot 1 of each direction is strictly required; slots 2-6 are optional
-(unused slots are simply left disabled by BESS).
+(unused slots are simply left disabled by BESS). The cut-off and current
+entities must resolve to `number.*`: the integration also publishes a read-only
+`sensor.*` with the same unique_id suffix. Installs set up before #869 need to
+re-run sensor discovery to pick them up; until then BESS opens no hold or export
+slot and reports the missing entities in the health check.
 
 ### Huawei LUNA2000 (Local) — `huawei_solar` integration
 

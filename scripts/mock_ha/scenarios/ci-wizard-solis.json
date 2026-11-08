@@ -1,6 +1,6 @@
 {
   "name": "ci-wizard-solis",
-  "description": "Fresh install with a Solis hybrid inverter via solis_modbus (Grid Time of Use v2, local Modbus) + official Nordpool SE3. Source-derived fixture (Phase 1, add-inverter-platform skill) built from github.com/Pho3niX90/solis_modbus v4.1.6 — see core/bess/ha_api_controller.py SOLIS_SUFFIX_MAP for unique_id citations.",
+  "description": "Fresh install with a Solis hybrid inverter via solis_modbus (Grid Time of Use v2, local Modbus) + official Nordpool SE3. Source-derived fixture (Phase 1, add-inverter-platform skill) built from github.com/Pho3niX90/solis_modbus v4.1.6 \u2014 see core/bess/ha_api_controller.py SOLIS_SUFFIX_MAP for unique_id citations.",
   "mock_time": "@2026-05-21 17:17:48",
   "timezone": "Europe/Stockholm",
   "bess_config": {
@@ -148,6 +148,36 @@
         "unit_of_measurement": "SEK/kWh",
         "price_area": "SE3"
       }
+    },
+    "sensor.solis_discharge_cut_off_soc_slot_1": {
+      "state": "50",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "number.solis_discharge_cut_off_soc_slot_1": {
+      "state": "50",
+      "attributes": {
+        "unit_of_measurement": "%"
+      }
+    },
+    "sensor.solis_discharge_battery_current_slot_1": {
+      "state": "50",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "number.solis_discharge_battery_current_slot_1": {
+      "state": "50",
+      "attributes": {
+        "unit_of_measurement": "A"
+      }
+    },
+    "sensor.solis_battery_voltage": {
+      "state": "51.2",
+      "attributes": {
+        "unit_of_measurement": "V"
+      }
     }
   },
   "entity_registry": [
@@ -259,6 +289,36 @@
       "unique_id": "SE3-current_price",
       "device_id": "dev-nordpool-001",
       "config_entry_id": "entry-nordpool-001"
+    },
+    {
+      "entity_id": "sensor.solis_discharge_cut_off_soc_slot_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_tou_charge_cutoff_discharge_1",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "number.solis_discharge_cut_off_soc_slot_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_tou_charge_cutoff_discharge_1",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_discharge_battery_current_slot_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_tou_discharge_v2_battery_current_1",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "number.solis_discharge_battery_current_slot_1",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_tou_discharge_v2_battery_current_1",
+      "device_id": "dev-solis-001"
+    },
+    {
+      "entity_id": "sensor.solis_battery_voltage",
+      "platform": "solis_modbus",
+      "unique_id": "solis_modbus_SN2024ABCDEF_solis_modbus_inverter_battery_voltage",
+      "device_id": "dev-solis-001"
     }
   ],
   "config_entries": [
@@ -318,12 +378,56 @@
   },
   "price_data": {
     "today": [
-      0.45, 0.38, 0.32, 0.28, 0.25, 0.3, 0.55, 0.82, 1.05, 1.15, 1.08, 0.95,
-      0.85, 0.78, 0.72, 0.8, 0.92, 1.25, 1.55, 1.42, 1.1, 0.75, 0.58, 0.48
+      0.45,
+      0.38,
+      0.32,
+      0.28,
+      0.25,
+      0.3,
+      0.55,
+      0.82,
+      1.05,
+      1.15,
+      1.08,
+      0.95,
+      0.85,
+      0.78,
+      0.72,
+      0.8,
+      0.92,
+      1.25,
+      1.55,
+      1.42,
+      1.1,
+      0.75,
+      0.58,
+      0.48
     ],
     "tomorrow": [
-      0.42, 0.35, 0.3, 0.26, 0.23, 0.28, 0.5, 0.78, 1.0, 1.1, 1.02, 0.9, 0.8,
-      0.74, 0.68, 0.76, 0.88, 1.2, 1.48, 1.35, 1.05, 0.7, 0.55, 0.45
+      0.42,
+      0.35,
+      0.3,
+      0.26,
+      0.23,
+      0.28,
+      0.5,
+      0.78,
+      1.0,
+      1.1,
+      1.02,
+      0.9,
+      0.8,
+      0.74,
+      0.68,
+      0.76,
+      0.88,
+      1.2,
+      1.48,
+      1.35,
+      1.05,
+      0.7,
+      0.55,
+      0.45
     ]
   },
   "time_segments": [],
@@ -356,7 +460,10 @@
       "solis_discharge_start_1",
       "solis_discharge_end_1",
       "solis_charge_enable_1",
-      "solis_discharge_enable_1"
+      "solis_discharge_enable_1",
+      "solis_discharge_cutoff_soc_1",
+      "solis_discharge_current_1",
+      "battery_voltage"
     ],
     "detected_inverter_platforms": [
       "solis_modbus"

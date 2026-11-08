@@ -66,6 +66,7 @@ def _make_controller(platform: str) -> MagicMock:
     sm.get_detailed_period_groups.return_value = []
     ctrl.system.price_manager.get_today_prices.return_value = [1.0] * 24
     ctrl.system.schedule_store.get_latest_schedule.return_value = None
+    ctrl.system.historical_store.get_period.return_value = None
     return ctrl
 
 
@@ -236,8 +237,7 @@ class TestScheduleDataChargeRate:
 
 
 # ===========================================================================
-# GET /api/growatt/detailed_schedule — period_groups intent reconciliation
-# (issue #317)
+# GET /api/growatt/detailed_schedule — period_groups
 # ===========================================================================
 
 
@@ -269,8 +269,9 @@ def _make_period_data(
 def _group_per_period(**kwargs) -> list[dict]:
     """Fake get_detailed_period_groups: one ungrouped group per period, echoing
     back whatever `intents` list was actually passed in — lets the test see
-    exactly what the endpoint decided each period's reconciled intent is."""
+    exactly what the endpoint decided each period's intent and SOC are."""
     intents = kwargs["intents"]
+    soc_values = kwargs["soc_values"]
     return [
         {
             "start_time": f"{i // 4:02d}:{(i % 4) * 15:02d}",
@@ -283,56 +284,14 @@ def _group_per_period(**kwargs) -> list[dict]:
             "discharge_rate": 0,
             "grid_charge": False,
             "total_action_kwh": 0.0,
-            "soc_end_pct": None,
+            "soc_end_pct": soc_values[i],
             "curtailed": False,
             "planned_load_kwh": 0.0,
+            "solar_to_battery_kwh": 0.0,
+            "grid_to_battery_kwh": 0.0,
         }
         for i in range(len(intents))
     ]
-
-
-class TestPeriodGroupsIntentReconciliation:
-    """dominant_intent must reflect observed_intent for actual periods, not the
-    stale DP-planned strategic_intent (issue #317)."""
-
-    def test_actual_period_uses_observed_intent_not_planned(self):
-        ctrl = _make_controller("growatt_server_sph")
-        sm = ctrl.system._inverter_controller
-        # Planned schedule says period 0 was BATTERY_EXPORT...
-        sm.strategic_intents = ["BATTERY_EXPORT"] + ["IDLE"] * 95
-        sm.get_detailed_period_groups.side_effect = _group_per_period
-
-        num_periods = time_utils.get_period_count(time_utils.today())
-        period_data = [
-            _make_period_data(0, "actual", "BATTERY_EXPORT", "IDLE"),
-        ] + [
-            _make_period_data(i, "predicted", "IDLE", None)
-            for i in range(1, num_periods)
-        ]
-        stored_schedule = StoredSchedule(
-            timestamp=datetime.now(),
-            optimization_period=0,
-            optimization_result=OptimizationResult(
-                input_data={}, period_data=period_data
-            ),
-        )
-        ctrl.system.schedule_store.get_latest_schedule.return_value = stored_schedule
-        by_timestamp = {p.timestamp: p for p in period_data}
-        ctrl.system.schedule_store.get_period_data_at.side_effect = (
-            lambda ts: by_timestamp.get(ts)
-        )
-
-        sys.modules["app"].bess_controller = ctrl
-        resp = _client.get("/api/growatt/detailed_schedule")
-        assert resp.status_code == 200
-
-        groups = resp.json()["periodGroups"]
-        period_0_group = next(
-            g for g in groups if g["startTime"] == "00:00" and g["endTime"] == "00:15"
-        )
-        # ...but the actual physical flow was IDLE (no battery discharge) — the
-        # reconciled dominant_intent must say so, not the stale plan.
-        assert period_0_group["dominantIntent"] == "IDLE"
 
 
 class TestPeriodGroupsNextDaySchedule:
@@ -353,13 +312,9 @@ class TestPeriodGroupsNextDaySchedule:
         real_store = ScheduleStore()
         num_periods = time_utils.get_period_count(time_utils.today())
 
-        # Today's real schedule, made moments earlier: period 0 already
-        # completed with an observed physical flow of LOAD_SUPPORT.
+        # Today's real schedule, made moments earlier.
         today_periods = [
-            _make_period_data(0, "actual", "BATTERY_EXPORT", "LOAD_SUPPORT"),
-        ] + [
-            _make_period_data(i, "predicted", "IDLE", None)
-            for i in range(1, num_periods)
+            _make_period_data(i, "predicted", "IDLE", None) for i in range(num_periods)
         ]
         real_store.store_schedule(
             OptimizationResult(input_data={}, period_data=today_periods),
@@ -367,10 +322,10 @@ class TestPeriodGroupsNextDaySchedule:
         )
 
         # The prepare_next_day schedule stored at 23:55: optimization_period=0,
-        # period_data[0] anchored to tomorrow 00:00 with a different observed
-        # intent -- must not shadow today's period 0 at the same positional
-        # index.
-        tomorrow_period_0 = _make_period_data(0, "actual", "IDLE", "GRID_CHARGE")
+        # period_data[0] anchored to tomorrow 00:00 with a different SOE --
+        # must not shadow today's period 0 at the same positional index.
+        tomorrow_period_0 = _make_period_data(0, "predicted", "IDLE", None)
+        tomorrow_period_0.energy.battery_soe_end = 21.0
         tomorrow_period_0.timestamp = time_utils.period_index_to_timestamp(num_periods)
         real_store.store_schedule(
             OptimizationResult(input_data={}, period_data=[tomorrow_period_0]),
@@ -387,7 +342,153 @@ class TestPeriodGroupsNextDaySchedule:
         period_0_group = next(
             g for g in groups if g["startTime"] == "00:00" and g["endTime"] == "00:15"
         )
-        assert period_0_group["dominantIntent"] == "LOAD_SUPPORT"
+        assert period_0_group["socEndPct"] == pytest.approx(50.0)  # 15 of 30 kWh
+
+
+def _flow_period(
+    period: int,
+    soe_start: float,
+    soe_end: float,
+    intent: str,
+    *,
+    data_source: str = "predicted",
+    solar: float = 0.0,
+    grid: float = 0.0,
+) -> PeriodData:
+    """A period whose battery inflow is `solar` kWh from solar and `grid` kWh
+    from the grid, with the detailed flows derived by the real EnergyData."""
+    return PeriodData(
+        period=period,
+        energy=EnergyData(
+            solar_production=solar,
+            home_consumption=0.0,
+            battery_charged=solar + grid,
+            battery_discharged=0.0,
+            grid_imported=grid,
+            grid_exported=0.0,
+            battery_soe_start=soe_start,
+            battery_soe_end=soe_end,
+        ),
+        timestamp=time_utils.period_index_to_timestamp(period),
+        data_source=data_source,
+        decision=DecisionData(strategic_intent=intent),
+    )
+
+
+class TestPeriodGroupsBatteryInflows:
+    """Each row's Solar and Grid values are that row's own energy flows (#866).
+
+    The numbers are the reporter's 8 Nov slots on a 15 kWh battery. Each
+    elapsed slot's plan comes from the run that started in it, so a row's plan
+    can differ from the previous row's by the previous slot's plan-vs-reality
+    miss. That miss must not appear as energy in either column.
+    """
+
+    IDLE_0230 = 10
+    CHARGE_0215 = 9
+    CHARGE_0245 = 11
+    CURRENT_0300 = 12
+
+    def _groups_by_start(self) -> dict[str, Any]:
+        from core.bess.growatt_min_controller import GrowattMinController
+        from core.bess.schedule_store import ScheduleStore
+        from core.bess.settings import BatterySettings
+
+        ctrl = _make_controller("growatt_server_min")
+        ctrl.system.battery_settings.total_capacity = 15.0
+        today_count = time_utils.get_period_count(time_utils.today())
+        intents = ["IDLE"] * today_count
+        intents[self.CHARGE_0215] = "GRID_CHARGING"
+        intents[self.CHARGE_0245] = "GRID_CHARGING"
+
+        real_groups = GrowattMinController(
+            BatterySettings(
+                total_capacity=15.0,
+                max_charge_power_kw=6.0,
+                max_discharge_power_kw=6.0,
+                min_soc=10.0,
+                max_soc=95.0,
+                cycle_cost_per_kwh=0.05,
+            )
+        )
+        real_groups.strategic_intents = intents
+        sm = ctrl.system._inverter_controller
+        sm.strategic_intents = intents
+        sm.get_detailed_period_groups.side_effect = (
+            real_groups.get_detailed_period_groups
+        )
+
+        store = ScheduleStore()
+        store.store_schedule(
+            OptimizationResult(
+                input_data={},
+                period_data=[
+                    _flow_period(9, 3.00, 3.30, "GRID_CHARGING", grid=0.30),
+                ],
+            ),
+            optimization_period=9,
+        )
+        store.store_schedule(
+            OptimizationResult(
+                input_data={},
+                period_data=[_flow_period(10, 3.60, 3.60, "IDLE")],
+            ),
+            optimization_period=10,
+        )
+        store.store_schedule(
+            OptimizationResult(
+                input_data={},
+                period_data=[
+                    _flow_period(11, 3.60, 4.79, "GRID_CHARGING", grid=1.19),
+                    _flow_period(12, 4.79, 5.19, "IDLE", solar=0.40),
+                    _flow_period(today_count, 5.19, 5.69, "SOLAR_STORAGE", solar=0.50),
+                ],
+            ),
+            optimization_period=11,
+        )
+        ctrl.system.schedule_store = store
+
+        measured = {
+            9: _flow_period(9, 3.00, 3.60, "IDLE", data_source="actual", grid=0.60),
+            10: _flow_period(10, 3.60, 3.60, "IDLE", data_source="actual"),
+            11: _flow_period(11, 3.60, 4.35, "IDLE", data_source="actual", grid=0.75),
+        }
+        ctrl.system.historical_store.get_period.side_effect = measured.get
+
+        app_module: Any = sys.modules["app"]
+        app_module.bess_controller = ctrl
+        resp = _client.get("/api/growatt/detailed_schedule")
+        assert resp.status_code == 200
+        body: dict[str, Any] = resp.json()
+        return body
+
+    def test_idle_row_after_a_charge_miss_shows_no_solar(self) -> None:
+        groups = {g["startTime"]: g for g in self._groups_by_start()["periodGroups"]}
+
+        assert groups["02:30"]["dominantIntent"] == "IDLE"
+        assert groups["02:30"]["solarToBatteryKwh"] == pytest.approx(0.0)
+
+    def test_elapsed_charge_rows_show_measured_grid_energy(self) -> None:
+        groups = {g["startTime"]: g for g in self._groups_by_start()["periodGroups"]}
+
+        assert groups["02:15"]["gridToBatteryKwh"] == pytest.approx(0.60)  # plan 0.30
+        assert groups["02:45"]["gridToBatteryKwh"] == pytest.approx(0.75)  # plan 1.19
+
+    def test_slot_without_a_measured_record_shows_its_planned_flow(self) -> None:
+        groups = {g["startTime"]: g for g in self._groups_by_start()["periodGroups"]}
+
+        assert groups["03:00"]["solarToBatteryKwh"] == pytest.approx(0.40)
+
+    def test_tomorrow_rows_show_their_planned_flows(self) -> None:
+        tomorrow = self._groups_by_start()["tomorrowPeriodGroups"]
+
+        assert tomorrow[0]["solarToBatteryKwh"] == pytest.approx(0.50)
+        assert tomorrow[0]["gridToBatteryKwh"] == pytest.approx(0.0)
+
+    def test_target_soc_stays_the_plan_on_elapsed_rows(self) -> None:
+        groups = {g["startTime"]: g for g in self._groups_by_start()["periodGroups"]}
+
+        assert groups["02:15"]["socEndPct"] == pytest.approx(22.0)  # measured 24 %
 
 
 class TestPeriodGroupsPlannedLoad:
@@ -416,6 +517,8 @@ class TestPeriodGroupsPlannedLoad:
                     "soc_end_pct": None,
                     "curtailed": False,
                     "planned_load_kwh": sum(planned),
+                    "solar_to_battery_kwh": 0.0,
+                    "grid_to_battery_kwh": 0.0,
                 }
             ]
 
@@ -493,6 +596,8 @@ def _group_per_period_vpp(**kwargs) -> list[dict]:
             "soc_end_pct": None,
             "curtailed": False,
             "planned_load_kwh": 0.0,
+            "solar_to_battery_kwh": 0.0,
+            "grid_to_battery_kwh": 0.0,
         }
         for i in range(len(intents))
     ]

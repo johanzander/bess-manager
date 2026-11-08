@@ -228,3 +228,45 @@ class TestPlannedLoadPerGroup:
         groups = controller.get_detailed_period_groups()
 
         assert groups[0]["planned_load_kwh"] == 0.0
+
+
+class TestBatteryInflowSums:
+    """Each group reports the solar and grid energy of its own periods (#866)."""
+
+    def test_group_sums_its_periods_flows(
+        self, controller: GrowattMinController
+    ) -> None:
+        controller.strategic_intents = ["SOLAR_STORAGE"] * 4
+
+        groups = controller.get_detailed_period_groups(
+            solar_to_battery=[0.1, 0.2, 0.3, 0.4],
+            grid_to_battery=[0.0, 0.05, 0.0, 0.05],
+        )
+
+        # Flow amounts alone never split a group: control is unchanged.
+        assert len(groups) == 1
+        assert groups[0]["solar_to_battery_kwh"] == pytest.approx(1.0)
+        assert groups[0]["grid_to_battery_kwh"] == pytest.approx(0.1)
+
+    def test_groups_split_by_intent_get_their_own_sums(
+        self, controller: GrowattMinController
+    ) -> None:
+        controller.strategic_intents = ["IDLE"] * 2 + ["SOLAR_STORAGE"] * 2
+
+        groups = controller.get_detailed_period_groups(
+            solar_to_battery=[0.0, 0.0, 0.5, 0.5],
+            grid_to_battery=[0.0, 0.0, 0.0, 0.0],
+        )
+
+        assert [g["solar_to_battery_kwh"] for g in groups] == [
+            pytest.approx(0.0),
+            pytest.approx(1.0),
+        ]
+
+    def test_no_flows_given_gives_zero(self, controller: GrowattMinController) -> None:
+        controller.strategic_intents = ["IDLE"] * 4
+
+        groups = controller.get_detailed_period_groups()
+
+        assert groups[0]["solar_to_battery_kwh"] == 0.0
+        assert groups[0]["grid_to_battery_kwh"] == 0.0

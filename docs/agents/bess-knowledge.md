@@ -1117,7 +1117,7 @@ Check this before saying a displayed value is "measured" or "planned".
 | `ScheduleStore` | Optimizer plans only, always `data_source="predicted"`. Each run covers its own slot onwards. Only intents survive a restart. | The newest run covering that slot. Normally that is the run that started in it: measured start SOE + that run's planned change. If that run failed, it is an earlier forecast. After a restart there may be nothing. |
 | `HistoricalDataStore` | Measured periods, `data_source="actual"`. | The measured SOE and energy flows, if collected. |
 | Daily view (`/api/dashboard`) | Merged. | Measured where collected, otherwise the plan or a placeholder. The current and future slots are always plan. |
-| `/api/inverter/schedule` (Schedule Overview) | SOC, action and planned load read `ScheduleStore`. Today's intent comes from the inverter controller's `strategic_intents`, and grid charge and rates derive from that intent. | A plan value, even on elapsed rows. |
+| `/api/inverter/schedule` (Schedule Overview) | SOC, action and planned load read `ScheduleStore`. Today's intent comes from the inverter controller's `strategic_intents`, and grid charge and rates derive from that intent. The Solar and Grid columns sum each row's own `solar_to_battery` and `grid_to_battery`. | Solar and Grid are measured once the slot is collected. Everything else is a plan value, even on elapsed rows. |
 
 Two consequences when a plan value exists:
 

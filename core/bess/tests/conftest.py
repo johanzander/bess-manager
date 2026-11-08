@@ -71,6 +71,8 @@ class MockHomeAssistantController(HomeAssistantAPIController):
         super().__init__(
             ha_url="http://mock", token="mock", settings_store=settings_store
         )
+        # http://mock never answers, so retrying only adds 14 s of backoff sleep.
+        self.max_attempts = 1
         self.settings = {
             "grid_charge": False,
             "discharge_rate": 0,

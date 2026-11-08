@@ -61,7 +61,7 @@ if PYTEST=$(py_tool pytest); then
         # do not apply there, so exclude the file.
         PYTEST_IGNORE_PERM="--ignore=backend/tests/test_agent_permissions.py"
     fi
-    if ! "$PYTEST" -m "not slow" --tb=short -q ${PYTEST_IGNORE_PERM:-}; then
+    if ! "$PYTEST" -m "not slow" -n auto --tb=short -q ${PYTEST_IGNORE_PERM:-}; then
         echo "❌ Tests failed"
         ERRORS=$((ERRORS + 1))
     else

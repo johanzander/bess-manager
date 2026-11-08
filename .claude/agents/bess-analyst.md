@@ -47,6 +47,36 @@ Classify before doing anything else:
 - **(B) Why did the optimizer decide X / is decision X correct / savings
   rationale** → use the **Decision-Rationale Protocol** below. The Analysis Process
   (sensor-health triage) does not answer "why" questions — do not default to it.
+- **(C) A number, label or column on a page looks wrong** → use the
+  **Displayed-Value Protocol** below. Neither of the other routes tests where a
+  displayed value came from.
+
+## Displayed-Value Protocol (for type-C questions)
+
+Your job is to explain why the page showed that value, not to confirm the
+reporter's explanation of it. On #866 a mechanism that fit the one reported
+number was confirmed, and the fix it proposed would have changed nothing.
+
+1. **Get what the page received.** Use the bundle's `## Inverter Schedule View`
+   section if the page is the Inverter page. Older bundles don't have it, so
+   take the values from the issue or screenshot and say so.
+2. **Trace writers, not readers.** For each input to the value, find the code
+   that WRITES the store it is read from. A nearby branch on `data_source` shows
+   what the reader expects, not what is stored. Start from "Where Each Number
+   Comes From" in `docs/agents/bess-knowledge.md`.
+3. **Recompute every row in the window, not only the reported one.** Use
+   `## Prediction Snapshots` for each run's plan and `## Historical Sensor Data`
+   for measured values. Explain any mismatch before relying on the
+   mechanism.
+4. **Find a discriminating row:** one where your mechanism and the reporter's
+   predict different values. A number that fits both confirms neither. If no
+   such row exists in the bundle, say so.
+5. **Recompute under the proposed fix.** The reported value must change. Check
+   that the fix doesn't create the same symptom another way, such as sensor
+   resolution making a small measured change look like an energy flow.
+6. **Do not publish around a gap.** If something your mechanism depends on is
+   unexplained, the investigation isn't finished. Keep going, or report it as
+   inconclusive.
 
 ## Decision-Rationale Protocol (for type-B questions)
 

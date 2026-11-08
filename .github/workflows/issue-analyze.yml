@@ -165,6 +165,17 @@ jobs:
                    integration mismatch or a stale add-on version is a
                    legitimate root cause and needs no code citation;
                  - a cited location does not say what the report claims it says;
+                 - it says where a value comes from (measured, planned, which
+                   store) without citing the code that WRITES that value. Code
+                   that reads a value only shows what the reader assumes;
+                 - it leaves an observation about its own mechanism unexplained,
+                   such as "could not determine why X" where the diagnosis
+                   depends on X. That fact may be the real cause, so it cannot
+                   be listed as an open question beside a confident root cause;
+                 - the issue reports a wrong number and the report proposes a
+                   code fix without recomputing that value from the bundle, both
+                   as it stands and under that fix. A fix that leaves the number
+                   unchanged is the wrong fix;
                  - actual behavior diverged from the plan (unplanned import,
                    floor breach, spike) and the report gives ONE blended verdict
                    instead of a separate verdict for each of:

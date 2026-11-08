@@ -1108,6 +1108,31 @@ Cost baselines:
 - **hourly_cost** (aka optimized cost): Actual cost with full optimization
 
 
+## Where Each Number Comes From
+
+Check this before saying a displayed value is "measured" or "planned".
+
+| Source | What it holds | What an elapsed slot returns |
+|---|---|---|
+| `ScheduleStore` | Optimizer plans only, always `data_source="predicted"`. Each run covers its own slot onwards. Only intents survive a restart. | The newest run covering that slot. Normally that is the run that started in it: measured start SOE + that run's planned change. If that run failed, it is an earlier forecast. After a restart there may be nothing. |
+| `HistoricalDataStore` | Measured periods, `data_source="actual"`. | The measured SOE and energy flows, if collected. |
+| Daily view (`/api/dashboard`) | Merged. | Measured where collected, otherwise the plan or a placeholder. The current and future slots are always plan. |
+| `/api/inverter/schedule` (Schedule Overview) | SOC, action and planned load read `ScheduleStore`. Today's intent comes from the inverter controller's `strategic_intents`, and grid charge and rates derive from that intent. | A plan value, even on elapsed rows. |
+
+Two consequences when a plan value exists:
+
+- **Adjacent elapsed plan values come from different runs.** Their difference
+  includes the previous slot's plan-vs-reality miss, so it is not energy that
+  moved in the later slot (#866).
+- **A plan can look measured.** A plan of "do nothing" from a measured start
+  equals the measurement, so matching a sensor value doesn't show where it came
+  from.
+
+Measured SOC can also arrive in whole percent, which was 0.15 kWh steps on a
+15 kWh solax_modbus Growatt system. Treat a change of one step as sensor
+resolution and use energy flows for amounts that small.
+
+
 ## Evidence-Based Analysis
 
 When analyzing system behavior:

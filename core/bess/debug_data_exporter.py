@@ -405,6 +405,7 @@ class DebugDataExport:
     ha_ws_discovery: dict = field(default_factory=dict)
     consumption_overlay: dict = field(default_factory=dict)
     key_findings: dict = field(default_factory=dict)
+    inverter_schedule_view: dict = field(default_factory=dict)
     compact: bool = True
 
 

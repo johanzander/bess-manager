@@ -1,5 +1,8 @@
 """Tests for debug_report_formatter markdown table rendering."""
 
+import json
+from typing import ClassVar
+
 from core.bess.debug_data_exporter import DebugDataExport
 from core.bess.debug_report_formatter import DebugReportFormatter
 
@@ -35,6 +38,77 @@ def _minimal_export(**overrides) -> DebugDataExport:
     }
     defaults.update(overrides)
     return DebugDataExport(**defaults)
+
+
+class TestInverterScheduleView:
+    """The bundle shows what the Inverter page received, so an analyst can
+    compare it with the user's screenshot instead of rebuilding it (#866)."""
+
+    _GROUP: ClassVar[dict[str, object]] = {
+        "startTime": "02:30",
+        "endTime": "02:44",
+        "dominantIntent": "IDLE",
+        "totalActionKwh": 0.0,
+        "socEndPct": 24.0,
+        "socDeltaKwh": 0.3,
+        "plannedLoadKwh": 0.92,
+        "gridCharge": False,
+        "chargePowerRate": 100,
+        "dischargePowerRate": 0,
+        "curtailed": True,
+        "vppPowerPct": 1,
+    }
+
+    def test_every_field_the_page_received_reaches_the_bundle(self) -> None:
+        export = _minimal_export(
+            inverter_schedule_view={
+                "periodGroups": [self._GROUP],
+                "tomorrowPeriodGroups": None,
+            }
+        )
+
+        report = DebugReportFormatter().format_report(export)
+
+        section = report.split("## Inverter Schedule View")[1]
+        for key, value in self._GROUP.items():
+            assert f'"{key}": {json.dumps(value)}' in section
+
+    def test_missing_soc_values_stay_null_not_zero(self) -> None:
+        group = {**self._GROUP, "socEndPct": None, "socDeltaKwh": None}
+        export = _minimal_export(
+            inverter_schedule_view={
+                "periodGroups": [group],
+                "tomorrowPeriodGroups": None,
+            }
+        )
+
+        report = DebugReportFormatter().format_report(export)
+
+        assert '"socEndPct": null' in report
+        assert '"socDeltaKwh": null' in report
+
+    def test_tomorrow_groups_are_listed_separately(self) -> None:
+        tomorrow = {**self._GROUP, "startTime": "05:00", "endTime": "05:14"}
+        export = _minimal_export(
+            inverter_schedule_view={
+                "periodGroups": [],
+                "tomorrowPeriodGroups": [tomorrow],
+            }
+        )
+
+        report = DebugReportFormatter().format_report(export)
+
+        tomorrow_section = report.split("### Tomorrow")[1]
+        assert '"startTime": "05:00"' in tomorrow_section
+
+    def test_unavailable_view_reports_the_reason(self) -> None:
+        export = _minimal_export(
+            inverter_schedule_view={"error": "System not configured"}
+        )
+
+        report = DebugReportFormatter().format_report(export)
+
+        assert "Unavailable at export time: System not configured" in report
 
 
 class TestHistoricalDataTimeColumn:

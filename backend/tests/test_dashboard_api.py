@@ -8,7 +8,9 @@ in _aggregate_quarterly_to_hourly.
 import sys
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from api import _aggregate_quarterly_to_hourly, router
@@ -1127,6 +1129,38 @@ class TestExportDebugData:
         sys.modules["app"].bess_controller = _make_started_controller()
         resp = _client.get("/api/export-debug-data")
         assert resp.status_code == 200
+
+    @staticmethod
+    def _exported_schedule_view(controller: MagicMock) -> dict:
+        app_module: Any = sys.modules["app"]
+        app_module.bess_controller = controller
+        captured: dict = {}
+
+        def capture(_formatter: object, export: SimpleNamespace) -> str:
+            captured.update(export.inverter_schedule_view)
+            return ""
+
+        with (
+            patch(
+                "core.bess.debug_data_exporter.DebugDataAggregator.aggregate_all_data",
+                return_value=SimpleNamespace(),
+            ),
+            patch(
+                "core.bess.debug_report_formatter.DebugReportFormatter.format_report",
+                capture,
+            ),
+        ):
+            resp = _client.get("/api/export-debug-data")
+        assert resp.status_code == 200
+        return captured
+
+    def test_bundle_carries_the_inverter_page_response(self) -> None:
+        view = self._exported_schedule_view(_make_started_controller())
+        assert "periodGroups" in view
+
+    def test_unavailable_inverter_page_does_not_lose_the_bundle(self) -> None:
+        view = self._exported_schedule_view(_unconfigured_controller())
+        assert view["error"]
 
 
 # ===========================================================================

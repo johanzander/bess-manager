@@ -2722,6 +2722,16 @@ async def get_consumption_forecast_comparison():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+async def _inverter_schedule_view_for_export() -> dict:
+    # A bundle matters most when the system is broken, so a schedule the page
+    # could not load is recorded in its section rather than failing the export.
+    try:
+        view: dict = await get_growatt_detailed_schedule()
+        return view
+    except HTTPException as e:
+        return {"error": str(e.detail)}
+
+
 @router.get("/api/export-debug-data")
 async def export_debug_data(compact: bool = True):
     """Export comprehensive debug data as markdown report.
@@ -2757,6 +2767,7 @@ async def export_debug_data(compact: bool = True):
             settings_data=bess_controller.settings_store.data,
         )
         export_data = aggregator.aggregate_all_data(compact=compact)
+        export_data.inverter_schedule_view = await _inverter_schedule_view_for_export()
 
         # Format as markdown report
         formatter = DebugReportFormatter()

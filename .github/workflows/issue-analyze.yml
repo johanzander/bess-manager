@@ -77,7 +77,11 @@ jobs:
           claude_code_oauth_token: ${{ vars.BOT_AUTH != 'api_key' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           github_token: ${{ steps.app-token.outputs.token }}
           trigger_phrase: "@claude-bot analyze"
-          claude_args: "--max-turns 100 --permission-mode bypassPermissions"
+          # Pinned because the action's default is Sonnet, and the bess-analyst
+          # sub-agent sets no model of its own so it follows this one. A cold
+          # A/B on #868 (same prompt and inputs) scored 5.5/6 known findings on
+          # Opus against 2.5/6 on Sonnet. Stage 3 acts on this diagnosis.
+          claude_args: "--model claude-opus-5-5 --max-turns 100 --permission-mode bypassPermissions"
           prompt: |
             You are the **Stage 2 Deep Analysis** bot for issue #${{ github.event.issue.number }} in johanzander/bess-manager.
 

@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Fuse protection: charging no longer jumps back to full power every other minute** — the limit now settles under the fuse rating. ([#877](https://github.com/johanzander/bess-manager/issues/877))
 - **Inverter page: no more phantom Solar or inflated Grid energy in Schedule Overview** — each row now shows its own measured or planned solar and grid charging. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 - **Solis: Powering Home now follows the house load, and the battery can hold energy for later** — re-run sensor discovery after updating. ([#869](https://github.com/johanzander/bess-manager/issues/869))
 - **Date selector: day and week labels now follow your browser language** — an English UI no longer shows Swedish weekday and month names. ([#862](https://github.com/johanzander/bess-manager/issues/862))

@@ -214,9 +214,8 @@ sell_price = spot_price * export_rate - tax_reduction
 **Key Responsibilities**:
 
 - Monitor electrical phase loading to prevent circuit overload
-- Calculate available charging power from house-only phase load (the
-  battery's own draw is subtracted from the grid-side phase sensors), every
-  minute
+- Move the charging rate by the headroom left on the most loaded grid-side
+  phase sensor, every minute
 - Dynamically adjust battery charging power to stay within fuse limits
 - Provide safety margins for electrical system protection
 

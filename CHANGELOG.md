@@ -8,7 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
-- **Force mode: override the plan until you clear it** — hold the battery in Storing Solar, Powering Home, Selling to Grid, Charging from Grid or Standby from the Dashboard or over `/api/force-mode`. The optimizer keeps planning in the background, and a banner shows while the override is active.
+- **Force mode: override the plan until you clear it** — hold the battery in Storing Solar, Powering Home, Selling to Grid, Charging from Grid or Standby from the Dashboard or over `/api/force-mode`. The optimizer keeps planning in the background, and a banner shows while the override is active. ([#879](https://github.com/johanzander/bess-manager/pull/879))
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 

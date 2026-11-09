@@ -684,17 +684,21 @@ configured.
   and instead plans against the balanced-load assumption. Off (`None`) when
   `power_monitoring_enabled` is False, matching the AC cap's own
   `<= 0.0 → None` convention.
-- **Runtime monitor mechanics (#816)**: `HomePowerMonitor` runs every minute.
-  The phase-current sensors are grid-side meters, so while the battery
-  grid-charges they read house load *plus* the battery's own draw; the monitor
-  subtracts `battery_charge_power / phase_count` from each phase (clamped at
-  zero) before computing headroom, otherwise it sees its own charging as house
-  load and oscillates 0 %/100 %. Whether a period is fuse-checked comes from
-  the plan's `grid_charge` for that period, not from the inverter's grid-charge
-  switch, which lags a few seconds at a period boundary. The headroom is
-  converted to a rate with `max_charge_power_kw`, so that setting must equal
-  what the inverter really draws at 100 % — the monitor cannot correct a
-  rating that is set too low.
+- **Runtime monitor mechanics (#816, #877)**: `HomePowerMonitor` runs every
+  minute. The phase-current sensors are grid-side meters, so while the battery
+  grid-charges they read house load *plus* the battery's own draw. The monitor
+  therefore moves the rate it last wrote by the headroom left on the most
+  loaded phase, clamped to 0 and the period's target. It does not read the
+  battery power sensor: on Growatt cloud that sensor updates every 5 minutes,
+  and subtracting a stale value from a live meter made the rate alternate
+  (#877). Whether a period is fuse-checked comes from the plan's `grid_charge`
+  for that period, not from the inverter's grid-charge switch, which lags a few
+  seconds at a period boundary. The headroom is converted to a rate step with
+  `max_charge_power_kw`, so a wrong rating only changes the step size: the rate
+  still settles provided the real draw is under twice the rating and the
+  inverter responds within one tick (measured on Growatt cloud; unverified
+  elsewhere). The loop is reactive, so a charge start or a house-load jump can
+  overshoot for one tick.
 - **Total import, not charging-only**: the cap bounds `grid_imported` (house
   load + battery grid-charging) jointly, not just the charging component —
   `HomePowerMonitor` only throttles charging today because that is the only

@@ -1,6 +1,13 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Fuse monitor: first grid-charge tick can overshoot for one minute**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/power_monitor.py`
+
+**Description**: Since #877 the monitor moves the rate by the measured headroom, so a charge start from a leftover high rate, or a sudden house-load jump, can exceed the fuse limit until the next one-minute tick. Settling also assumes the inverter responds within a tick; that is measured on Growatt cloud only.
+
+
 ### **Schedule Overview: elapsed row labels stay the plan while Solar and Grid are measured**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `backend/api.py`, `frontend/src/components/InverterStatusDashboard.tsx`

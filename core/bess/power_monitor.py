@@ -4,8 +4,7 @@ It does this by:
 
 1. Power Monitoring:
    - Continuously monitors current draw on electrical phases (single or three-phase)
-   - Calculates house power consumption per phase (the battery's own charging
-     draw is subtracted: the phase sensors are grid-side meters)
+   - Reads each phase from grid-side meters, which include the battery's own draw
    - Considers house fuse limits (e.g., 25A per phase)
    - Maintains a safety margin to prevent tripping fuses
 
@@ -105,7 +104,6 @@ class HomePowerMonitor:
         if self.home_settings.phase_count == 1:
             all_methods = [
                 "get_l1_current",
-                "get_battery_charge_power",
                 "get_charging_power_rate",
             ]
         else:
@@ -113,7 +111,6 @@ class HomePowerMonitor:
                 "get_l1_current",
                 "get_l2_current",
                 "get_l3_current",
-                "get_battery_charge_power",
                 "get_charging_power_rate",
             ]
 
@@ -187,35 +184,22 @@ class HomePowerMonitor:
             readings["current_l3"] * voltage,
         )
 
-    def get_house_phase_loads_w(self) -> tuple[float, ...]:
-        """Get the load each phase would carry without the battery charging.
+    def calculate_available_charging_power(self, current_rate_pct: float) -> float:
+        """Calculate safe battery charging power based on most loaded phase and target power.
 
-        The phase-current sensors are grid-side meters, so while the battery
-        charges they read house load plus the battery's own draw. The draw is
-        split evenly across phases and subtracted. Charging fed by solar does
-        not reach the meter, so subtracting the full draw yields house load
-        net of PV -- exactly the baseline the grid-sourced charge adds to --
-        and is clamped at zero.
+        The phase sensors are grid-side meters, so they already include the
+        battery's draw at current_rate_pct, and the rate only has to move by
+        the headroom left on the most loaded phase. The battery power sensor is
+        deliberately not used: on cloud integrations it can be minutes old, and
+        subtracting it from a live meter makes the rate alternate (#877).
 
-        Raises:
-            ValueError: If the battery charge power sensor cannot be read.
+        Args:
+            current_rate_pct: The charging rate the inverter is currently set to.
         """
-        battery_w = self.controller.get_battery_charge_power()
-        if battery_w is None:
-            raise ValueError(
-                "Cannot calculate house load: battery_charge_power sensor read "
-                "returned None"
-            )
-        phase_loads = self.get_current_phase_loads_w()
-        battery_per_phase_w = battery_w / len(phase_loads)
-        return tuple(max(0.0, load - battery_per_phase_w) for load in phase_loads)
-
-    def calculate_available_charging_power(self) -> float:
-        """Calculate safe battery charging power based on most loaded phase and target power."""
         phase_count = self.home_settings.phase_count
 
-        # House-only loads in watts (variable-length tuple matching phase count)
-        phase_loads = self.get_house_phase_loads_w()
+        # Grid-side loads in watts (variable-length tuple matching phase count)
+        phase_loads = self.get_current_phase_loads_w()
 
         # Find most loaded phase in watts
         max_load_w = max(phase_loads)
@@ -227,15 +211,16 @@ class HomePowerMonitor:
         # Max battery power per phase (distributed across phases)
         max_battery_power_per_phase_w = self.max_charge_power_w / phase_count
 
-        # Calculate available charging power as percentage of battery's max power
-        # This is the correct calculation: available power relative to what the battery needs
+        # Express the headroom as a change to the rate, relative to battery max power
         if max_battery_power_per_phase_w > 0:
             available_pct = (available_power_w / max_battery_power_per_phase_w) * 100
         else:
             available_pct = 0
 
         # Limit by target charging power
-        charging_power_pct = min(available_pct, self.target_charging_power_pct)
+        charging_power_pct = min(
+            current_rate_pct + available_pct, self.target_charging_power_pct
+        )
 
         # Log phase loads
         if phase_count == 1:
@@ -252,6 +237,7 @@ class HomePowerMonitor:
             "%s\n"
             "Most loaded phase: %.1f%%\n"
             "Available power: %.0fW (%.1f%% of battery max per phase)\n"
+            "Current charging: %.1f%%\n"
             "Target charging: %.1f%%\n"
             "Recommended charging: %.1f%%"
         )
@@ -261,6 +247,7 @@ class HomePowerMonitor:
             max_load_pct,
             available_power_w,
             available_pct,
+            current_rate_pct,
             self.target_charging_power_pct,
             charging_power_pct,
         )
@@ -275,13 +262,6 @@ class HomePowerMonitor:
                 comes from the plan, not from the inverter's grid-charge state,
                 which still reads off for a few seconds after a period starts.
         """
-        if not grid_charging:
-            # Solar-only charging: no fuse risk, allow full target charging power
-            target_power = self.target_charging_power_pct
-        else:
-            # Grid charging: limit by available fuse headroom
-            target_power = self.calculate_available_charging_power()
-
         current_power = self.controller.get_charging_power_rate()
         if current_power is None:
             # The sensor read degraded (transient HA failure -- _get_raw_state
@@ -293,6 +273,13 @@ class HomePowerMonitor:
                 "unchanged for this adjustment"
             )
             return
+
+        if not grid_charging:
+            # Solar-only charging: no fuse risk, allow full target charging power
+            target_power = self.target_charging_power_pct
+        else:
+            # Grid charging: limit by available fuse headroom
+            target_power = self.calculate_available_charging_power(current_power)
 
         # Skip if no change needed (within 1% tolerance)
         if abs(target_power - current_power) < 1:

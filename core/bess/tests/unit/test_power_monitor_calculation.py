@@ -20,8 +20,6 @@ class MockController:
         self.l3_current = l3_current
         self.grid_charge = False
         self.charging_power_rate = 0
-        # Phase currents here are house-only; no battery draw to subtract.
-        self.battery_charge_power = 0.0
 
     def get_l1_current(self):
         return self.l1_current
@@ -31,9 +29,6 @@ class MockController:
 
     def get_l3_current(self):
         return self.l3_current
-
-    def get_battery_charge_power(self) -> float:
-        return self.battery_charge_power
 
     def grid_charge_enabled(self):
         return self.grid_charge
@@ -102,7 +97,7 @@ def test_available_power_calculation_user_scenario(standard_settings):
     monitor = HomePowerMonitor(controller, home, battery)
 
     # Calculate available charging power
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Verify the calculation is correct
     expected_available_pct = 72.45  # (3622.5W / 5000W) * 100
@@ -138,7 +133,7 @@ def test_zero_household_load_allows_full_charging(standard_settings):
     controller = MockController(l1_current=0.0, l2_current=0.0, l3_current=0.0)
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power per phase: 5,462.5W (full capacity with safety margin)
     # Max battery power per phase: 5,000W
@@ -161,7 +156,7 @@ def test_high_household_load_limits_charging(standard_settings):
     )
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power on phase 3: 5,462.5W - 4,000W = 1,462.5W
     # Max battery power per phase: 5,000W
@@ -184,7 +179,7 @@ def test_near_fuse_limit_prevents_charging(standard_settings):
     )
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power on phase 3: 5,462.5W - 5,200W = 262.5W
     # Max battery power per phase: 5,000W
@@ -207,7 +202,7 @@ def test_balanced_phases_uses_most_loaded(standard_settings):
     )
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Should be based on L3 (3,000W), not average (1,667W)
     # Available on L3: 5,462.5W - 3,000W = 2,462.5W
@@ -231,7 +226,7 @@ def test_calculation_improvement_vs_old_algorithm(standard_settings):
     )
 
     monitor = HomePowerMonitor(controller, home, battery)
-    new_available_pct = monitor.calculate_available_charging_power()
+    new_available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Old (buggy) algorithm would calculate:
     # max_load_pct = (1840 / 5462.5) * 100 = 33.7%
@@ -268,7 +263,7 @@ def test_different_battery_sizes(standard_settings):
     )
 
     monitor = HomePowerMonitor(controller, home, battery_small)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power: 3,622.5W
     # Max battery per phase: 10kW / 3 = 3,333W
@@ -291,7 +286,7 @@ def test_different_safety_margins():
     )
 
     monitor_98 = HomePowerMonitor(controller, home_98, battery)
-    available_pct_98 = monitor_98.calculate_available_charging_power()
+    available_pct_98 = monitor_98.calculate_available_charging_power(current_rate_pct=0)
 
     # Max per phase: 230 * 25 * 0.98 = 5,635W
     # Available: 5,635 - 1,840 = 3,795W
@@ -304,7 +299,7 @@ def test_different_safety_margins():
     home_90 = HomeSettings(max_fuse_current=25, voltage=230, safety_margin=0.90)
 
     monitor_90 = HomePowerMonitor(controller, home_90, battery)
-    available_pct_90 = monitor_90.calculate_available_charging_power()
+    available_pct_90 = monitor_90.calculate_available_charging_power(current_rate_pct=0)
 
     # Max per phase: 230 * 25 * 0.90 = 5,175W
     # Available: 5,175 - 1,840 = 3,335W
@@ -350,7 +345,7 @@ def test_single_phase_no_division(single_phase_settings):
     controller = MockController(l1_current=1840 / 230)
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Max power per phase: 230 * 25 * 0.95 = 5,462.5W
     # Available: 5,462.5 - 1,840 = 3,622.5W
@@ -399,7 +394,7 @@ def test_single_phase_fuse_protection(single_phase_settings):
     controller = MockController(l1_current=0.0)
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power: 5,462.5W
     # Battery max (single phase): 15,000W
@@ -419,7 +414,7 @@ def test_single_phase_high_load(single_phase_settings):
     controller = MockController(l1_current=5200 / 230)
 
     monitor = HomePowerMonitor(controller, home, battery)
-    available_pct = monitor.calculate_available_charging_power()
+    available_pct = monitor.calculate_available_charging_power(current_rate_pct=0)
 
     # Available power: 5,462.5 - 5,200 = 262.5W
     # Battery max (single phase): 15,000W

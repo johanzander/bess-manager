@@ -287,44 +287,6 @@ class TestAdjustChargingPowerSkipsUnsupported:
         system.adjust_charging_power()  # must not raise
         assert mock_controller.calls["charge_rate"] == []  # tick skipped, no write
 
-    def test_unreadable_battery_charge_power_does_not_crash_adjust_charging_power(
-        self,
-        mock_controller: Any,
-        arbitrage_prices: Any,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """A transient HA failure on the battery charge power read must not
-        escape the 1-minute adjust_charging_power cron job (issue #643, #816).
-
-        The monitor subtracts the battery's own draw from the grid-side phase
-        sensors, so an unreadable draw cannot be worked around -- the tick is
-        skipped with the inverter left on its current rate (no write), not
-        crashed and not guessed.
-        """
-        from core.bess.battery_system_manager import BatterySystemManager
-        from core.bess.price_manager import MockSource
-
-        monkeypatch.setattr(
-            "core.bess.sensor_collector.SensorCollector", MockSensorCollector
-        )
-        system = BatterySystemManager(
-            controller=mock_controller,
-            price_source=MockSource(arbitrage_prices),
-            addon_options={"inverter": {"platform": "growatt_server_min"}},
-        )
-        assert system._supports_charge_rate_control is True
-
-        system.update_settings({"home": {"power_monitoring_enabled": True}})
-        assert system._power_monitor is not None
-
-        system._inverter_controller.strategic_intents = ["GRID_CHARGING"] * 96
-
-        # _get_sensor_value degrades a RequestException to None.
-        monkeypatch.setattr(mock_controller, "get_battery_charge_power", lambda: None)
-
-        system.adjust_charging_power()  # must not raise
-        assert mock_controller.calls["charge_rate"] == []
-
     def test_unreadable_charge_rate_does_not_crash_adjust_charging_power(
         self,
         mock_controller: Any,

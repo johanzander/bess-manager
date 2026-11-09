@@ -25,6 +25,8 @@ from api_dataclasses import (
     APIConsumptionForecastComparison,
     APIDashboardHourlyData,
     APIDashboardResponse,
+    APIForceMode,
+    APIForceModeRequest,
     APIPredictionSnapshot,
     APISavingsBucket,
     APISetupCompletePayload,
@@ -296,6 +298,69 @@ def _replan_in_background(bess_controller: Any) -> None:
             logger.warning("Could not rebuild schedule after settings change: %s", e)
 
     threading.Thread(target=_replan, daemon=True).start()
+
+
+def _force_mode_state(bess_controller: Any) -> APIForceMode:
+    system = bess_controller.system
+    mode = system.force_mode
+    activated_at = (
+        bess_controller.settings_store.get_section("force_mode")["activated_at"]
+        if mode is not None
+        else None
+    )
+    return APIForceMode(
+        active=mode is not None,
+        mode=mode,
+        activatedAt=activated_at,
+        supportedModes=sorted(system.supported_force_modes),
+    )
+
+
+@router.get("/api/force-mode")
+async def get_force_mode() -> APIForceMode:
+    """Current force-mode override and the modes this platform supports."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+    return _force_mode_state(bess_controller)
+
+
+@router.put("/api/force-mode")
+async def set_force_mode(body: APIForceModeRequest) -> APIForceMode:
+    """Force the inverter into one mode until cleared; the optimizer keeps planning."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+    system = bess_controller.system
+    if body.mode not in system.supported_force_modes:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Force mode {body.mode!r} is not supported by this inverter "
+                f"platform. Supported: {sorted(system.supported_force_modes)}"
+            ),
+        )
+    bess_controller.settings_store.save_section(
+        "force_mode",
+        {"mode": body.mode, "activated_at": time_utils.now().isoformat()},
+    )
+    system.set_force_mode(body.mode)
+    _replan_in_background(bess_controller)
+    return _force_mode_state(bess_controller)
+
+
+@router.delete("/api/force-mode")
+async def clear_force_mode() -> APIForceMode:
+    """Clear the force-mode override and return to the optimizer plan."""
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+    bess_controller.settings_store.save_section(
+        "force_mode", {"mode": None, "activated_at": None}
+    )
+    bess_controller.system.set_force_mode(None)
+    _replan_in_background(bess_controller)
+    return _force_mode_state(bess_controller)
 
 
 # ---------------------------------------------------------------------------
@@ -1207,6 +1272,7 @@ async def get_dashboard_data(
             hourly_data_instances=hourly_dataclass_instances,
             resolution=resolution,
             tomorrow_data=tomorrow_data,
+            force_mode=_force_mode_state(bess_controller),
         )
 
         if is_historical:

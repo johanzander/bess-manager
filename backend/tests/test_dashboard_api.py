@@ -193,6 +193,8 @@ def _make_started_controller() -> MagicMock:
         "actual_hours_available": 0,
     }
     ctrl.settings_store.data = {}
+    ctrl.system.force_mode = None
+    ctrl.system.supported_force_modes = frozenset({"IDLE", "SOLAR_STORAGE"})
 
     return ctrl
 
@@ -228,6 +230,31 @@ class TestDashboard:
         assert len(periods) > 0
         assert "strategicIntent" in periods[0]
         assert "observedIntent" in periods[0]
+
+    def test_dashboard_reports_force_mode(self) -> None:
+        ctrl = _make_started_controller()
+        ctrl.system.force_mode = "IDLE"
+        ctrl.settings_store.get_section.return_value = {
+            "mode": "IDLE",
+            "activated_at": "2026-09-16T10:00:00+02:00",
+        }
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        body = _client.get("/api/dashboard").json()
+
+        assert body["forceMode"] == {
+            "active": True,
+            "mode": "IDLE",
+            "activatedAt": "2026-09-16T10:00:00+02:00",
+            "supportedModes": ["IDLE", "SOLAR_STORAGE"],
+        }
+
+    def test_dashboard_force_mode_inactive_by_default(self) -> None:
+        sys.modules["app"].bess_controller = _make_started_controller()  # type: ignore[attr-defined]
+        force_mode = _client.get("/api/dashboard").json()["forceMode"]
+        assert force_mode["active"] is False
+        assert force_mode["mode"] is None
+        assert force_mode["activatedAt"] is None
 
     def test_unconfigured_returns_503(self):
         sys.modules["app"].bess_controller = _unconfigured_controller()

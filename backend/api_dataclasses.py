@@ -376,6 +376,22 @@ class APISnapshotComparison:
 
 
 @dataclass
+class APIForceMode:
+    """User override of the optimizer plan; mode is None when not forced."""
+
+    active: bool
+    mode: str | None
+    activatedAt: str | None
+    supportedModes: list[str]
+
+
+class APIForceModeRequest(BaseModel):
+    """Request body for PUT /api/force-mode."""
+
+    mode: str
+
+
+@dataclass
 class APIDashboardHourlyData:
     """Dashboard hourly data with canonical FormattedValue interface."""
 
@@ -930,6 +946,7 @@ class APIDashboardResponse:
     costAndSavings: APICostAndSavings
     realTimePower: APIRealTimePower
     strategicIntentSummary: dict[str, int]
+    forceMode: APIForceMode
 
     @classmethod
     def from_dashboard_data(
@@ -945,6 +962,8 @@ class APIDashboardResponse:
         hourly_data_instances: list | None = None,
         resolution: str = "quarter-hourly",
         tomorrow_data: list[APIDashboardHourlyData] | None = None,
+        *,
+        force_mode: APIForceMode,
     ) -> APIDashboardResponse:
         """Create complete dashboard response from internal data."""
 
@@ -1056,6 +1075,7 @@ class APIDashboardResponse:
             costAndSavings=cost_and_savings,
             realTimePower=real_time_power,
             strategicIntentSummary=strategic_summary,
+            forceMode=force_mode,
         )
 
 

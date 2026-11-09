@@ -13,6 +13,7 @@ import { ReportProblemProvider } from './components/ReportProblemContext';
 import ReportProblemButton from './components/ReportProblemButton';
 import AIChatPanel from './components/AIChatPanel';
 import DemoModeBanner from './components/DemoModeBanner';
+import ForceModeBanner from './components/ForceModeBanner';
 import PreflightCheckDialog from './components/PreflightCheckDialog';
 
 // An ErrorBoundary component to catch rendering errors
@@ -298,6 +299,7 @@ function App() {
           {isDemoMode && (
             <DemoModeBanner onGoLive={() => setShowPreflightDialog(true)} />
           )}
+          <ForceModeBanner />
 
           <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (

@@ -46,6 +46,7 @@ from typing import Any, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .force_mode import FORCE_MODES
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 from .strategic_intent import idle_hold_releasable
@@ -77,6 +78,15 @@ class SolisModbusController(InverterController):
     load_support_delivers_exact_cover: ClassVar[bool] = False
 
     CONTROL_MODEL: ClassVar[str] = "period_list"
+
+    # Export slots take their power and cut-off SoC, and an IDLE hold its
+    # "is this deliberate" verdict, from the plan's period_data
+    # (_export_slots, _is_deliberate_hold) -- which a force mode leaves as
+    # the unforced plan.
+    SUPPORTED_FORCE_MODES: ClassVar[frozenset[str]] = FORCE_MODES - {
+        "BATTERY_EXPORT",
+        "IDLE",
+    }
 
     MAX_CHARGE_PERIODS = 6
     MAX_DISCHARGE_PERIODS = 6

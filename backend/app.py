@@ -25,6 +25,7 @@ from loguru import logger
 # Import BESS system modules
 from core.bess import time_utils
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.exceptions import SystemConfigurationError
 from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.settings_store import SettingsStore
 
@@ -209,8 +210,31 @@ class BESSController:
         # when the user completes the setup wizard).
         if self.system.is_configured:
             self._apply_settings(merged)
+            self._restore_force_mode()
 
         logger.info("BESS Controller initialized with early settings loading")
+
+    def _restore_force_mode(self) -> None:
+        """Re-apply the persisted force-mode override before the first optimization run."""
+        mode = self.settings_store.get_section("force_mode")["mode"]
+        if mode is None:
+            return
+        try:
+            self.system.set_force_mode(mode)
+        except SystemConfigurationError as e:
+            logger.error(
+                "Persisted force mode {} is no longer supported, clearing it: {}",
+                mode,
+                e,
+            )
+            self.settings_store.save_section(
+                "force_mode", {"mode": None, "activated_at": None}
+            )
+            self.ha_controller.failure_tracker.record_failure(
+                category="force_mode",
+                operation=f"Restore forced mode {mode} at startup",
+                error=e,
+            )
 
     def _init_ha_controller(
         self,

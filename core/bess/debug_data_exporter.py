@@ -406,6 +406,8 @@ class DebugDataExport:
     consumption_overlay: dict = field(default_factory=dict)
     key_findings: dict = field(default_factory=dict)
     inverter_schedule_view: dict = field(default_factory=dict)
+    # Active user force mode at export time; None when the plan was followed.
+    force_mode: str | None = None
     compact: bool = True
 
 
@@ -496,6 +498,7 @@ class DebugDataAggregator:
             log_file_info=self._get_log_file_info(),
             ha_ws_discovery=self._serialize_ha_ws_discovery(),
             consumption_overlay=self._serialize_consumption_overlay(),
+            force_mode=self.system.force_mode,
             compact=compact,
         )
         export.key_findings = build_key_findings(

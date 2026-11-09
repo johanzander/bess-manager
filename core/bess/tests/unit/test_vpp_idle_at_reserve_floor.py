@@ -57,7 +57,7 @@ def _make_vpp_bsm(
     inverter_controller.strategic_intents = intents
     # A duck-typed stand-in: only `.actions` is read on this path.
     inverter_controller.current_schedule = cast(
-        DPSchedule, SimpleNamespace(actions=[0.0] * 96)
+        DPSchedule, SimpleNamespace(forced_from_period=None, actions=[0.0] * 96)
     )
     return bsm, controller
 

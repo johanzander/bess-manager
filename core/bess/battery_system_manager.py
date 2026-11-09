@@ -38,6 +38,7 @@ from .exceptions import (
     SystemConfigurationError,
 )
 from .execution_model import PlatformCapabilities, intra_period_discharge_gate
+from .force_mode import apply_force_mode
 from .growatt_min_controller import GrowattMinController
 from .growatt_sph_controller import GrowattSphController
 from .ha_api_controller import HomeAssistantAPIController
@@ -296,6 +297,13 @@ class BatterySystemManager:
         # own plan doesn't call for export (see _apply_period_schedule).
         self._export_limit_curtailed: bool = False
 
+        # User force mode (core/bess/force_mode.py); None follows the plan.
+        self._force_mode: str | None = None
+        # The intent commanded for each period that started under a force
+        # mode, keyed by period start, so history records what ran rather
+        # than what the optimizer planned for it.
+        self._forced_period_intents: dict[datetime, str] = {}
+
         # Consumption forecast cache. Only used for the 'load_power_7d_avg'
         # and 'ha_statistics' strategies, whose value is a window of full
         # calendar days ending at today's midnight and so provably can't
@@ -512,6 +520,7 @@ class BatterySystemManager:
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+        self._drop_unsupported_force_mode()
 
     def switch_control_mode(self, control_mode: str) -> None:
         """Switch control_mode (tou/vpp) for the current Growatt-modbus platform.
@@ -564,6 +573,7 @@ class BatterySystemManager:
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+        self._drop_unsupported_force_mode()
 
     def _configured_free_import_price(self) -> float:
         """Buy price during an Octoplus free-import window.
@@ -815,6 +825,80 @@ class BatterySystemManager:
                     e,
                 )
 
+    @property
+    def supported_force_modes(self) -> frozenset[str]:
+        """Force modes the configured inverter platform can execute (none
+        without one)."""
+        if self._inverter_controller is None:
+            return frozenset()
+        return self._inverter_controller.SUPPORTED_FORCE_MODES
+
+    @property
+    def force_mode(self) -> str | None:
+        """The active force mode, or None while the plan is followed."""
+        return self._force_mode
+
+    def set_force_mode(self, mode: str | None) -> None:
+        """Hold the inverter in ``mode`` until cleared with None, overriding the plan.
+
+        The optimizer keeps planning; only what is commanded follows the
+        override. Takes effect at the next schedule update -- a caller that
+        wants it on the inverter now runs one.
+
+        Raises:
+            SystemConfigurationError: ``mode`` is not one the configured
+                inverter platform supports.
+        """
+        if mode is not None and mode not in self.supported_force_modes:
+            raise SystemConfigurationError(
+                message=(
+                    f"Force mode '{mode}' is not supported on inverter platform "
+                    f"'{self.inverter_platform}'; supported: "
+                    f"{sorted(self.supported_force_modes)}"
+                )
+            )
+        if mode == self._force_mode:
+            return
+        if mode is None:
+            logger.warning(
+                "FORCE MODE CLEARED (was %s): returning to the optimizer's plan",
+                self._force_mode,
+            )
+        else:
+            logger.warning(
+                "FORCE MODE SET: %s -- overriding the optimizer's plan until cleared",
+                mode,
+            )
+        self._force_mode = mode
+
+    def _drop_unsupported_force_mode(self) -> None:
+        """Clear a force mode the current inverter platform cannot execute.
+
+        Reached when the platform changes under an active override. The mode
+        is dropped rather than kept, because commanding it would no longer
+        mean what the user asked for, and the drop is recorded so the
+        dashboard says so instead of the override silently vanishing.
+        """
+        if self._force_mode is None or self._force_mode in self.supported_force_modes:
+            return
+        dropped = self._force_mode
+        self._force_mode = None
+        self._runtime_failure_tracker.record_failure(
+            category="force_mode",
+            operation=f"Force mode {dropped} cleared",
+            error=SystemConfigurationError(
+                message=(
+                    f"Force mode '{dropped}' is not supported on inverter "
+                    f"platform '{self.inverter_platform}'"
+                )
+            ),
+        )
+        logger.error(
+            "FORCE MODE CLEARED: %s is not supported on inverter platform '%s'",
+            dropped,
+            self.inverter_platform,
+        )
+
     def reinitialize_historical_data(self) -> None:
         """Re-run the historical recorder backfill.
 
@@ -859,6 +943,8 @@ class BatterySystemManager:
             )
 
         is_first_run = self._current_schedule is None
+        # Read once: an API call may change the mode while this cycle runs.
+        force_mode = self._force_mode
 
         try:
             # Handle special cases (midnight, next day prep)
@@ -925,6 +1011,18 @@ class BatterySystemManager:
             if temp_schedule is None:
                 logger.error("Failed to create updated schedule")
                 return False
+
+            if force_mode is not None:
+                forced_from = 0 if prepare_next_day else current_period
+                temp_schedule = apply_force_mode(
+                    temp_schedule, force_mode, forced_from, self.battery_settings
+                )
+                logger.warning(
+                    "FORCE MODE ACTIVE: %s from period %d -- the inverter follows "
+                    "the override, not the optimizer's plan",
+                    force_mode,
+                    forced_from,
+                )
 
             # Determine if we should apply the new schedule
             should_apply, reason = self._should_apply_schedule(
@@ -1241,7 +1339,7 @@ class BatterySystemManager:
 
                         # Store period data with both planned and observed intents
                         # Get DP-planned intent (authoritative) if available
-                        planned_intent = self._get_planned_intent_for_period(period)
+                        planned_intent = self._commanded_intent_for_period(period)
                         # Infer observed intent from actual flows
                         battery_power = period_energy_data.battery_net_change
                         observed = infer_intent_from_flows(
@@ -2223,7 +2321,7 @@ class BatterySystemManager:
 
                 # Store using period-based API with both planned and observed intents
                 # Get DP-planned intent (authoritative) if available
-                planned_intent = self._get_planned_intent_for_period(prev_period)
+                planned_intent = self._commanded_intent_for_period(prev_period)
                 # Infer observed intent from actual flows
                 battery_power = energy_data.battery_net_change
                 observed = infer_intent_from_flows(battery_power, energy_data)
@@ -2549,6 +2647,21 @@ class BatterySystemManager:
                 self.daily_view_store.save_day(
                     replace(view, power_down_sessions=new_sessions)
                 )
+
+    def _commanded_intent_for_period(self, period: int) -> str | None:
+        """The strategic intent the inverter was commanded for a period.
+
+        A period that started under a force mode ran the forced intent, so
+        that is what history records -- and what the GRID_CHARGING cost-basis
+        split keys on, as "what actually commanded the inverter's topology".
+        Every other period ran the plan's intent.
+        """
+        forced = self._forced_period_intents.get(
+            time_utils.period_index_to_timestamp(period)
+        )
+        if forced is not None:
+            return forced
+        return self._get_planned_intent_for_period(period)
 
     def _get_planned_intent_for_period(self, period: int) -> str | None:
         """Get the DP-planned strategic intent for a period.
@@ -3607,6 +3720,31 @@ class BatterySystemManager:
             return
 
         strategic_intent = self._inverter_controller.strategic_intents[period]
+        # Read off the schedule actually commanded, not self._force_mode: the
+        # plan-derived gates below must follow what is being written.
+        assert self._inverter_controller is not None  # already dereferenced above
+        commanded_schedule = self._inverter_controller.current_schedule
+        forced = (
+            commanded_schedule is not None
+            and commanded_schedule.forced_from_period is not None
+            and period >= commanded_schedule.forced_from_period
+        )
+        if forced:
+            period_start = time_utils.period_index_to_timestamp(period)
+            today = time_utils.today()
+            self._forced_period_intents = {
+                start: intent
+                for start, intent in self._forced_period_intents.items()
+                if start.date() >= today
+            }
+            self._forced_period_intents[period_start] = strategic_intent
+            logger.warning(
+                "Period %d (%s): FORCE MODE %s (planned: %s)",
+                period,
+                format_period(period),
+                strategic_intent,
+                self._get_planned_intent_for_period(period),
+            )
 
         # Get battery action for this specific period (kWh → kW)
         battery_action_kwh = 0.0
@@ -3681,7 +3819,10 @@ class BatterySystemManager:
         # True, so the planner and this write path read the same hardware two
         # different ways. Solis now declares both explicitly; routing through
         # the capability is what keeps a future platform from re-opening it.
-        if self.platform_capabilities.discharge_rate_is_load_following:
+        # Skipped under a force mode: the verdict is the unforced plan's, and
+        # lifting the ceiling would add discharge to a forced SOLAR_STORAGE or
+        # IDLE.
+        if not forced and self.platform_capabilities.discharge_rate_is_load_following:
             # Resolved by exact timestamp (not positional index -
             # optimization_period) so the standalone next-day schedule
             # (period_data[0] anchored to tomorrow 00:00 despite
@@ -3724,15 +3865,25 @@ class BatterySystemManager:
         # A write failure here (e.g. an unconfigured entity) must not take
         # down the rest of this period's hardware apply below.
         if self.battery_settings.export_curtailment_enabled:
-            target_timestamp = time_utils.period_index_to_timestamp(period)
-            period_data = self.schedule_store.get_period_data_at(target_timestamp)
-            if period_data is not None and (
-                period_data.energy.grid_exported > 0 or self._export_limit_curtailed
-            ):
-                should_curtail = self.battery_settings.should_curtail_export(
-                    period_data.energy.grid_exported,
-                    period_data.economic.sell_price,
-                )
+            should_curtail: bool | None = None
+            if forced:
+                # The curtail verdict comes from the unforced plan's export,
+                # which says nothing about a forced mode -- and curtailing
+                # would cap a forced BATTERY_EXPORT. Only a curtailment left
+                # on from before the override is released.
+                if self._export_limit_curtailed:
+                    should_curtail = False
+            else:
+                target_timestamp = time_utils.period_index_to_timestamp(period)
+                period_data = self.schedule_store.get_period_data_at(target_timestamp)
+                if period_data is not None and (
+                    period_data.energy.grid_exported > 0 or self._export_limit_curtailed
+                ):
+                    should_curtail = self.battery_settings.should_curtail_export(
+                        period_data.energy.grid_exported,
+                        period_data.economic.sell_price,
+                    )
+            if should_curtail is not None:
                 try:
                     self._inverter_controller.apply_export_limit(
                         self.controller, should_curtail
@@ -3763,7 +3914,10 @@ class BatterySystemManager:
         self._desired_block_passive_charging = block_passive_charging
         self._desired_strategic_intent = strategic_intent
         self._desired_charge_rate = charge_rate
-        self._desired_discharge_authorized = self._planned_discharge_authorized(period)
+        # A forced IDLE holds: the release verdict is the unforced plan's.
+        self._desired_discharge_authorized = (
+            False if forced else self._planned_discharge_authorized(period)
+        )
         discharge_authorized = self._inhibit_gated(self._desired_discharge_authorized)
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)

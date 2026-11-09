@@ -40,7 +40,9 @@ def _set_action(system, period: int, kwh: float) -> None:
     """Set a battery action for the given period."""
     actions = [0.0] * 96
     actions[period] = kwh
-    system._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    system._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
 
 def _is_solax(system) -> bool:

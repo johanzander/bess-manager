@@ -70,7 +70,9 @@ def _set_intent_with_action(
     bsm._inverter_controller.strategic_intents = intents
     actions = [0.0] * 96
     actions[period] = action_kwh
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
 
 def _store_authorization(bsm: BatterySystemManager, period: int, allowed: bool) -> None:

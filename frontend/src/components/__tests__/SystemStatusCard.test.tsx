@@ -133,6 +133,7 @@ const mockDashboardData = {
     SOLAR_STORAGE: 6,
   },
   batteryCapacity: 30,
+  forceMode: { active: false, mode: null, activatedAt: null, supportedModes: [] },
   batterySoc: fv(75, '75', '%') as any,
   batterySoe: fv(22.5, '22.5', 'kWh') as any,
   batterySocFormatted: '75%',
@@ -218,6 +219,39 @@ describe('SystemStatusCard', () => {
     expect(screen.getByText('0.65 EUR')).toBeInTheDocument();
     expect(screen.queryByText('0.50 EUR')).not.toBeInTheDocument();
     expect(screen.queryByText("Today's Savings")).not.toBeInTheDocument();
+  });
+
+  it('shows the forced mode with a Forced badge when force mode is active', async () => {
+    vi.mocked(useDashboardData).mockReturnValue({
+      data: {
+        ...mockDashboardData,
+        forceMode: {
+          active: true,
+          mode: 'BATTERY_EXPORT',
+          activatedAt: '2026-07-11T10:00:00+00:00',
+          supportedModes: ['BATTERY_EXPORT', 'IDLE'],
+        },
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    render(<SystemStatusCard systemMode="live" />);
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Selling to Grid')).toBeInTheDocument();
+    expect(screen.getByText('Forced')).toBeInTheDocument();
+    expect(screen.queryByText('Powering Home')).not.toBeInTheDocument();
+  });
+
+  it('shows no Forced badge when force mode is inactive', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Forced')).not.toBeInTheDocument();
+    expect(screen.getByText('Powering Home')).toBeInTheDocument();
   });
 
   it('does not show a horizon annotation for a single-day plan', async () => {

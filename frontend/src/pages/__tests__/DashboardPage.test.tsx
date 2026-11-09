@@ -34,6 +34,7 @@ vi.mock('../../components/SystemStatusCard', () => ({
 }));
 vi.mock('../../components/AlertBanner', () => ({ default: () => null }));
 vi.mock('../../components/DeprecationBanner', () => ({ default: () => null }));
+vi.mock('../../components/ForceModeControl', () => ({ default: () => null }));
 vi.mock('../../components/RuntimeFailureAlerts', () => ({
   RuntimeFailureAlerts: () => null,
 }));

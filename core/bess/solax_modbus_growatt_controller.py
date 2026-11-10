@@ -32,11 +32,13 @@ still forces a rate for it, this controller now releases VPP control instead.
   #754 -- previously always +100%, discarding the DP's own fuse-throttled
   rate, #429), remote_control enabled
 - BATTERY_EXPORT (rate>0)    -> power=-rate%, remote_control enabled
-- LOAD_SUPPORT (any rate)    -> power=0, remote_control DISABLED, regardless
-  of discharge_rate (#413 -- releases control to the inverter's own
-  load-following self-use instead of forcing a fixed discharge rate, which
-  causes unnecessary grid imports/exports whenever the schedule's load
-  prediction misses)
+- LOAD_SUPPORT (rate>0)      -> power=0, remote_control DISABLED (#413 --
+  releases control to the inverter's own load-following self-use instead of
+  forcing a fixed discharge rate, which causes unnecessary grid
+  imports/exports whenever the schedule's load prediction misses)
+- LOAD_SUPPORT (rate=0)      -> power=+1%, remote_control ENABLED (#881 --
+  the discharge inhibit's zero rate; holds like IDLE, released at the
+  reserve floor like IDLE)
 - SOLAR_STORAGE (rate=0, block_passive_charging=False) -> remote_control
   disabled (load_first self-use -- battery may absorb solar surplus)
 - IDLE (rate=0) -> power=+1%, remote_control ENABLED (battery-first hold,
@@ -402,6 +404,16 @@ class SolaxModbusGrowattController(GrowattMinController):
           the DP plan calling for no net discharge, or discharge-inhibit
           forcing the rate to 0) -- without this ordering that would wrongly
           fall into the grid_first-hold branch below instead of releasing.
+        - grid_charge=False, intent=LOAD_SUPPORT, rate=0 -> +1%, remote
+          control ENABLED (#881). A zero rate is a command not to discharge --
+          in practice the discharge inhibit (e.g. an EV charging) zeroing it,
+          or a plan too small to register at 1% resolution. The release above
+          would ignore it: self-use covers the whole load, the EV included,
+          which drained #881's battery to its floor. So a zero-rate period
+          gets IDLE's battery_first hold (#466), the same "no discharge" a
+          zero load_first ceiling already means on TOU. Like IDLE, it
+          releases at the reserve floor (#592): there is nothing left there
+          to hold.
         - grid_charge=False, rate=0, block=True   -> 0%, remote control ENABLED
           (SOLAR_EXPORT). Per the Growatt VPP protocol (V2.01, section 3.5),
           vpp_power<=0 with remote control enabled selects "grid first"
@@ -492,6 +504,8 @@ class SolaxModbusGrowattController(GrowattMinController):
             return charge_rate, True
         if strategic_intent == "LOAD_SUPPORT":
             if load_tracking_active:
+                return VPP_HOLD_POWER_PCT, True
+            if discharge_rate == 0 and not at_reserve_floor:
                 return VPP_HOLD_POWER_PCT, True
             return 0, False
         if discharge_rate == 0:

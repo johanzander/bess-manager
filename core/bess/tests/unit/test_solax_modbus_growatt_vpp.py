@@ -207,14 +207,16 @@ class TestIntentToVpp:
         assert power_pct == 0
         assert enabled is False
 
-    def test_load_support_releases_vpp_control_at_zero_discharge_rate(self, controller):
-        """PR #414 review: LOAD_SUPPORT's INTENT_TO_CONTROL charge_rate is 0
-        (same as BATTERY_EXPORT/SOLAR_EXPORT), so block_passive_charging is
-        True for it in production (compute_rates_for_period). Whenever the
-        DP plan calls for no net discharge, or discharge-inhibit forces the
-        rate to 0, discharge_rate is 0 too -- both common, not edge cases.
-        The discharge_rate==0 branch must not take priority over the
-        LOAD_SUPPORT release for real block_passive_charging=True callers.
+    def test_load_support_at_zero_discharge_rate_holds_battery_first(
+        self, controller: SolaxModbusGrowattController
+    ) -> None:
+        """#881: a zero rate (the discharge inhibit, typically) means "do not
+        discharge", so LOAD_SUPPORT must hold rather than release -- a release
+        hands the load, EV included, to self-use. The hold is battery_first
+        (+1%), never grid_first (0%, enabled): per #118 grid_first still
+        serves load from the battery. That second half is PR #414's original
+        point -- LOAD_SUPPORT's block_passive_charging is True in production,
+        so the generic rate=0 branch must not catch it.
         """
         power_pct, enabled = controller._intent_to_vpp(
             grid_charge=False,
@@ -222,8 +224,21 @@ class TestIntentToVpp:
             block_passive_charging=True,
             strategic_intent="LOAD_SUPPORT",
         )
-        assert power_pct == 0
-        assert enabled is False
+        assert (power_pct, enabled) == (1, True)
+
+    def test_load_support_at_zero_discharge_rate_releases_at_the_floor(
+        self, controller: SolaxModbusGrowattController
+    ) -> None:
+        """At the reserve floor there is nothing left to hold, so the zero-rate
+        hold releases, exactly as IDLE's does (#592)."""
+        power_pct, enabled = controller._intent_to_vpp(
+            grid_charge=False,
+            discharge_rate=0,
+            block_passive_charging=True,
+            strategic_intent="LOAD_SUPPORT",
+            at_reserve_floor=True,
+        )
+        assert (power_pct, enabled) == (0, False)
 
 
 class TestApplyPeriodVpp:

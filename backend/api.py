@@ -1277,7 +1277,13 @@ async def get_inverter_status():
         if battery_soc is None:
             raise ValueError("battery_soc sensor is unavailable")
         battery_soe = (battery_soc / 100.0) * battery_settings.total_capacity
-        grid_charge_enabled = controller.grid_charge_enabled()
+        # Gate on the entity, not CONTROL_MODEL: Huawei is period_list yet has
+        # a grid-charge entity, while Solis/SPH/native SolaX have none (#885).
+        grid_charge_enabled = (
+            controller.grid_charge_enabled()
+            if controller.is_sensor_configured("grid_charge")
+            else None
+        )
         charge_power_rate = controller.get_charging_power_rate()
         discharge_power_rate = controller.get_discharging_power_rate()
         battery_charge_power = controller.get_battery_charge_power()

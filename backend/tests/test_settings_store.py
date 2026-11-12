@@ -607,8 +607,8 @@ class TestSchemaMigration:
         assert price["use_actual_price"] is False
 
     def test_electricity_price_missing_grid_tariff_gets_empty_profiles(
-        self, tmp_path, monkeypatch
-    ):
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Configs written before #861 start up with no time-of-day tariff."""
         store = self._store_with_data(
             tmp_path,

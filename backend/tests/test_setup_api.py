@@ -558,7 +558,9 @@ class TestSetupComplete:
         assert elec["spot_multiplier"] == 1.0175
         assert elec["export_spot_multiplier"] == 1.018
 
-    def test_grid_tariff_profiles_persisted_and_sent_live(self, complete_controller):
+    def test_grid_tariff_profiles_persisted_and_sent_live(
+        self, complete_controller: MagicMock
+    ) -> None:
         """The wizard shares the pricing form, so its tariff must not be dropped (#861)."""
         winter = [0.45] * 24
         summer = [0.23] * 24
@@ -579,7 +581,9 @@ class TestSetupComplete:
         ]
         assert price_calls[0][0][0]["price"]["grid_tariff_summer_hourly"] == summer
 
-    def test_malformed_grid_tariff_rejected(self, complete_controller):
+    def test_malformed_grid_tariff_rejected(
+        self, complete_controller: MagicMock
+    ) -> None:
         payload = _full_wizard_payload(gridTariffHourly=[0.45] * 23)
         resp = _client.post("/api/setup/complete", json=payload)
         assert resp.status_code == 422

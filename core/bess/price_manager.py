@@ -542,7 +542,8 @@ class PriceManager:
         """Per-period grid tariff for target_date's real (DST-aware) periods.
 
         The summer profile, when set, replaces the year-round one in
-        GRID_TARIFF_SUMMER_MONTHS. With no profile every period is 0.0.
+        GRID_TARIFF_SUMMER_MONTHS. With no profile the list is empty: no
+        period carries a fee, however many prices the source returned.
         """
         profile = self.grid_tariff_hourly
         if (
@@ -551,7 +552,7 @@ class PriceManager:
         ):
             profile = self.grid_tariff_summer_hourly
         if not profile:
-            return [0.0] * time_utils.get_period_count(target_date)
+            return []
         quarterly = [fee for fee in profile for _ in range(time_utils.PERIODS_PER_HOUR)]
         return time_utils.expand_wall_clock_profile(quarterly, target_date)
 
@@ -645,7 +646,9 @@ class PriceManager:
                 buy_price = (
                     price
                     if self.price_source.prices_are_final
-                    else self._calculate_buy_price(price, grid_tariff[index])
+                    else self._calculate_buy_price(
+                        price, grid_tariff[index] if grid_tariff else 0.0
+                    )
                 )
 
                 price_entry = {

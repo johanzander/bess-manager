@@ -20,18 +20,132 @@ The scenario name is derived from the debug log filename timestamp.
 """
 
 import argparse
+import importlib.util
 import json
 import re
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 # Allow importing from repo root when run as a script
 repo_root = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
-from core.bess.tests.debug_log_parser import parse_debug_log  # noqa: E402
+from core.bess.consumption_overlay import (  # noqa: E402
+    apply_overlay,
+    parse_overlay_blocks,
+    period_starts_from,
+)
+from core.bess.tests.debug_log_parser import (  # noqa: E402
+    DebugLogData,
+    parse_debug_log,
+)
+
+
+def _load_replay_snapshot_deltas() -> Callable[..., Any]:
+    """Import replay_snapshot_deltas from scripts/extract_decision_evidence.py.
+
+    That script is not an importable package, so it is loaded by path -- the
+    same way its own tests load it.
+    """
+    path = repo_root / "scripts" / "extract_decision_evidence.py"
+    spec = importlib.util.spec_from_file_location("extract_decision_evidence", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    result: Callable[..., Any] = module.replay_snapshot_deltas
+    return result
+
+
+def rebuild_expired_overlay_blocks(log: DebugLogData, sensors: dict) -> int:
+    """Restore planned loads that had expired from the overlay entity by export (#882).
+
+    A planned-consumption template typically drops blocks once they pass, so the
+    exported entity no longer declares the load for periods that had already
+    elapsed. Replaying the bundle at an earlier time (``mock-run.sh <s> HH:MM``)
+    would then plan those periods without the load the optimizer actually had.
+
+    For every period before the export's optimization period, the last state the
+    Prediction Snapshots recorded for it carries the overlay the optimizer used
+    (``consumption_breakdown.planned``). Whatever the exported blocks do not
+    already account for is appended as one ``add`` block for that period, so
+    the replayed entity composes -- through the real ``apply_overlay`` -- to the
+    planned value. Periods from the export onward are left exactly as exported.
+
+    Args:
+        log: The parsed debug log.
+        sensors: The scenario's entity states; the overlay entity's ``blocks``
+            attribute is extended in place.
+
+    Returns:
+        The number of blocks appended.
+
+    """
+    entity_id = (
+        log.addon_options.get("sensors", {})
+        .get("shared", {})
+        .get("consumption_overlay")
+    )
+    if not entity_id:
+        return 0
+    if entity_id not in sensors:
+        print(
+            f"Note: overlay entity {entity_id} is configured but absent from the "
+            "entity snapshot -- expired planned loads not rebuilt."
+        )
+        return 0
+    if not log.prediction_snapshots:
+        print(
+            "Note: no Prediction Snapshots in log -- planned loads that expired "
+            "before export are not rebuilt; earlier-time replays will lack them."
+        )
+        return 0
+
+    tz = ZoneInfo(log.timezone or "UTC")
+    export_dt = datetime.fromisoformat(log.system_info["export_timestamp"]).astimezone(
+        tz
+    )
+    day_start = export_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    expired = log.optimization_period
+    starts = period_starts_from(day_start, expired + 1)
+
+    attributes = sensors[entity_id]["attributes"]
+    exported_blocks = parse_overlay_blocks(attributes["blocks"])
+    replay_snapshot_deltas = _load_replay_snapshot_deltas()
+
+    added = []
+    for period in range(expired):
+        states = replay_snapshot_deltas(log.prediction_snapshots, period) or []
+        breakdown = states[-1].get("consumption_breakdown") if states else None
+        if breakdown is None:
+            continue
+        residual = breakdown["residual"]
+        covered = (
+            apply_overlay([residual], [starts[period]], exported_blocks).values[0]
+            - residual
+        )
+        missing = breakdown["planned"] - covered
+        if abs(missing) < 1e-9:
+            continue
+        added.append(
+            {
+                "start": starts[period].isoformat(),
+                "end": starts[period + 1].isoformat(),
+                "energy_kwh": missing,
+                "mode": "add",
+            }
+        )
+
+    attributes["blocks"] = list(attributes["blocks"]) + added
+    if added:
+        print(
+            f"Rebuilt {len(added)} planned-load block(s) on {entity_id} that had "
+            f"expired before export ({sum(b['energy_kwh'] for b in added):.2f} kWh)."
+        )
+    return len(added)
 
 
 def _quarterly_to_hourly_detail(quarterly: list[float], date_str: str) -> list[dict]:
@@ -211,6 +325,7 @@ def generate_scenario(
         # Every entity BESS reads is present with the exact value it had on the user's HA.
         sensors: dict = log.entity_snapshot
         print(f"Entity snapshot loaded: {len(sensors)} entities (verbatim replay).")
+        rebuild_expired_overlay_blocks(log, sensors)
     else:
         # Legacy fallback for debug logs that predate entity snapshot capture.
         # Synthesises sensor values from processed data — approximate, not exact.

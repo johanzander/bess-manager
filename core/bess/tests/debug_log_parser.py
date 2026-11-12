@@ -60,6 +60,7 @@ class DebugLogData:
     inverter_tou_segments: list[dict] = field(default_factory=list)
     historical_periods: list[dict] = field(default_factory=list)
     last_schedule: dict = field(default_factory=dict)
+    prediction_snapshots: list[dict] = field(default_factory=list)
 
     @property
     def timezone(self) -> str:
@@ -143,6 +144,9 @@ def parse_debug_log(path: str) -> DebugLogData:
             elif isinstance(parsed, dict):
                 # Some versions wrap the list in a dict
                 result.historical_periods = list(parsed.values())
+        elif section == _SECTION_PREDICTION_SNAPSHOTS:
+            if isinstance(parsed, list):
+                result.prediction_snapshots = parsed
         elif (
             section in (_SECTION_SCHEDULES, _SECTION_RAW_SCHEDULE)
             and not result.last_schedule

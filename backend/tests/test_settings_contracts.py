@@ -101,6 +101,8 @@ def _valid_options() -> dict:
             "spot_multiplier": 1.0175,
             "export_spot_multiplier": 1.018,
             "use_actual_price": False,
+            "grid_tariff_hourly": [0.45] * 24,
+            "grid_tariff_summer_hourly": [0.23] * 24,
         },
     }
 

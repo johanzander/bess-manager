@@ -578,6 +578,8 @@ class SettingsStore:
                 "spot_multiplier": SPOT_MULTIPLIER,
                 "export_spot_multiplier": EXPORT_SPOT_MULTIPLIER,
                 "use_actual_price": USE_ACTUAL_PRICE,
+                "grid_tariff_hourly": [],
+                "grid_tariff_summer_hourly": [],
             },
             "energy_provider": {
                 "provider": "nordpool_official",
@@ -719,7 +721,8 @@ class SettingsStore:
             if changed:
                 self.data["home"] = home
 
-        # --- electricity_price: spot_multiplier / export_spot_multiplier / use_actual_price ---
+        # --- electricity_price: spot_multiplier / export_spot_multiplier /
+        #     use_actual_price / grid_tariff_hourly / grid_tariff_summer_hourly ---
         # Added after these fields were introduced on PriceSettings; without a
         # default, build_system_settings() would raise ValueError at startup
         # for any config written before this migration existed.
@@ -729,6 +732,8 @@ class SettingsStore:
                 ("spot_multiplier", SPOT_MULTIPLIER),
                 ("export_spot_multiplier", EXPORT_SPOT_MULTIPLIER),
                 ("use_actual_price", USE_ACTUAL_PRICE),
+                ("grid_tariff_hourly", []),
+                ("grid_tariff_summer_hourly", []),
             ):
                 if key not in price:
                     price[key] = default

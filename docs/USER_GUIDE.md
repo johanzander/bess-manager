@@ -302,8 +302,10 @@ Once BESS has the raw spot price from your provider, it applies your configured 
 
 The formulas:
 
-- **Buy price** = (spot + markup) × VAT multiplier + additional costs
+- **Buy price** = (spot + markup) × VAT multiplier + additional costs + hourly grid tariff
 - **Sell price** = spot + export compensation
+
+**Time-of-day grid tariff** (optional): if your grid operator charges a transport fee that varies by hour — e.g. Danish DSOs such as Radius, with low/high/peak bands — enable **Hourly grid tariff** under Settings → Electricity Pricing and enter the fee for each hour (per kWh, including VAT). Turn on **Separate summer and winter tariffs** to enter one profile for October–March and another for April–September. Remove the grid fee from Additional Costs so it is not counted twice; keep only the fixed parts (such as electricity tax) there.
 
 For Octopus Energy, prices are already final (VAT-inclusive, GBP/kWh). Markup, VAT, and Additional Costs are not applied — only Export Compensation is used.
 

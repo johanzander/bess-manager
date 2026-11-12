@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Time-of-day grid tariffs** — enter an hourly grid transport fee, optionally with separate summer and winter profiles, and BESS prices it into every buy decision. ([#861](https://github.com/johanzander/bess-manager/issues/861))
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 

@@ -14,7 +14,10 @@ from . import time_utils
 from .calendar_windows import CalendarWindow
 from .exceptions import PriceDataUnavailableError, SystemConfigurationError
 from .free_import_overlay import apply_free_import_windows
-from .settings import FREE_IMPORT_PRICE
+from .settings import (
+    FREE_IMPORT_PRICE,
+    GRID_TARIFF_SUMMER_MONTHS,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -438,6 +441,8 @@ class PriceManager:
         area: str,
         spot_multiplier: float = 1.0,
         export_spot_multiplier: float = 1.0,
+        grid_tariff_hourly: list[float] | None = None,
+        grid_tariff_summer_hourly: list[float] | None = None,
         free_import_price: float = FREE_IMPORT_PRICE,
         free_import_window_source: (
             Callable[[datetime, datetime], list[CalendarWindow]] | None
@@ -457,6 +462,11 @@ class PriceManager:
             area: Price area code (e.g. "SE4", "NO1", "DK1")
             spot_multiplier: Multiplicative factor on spot buy price (1.0 = no adjustment)
             export_spot_multiplier: Multiplicative factor on spot sell price
+            grid_tariff_hourly: 24 hourly grid fees (VAT-incl.) added to the
+                buy price by local hour; empty/None = no time-of-day tariff
+            grid_tariff_summer_hourly: 24 hourly grid fees used instead of
+                grid_tariff_hourly in GRID_TARIFF_SUMMER_MONTHS; empty/None =
+                grid_tariff_hourly applies all year
             free_import_price: Buy price for periods inside a free-import window
             free_import_window_source: Returns the free-import windows
                 overlapping ``[start, end)``; None when no window source exists
@@ -475,6 +485,8 @@ class PriceManager:
         self.area = area
         self.spot_multiplier = spot_multiplier
         self.export_spot_multiplier = export_spot_multiplier
+        self.grid_tariff_hourly = list(grid_tariff_hourly or [])
+        self.grid_tariff_summer_hourly = list(grid_tariff_summer_hourly or [])
         self.free_import_price = free_import_price
         self._free_import_window_source = free_import_window_source
         self._power_down_window_source = power_down_window_source
@@ -511,11 +523,12 @@ class PriceManager:
         self._tomorrow_prices = None
         self._tomorrow_date = None
 
-    def _calculate_buy_price(self, base_price: float) -> float:
+    def _calculate_buy_price(self, base_price: float, grid_tariff: float) -> float:
         """Calculate retail buy price from Nordpool base price.
 
         Args:
             base_price: Raw Nordpool price (VAT-exclusive)
+            grid_tariff: Time-of-day grid fee for this period (VAT-inclusive)
 
         Returns:
             Calculated retail price
@@ -523,7 +536,24 @@ class PriceManager:
         result = (
             base_price * self.spot_multiplier + self.markup_rate
         ) * self.vat_multiplier
-        return result + self.additional_costs
+        return result + self.additional_costs + grid_tariff
+
+    def _grid_tariff_for_date(self, target_date: date) -> list[float]:
+        """Per-period grid tariff for target_date's real (DST-aware) periods.
+
+        The summer profile, when set, replaces the year-round one in
+        GRID_TARIFF_SUMMER_MONTHS. With no profile every period is 0.0.
+        """
+        profile = self.grid_tariff_hourly
+        if (
+            self.grid_tariff_summer_hourly
+            and target_date.month in GRID_TARIFF_SUMMER_MONTHS
+        ):
+            profile = self.grid_tariff_summer_hourly
+        if not profile:
+            return [0.0] * time_utils.get_period_count(target_date)
+        quarterly = [fee for fee in profile for _ in range(time_utils.PERIODS_PER_HOUR)]
+        return time_utils.expand_wall_clock_profile(quarterly, target_date)
 
     def _calculate_sell_price(self, base_price: float) -> float:
         """Calculate sell-back price from Nordpool base price.
@@ -602,6 +632,8 @@ class PriceManager:
             base_timestamp = datetime.combine(target_date, datetime.min.time())
             period_hours = self.price_source.period_duration_hours
 
+            grid_tariff = self._grid_tariff_for_date(target_date)
+
             for index, price in enumerate(raw_prices):
                 timestamp = base_timestamp + timedelta(hours=index * period_hours)
 
@@ -613,7 +645,7 @@ class PriceManager:
                 buy_price = (
                     price
                     if self.price_source.prices_are_final
-                    else self._calculate_buy_price(price)
+                    else self._calculate_buy_price(price, grid_tariff[index])
                 )
 
                 price_entry = {
@@ -840,8 +872,14 @@ class PriceManager:
             List of buy prices
         """
         if raw_prices is not None:
-            # Calculate buy prices directly from the provided raw prices
-            return [self._calculate_buy_price(price) for price in raw_prices]
+            # Calculate buy prices directly from the provided raw prices.
+            # They carry no date, so a time-of-day tariff cannot be placed.
+            if self.grid_tariff_hourly:
+                raise ValueError(
+                    "raw_prices cannot be priced with a grid tariff profile; "
+                    "pass target_date instead"
+                )
+            return [self._calculate_buy_price(price, 0.0) for price in raw_prices]
         else:
             # Get buy prices from the price data for the specified date
             price_data = self.get_price_data(target_date)

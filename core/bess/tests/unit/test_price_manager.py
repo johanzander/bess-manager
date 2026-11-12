@@ -1078,3 +1078,15 @@ def test_raw_price_buy_path_refuses_a_configured_grid_tariff() -> None:
         assert "grid tariff" in str(e)
     else:
         raise AssertionError("expected ValueError")
+
+
+def test_grid_tariff_tolerates_a_source_returning_more_than_a_day() -> None:
+    """Extended-horizon sources can return past midnight; the tariff must not
+    assume the list is exactly one day long."""
+    pm = _tariff_price_manager(MockSource([0.5] * 150), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 1, 14))
+
+    assert len(entries) == 150
+    # Period 96 + 8*4 is 08:00 the next day -- the high-band fee.
+    assert entries[96 + 8 * 4]["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[8]

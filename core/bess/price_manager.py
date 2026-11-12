@@ -538,23 +538,20 @@ class PriceManager:
         ) * self.vat_multiplier
         return result + self.additional_costs + grid_tariff
 
-    def _grid_tariff_for_date(self, target_date: date) -> list[float]:
-        """Per-period grid tariff for target_date's real (DST-aware) periods.
+    def _grid_tariff_for_period(self, target_date: date, period: int) -> float:
+        """Grid tariff for a period of target_date, by its local clock hour.
 
-        The summer profile, when set, replaces the year-round one in
-        GRID_TARIFF_SUMMER_MONTHS. With no profile the list is empty: no
-        period carries a fee, however many prices the source returned.
+        period_start() counts real elapsed time, so on a DST day each period
+        lands on its true wall-clock hour. The summer profile, when set,
+        replaces the year-round one in GRID_TARIFF_SUMMER_MONTHS (by the
+        period's own date). With no profile the fee is 0.0.
         """
-        profile = self.grid_tariff_hourly
-        if (
-            self.grid_tariff_summer_hourly
-            and target_date.month in GRID_TARIFF_SUMMER_MONTHS
-        ):
-            profile = self.grid_tariff_summer_hourly
-        if not profile:
-            return []
-        quarterly = [fee for fee in profile for _ in range(time_utils.PERIODS_PER_HOUR)]
-        return time_utils.expand_wall_clock_profile(quarterly, target_date)
+        if not self.grid_tariff_hourly:
+            return 0.0
+        start = time_utils.period_start(target_date, period)
+        if self.grid_tariff_summer_hourly and start.month in GRID_TARIFF_SUMMER_MONTHS:
+            return self.grid_tariff_summer_hourly[start.hour]
+        return self.grid_tariff_hourly[start.hour]
 
     def _calculate_sell_price(self, base_price: float) -> float:
         """Calculate sell-back price from Nordpool base price.
@@ -633,8 +630,6 @@ class PriceManager:
             base_timestamp = datetime.combine(target_date, datetime.min.time())
             period_hours = self.price_source.period_duration_hours
 
-            grid_tariff = self._grid_tariff_for_date(target_date)
-
             for index, price in enumerate(raw_prices):
                 timestamp = base_timestamp + timedelta(hours=index * period_hours)
 
@@ -647,7 +642,7 @@ class PriceManager:
                     price
                     if self.price_source.prices_are_final
                     else self._calculate_buy_price(
-                        price, grid_tariff[index] if grid_tariff else 0.0
+                        price, self._grid_tariff_for_period(target_date, index)
                     )
                 )
 

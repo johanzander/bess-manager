@@ -1,6 +1,13 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Solis: more hold periods compete for the six discharge slots**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/solis_modbus_controller.py`
+
+**Description**: Since #884 the plan holds instead of covering part of the load, so a Solis day can need more hold blocks. On the #869 bundle the whole horizon went from 4 to 8, today's part fits easily, but a day with more than six would drop holds to Self Use and drain the battery against the plan.
+
+
 ### **Fuse monitor: first grid-charge tick can overshoot for one minute**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/power_monitor.py`

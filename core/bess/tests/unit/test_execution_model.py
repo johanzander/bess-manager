@@ -21,6 +21,9 @@ from core.bess.execution_model import (
     DISCHARGE_RATE_ABSENT,
     DISCHARGE_RATE_CEILING,
     DISCHARGE_RATE_TARGET,
+    LOAD_SUPPORT_CEILING,
+    LOAD_SUPPORT_UNMODELLED,
+    LOAD_SUPPORT_WHOLE_LOAD,
     PlatformCapabilities,
     intra_period_discharge_gate,
 )
@@ -100,11 +103,24 @@ class TestDischargeRateSemantics:
         The next period-list controller that repeats it must fail at
         construction, not plan an off-lattice delivery on hardware with no
         per-period rate."""
-        with pytest.raises(ValueError, match="load_support_delivers_exact_cover"):
+        with pytest.raises(ValueError, match="load_support_delivery"):
             PlatformCapabilities(
                 discharge_rate_semantics=DISCHARGE_RATE_ABSENT,
-                load_support_delivers_exact_cover=True,
+                load_support_delivery=LOAD_SUPPORT_CEILING,
             )
+
+    def test_no_rate_at_all_may_still_deliver_the_whole_load(self) -> None:
+        """Solis (#884): no per-period rate, but Self Use's delivery is
+        known exactly -- the whole deficit -- so this pair is legitimate."""
+        caps = PlatformCapabilities(
+            discharge_rate_semantics=DISCHARGE_RATE_ABSENT,
+            load_support_delivery=LOAD_SUPPORT_WHOLE_LOAD,
+        )
+        assert caps.load_support_delivery == LOAD_SUPPORT_WHOLE_LOAD
+
+    def test_unknown_load_support_delivery_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="load_support_delivery"):
+            PlatformCapabilities(load_support_delivery="exact")
 
     def test_every_shipped_controller_satisfies_the_invariant(self):
         """The declarations themselves, not a constructed pair -- a controller
@@ -241,7 +257,7 @@ def test_cover_candidate_is_not_planned_where_the_cover_is_not_delivered(semanti
     plan = _plan_with(
         PlatformCapabilities(
             discharge_rate_semantics=semantics,
-            load_support_delivers_exact_cover=False,
+            load_support_delivery=LOAD_SUPPORT_UNMODELLED,
         )
     )
     first = plan.period_data[0]
@@ -266,7 +282,7 @@ def test_cover_candidate_survives_where_load_support_load_follows_without_a_ceil
     """
     caps = PlatformCapabilities(
         discharge_rate_semantics=DISCHARGE_RATE_TARGET,
-        load_support_delivers_exact_cover=True,
+        load_support_delivery=LOAD_SUPPORT_CEILING,
         control_model="vpp_power",
     )
     assert caps.discharge_rate_is_load_following is False
@@ -287,7 +303,7 @@ def test_solax_modbus_vpp_declares_the_two_capabilities_differently():
         SolaxModbusGrowattController(_settings(), control_mode="vpp"), _settings()
     )
     assert caps.discharge_rate_is_load_following is False  # forced vpp_power
-    assert caps.load_support_delivers_exact_cover is True  # #413 release
+    assert caps.load_support_delivery == LOAD_SUPPORT_CEILING  # #413 release
 
 
 def test_intent_to_mode_cannot_be_mutated_through_a_capability():

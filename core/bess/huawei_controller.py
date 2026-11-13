@@ -25,6 +25,7 @@ from typing import ClassVar
 from . import time_utils
 from .dp_schedule import DPSchedule
 from .exceptions import SystemConfigurationError
+from .execution_model import LOAD_SUPPORT_UNMODELLED
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
@@ -107,7 +108,7 @@ class HuaweiController(InverterController):
 
     # A discharge period is a time slot, not a rate -- there is no per-period
     # control that could deliver a partial load cover as planned.
-    load_support_delivers_exact_cover: ClassVar[bool] = False
+    load_support_delivery: ClassVar[str] = LOAD_SUPPORT_UNMODELLED
 
     CONTROL_MODEL: ClassVar[str] = "period_list"
 

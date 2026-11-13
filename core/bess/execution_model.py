@@ -55,6 +55,30 @@ DISCHARGE_RATE_ABSENT = "absent"
 """There is no per-period discharge rate at all -- behaviour is discrete
 charge/discharge time slots. Growatt SPH, Solis, Huawei (`period_list`)."""
 
+# ── LOAD_SUPPORT delivery (#884) ─────────────────────────────────────────────
+#
+# A second question, about the *intent* rather than the rate register: when
+# the plan says LOAD_SUPPORT, how much of the house deficit does the battery
+# actually deliver? It decides which load-cover discharges the optimizer may
+# plan (`action_selector._residual_cover_p` / `_discharge_is_partial_cover`).
+# One value per platform, not a pair of booleans: the answers are mutually
+# exclusive, and two flags would let a controller declare both.
+LOAD_SUPPORT_CEILING = "ceiling"
+"""Delivered as `min(plan, actual load)`: any cover up to the deficit is exact,
+so the off-lattice exact-cover candidate is offered. Growatt MIN (TOU),
+solax-modbus Growatt in both modes (VPP via #413's release to self-use)."""
+
+LOAD_SUPPORT_WHOLE_LOAD = "whole_load"
+"""The inverter's own self-consumption mode serves the period: it covers the
+*whole* deficit, up to the battery's maximum discharge power, and cannot be
+told to cover less. Only full cover or a hold is deliverable, so a partial
+cover is excluded from the plan. Solis since #872 (Self Use)."""
+
+LOAD_SUPPORT_UNMODELLED = "unmodelled"
+"""No exact model of the delivery: the plan keeps the lattice candidates and
+gets no exact-cover candidate (#580). Native SolaX (a forced power), Growatt
+SPH and Huawei (no hardware evidence of what LOAD_SUPPORT delivers)."""
+
 # ── Mode vocabulary ──────────────────────────────────────────────────────────
 #
 # Canonical intent -> battery mode map, shared by every TOU-register platform.
@@ -272,18 +296,24 @@ class PlatformCapabilities:
         default and a platform's explicit declaration stay distinguishable.
       `discharge_rate_semantics` -- one of the three constants above. This is
         about the *rate register*: what a number written into it does.
-      `load_support_delivers_exact_cover` -- a different question, with a
-        different answer on one platform: is a planned LOAD_SUPPORT discharge
-        delivered as `min(plan, actual load)`? That is what the off-lattice
-        exact-cover candidate needs (`action_selector._residual_cover_p`).
+      `load_support_delivery` -- a different question, with a different
+        answer on two platforms: how much of the deficit does a planned
+        LOAD_SUPPORT period actually deliver? One of the three
+        `LOAD_SUPPORT_*` constants above; it decides which load-cover
+        discharges may be planned (`action_selector._residual_cover_p`,
+        `action_selector._discharge_is_partial_cover`).
         On solax-modbus Growatt in VPP mode the rate register is a forced
         power -- so `discharge_rate_is_load_following` is False -- but
         LOAD_SUPPORT never writes a rate there: #413 disables remote control
         for that intent and hands the period back to the inverter's own
         load-following self-use (`_intent_to_vpp`). A cover plan is delivered
-        exactly, so this stays True. Native SolaX never received #413 (gap
+        exactly, so this is `ceiling`. Native SolaX never received #413 (gap
         note in `solax_controller._vpp_display_state`), so its LOAD_SUPPORT
-        really is a forced `-(rate% x max_discharge)` and it is False.
+        really is a forced `-(rate% x max_discharge)` and it is
+        `unmodelled`. Solis has no rate at all, yet its delivery *is* known
+        exactly -- Self Use covers the whole deficit (#872) -- so it is
+        `whole_load`: the rate-register answer alone could not tell it apart
+        from SPH or Huawei (#884).
       `control_model` -- the controller's `CONTROL_MODEL`, carried so 4b can
         derive the command without reaching back to a controller class.
       `intent_to_mode` -- the mode vocabulary (read-only).
@@ -295,7 +325,7 @@ class PlatformCapabilities:
 
     discharge_resolution_kw: float | None = None
     discharge_rate_semantics: str = DISCHARGE_RATE_CEILING
-    load_support_delivers_exact_cover: bool = True
+    load_support_delivery: str = LOAD_SUPPORT_CEILING
     control_model: str = "tou_register"
     intent_to_mode: Mapping[str, str] = field(default_factory=lambda: INTENT_TO_MODE)
 
@@ -309,11 +339,21 @@ class PlatformCapabilities:
                 f"Unknown discharge_rate_semantics: "
                 f"{self.discharge_rate_semantics!r}"
             )
+        if self.load_support_delivery not in (
+            LOAD_SUPPORT_CEILING,
+            LOAD_SUPPORT_WHOLE_LOAD,
+            LOAD_SUPPORT_UNMODELLED,
+        ):
+            raise ValueError(
+                f"Unknown load_support_delivery: {self.load_support_delivery!r}"
+            )
         # A platform with no per-period discharge rate cannot deliver a
         # partial load cover -- there is nothing to command it with. Every
-        # other combination is legitimate, including `target` + exact cover
-        # (solax-modbus VPP: forced rate register, but #413 makes
-        # LOAD_SUPPORT release the period to native load-following).
+        # other combination is legitimate, including `target` + ceiling
+        # delivery (solax-modbus VPP: forced rate register, but #413 makes
+        # LOAD_SUPPORT release the period to native load-following), and
+        # `absent` + whole-load delivery (Solis: no rate, Self Use covers it
+        # all).
         #
         # Enforced here rather than trusted to the controllers, because this
         # PR exists partly because one of those declarations was wrong: Solis
@@ -324,10 +364,10 @@ class PlatformCapabilities:
         # #282/#580 shape this phase closes.
         if (
             self.discharge_rate_semantics == DISCHARGE_RATE_ABSENT
-            and self.load_support_delivers_exact_cover
+            and self.load_support_delivery == LOAD_SUPPORT_CEILING
         ):
             raise ValueError(
-                "load_support_delivers_exact_cover cannot be True when "
+                f"load_support_delivery cannot be {LOAD_SUPPORT_CEILING!r} when "
                 f"discharge_rate_semantics is {DISCHARGE_RATE_ABSENT!r}: a "
                 "platform with no per-period discharge rate has nothing to "
                 "deliver a partial load cover with"
@@ -344,7 +384,7 @@ class PlatformCapabilities:
         there is no rate to interpret as either.
 
         It is **not** the question the exact-cover candidate asks; see
-        `load_support_delivers_exact_cover`. The two differ on solax-modbus
+        `load_support_delivery`. The two differ on solax-modbus
         Growatt in VPP mode, and conflating them was caught in review.
         """
         return self.discharge_rate_semantics == DISCHARGE_RATE_CEILING
@@ -427,9 +467,7 @@ class PlatformCapabilities:
                 battery_settings.max_discharge_power_kw
             ),
             discharge_rate_semantics=semantics,
-            load_support_delivers_exact_cover=(
-                controller.load_support_delivers_exact_cover
-            ),
+            load_support_delivery=controller.load_support_delivery,
             control_model=controller.CONTROL_MODEL,
             intent_to_mode=controller.INTENT_TO_MODE,
         )

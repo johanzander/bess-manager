@@ -46,6 +46,7 @@ from typing import Any, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .execution_model import LOAD_SUPPORT_WHOLE_LOAD
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 from .strategic_intent import idle_hold_releasable
@@ -66,15 +67,19 @@ class SolisModbusController(InverterController):
     # window per slot, same limitation as SPH.
     supports_charge_rate_control: ClassVar[bool] = False
 
-    # Both False for the same reason as SPH and Huawei: a Solis discharge
-    # slot is a time window, with no per-period rate to interpret as a
-    # ceiling and none to deliver a partial load cover with. Previously left
-    # to inherit the base class's True, which disagreed with this
-    # platform's own `period_list` control model -- caught in review of
+    # False for the same reason as SPH and Huawei: a Solis discharge slot is
+    # a time window, with no per-period rate to interpret as a ceiling.
+    # Previously left to inherit the base class's True, which disagreed with
+    # this platform's own `period_list` control model -- caught in review of
     # Phase 4a, where the optimizer and the hardware-write path would
     # otherwise have read the same platform two different ways.
     discharge_rate_is_load_following: ClassVar[bool] = False
-    load_support_delivers_exact_cover: ClassVar[bool] = False
+
+    # LOAD_SUPPORT opens no slot (#872), so Self Use runs the period and
+    # covers the whole house deficit from the battery, up to its maximum
+    # discharge power, until min SOC. It cannot cover part of it: the plan
+    # may only choose that whole cover or a hold (#884).
+    load_support_delivery: ClassVar[str] = LOAD_SUPPORT_WHOLE_LOAD
 
     CONTROL_MODEL: ClassVar[str] = "period_list"
 

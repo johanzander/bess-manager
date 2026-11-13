@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .execution_model import LOAD_SUPPORT_UNMODELLED
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
@@ -62,7 +63,7 @@ class SolaxController(InverterController):
     # received the #413 remote-control release that makes solax_modbus's VPP
     # mode load-follow that intent (see _vpp_display_state's gap note), so a
     # planned partial cover is NOT delivered as min(plan, actual load).
-    load_support_delivers_exact_cover: ClassVar[bool] = False
+    load_support_delivery: ClassVar[str] = LOAD_SUPPORT_UNMODELLED
 
     CONTROL_MODEL: ClassVar[str] = "vpp_power"
 

@@ -17,7 +17,8 @@ and `pwl_window_dp._pwl_candidate_values_at` -- keep their own numpy
 evaluators for speed (P1 permits this explicitly: they estimate V over a
 whole state grid at once and never emit an action). They consume this
 module's candidate-space definitions -- `_residual_cover_p`,
-`_discharge_is_unexecutable`, `_solar_export_bypass_is_unexecutable` -- and
+`_discharge_is_unexecutable`, `_discharge_is_partial_cover`,
+`_solar_export_bypass_is_unexecutable` -- and
 the platform lattice from
 `execution_model.PlatformCapabilities` rather than restating them, so the
 action space itself has one definition even where the evaluation loop does
@@ -46,6 +47,8 @@ from core.bess.dp_constants import (
 from core.bess.execution_model import (
     DEFAULT_CAPABILITIES,
     LATTICE_EPS,
+    LOAD_SUPPORT_CEILING,
+    LOAD_SUPPORT_WHOLE_LOAD,
     PlatformCapabilities,
 )
 from core.bess.models import GRID_FLOW_RESOLUTION_KWH
@@ -172,6 +175,84 @@ def _solar_export_bypass_is_unexecutable(
     return grid_exported <= FLOW_NOISE_FLOOR_KWH
 
 
+def _whole_load_cover_p(
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+    battery_settings: BatterySettings,
+) -> float:
+    """The discharge (kW) a self-consumption mode delivers when it runs the
+    period: the whole net-load deficit, but no more than the battery's
+    maximum discharge power or the AC headroom the period's solar leaves
+    (#884). Zero when there is no deficit.
+
+    It is what `LOAD_SUPPORT_WHOLE_LOAD` hardware (Solis Self Use, #872)
+    delivers for any LOAD_SUPPORT plan, so it is both that platform's one
+    cover candidate (`_residual_cover_p`) and the bound below which a
+    discharge is a partial cover it cannot deliver
+    (`_discharge_is_partial_cover`). One derivation for both, so the
+    candidate can never itself fall inside the excluded band.
+
+    Not capped by the energy the battery holds: that bound is per state, and
+    the backward passes apply it per state already (`cover_p <= p_max`). The
+    consequence, accepted in #884, is that a battery too empty to cover a
+    whole period is planned to hold rather than to drain its last fraction
+    of a period -- a hold this platform does deliver.
+    """
+    deficit_kw = (home_consumption - solar_production) / dt
+    if deficit_kw <= 0.0:
+        return 0.0
+    ac_cap_kwh = _effective_ac_cap_kwh(battery_settings, dt)
+    cover_kw = min(deficit_kw, battery_settings.max_discharge_power_kw)
+    if ac_cap_kwh is not None:
+        ac_headroom_kwh = max(0.0, ac_cap_kwh - min(solar_production, ac_cap_kwh))
+        cover_kw = min(cover_kw, ac_headroom_kwh / dt)
+    return cover_kw
+
+
+def _discharge_is_partial_cover(
+    discharge_power_kw: np.ndarray | float,
+    home_consumption: float,
+    solar_production: float,
+    dt: float,
+    capabilities: PlatformCapabilities,
+    battery_settings: BatterySettings,
+) -> np.ndarray:
+    """Is this discharge a partial load cover the platform cannot deliver?
+    (#884)
+
+    Only on `LOAD_SUPPORT_WHOLE_LOAD` hardware, where LOAD_SUPPORT is the
+    inverter's own self-consumption mode: it covers the whole deficit (up to
+    `_whole_load_cover_p`) and cannot be told to cover less. A planned
+    discharge strictly between zero and that cover would be delivered as the
+    whole cover -- SOC falls faster than planned, and the plan prices savings
+    that do not happen. Discharges above it are exports, a different command
+    with its own rate, and are left to the other rules.
+
+    False everywhere on other platforms: a `ceiling` platform delivers any
+    cover up to the deficit exactly, and an `unmodelled` one keeps its lattice
+    as before (#580).
+
+    Unlike `_discharge_is_unexecutable`, the coarse-grid backward pass applies
+    this too. That pass keeps the #497 band as a proxy for an exact-cover
+    breakpoint its lattice lacks; a partial cover is no such proxy -- it is a
+    whole band of actions this hardware has no command for, and valuing V on
+    them would promise the replay a rationing it cannot perform.
+
+    Accepts a scalar or an array (magnitudes, kW); returns the matching shape.
+    """
+    if capabilities.load_support_delivery != LOAD_SUPPORT_WHOLE_LOAD:
+        return np.zeros_like(discharge_power_kw, dtype=bool)
+    cover_kw = _whole_load_cover_p(
+        home_consumption, solar_production, dt, battery_settings
+    )
+    # The cover candidate is this same float, so it sits exactly on the
+    # boundary and is kept; LATTICE_EPS is scaled to kW by the platform step,
+    # as every other lattice-unit comparison does (P5).
+    tolerance_kw = LATTICE_EPS * capabilities.discharge_rate_step_kw(battery_settings)
+    return np.asarray(discharge_power_kw) < cover_kw - tolerance_kw
+
+
 def _residual_cover_p(
     home_consumption: float,
     solar_production: float,
@@ -179,7 +260,9 @@ def _residual_cover_p(
     capabilities: PlatformCapabilities,
     battery_settings: BatterySettings,
 ) -> float | None:
-    """Exact net-load residual as a discharge power (kW, positive) wherever
+    """The load-cover discharge (kW, positive) this platform delivers exactly:
+    the net-load residual on ceiling hardware, the whole cover on whole-load
+    hardware (#884), else None. On ceiling hardware it is offered wherever
     the lattice cannot represent covering it exactly -- else None (#466
     sunrise crossover; generalized above the lattice by Phase 4b to close
     #352 Shape B).
@@ -248,7 +331,7 @@ def _residual_cover_p(
     a delivery that will not happen, the #282 shape. Before 4a the candidate
     was added unconditionally, which is what #580 records.
 
-    Note this is `load_support_delivers_exact_cover`, **not**
+    Note this is `load_support_delivery`, **not**
     `discharge_rate_is_load_following`: on solax-modbus Growatt in VPP mode
     the rate register is a forced power, but LOAD_SUPPORT writes no rate --
     #413 releases the period to the inverter's own load-following self-use,
@@ -256,17 +339,34 @@ def _residual_cover_p(
     Gating on the register's semantics would have silently withdrawn #466's
     sunrise-crossover saving from that platform. Gated once, where the
     candidate is defined, rather than at each of the four call sites.
+
+    **On `whole_load` hardware (Solis Self Use, #884) the candidate is the
+    whole cover instead** -- `_whole_load_cover_p`, the deficit capped at the
+    battery's maximum power. That is the one LOAD_SUPPORT delivery the
+    hardware makes, whatever the plan says, so it is exact by construction
+    and needs no covering ceiling: there is no rate to write. Every smaller
+    discharge is excluded by `_discharge_is_partial_cover`, so without this
+    candidate such a platform could not plan to serve the house at all. The
+    two classifier gates still apply, to the capped power.
     """
-    if not capabilities.load_support_delivers_exact_cover:
+    if capabilities.load_support_delivery == LOAD_SUPPORT_WHOLE_LOAD:
+        cover_p = _whole_load_cover_p(
+            home_consumption, solar_production, dt, battery_settings
+        )
+    elif capabilities.load_support_delivery == LOAD_SUPPORT_CEILING:
+        cover_p = (home_consumption - solar_production) / dt
+    else:
         return None
-    residual_p = (home_consumption - solar_production) / dt
-    if residual_p * dt <= FLOW_NOISE_FLOOR_KWH:
+    if cover_p * dt <= FLOW_NOISE_FLOOR_KWH:
         return None
-    if residual_p <= POWER_CLASSIFICATION_THRESHOLD_KW:
+    if cover_p <= POWER_CLASSIFICATION_THRESHOLD_KW:
         return None
-    if capabilities.covering_ceiling_kw(residual_p, battery_settings) is None:
+    if (
+        capabilities.load_support_delivery == LOAD_SUPPORT_CEILING
+        and capabilities.covering_ceiling_kw(cover_p, battery_settings) is None
+    ):
         return None
-    return residual_p
+    return cover_p
 
 
 def _discharge_candidates(
@@ -356,10 +456,21 @@ def _discharge_candidates(
     # period, 0.0034 kWh) to save a fraction of an öre, and reintroduced the
     # asymmetry between this pass and the PWL window that the whole predicate
     # exists to prevent.
+    #
+    # Partial load covers (#884) go the same way, on the one platform class
+    # that cannot deliver them: the whole cover replaces them below.
     executable = [
         p
         for p in candidates
         if not _discharge_is_unexecutable(p, home_consumption, solar_production, dt)
+        and not _discharge_is_partial_cover(
+            p,
+            home_consumption,
+            solar_production,
+            dt,
+            capabilities,
+            battery_settings,
+        )
     ]
 
     # One deliberate off-lattice candidate: discharge exactly the forecast

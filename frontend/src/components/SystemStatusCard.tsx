@@ -3,8 +3,9 @@ import api from '../lib/api';
 import { useDashboardData } from '../hooks/useDashboardData';
 import { FormattedValue, ControlModel } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
-import { getIntent, isCurtailed } from '../utils/intent';
+import { getIntent, isCurtailed, intentDisplayNames, intentLabel } from '../utils/intent';
 import { formatFixed } from '../utils/format';
+import { useForceMode } from './ForceModeContext';
 import { 
   DollarSign, 
   Battery, 
@@ -193,6 +194,7 @@ const DASHBOARD_REFRESH_MS = 60000;
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode, date }) => {
   const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(date, 'quarter-hourly', date ? 0 : DASHBOARD_REFRESH_MS);
+  const { state: forceMode } = useForceMode();
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);
   const [inverterError, setInverterError] = useState<string | null>(null);
@@ -297,14 +299,6 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     const batteryStatus = currentHourData.batteryAction > 0.1 ? 'charging' :
                         currentHourData.batteryAction < -0.1 ? 'discharging' : 'idle';
 
-    const intentDisplayNames: Record<string, string> = {
-      GRID_CHARGING: 'Charging from Grid',
-      SOLAR_STORAGE: 'Storing Solar',
-      LOAD_SUPPORT: 'Powering Home',
-      BATTERY_EXPORT: 'Selling to Grid',
-      SOLAR_EXPORT: 'Solar Exporting',
-      IDLE: 'Standby',
-    };
     const rawIntent = getIntent(currentHourData).toUpperCase().replace(/ /g, '_');
     // Curtailment doesn't replace the intent (a curtailed period can still
     // be charging, e.g. SOLAR_STORAGE) -- keep the intent as the headline and
@@ -510,13 +504,17 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       title: "Battery",
       icon: Battery,
       color: "blue" as const,
-      keyMetric: "Strategic Intent",
-      keyValue: statusData.strategicIntent ?? 'Idle',
+      keyMetric: forceMode?.active ? "Forced Mode" : "Strategic Intent",
+      keyValue: forceMode?.active && forceMode.mode
+        ? intentLabel(forceMode.mode)
+        : statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
       keyAnnotation: undefined as string[] | undefined,
-      keyBadge: (statusData.strategicIntentCurtailed
-        ? 'Curtailed (No Export)'
-        : undefined) as string | undefined,
+      keyBadge: (forceMode?.active
+        ? 'Forced'
+        : statusData.strategicIntentCurtailed
+          ? 'Curtailed (No Export)'
+          : undefined) as string | undefined,
       metrics: [
         {
           label: "State of Charge",

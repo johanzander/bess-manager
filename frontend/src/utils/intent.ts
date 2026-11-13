@@ -43,3 +43,16 @@ export function getIntent(hour: IntentSource): StrategicIntent {
 export function isCurtailed(hour: IntentSource): boolean {
   return hour.curtailed === true;
 }
+
+export const intentDisplayNames: Record<string, string> = {
+  GRID_CHARGING: 'Charging from Grid',
+  SOLAR_STORAGE: 'Storing Solar',
+  LOAD_SUPPORT: 'Powering Home',
+  BATTERY_EXPORT: 'Selling to Grid',
+  SOLAR_EXPORT: 'Solar Exporting',
+  IDLE: 'Standby',
+};
+
+export function intentLabel(mode: string): string {
+  return intentDisplayNames[mode] ?? mode;
+}

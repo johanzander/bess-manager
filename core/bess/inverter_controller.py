@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, ClassVar
 from . import time_utils
 from .dp_schedule import DPSchedule
 from .execution_model import INTENT_TO_MODE, command_index
+from .force_mode import FORCE_MODES
 from .settings import BatterySettings
 from .strategic_intent import idle_hold_releasable
 
@@ -169,6 +170,14 @@ class InverterController(ABC):
     # - "period_list": no per-period mode or power value; behavior is
     #   discrete charge/discharge time slots (Growatt SPH, Solis, Huawei).
     CONTROL_MODEL: ClassVar[str] = "tou_register"
+
+    # Force modes (core/bess/force_mode.py) this platform executes exactly as
+    # it executes the same intent when the optimizer plans it. A platform
+    # whose write path for an intent reads the plan's own energy figures, or
+    # scales a forced power by the planned action, narrows this: a forced
+    # mode leaves those figures describing the unforced plan, so the command
+    # would no longer be the mode the user asked for.
+    SUPPORTED_FORCE_MODES: ClassVar[frozenset[str]] = FORCE_MODES
 
     def discharge_resolution_kw(self, max_discharge_power_kw: float) -> float:
         """Smallest controllable discharge increment this platform can
@@ -777,6 +786,11 @@ class InverterController(ABC):
         unchanged-behaviour answer.
         """
         if self.current_schedule is None:
+            return False
+        forced_from = self.current_schedule.forced_from_period
+        if forced_from is not None and period >= forced_from:
+            # A forced period does not follow the plan's verdict: the write
+            # path holds a forced IDLE (BatterySystemManager), so show that.
             return False
         period_data = self.current_schedule.period_data
         if period >= len(period_data):

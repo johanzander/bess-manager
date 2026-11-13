@@ -438,6 +438,38 @@ To prevent this, BESS auto-detects any `binary_sensor` whose entity ID ends with
 
 The discharge inhibit only affects discharging — it does not change the TOU schedule, trigger battery charging, or interfere with the EV charging session in any way.
 
+### Force Mode — overriding the plan
+
+Sometimes you know something the optimizer doesn't: you're away tonight and want the battery sold now, or you want it kept full for a planned outage. **Force mode** holds the battery in one mode until you clear it. The optimizer keeps planning every 15 minutes in the background, so the moment you return to automatic it carries on from the battery's real state of charge.
+
+Set it from the **Force mode** card on the Dashboard, or remotely over the API. While it is active, an amber banner sits at the top of every page, and the Battery card shows the forced mode with a **Forced** badge. The schedule charts keep showing what the optimizer *would* do, so you can see what you are overriding.
+
+| Mode | What the battery does |
+|---|---|
+| `SOLAR_STORAGE` (Storing Solar) | Charges from solar surplus only. No grid charging, no discharge. |
+| `LOAD_SUPPORT` (Powering Home) | Covers the house load from the battery. Never exports. |
+| `BATTERY_EXPORT` (Selling to Grid) | Discharges to the grid at **maximum discharge power**. |
+| `GRID_CHARGING` (Charging from Grid) | Charges from the grid at **maximum charge power**. |
+| `IDLE` (Standby) | Holds the stored energy. |
+
+Each mode runs the same way your inverter runs that intent when the optimizer plans it. Export and grid charging keep going until the battery reaches its minimum or maximum state of charge, and the discharge inhibit (below) still applies. On inverters that only take charge/discharge time slots (Growatt SPH, Huawei, Solis), `SOLAR_STORAGE` and `IDLE` cannot stop the inverter's own self-use discharge, exactly as when the optimizer plans them. A mode your inverter cannot run as requested isn't offered: native SolaX has no `LOAD_SUPPORT`, and Solis has no `BATTERY_EXPORT` or `IDLE`.
+
+Force mode survives an add-on restart. It is cleared only when you clear it, or if you switch to an inverter platform that can't run it, in which case the dashboard says so.
+
+**Remote control (API).** `GET /api/force-mode` returns `{"active", "mode", "activatedAt", "supportedModes"}`, `PUT /api/force-mode` with `{"mode": "BATTERY_EXPORT"}` sets it, and `DELETE /api/force-mode` returns to automatic. The change reaches the inverter within seconds. Sending the mode that is already active changes nothing, and its start time is kept, so an automation can safely repeat it. From Home Assistant, for example:
+
+```yaml
+rest_command:
+  bess_force_export:
+    url: "http://<addon-host>:8080/api/force-mode"
+    method: PUT
+    content_type: "application/json"
+    payload: '{"mode": "BATTERY_EXPORT"}'
+  bess_force_clear:
+    url: "http://<addon-host>:8080/api/force-mode"
+    method: DELETE
+```
+
 ### Peak Shaving (capacity tariffs)
 
 Some grid tariffs charge for your **highest power draw** rather than only for the energy you use — the Swedish *effektavgift*, the Flemish *capaciteitstarief*, and similar. A single quarter-hour or hour of high import can then cost far more than the spot-price saving that caused it. Left alone, BESS optimizes only for energy cost, so it can happily grid-charge at full power in the cheapest hour and set a new peak.

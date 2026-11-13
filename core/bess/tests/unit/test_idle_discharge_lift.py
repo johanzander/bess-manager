@@ -57,7 +57,7 @@ def _seed_idle_intents(bsm: BatterySystemManager) -> None:
     controller = bsm._inverter_controller
     assert controller is not None
     controller.strategic_intents = ["IDLE"] * 96
-    controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)  # type: ignore[assignment]
+    controller.current_schedule = SimpleNamespace(forced_from_period=None, actions=[0.0] * 96)  # type: ignore[assignment]
 
 
 def _store_idle_period(

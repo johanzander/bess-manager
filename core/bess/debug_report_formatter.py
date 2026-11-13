@@ -61,11 +61,17 @@ class DebugReportFormatter:
         Returns:
             Markdown header section
         """
-        return f"""# BESS Manager Debug Export
+        header = f"""# BESS Manager Debug Export
 
 **Export Date**: {export.export_timestamp}
 
 **BESS Version**: {export.bess_version}"""
+        if export.force_mode is not None:
+            header += (
+                f"\n\n**Force Mode**: {export.force_mode} -- the inverter was "
+                "following a user override, not the optimizer's plan"
+            )
+        return header
 
     def format_key_findings(self, export: DebugDataExport) -> str:
         kf = export.key_findings or {}
@@ -111,6 +117,7 @@ class DebugReportFormatter:
             "system_uptime_hours": round(export.system_uptime_hours, 2),
             "export_timestamp": export.export_timestamp,
             "timezone": export.timezone,
+            "force_mode": export.force_mode,
         }
 
         return f"""## System Information

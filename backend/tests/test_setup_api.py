@@ -841,6 +841,7 @@ class TestSetupComplete:
         complete_controller.system.switch_inverter_platform.assert_called_once_with(
             "growatt_server_sph"
         )
+        complete_controller.forget_dropped_force_mode.assert_called_once_with()
 
     def test_control_mode_persisted_for_solax_modbus_growatt_min(
         self, complete_controller

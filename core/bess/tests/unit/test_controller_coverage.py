@@ -350,6 +350,7 @@ class TestGetPeriodSettings:
 
         min_ctrl.strategic_intents = ["LOAD_SUPPORT"] * 4
         mock_schedule = MagicMock()
+        mock_schedule.forced_from_period = None
         # 96 periods, LOAD_SUPPORT action at period 0: -1.5 kWh → -6 kW → round(6/15*100)=40
         mock_schedule.actions = [-1.5] + [0.0] * 95
         min_ctrl.current_schedule = mock_schedule
@@ -368,6 +369,7 @@ class TestGetPeriodSettings:
 
         min_ctrl.strategic_intents = ["GRID_CHARGING"] * 96
         mock_schedule = MagicMock()
+        mock_schedule.forced_from_period = None
         # 0.17 kWh in 15 min → 0.68 kW → round(0.68 / 15.0 * 100) = 5
         mock_schedule.actions = [0.17] + [0.0] * 95
         min_ctrl.current_schedule = mock_schedule
@@ -381,6 +383,7 @@ class TestGetPeriodSettings:
 
         min_ctrl.strategic_intents = ["GRID_CHARGING"] * 96
         mock_schedule = MagicMock()
+        mock_schedule.forced_from_period = None
         # 3.75 kWh in 15 min → 15.0 kW → round(15.0 / 15.0 * 100) = 100
         mock_schedule.actions = [3.75] + [0.0] * 95
         min_ctrl.current_schedule = mock_schedule
@@ -393,6 +396,7 @@ class TestGetPeriodSettings:
 
         min_ctrl.strategic_intents = ["SOLAR_STORAGE"] * 96
         mock_schedule = MagicMock()
+        mock_schedule.forced_from_period = None
         mock_schedule.actions = [0.5] * 96
         min_ctrl.current_schedule = mock_schedule
 

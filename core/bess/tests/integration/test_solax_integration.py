@@ -70,7 +70,9 @@ def _set_action(bsm: BatterySystemManager, period: int, kwh: float) -> None:
     """Set a battery action for the given period."""
     actions = [0.0] * 96
     actions[period] = kwh
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
 
 PERIOD = 20

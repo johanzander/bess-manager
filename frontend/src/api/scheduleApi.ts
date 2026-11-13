@@ -1,6 +1,6 @@
 // Unified API client for dashboard data
 import api from '../lib/api';
-import { FormattedValue } from '../types';
+import { FormattedValue, ForceModeState } from '../types';
 
 /**
  * Fetch comprehensive dashboard data including schedule, energy flows, and financial metrics.
@@ -15,6 +15,21 @@ export const fetchDashboardData = async (date?: string, resolution?: string) => 
   if (date) params.date = date;
   if (resolution) params.resolution = resolution;
   const response = await api.get('/api/dashboard', { params });
+  return response.data;
+};
+
+export const getForceMode = async (): Promise<ForceModeState> => {
+  const response = await api.get('/api/force-mode');
+  return response.data;
+};
+
+export const setForceMode = async (mode: string): Promise<ForceModeState> => {
+  const response = await api.put('/api/force-mode', { mode });
+  return response.data;
+};
+
+export const clearForceMode = async (): Promise<ForceModeState> => {
+  const response = await api.delete('/api/force-mode');
   return response.data;
 };
 

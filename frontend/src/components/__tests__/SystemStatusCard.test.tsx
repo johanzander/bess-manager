@@ -13,9 +13,14 @@ vi.mock('../../hooks/useDashboardData', () => ({
   useDashboardData: vi.fn(),
 }));
 
+vi.mock('../ForceModeContext', () => ({
+  useForceMode: vi.fn(),
+}));
+
 import SystemStatusCard from '../SystemStatusCard';
 import api from '../../lib/api';
 import { useDashboardData } from '../../hooks/useDashboardData';
+import { useForceMode } from '../ForceModeContext';
 
 const fv = (value: number, display: string, unit = '') => ({
   value,
@@ -173,6 +178,11 @@ const mockInverterData = {
 describe('SystemStatusCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useForceMode).mockReturnValue({
+      state: { active: false, mode: null, activatedAt: null, supportedModes: [] },
+      setMode: vi.fn(),
+      clear: vi.fn(),
+    });
 
     // Mock useDashboardData hook to always return the mock data
     vi.mocked(useDashboardData).mockReturnValue({
@@ -218,6 +228,35 @@ describe('SystemStatusCard', () => {
     expect(screen.getByText('0.65 EUR')).toBeInTheDocument();
     expect(screen.queryByText('0.50 EUR')).not.toBeInTheDocument();
     expect(screen.queryByText("Today's Savings")).not.toBeInTheDocument();
+  });
+
+  it('shows the forced mode with a Forced badge when force mode is active', async () => {
+    vi.mocked(useForceMode).mockReturnValue({
+      state: {
+        active: true,
+        mode: 'BATTERY_EXPORT',
+        activatedAt: '2026-07-11T10:00:00+00:00',
+        supportedModes: ['BATTERY_EXPORT', 'IDLE'],
+      },
+      setMode: vi.fn(),
+      clear: vi.fn(),
+    });
+    render(<SystemStatusCard systemMode="live" />);
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+    expect(screen.getByText('Selling to Grid')).toBeInTheDocument();
+    expect(screen.getByText('Forced')).toBeInTheDocument();
+    expect(screen.queryByText('Powering Home')).not.toBeInTheDocument();
+  });
+
+  it('shows no Forced badge when force mode is inactive', async () => {
+    render(<SystemStatusCard systemMode="live" />);
+    await waitFor(() => {
+      expect(screen.getByText('Home Power')).toBeInTheDocument();
+    });
+    expect(screen.queryByText('Forced')).not.toBeInTheDocument();
+    expect(screen.getByText('Powering Home')).toBeInTheDocument();
   });
 
   it('does not show a horizon annotation for a single-day plan', async () => {

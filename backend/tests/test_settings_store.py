@@ -770,6 +770,34 @@ def test_migrate_schema_adds_demo_mode_to_old_config(tmp_path, monkeypatch):
     assert store.data.get("demo_mode") == {"enabled": False}
 
 
+def test_force_mode_defaults_to_following_the_plan() -> None:
+    defaults = SettingsStore._bootstrap_defaults()
+    assert defaults["force_mode"] == {"mode": None, "activated_at": None}
+
+
+def test_migrate_schema_adds_force_mode_to_old_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = {"battery": {"total_capacity": 10.0}, "demo_mode": {"enabled": False}}
+    store._migrate_schema()
+    assert store.data.get("force_mode") == {"mode": None, "activated_at": None}
+
+
+def test_force_mode_section_round_trips(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _patch_path(tmp_path, monkeypatch)
+    store = SettingsStore()
+    store.data = SettingsStore._bootstrap_defaults()
+    store.save_section(
+        "force_mode",
+        {"mode": "BATTERY_EXPORT", "activated_at": "2026-11-09T14:05:00+00:00"},
+    )
+    assert store.get_section("force_mode")["mode"] == "BATTERY_EXPORT"
+
+
 # ---------------------------------------------------------------------------
 # ai_analyst.model migration (legacy Claude 4.0 launch IDs → current)
 # ---------------------------------------------------------------------------

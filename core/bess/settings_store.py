@@ -30,6 +30,7 @@ OWNED_SECTIONS = (
     "sensors",
     "ai_analyst",
     "demo_mode",
+    "force_mode",
 )
 
 # All valid inverter platform IDs.
@@ -612,6 +613,7 @@ class SettingsStore:
                 "shared": {},
             },
             "demo_mode": {"enabled": False},
+            "force_mode": {"mode": None, "activated_at": None},
         }
 
     def _migrate_schema(self) -> None:
@@ -884,6 +886,11 @@ class SettingsStore:
         # --- demo_mode section (added v9.5) ---
         if "demo_mode" not in self.data:
             self.data["demo_mode"] = {"enabled": False}
+            changed = True
+
+        # --- force_mode section (user override of the plan) ---
+        if "force_mode" not in self.data:
+            self.data["force_mode"] = {"mode": None, "activated_at": None}
             changed = True
 
         # --- ai_analyst: rewrite deprecated Claude 4.0 launch model IDs ---

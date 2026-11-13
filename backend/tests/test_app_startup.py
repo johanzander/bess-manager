@@ -13,11 +13,16 @@ import importlib.util
 import json
 import os
 import sys
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 import core.bess.battery_system_manager as _bsm_module
 import core.bess.ha_api_controller as _ha_api_module
 import core.bess.settings_store as _settings_store_module
+from core.bess.exceptions import SystemConfigurationError
 
 
 def _settings_path(tmp_path) -> str:
@@ -185,3 +190,121 @@ class TestTimezoneFetchOrdering:
             "constructed, so ha_controller.failure_tracker is already wired "
             "and a fetch failure gets recorded instead of silently lost"
         )
+
+
+class TestForceModeRestoreAtStartup:
+    """A persisted force-mode override is re-applied before the first optimization."""
+
+    def _boot(
+        self,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        persisted: dict[str, str | None],
+        system: MagicMock,
+    ) -> tuple[Any, MagicMock]:
+        monkeypatch.setattr(
+            _settings_store_module, "SETTINGS_PATH", _settings_path(tmp_path)
+        )
+        _write_settings(_settings_path(tmp_path))
+        path = _settings_path(tmp_path)
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+        data["force_mode"] = persisted
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        mock_ha_controller_cls = MagicMock()
+        mock_ha_controller_cls.return_value.get_ha_config.return_value = {
+            "time_zone": "UTC"
+        }
+        mock_bsm_cls = MagicMock(return_value=system)
+        with (
+            patch.object(
+                _ha_api_module, "HomeAssistantAPIController", mock_ha_controller_cls
+            ),
+            patch.object(_bsm_module, "BatterySystemManager", mock_bsm_cls),
+            patch("api_conversion.build_system_settings", return_value={}),
+        ):
+            module = _load_real_app_module(monkeypatch)
+        return module.bess_controller, mock_ha_controller_cls.return_value
+
+    def _system(self, supported: frozenset[str]) -> MagicMock:
+        system = MagicMock()
+        system.is_configured = True
+        state: dict = {"mode": None}
+
+        def _set(mode: str | None) -> None:
+            if mode is not None and mode not in supported:
+                raise SystemConfigurationError(f"unsupported {mode}")
+            state["mode"] = mode
+
+        system.set_force_mode.side_effect = _set
+        type(system).force_mode = property(lambda _self: state["mode"])
+        return system
+
+    def test_persisted_mode_is_applied(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"IDLE"}))
+        self._boot(tmp_path, monkeypatch, {"mode": "IDLE", "activated_at": "t"}, system)
+        assert system.force_mode == "IDLE"
+
+    def test_nothing_persisted_leaves_system_unforced(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"IDLE"}))
+        self._boot(tmp_path, monkeypatch, {"mode": None, "activated_at": None}, system)
+        assert system.force_mode is None
+
+    def test_unsupported_persisted_mode_is_cleared_reported_and_not_fatal(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"IDLE"}))
+        controller, ha = self._boot(
+            tmp_path,
+            monkeypatch,
+            {"mode": "BATTERY_EXPORT", "activated_at": "t"},
+            system,
+        )
+
+        assert system.force_mode is None
+        assert controller.settings_store.get_section("force_mode") == {
+            "mode": None,
+            "activated_at": None,
+        }
+        ha.failure_tracker.record_failure.assert_called_once()
+
+    def test_mode_dropped_by_a_platform_switch_is_not_restored_later(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"BATTERY_EXPORT"}))
+        controller, _ = self._boot(
+            tmp_path,
+            monkeypatch,
+            {"mode": "BATTERY_EXPORT", "activated_at": "t"},
+            system,
+        )
+        # The platform switch dropped it in the live system.
+        system.set_force_mode(None)
+
+        controller.forget_dropped_force_mode()
+
+        assert controller.settings_store.get_section("force_mode") == {
+            "mode": None,
+            "activated_at": None,
+        }
+
+    def test_mode_the_new_platform_still_runs_stays_persisted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"IDLE"}))
+        controller, _ = self._boot(
+            tmp_path, monkeypatch, {"mode": "IDLE", "activated_at": "t"}, system
+        )
+
+        controller.forget_dropped_force_mode()
+
+        assert controller.settings_store.get_section("force_mode") == {
+            "mode": "IDLE",
+            "activated_at": "t",
+        }

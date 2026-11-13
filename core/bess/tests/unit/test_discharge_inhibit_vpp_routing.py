@@ -58,7 +58,9 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
 def _set_discharge_action(bsm: BatterySystemManager, period: int, kwh: float) -> None:
     actions = [0.0] * 96
     actions[period] = kwh
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
 
 class TestApplyDischargeInhibitRoutesThroughVppPath:

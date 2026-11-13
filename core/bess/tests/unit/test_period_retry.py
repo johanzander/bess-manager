@@ -25,6 +25,8 @@ def _make_bsm_with_mocks():
     # retry tests were written for.
     bsm.schedule_store = MagicMock()
     bsm.schedule_store.get_period_data_at.return_value = None
+    # The write path keeps the record of which periods ran forced current.
+    bsm._forced_period_intents = {}
     return bsm
 
 

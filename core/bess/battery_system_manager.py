@@ -6,6 +6,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 import json
 import logging
 import os
+import threading
 import traceback
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, tzinfo
@@ -303,6 +304,10 @@ class BatterySystemManager:
         # mode, keyed by period start, so history records what ran rather
         # than what the optimizer planned for it.
         self._forced_period_intents: dict[datetime, str] = {}
+        # Serialises schedule updates: the scheduler and API-triggered replans
+        # run them on different threads, and a cycle that read a force mode
+        # before it was cleared must not write its schedule after the replan's.
+        self._schedule_update_lock = threading.Lock()
 
         # Consumption forecast cache. Only used for the 'load_power_7d_avg'
         # and 'ha_statistics' strategies, whose value is a window of full
@@ -915,7 +920,17 @@ class BatterySystemManager:
     def update_battery_schedule(
         self, current_period: int, prepare_next_day: bool = False
     ) -> bool:
-        """Main schedule update method for quarterly resolution."""
+        """Main schedule update method for quarterly resolution.
+
+        One update runs at a time; a call made while another is running waits
+        for it, so the later call's view of the settings is what is commanded.
+        """
+        with self._schedule_update_lock:
+            return self._update_battery_schedule(current_period, prepare_next_day)
+
+    def _update_battery_schedule(
+        self, current_period: int, prepare_next_day: bool
+    ) -> bool:
         if not self.is_configured:
             logger.warning(
                 "update_battery_schedule called on unconfigured system — skipping"
@@ -3729,8 +3744,12 @@ class BatterySystemManager:
             and commanded_schedule.forced_from_period is not None
             and period >= commanded_schedule.forced_from_period
         )
-        if forced:
-            period_start = time_utils.period_index_to_timestamp(period)
+        period_start = time_utils.period_index_to_timestamp(period)
+        if not forced:
+            # Cleared mid-period: the plan now commands this period, so a
+            # forced entry from earlier in it no longer describes what ran.
+            self._forced_period_intents.pop(period_start, None)
+        else:
             today = time_utils.today()
             self._forced_period_intents = {
                 start: intent

@@ -273,3 +273,38 @@ class TestForceModeRestoreAtStartup:
             "activated_at": None,
         }
         ha.failure_tracker.record_failure.assert_called_once()
+
+    def test_mode_dropped_by_a_platform_switch_is_not_restored_later(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"BATTERY_EXPORT"}))
+        controller, _ = self._boot(
+            tmp_path,
+            monkeypatch,
+            {"mode": "BATTERY_EXPORT", "activated_at": "t"},
+            system,
+        )
+        # The platform switch dropped it in the live system.
+        system.set_force_mode(None)
+
+        controller.forget_dropped_force_mode()
+
+        assert controller.settings_store.get_section("force_mode") == {
+            "mode": None,
+            "activated_at": None,
+        }
+
+    def test_mode_the_new_platform_still_runs_stays_persisted(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        system = self._system(frozenset({"IDLE"}))
+        controller, _ = self._boot(
+            tmp_path, monkeypatch, {"mode": "IDLE", "activated_at": "t"}, system
+        )
+
+        controller.forget_dropped_force_mode()
+
+        assert controller.settings_store.get_section("force_mode") == {
+            "mode": "IDLE",
+            "activated_at": "t",
+        }

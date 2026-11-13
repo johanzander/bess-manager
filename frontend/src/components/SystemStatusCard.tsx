@@ -5,6 +5,7 @@ import { FormattedValue, ControlModel } from '../types';
 import { DashboardResponse } from '../api/scheduleApi';
 import { getIntent, isCurtailed, intentDisplayNames, intentLabel } from '../utils/intent';
 import { formatFixed } from '../utils/format';
+import { useForceMode } from './ForceModeContext';
 import { 
   DollarSign, 
   Battery, 
@@ -193,6 +194,7 @@ const DASHBOARD_REFRESH_MS = 60000;
 
 const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", systemMode, date }) => {
   const { data: dashboardData, loading: dashboardLoading, error: dashboardError } = useDashboardData(date, 'quarter-hourly', date ? 0 : DASHBOARD_REFRESH_MS);
+  const { state: forceMode } = useForceMode();
   const [inverterData, setInverterData] = useState<any>(null);
   const [inverterLoading, setInverterLoading] = useState(true);
   const [inverterError, setInverterError] = useState<string | null>(null);
@@ -304,11 +306,9 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
     // " — Curtailed (No Export)" made the text-3xl headline overflow the card).
     const strategicIntent = intentDisplayNames[rawIntent] ?? rawIntent;
     const strategicIntentCurtailed = isCurtailed(currentHourData);
-    const forceMode = dashboardData.forceMode;
 
     return {
       strategicIntent,
-      forceMode,
       strategicIntentCurtailed,
       costAndSavings: {
         todaysCost: (() => {
@@ -504,13 +504,13 @@ const SystemStatusCard: React.FC<SystemStatusCardProps> = ({ className = "", sys
       title: "Battery",
       icon: Battery,
       color: "blue" as const,
-      keyMetric: statusData.forceMode?.active ? "Forced Mode" : "Strategic Intent",
-      keyValue: statusData.forceMode?.active && statusData.forceMode.mode
-        ? intentLabel(statusData.forceMode.mode)
+      keyMetric: forceMode?.active ? "Forced Mode" : "Strategic Intent",
+      keyValue: forceMode?.active && forceMode.mode
+        ? intentLabel(forceMode.mode)
         : statusData.strategicIntent ?? 'Idle',
       keyUnit: "",
       keyAnnotation: undefined as string[] | undefined,
-      keyBadge: (statusData.forceMode?.active
+      keyBadge: (forceMode?.active
         ? 'Forced'
         : statusData.strategicIntentCurtailed
           ? 'Curtailed (No Export)'

@@ -1,41 +1,20 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { clearForceMode, getForceMode } from '../api/scheduleApi';
-import { ForceModeState } from '../types';
 import { intentLabel } from '../utils/intent';
-
-export const FORCE_MODE_CHANGED_EVENT = 'bess:force-mode-changed';
-const POLL_MS = 60_000;
+import { useForceMode } from './ForceModeContext';
 
 function formatTime(iso: string): string {
   return new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 export default function ForceModeBanner() {
-  const [state, setState] = useState<ForceModeState | null>(null);
+  const { state, clear } = useForceMode();
   const [error, setError] = useState<string | null>(null);
-
-  const refresh = useCallback(() => {
-    getForceMode()
-      .then(setState)
-      .catch((err) => console.error('Failed to load force mode:', err));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    const interval = setInterval(refresh, POLL_MS);
-    window.addEventListener(FORCE_MODE_CHANGED_EVENT, refresh);
-    return () => {
-      clearInterval(interval);
-      window.removeEventListener(FORCE_MODE_CHANGED_EVENT, refresh);
-    };
-  }, [refresh]);
 
   const handleClear = async () => {
     try {
-      setState(await clearForceMode());
+      await clear();
       setError(null);
-      window.dispatchEvent(new Event(FORCE_MODE_CHANGED_EVENT));
     } catch (err) {
       console.error('Failed to clear force mode:', err);
       setError('Failed to return to automatic');

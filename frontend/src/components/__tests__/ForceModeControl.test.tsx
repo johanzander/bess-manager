@@ -8,6 +8,7 @@ vi.mock('../../api/scheduleApi', () => ({
 }));
 
 import ForceModeControl from '../ForceModeControl';
+import { ForceModeProvider } from '../ForceModeContext';
 import { getForceMode, setForceMode, clearForceMode } from '../../api/scheduleApi';
 
 const inactive = {
@@ -17,12 +18,19 @@ const inactive = {
   supportedModes: ['GRID_CHARGING', 'IDLE', 'SOLAR_STORAGE'],
 };
 
+const renderControl = () =>
+  render(
+    <ForceModeProvider>
+      <ForceModeControl />
+    </ForceModeProvider>,
+  );
+
 describe('ForceModeControl', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('lists only the supported modes', async () => {
     vi.mocked(getForceMode).mockResolvedValue(inactive);
-    render(<ForceModeControl />);
+    renderControl();
     expect(await screen.findByRole('button', { name: 'Standby' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Charging from Grid' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Storing Solar' })).toBeInTheDocument();
@@ -33,23 +41,19 @@ describe('ForceModeControl', () => {
   it('asks for confirmation before sending the PUT', async () => {
     vi.mocked(getForceMode).mockResolvedValue(inactive);
     vi.mocked(setForceMode).mockResolvedValue({ ...inactive, active: true, mode: 'IDLE' });
-    const changed = vi.fn();
-    window.addEventListener('bess:force-mode-changed', changed);
 
-    render(<ForceModeControl />);
+    renderControl();
     fireEvent.click(await screen.findByRole('button', { name: 'Standby' }));
     expect(setForceMode).not.toHaveBeenCalled();
     expect(screen.getByText(/maximum power until cleared/)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Force Standby' }));
     await waitFor(() => expect(setForceMode).toHaveBeenCalledWith('IDLE'));
-    await waitFor(() => expect(changed).toHaveBeenCalled());
-    window.removeEventListener('bess:force-mode-changed', changed);
   });
 
   it('cancel does not send anything', async () => {
     vi.mocked(getForceMode).mockResolvedValue(inactive);
-    render(<ForceModeControl />);
+    renderControl();
     fireEvent.click(await screen.findByRole('button', { name: 'Standby' }));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(setForceMode).not.toHaveBeenCalled();
@@ -58,14 +62,14 @@ describe('ForceModeControl', () => {
 
   it('shows a clear button only when active', async () => {
     vi.mocked(getForceMode).mockResolvedValue(inactive);
-    const { unmount } = render(<ForceModeControl />);
+    const { unmount } = renderControl();
     await screen.findByRole('button', { name: 'Standby' });
     expect(screen.queryByRole('button', { name: /Return to automatic/ })).not.toBeInTheDocument();
     unmount();
 
     vi.mocked(getForceMode).mockResolvedValue({ ...inactive, active: true, mode: 'IDLE' });
     vi.mocked(clearForceMode).mockResolvedValue(inactive);
-    render(<ForceModeControl />);
+    renderControl();
     fireEvent.click(await screen.findByRole('button', { name: /Return to automatic/ }));
     await waitFor(() => expect(clearForceMode).toHaveBeenCalled());
   });

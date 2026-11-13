@@ -286,18 +286,30 @@ def _replan_in_background(bess_controller: Any) -> None:
     Prices are refreshed first: free-import windows are only fetched there.
     """
 
-    def _replan() -> None:
+    _rebuild_schedule_in_background(
+        bess_controller, "pricing settings change", refresh_prices=True
+    )
+
+
+def _rebuild_schedule_in_background(
+    bess_controller: Any, reason: str, *, refresh_prices: bool
+) -> None:
+    """Re-optimize and command the current period off the request thread, so
+    a change reaches the inverter now rather than at the next quarterly run."""
+
+    def _rebuild() -> None:
         try:
-            bess_controller.system.refresh_prices()
+            if refresh_prices:
+                bess_controller.system.refresh_prices()
             now = time_utils.now()
             bess_controller.system.update_battery_schedule(
                 current_period=time_utils.timestamp_to_period_index(now)
             )
-            logger.info("Schedule rebuilt after pricing settings change")
+            logger.info("Schedule rebuilt after {}", reason)
         except Exception as e:
-            logger.warning("Could not rebuild schedule after settings change: %s", e)
+            logger.warning("Could not rebuild schedule after {}: {}", reason, e)
 
-    threading.Thread(target=_replan, daemon=True).start()
+    threading.Thread(target=_rebuild, daemon=True).start()
 
 
 def _force_mode_state(bess_controller: Any) -> APIForceMode:
@@ -340,12 +352,19 @@ async def set_force_mode(body: APIForceModeRequest) -> APIForceMode:
                 f"platform. Supported: {sorted(system.supported_force_modes)}"
             ),
         )
+    # Re-sending the active mode (e.g. an automation that repeats it) is a
+    # no-op: "since" must keep the original activation, and there is nothing
+    # new to command.
+    if body.mode == system.force_mode:
+        return _force_mode_state(bess_controller)
     bess_controller.settings_store.save_section(
         "force_mode",
         {"mode": body.mode, "activated_at": time_utils.now().isoformat()},
     )
     system.set_force_mode(body.mode)
-    _replan_in_background(bess_controller)
+    _rebuild_schedule_in_background(
+        bess_controller, "force mode change", refresh_prices=False
+    )
     return _force_mode_state(bess_controller)
 
 
@@ -355,11 +374,15 @@ async def clear_force_mode() -> APIForceMode:
     from app import bess_controller
 
     _require_configured_system(bess_controller)
+    if bess_controller.system.force_mode is None:
+        return _force_mode_state(bess_controller)
     bess_controller.settings_store.save_section(
         "force_mode", {"mode": None, "activated_at": None}
     )
     bess_controller.system.set_force_mode(None)
-    _replan_in_background(bess_controller)
+    _rebuild_schedule_in_background(
+        bess_controller, "force mode change", refresh_prices=False
+    )
     return _force_mode_state(bess_controller)
 
 
@@ -637,6 +660,7 @@ async def patch_settings(updates: dict):
                 control_mode = section.get("control_mode")
                 if control_mode and platform == "solax_modbus_growatt_min":
                     bess_controller.system.switch_control_mode(control_mode)
+                bess_controller.forget_dropped_force_mode()
 
             elif store_key == "demo_mode":
                 enabled = section.get("enabled", False)
@@ -1272,7 +1296,6 @@ async def get_dashboard_data(
             hourly_data_instances=hourly_dataclass_instances,
             resolution=resolution,
             tomorrow_data=tomorrow_data,
-            force_mode=_force_mode_state(bess_controller),
         )
 
         if is_historical:
@@ -3564,6 +3587,7 @@ async def setup_complete(payload: APISetupCompletePayload):
                 and sections["inverter"]["platform"] == "solax_modbus_growatt_min"
             ):
                 bess_controller.system.switch_control_mode(payload.inverterControlMode)
+            bess_controller.forget_dropped_force_mode()
 
         # Apply settings to live system so BESS starts immediately without
         # requiring a restart. Unconditional, not gated on payload.sensors:

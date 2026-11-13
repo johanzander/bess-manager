@@ -5,9 +5,10 @@ system to do, not how the core applies a forced mode.
 """
 
 import sys
+import threading
 from collections.abc import Iterator
 from copy import deepcopy
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 from api import router
@@ -22,6 +23,9 @@ _client = TestClient(_test_app, raise_server_exceptions=False)
 
 _SUPPORTED = frozenset({"IDLE", "LOAD_SUPPORT", "SOLAR_STORAGE"})
 _CLEARED = {"mode": None, "activated_at": None}
+# Long enough for a background replan that was started to have run; only a
+# test asserting that no replan happens ever waits this out.
+_NO_REPLAN_WAIT_S = 0.3
 
 
 class _FakeSystem:
@@ -32,6 +36,11 @@ class _FakeSystem:
         self.supported_force_modes = _SUPPORTED
         self.force_mode: str | None = None
         self.set_force_mode = MagicMock(side_effect=self._set)
+        self.refresh_prices = MagicMock()
+        self.replanned = threading.Event()
+        self.update_battery_schedule = MagicMock(
+            side_effect=lambda **_kwargs: self.replanned.set()
+        )
 
     def _set(self, mode: str | None) -> None:
         if mode is not None and mode not in self.supported_force_modes:
@@ -51,9 +60,7 @@ def controller() -> Iterator[MagicMock]:
     )
     ctrl.store = store
     sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
-    with patch("api._replan_in_background") as replan:
-        ctrl.replan = replan
-        yield ctrl
+    yield ctrl
 
 
 class TestGetForceMode:
@@ -101,7 +108,31 @@ class TestPutForceMode:
         assert controller.system.force_mode == "LOAD_SUPPORT"
         assert controller.store["force_mode"]["mode"] == "LOAD_SUPPORT"
         assert controller.store["force_mode"]["activated_at"] == body["activatedAt"]
-        controller.replan.assert_called_once_with(controller)
+        assert controller.system.replanned.wait(5)
+
+    def test_replan_does_not_refetch_prices(self, controller: MagicMock) -> None:
+        _client.put("/api/force-mode", json={"mode": "LOAD_SUPPORT"})
+
+        assert controller.system.replanned.wait(5)
+        controller.system.refresh_prices.assert_not_called()
+
+    def test_resending_the_active_mode_keeps_its_start_and_does_not_replan(
+        self, controller: MagicMock
+    ) -> None:
+        controller.system.force_mode = "IDLE"
+        controller.store["force_mode"] = {
+            "mode": "IDLE",
+            "activated_at": "2026-09-16T10:00:00+02:00",
+        }
+
+        resp = _client.put("/api/force-mode", json={"mode": "IDLE"})
+
+        assert resp.status_code == 200
+        assert resp.json()["activatedAt"] == "2026-09-16T10:00:00+02:00"
+        assert controller.store["force_mode"]["activated_at"] == (
+            "2026-09-16T10:00:00+02:00"
+        )
+        assert not controller.system.replanned.wait(_NO_REPLAN_WAIT_S)
 
     def test_unsupported_mode_returns_400_and_changes_nothing(
         self, controller: MagicMock
@@ -111,7 +142,7 @@ class TestPutForceMode:
         assert resp.status_code == 400
         assert controller.system.force_mode is None
         assert controller.store["force_mode"] == _CLEARED
-        controller.replan.assert_not_called()
+        assert not controller.system.replanned.wait(_NO_REPLAN_WAIT_S)
 
     def test_malformed_body_returns_422(self, controller: MagicMock) -> None:
         assert _client.put("/api/force-mode", json={}).status_code == 422
@@ -138,7 +169,25 @@ class TestDeleteForceMode:
         assert resp.json()["activatedAt"] is None
         assert controller.system.force_mode is None
         assert controller.store["force_mode"] == _CLEARED
-        controller.replan.assert_called_once_with(controller)
+        assert controller.system.replanned.wait(5)
+
+    def test_replan_does_not_refetch_prices(self, controller: MagicMock) -> None:
+        controller.system.force_mode = "IDLE"
+        controller.store["force_mode"] = {"mode": "IDLE", "activated_at": "t"}
+
+        _client.delete("/api/force-mode")
+
+        assert controller.system.replanned.wait(5)
+        controller.system.refresh_prices.assert_not_called()
+
+    def test_clearing_when_nothing_is_forced_does_not_replan(
+        self, controller: MagicMock
+    ) -> None:
+        resp = _client.delete("/api/force-mode")
+
+        assert resp.status_code == 200
+        assert resp.json()["active"] is False
+        assert not controller.system.replanned.wait(_NO_REPLAN_WAIT_S)
 
     def test_unconfigured_returns_503(self, controller: MagicMock) -> None:
         controller.system.is_configured = False

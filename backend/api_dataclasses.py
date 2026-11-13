@@ -946,7 +946,6 @@ class APIDashboardResponse:
     costAndSavings: APICostAndSavings
     realTimePower: APIRealTimePower
     strategicIntentSummary: dict[str, int]
-    forceMode: APIForceMode
 
     @classmethod
     def from_dashboard_data(
@@ -962,8 +961,6 @@ class APIDashboardResponse:
         hourly_data_instances: list | None = None,
         resolution: str = "quarter-hourly",
         tomorrow_data: list[APIDashboardHourlyData] | None = None,
-        *,
-        force_mode: APIForceMode,
     ) -> APIDashboardResponse:
         """Create complete dashboard response from internal data."""
 
@@ -1075,7 +1072,6 @@ class APIDashboardResponse:
             costAndSavings=cost_and_savings,
             realTimePower=real_time_power,
             strategicIntentSummary=strategic_summary,
-            forceMode=force_mode,
         )
 
 

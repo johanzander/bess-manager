@@ -236,6 +236,23 @@ class BESSController:
                 error=e,
             )
 
+    def forget_dropped_force_mode(self) -> None:
+        """Clear the persisted force mode once the live system has dropped it.
+
+        A platform switch drops a force mode the new platform cannot run
+        (BatterySystemManager._drop_unsupported_force_mode). Without this the
+        saved mode outlives the drop, and a restart on a platform that
+        supports it again would silently restore the override. Call after
+        any inverter platform or control-mode switch.
+        """
+        if self.system.force_mode is not None:
+            return
+        if self.settings_store.get_section("force_mode")["mode"] is None:
+            return
+        self.settings_store.save_section(
+            "force_mode", {"mode": None, "activated_at": None}
+        )
+
     def _init_ha_controller(
         self,
         settings_store,

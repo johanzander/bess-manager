@@ -456,7 +456,7 @@ Each mode runs the same way your inverter runs that intent when the optimizer pl
 
 Force mode survives an add-on restart. It is cleared only when you clear it, or if you switch to an inverter platform that can't run it, in which case the dashboard says so.
 
-**Remote control (API).** `GET /api/force-mode` returns `{"active", "mode", "activatedAt", "supportedModes"}`, `PUT /api/force-mode` with `{"mode": "BATTERY_EXPORT"}` sets it, and `DELETE /api/force-mode` returns to automatic. The change reaches the inverter within seconds. From Home Assistant, for example:
+**Remote control (API).** `GET /api/force-mode` returns `{"active", "mode", "activatedAt", "supportedModes"}`, `PUT /api/force-mode` with `{"mode": "BATTERY_EXPORT"}` sets it, and `DELETE /api/force-mode` returns to automatic. The change reaches the inverter within seconds. Sending the mode that is already active changes nothing, and its start time is kept, so an automation can safely repeat it. From Home Assistant, for example:
 
 ```yaml
 rest_command:

@@ -13,9 +13,14 @@ vi.mock('../../hooks/useDashboardData', () => ({
   useDashboardData: vi.fn(),
 }));
 
+vi.mock('../ForceModeContext', () => ({
+  useForceMode: vi.fn(),
+}));
+
 import SystemStatusCard from '../SystemStatusCard';
 import api from '../../lib/api';
 import { useDashboardData } from '../../hooks/useDashboardData';
+import { useForceMode } from '../ForceModeContext';
 
 const fv = (value: number, display: string, unit = '') => ({
   value,
@@ -133,7 +138,6 @@ const mockDashboardData = {
     SOLAR_STORAGE: 6,
   },
   batteryCapacity: 30,
-  forceMode: { active: false, mode: null, activatedAt: null, supportedModes: [] },
   batterySoc: fv(75, '75', '%') as any,
   batterySoe: fv(22.5, '22.5', 'kWh') as any,
   batterySocFormatted: '75%',
@@ -174,6 +178,11 @@ const mockInverterData = {
 describe('SystemStatusCard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useForceMode).mockReturnValue({
+      state: { active: false, mode: null, activatedAt: null, supportedModes: [] },
+      setMode: vi.fn(),
+      clear: vi.fn(),
+    });
 
     // Mock useDashboardData hook to always return the mock data
     vi.mocked(useDashboardData).mockReturnValue({
@@ -222,19 +231,15 @@ describe('SystemStatusCard', () => {
   });
 
   it('shows the forced mode with a Forced badge when force mode is active', async () => {
-    vi.mocked(useDashboardData).mockReturnValue({
-      data: {
-        ...mockDashboardData,
-        forceMode: {
-          active: true,
-          mode: 'BATTERY_EXPORT',
-          activatedAt: '2026-07-11T10:00:00+00:00',
-          supportedModes: ['BATTERY_EXPORT', 'IDLE'],
-        },
+    vi.mocked(useForceMode).mockReturnValue({
+      state: {
+        active: true,
+        mode: 'BATTERY_EXPORT',
+        activatedAt: '2026-07-11T10:00:00+00:00',
+        supportedModes: ['BATTERY_EXPORT', 'IDLE'],
       },
-      loading: false,
-      error: null,
-      refetch: vi.fn(),
+      setMode: vi.fn(),
+      clear: vi.fn(),
     });
     render(<SystemStatusCard systemMode="live" />);
     await waitFor(() => {

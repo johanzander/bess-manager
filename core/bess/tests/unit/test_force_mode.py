@@ -195,6 +195,16 @@ def _command_forced(bsm: BatterySystemManager, plan_intent: str, mode: str) -> N
     inverter_controller.current_schedule = forced
 
 
+def _command_plan(bsm: BatterySystemManager, intent: str) -> None:
+    inverter_controller = bsm._inverter_controller
+    assert inverter_controller is not None
+    inverter_controller.strategic_intents = [intent] * PERIODS
+    inverter_controller.current_schedule = cast(
+        DPSchedule,
+        SimpleNamespace(forced_from_period=None, actions=[1.0] * PERIODS),
+    )
+
+
 def _store_plan_period(
     bsm: BatterySystemManager,
     intent: str,
@@ -314,15 +324,23 @@ class TestWritePathFollowsTheOverride:
 
     def test_an_unforced_period_records_the_planned_intent(self) -> None:
         bsm, _ = _make_bsm()
-        inverter_controller = bsm._inverter_controller
-        assert inverter_controller is not None
-        inverter_controller.strategic_intents = ["GRID_CHARGING"] * PERIODS
-        inverter_controller.current_schedule = cast(
-            DPSchedule,
-            SimpleNamespace(forced_from_period=None, actions=[1.0] * PERIODS),
-        )
+        _command_plan(bsm, "GRID_CHARGING")
         _store_plan_period(bsm, "GRID_CHARGING", discharge_allowed=False)
 
+        bsm._apply_period_schedule(PERIOD)
+
+        assert bsm._commanded_intent_for_period(PERIOD) == "GRID_CHARGING"
+
+    def test_clearing_mid_period_records_the_planned_intent(self) -> None:
+        """The period is re-applied from the plan once cleared; history and the
+        GRID_CHARGING cost-basis split must follow that, not the earlier
+        forced command."""
+        bsm, _ = _make_bsm()
+        _command_forced(bsm, "GRID_CHARGING", "SOLAR_STORAGE")
+        _store_plan_period(bsm, "GRID_CHARGING", discharge_allowed=False)
+        bsm._apply_period_schedule(PERIOD)
+
+        _command_plan(bsm, "GRID_CHARGING")
         bsm._apply_period_schedule(PERIOD)
 
         assert bsm._commanded_intent_for_period(PERIOD) == "GRID_CHARGING"

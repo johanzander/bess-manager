@@ -1,31 +1,16 @@
-import { useCallback, useEffect, useState } from 'react';
-import { clearForceMode, getForceMode, setForceMode } from '../api/scheduleApi';
-import { ForceModeState } from '../types';
+import { useState } from 'react';
 import { intentLabel } from '../utils/intent';
-import { FORCE_MODE_CHANGED_EVENT } from './ForceModeBanner';
+import { useForceMode } from './ForceModeContext';
 
 export default function ForceModeControl() {
-  const [state, setState] = useState<ForceModeState | null>(null);
+  const { state, setMode, clear } = useForceMode();
   const [pendingMode, setPendingMode] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const refresh = useCallback(() => {
-    getForceMode()
-      .then(setState)
-      .catch((err) => console.error('Failed to load force mode:', err));
-  }, []);
-
-  useEffect(() => {
-    refresh();
-    window.addEventListener(FORCE_MODE_CHANGED_EVENT, refresh);
-    return () => window.removeEventListener(FORCE_MODE_CHANGED_EVENT, refresh);
-  }, [refresh]);
-
-  const apply = async (action: () => Promise<ForceModeState>, failure: string) => {
+  const apply = async (action: () => Promise<void>, failure: string) => {
     try {
-      setState(await action());
+      await action();
       setError(null);
-      window.dispatchEvent(new Event(FORCE_MODE_CHANGED_EVENT));
     } catch (err) {
       console.error(failure, err);
       setError(failure);
@@ -63,7 +48,7 @@ export default function ForceModeControl() {
           </div>
           {state.active && (
             <button
-              onClick={() => apply(clearForceMode, 'Failed to return to automatic')}
+              onClick={() => apply(clear, 'Failed to return to automatic')}
               className="px-3 py-2 text-sm text-gray-600 dark:text-gray-400 bg-gray-200 dark:bg-gray-700 rounded-md hover:bg-gray-300 dark:hover:bg-gray-600"
             >
               Return to automatic
@@ -88,7 +73,7 @@ export default function ForceModeControl() {
               Cancel
             </button>
             <button
-              onClick={() => apply(() => setForceMode(pendingMode), 'Failed to set force mode')}
+              onClick={() => apply(() => setMode(pendingMode), 'Failed to set force mode')}
               className="px-3 py-1.5 text-xs text-white bg-amber-600 rounded hover:bg-amber-500"
             >
               Force {intentLabel(pendingMode)}

@@ -193,7 +193,6 @@ export interface DashboardResponse {
   totals: DashboardTotals;
   strategicIntentSummary: Record<string, number>;
   batteryCapacity: number;
-  forceMode: ForceModeState;
   
   // Battery state
   batterySoc: number;

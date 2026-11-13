@@ -8,6 +8,7 @@ vi.mock('../../api/scheduleApi', () => ({
 }));
 
 import ForceModeBanner from '../ForceModeBanner';
+import { ForceModeProvider } from '../ForceModeContext';
 import { getForceMode, clearForceMode } from '../../api/scheduleApi';
 
 const inactive = { active: false, mode: null, activatedAt: null, supportedModes: ['IDLE'] };
@@ -18,19 +19,26 @@ const active = {
   supportedModes: ['IDLE', 'BATTERY_EXPORT'],
 };
 
+const renderBanner = () =>
+  render(
+    <ForceModeProvider>
+      <ForceModeBanner />
+    </ForceModeProvider>,
+  );
+
 describe('ForceModeBanner', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('renders nothing when force mode is inactive', async () => {
     vi.mocked(getForceMode).mockResolvedValue(inactive);
-    const { container } = render(<ForceModeBanner />);
+    const { container } = renderBanner();
     await waitFor(() => expect(getForceMode).toHaveBeenCalled());
     expect(container).toBeEmptyDOMElement();
   });
 
   it('shows the forced mode when active', async () => {
     vi.mocked(getForceMode).mockResolvedValue(active);
-    render(<ForceModeBanner />);
+    renderBanner();
     expect(await screen.findByText(/Force mode: Selling to Grid/)).toBeInTheDocument();
     expect(screen.getByText(/optimizer plan overridden since/)).toBeInTheDocument();
   });
@@ -41,18 +49,9 @@ describe('ForceModeBanner', () => {
       vi.mocked(getForceMode).mockResolvedValue(inactive);
       return inactive;
     });
-    const { container } = render(<ForceModeBanner />);
+    const { container } = renderBanner();
     fireEvent.click(await screen.findByRole('button', { name: /Return to automatic/ }));
     await waitFor(() => expect(clearForceMode).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(container).toBeEmptyDOMElement());
-  });
-
-  it('refetches when the force-mode-changed event fires', async () => {
-    vi.mocked(getForceMode).mockResolvedValue(inactive);
-    render(<ForceModeBanner />);
-    await waitFor(() => expect(getForceMode).toHaveBeenCalledTimes(1));
-    vi.mocked(getForceMode).mockResolvedValue(active);
-    window.dispatchEvent(new Event('bess:force-mode-changed'));
-    expect(await screen.findByText(/Force mode:/)).toBeInTheDocument();
   });
 });

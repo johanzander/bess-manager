@@ -22,6 +22,7 @@ class DPSchedule:
         summary: dict[str, Any] | None = None,
         solar_charged: list[float] | None = None,
         original_dp_results: dict[str, Any] | None = None,
+        forced_from_period: int | None = None,
     ):
         """
         Initialize schedule with strategic intent support.
@@ -36,6 +37,9 @@ class DPSchedule:
             summary: Economic summary data
             solar_charged: Solar energy charged to battery each hour
             original_dp_results: Complete results from DP algorithm including intents
+            forced_from_period: First period whose intent and action are a
+                user force mode rather than the plan (core/bess/force_mode.py);
+                None when the whole schedule is the optimizer's own.
         """
         self.actions = actions
         self.state_of_energy = state_of_energy
@@ -46,6 +50,7 @@ class DPSchedule:
         self.summary = summary or {}
         self.solar_charged = solar_charged or []
         self.original_dp_results = original_dp_results or {}
+        self.forced_from_period = forced_from_period
 
         # Extract strategic intents if available
         self.strategic_intents = self.original_dp_results.get("strategic_intent", [])

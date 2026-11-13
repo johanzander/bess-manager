@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .force_mode import FORCE_MODES
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
@@ -65,6 +66,11 @@ class SolaxController(InverterController):
     load_support_delivers_exact_cover: ClassVar[bool] = False
 
     CONTROL_MODEL: ClassVar[str] = "vpp_power"
+
+    # LOAD_SUPPORT's rate is a forced power here, not a load-following
+    # ceiling (_vpp_display_state / _write_period_to_hardware), so a forced
+    # LOAD_SUPPORT at the full ceiling would export at full power.
+    SUPPORTED_FORCE_MODES: ClassVar[frozenset[str]] = FORCE_MODES - {"LOAD_SUPPORT"}
 
     def __init__(self, battery_settings: BatterySettings) -> None:
         """Initialise the SolaX controller."""

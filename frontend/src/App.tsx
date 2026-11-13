@@ -13,6 +13,8 @@ import { ReportProblemProvider } from './components/ReportProblemContext';
 import ReportProblemButton from './components/ReportProblemButton';
 import AIChatPanel from './components/AIChatPanel';
 import DemoModeBanner from './components/DemoModeBanner';
+import ForceModeBanner from './components/ForceModeBanner';
+import { ForceModeProvider } from './components/ForceModeContext';
 import PreflightCheckDialog from './components/PreflightCheckDialog';
 
 // An ErrorBoundary component to catch rendering errors
@@ -263,6 +265,7 @@ function App() {
     return (
       <Router>
         <ReportProblemProvider>
+        <ForceModeProvider>
         <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-900">
           <header className="bg-white dark:bg-gray-800 shadow sticky top-0 z-10">
             <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8">
@@ -298,6 +301,7 @@ function App() {
           {isDemoMode && (
             <DemoModeBanner onGoLive={() => setShowPreflightDialog(true)} />
           )}
+          <ForceModeBanner />
 
           <main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
             {settingsError && (
@@ -346,6 +350,7 @@ function App() {
             window.dispatchEvent(new Event('bess:demo-mode-changed'));
           }}
         />
+        </ForceModeProvider>
         </ReportProblemProvider>
       </Router>
     );

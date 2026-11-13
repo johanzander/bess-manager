@@ -635,6 +635,7 @@ class TestChargeRateHardwareWrite:
         actions = [0.0] * 96
         actions[8] = 0.17
         mock_schedule = MagicMock(spec=DPSchedule)
+        mock_schedule.forced_from_period = None
         mock_schedule.actions = actions
         # `spec=DPSchedule` specs off the class, but `state_of_energy` is set
         # in `__init__`, so the spec does not include it while every real

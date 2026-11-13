@@ -825,6 +825,19 @@ doesn't match the schedule:
   `Observed` behavior shows no discharge despite `Intent: BATTERY_EXPORT` or
   `LOAD_SUPPORT`, check for an active discharge-inhibit sensor before
   suspecting the DP or the intent-to-hardware mapping.
+- **Force mode** (user override, `core/bess/force_mode.py`): while set, the
+  schedule handed to the inverter controller is replaced from the current
+  period onward by the forced intent at full power (`apply_force_mode`, called
+  in `update_battery_schedule` right after `_create_updated_schedule`). The
+  optimizer still plans, and `schedule_store`/the daily view keep the
+  *unforced* plan, so a bundle's plan and the hardware disagree by design.
+  The plan-derived gates in `_apply_period_schedule` (intra-period ceiling
+  lift, export curtailment, IDLE hold release) are bypassed for forced
+  periods, and history records the commanded intent
+  (`_commanded_intent_for_period`). A bundle header says **Force Mode** when
+  one was active at export. Check for `FORCE MODE ACTIVE` in the log before
+  diagnosing a plan/actual mismatch. Per-platform support:
+  `InverterController.SUPPORTED_FORCE_MODES`.
 - **Temperature derating**: charge power can be capped below the configured
   max on cold days via a weather-forecast-driven derating curve
   (`core/bess/battery_system_manager.py:1917-1966`,

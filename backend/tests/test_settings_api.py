@@ -251,6 +251,9 @@ class TestPatchSettingsInverter:
         mock_controller.system.switch_inverter_platform.assert_called_once_with(
             "solax_modbus_growatt_min"
         )
+        # A force mode the new platform cannot run is dropped live; the saved
+        # one must follow, or a restart would restore it.
+        mock_controller.forget_dropped_force_mode.assert_called_once_with()
 
     def test_control_mode_switched_live_for_growatt_modbus_min(self, mock_controller):
         _client.patch(

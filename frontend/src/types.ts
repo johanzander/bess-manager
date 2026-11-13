@@ -307,3 +307,10 @@ export type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
 
 
 
+
+export interface ForceModeState {
+  active: boolean;
+  mode: string | null;
+  activatedAt: string | null;
+  supportedModes: string[];
+}

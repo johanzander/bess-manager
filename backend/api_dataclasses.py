@@ -376,6 +376,22 @@ class APISnapshotComparison:
 
 
 @dataclass
+class APIForceMode:
+    """User override of the optimizer plan; mode is None when not forced."""
+
+    active: bool
+    mode: str | None
+    activatedAt: str | None
+    supportedModes: list[str]
+
+
+class APIForceModeRequest(BaseModel):
+    """Request body for PUT /api/force-mode."""
+
+    mode: str
+
+
+@dataclass
 class APIDashboardHourlyData:
     """Dashboard hourly data with canonical FormattedValue interface."""
 

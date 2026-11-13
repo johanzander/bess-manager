@@ -112,7 +112,9 @@ def _apply_load_support_period(
     bsm._inverter_controller.strategic_intents = intents
     actions = [0.0] * 96
     actions[TEST_PERIOD] = action_kwh
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
     period_data = PeriodData(
         period=TEST_PERIOD,

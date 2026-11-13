@@ -45,7 +45,9 @@ def _set_intent(bsm: BatterySystemManager, period: int, intent: str) -> None:
     intents = ["IDLE"] * 96
     intents[period] = intent
     bsm._inverter_controller.strategic_intents = intents
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=[0.0] * 96)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=[0.0] * 96
+    )
 
 
 def _period_data(period: int, timestamp, allowed: bool) -> PeriodData:

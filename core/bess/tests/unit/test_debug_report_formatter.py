@@ -1,14 +1,14 @@
 """Tests for debug_report_formatter markdown table rendering."""
 
 import json
-from typing import ClassVar
+from typing import Any, ClassVar
 
 from core.bess.debug_data_exporter import DebugDataExport
 from core.bess.debug_report_formatter import DebugReportFormatter
 
 
-def _minimal_export(**overrides) -> DebugDataExport:
-    defaults = {
+def _minimal_export(**overrides: Any) -> DebugDataExport:
+    defaults: dict[str, Any] = {
         "export_timestamp": "2026-07-07T21:45:00+02:00",
         "timezone": "Europe/Stockholm",
         "bess_version": "9.9.0b9",
@@ -220,3 +220,22 @@ class TestFormatPreviousDays:
         assert "2026-07-17" in report
         assert "BATTERY_EXPORT" in report
         assert "|  76 | 19:00 |" in report
+
+
+class TestForceModeInBundle:
+    """A bundle taken during a force mode must say the inverter was not
+    following the plan, or the analyst reads plan-vs-actual gaps as bugs."""
+
+    def test_active_force_mode_is_announced_in_the_header(self) -> None:
+        report = DebugReportFormatter().format_report(
+            _minimal_export(force_mode="BATTERY_EXPORT")
+        )
+
+        header = report.split("## ")[0]
+        assert "Force Mode" in header
+        assert "BATTERY_EXPORT" in header
+
+    def test_no_force_mode_adds_nothing_to_the_header(self) -> None:
+        report = DebugReportFormatter().format_report(_minimal_export())
+
+        assert "Force Mode" not in report.split("## ")[0]

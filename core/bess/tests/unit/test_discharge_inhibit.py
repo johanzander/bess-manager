@@ -52,7 +52,9 @@ def _set_discharge_action(bsm: BatterySystemManager, period: int, kwh: float) ->
     """Set a battery action for BATTERY_EXPORT discharge calculation."""
     actions = [0.0] * 96
     actions[period] = kwh
-    bsm._inverter_controller.current_schedule = SimpleNamespace(actions=actions)
+    bsm._inverter_controller.current_schedule = SimpleNamespace(
+        forced_from_period=None, actions=actions
+    )
 
 
 PERIOD = 20  # Arbitrary test period

@@ -6,6 +6,7 @@ import { BatterySettings, ElectricitySettings } from '../types';
 import { Clock, AlertCircle } from 'lucide-react';
 import EnergyFlowCards from '../components/EnergyFlowCards';
 import SystemStatusCard from '../components/SystemStatusCard';
+import ForceModeControl from '../components/ForceModeControl';
 import AlertBanner from '../components/AlertBanner';
 import DeprecationBanner from '../components/DeprecationBanner';
 import { RuntimeFailureAlerts } from '../components/RuntimeFailureAlerts';
@@ -375,6 +376,8 @@ export default function DashboardPage({
           </div>
         </div>
       </div>
+
+      <ForceModeControl />
 
       {/* Initializing state — startup or backfill + schedule running in background */}
       {isInitializing && (

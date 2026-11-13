@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
-from .execution_model import INTENT_TO_MODE, command_index
+from .execution_model import INTENT_TO_MODE, LOAD_SUPPORT_CEILING, command_index
 from .settings import BatterySettings
 from .strategic_intent import idle_hold_releasable
 
@@ -130,21 +130,20 @@ class InverterController(ABC):
     # full-power discharge instead of gently covering a dip (#324).
     discharge_rate_is_load_following: ClassVar[bool] = True
 
-    # Whether a planned LOAD_SUPPORT discharge is delivered as
-    # min(plan, actual load). Related to the flag above but NOT the same
-    # question, and the answers differ on solax_modbus VPP mode: there the
-    # rate register is a forced power (flag above False), yet LOAD_SUPPORT
-    # writes no rate at all -- #413 disables remote control for that intent
-    # and lets the inverter's own load-following self-use run the period, so
-    # a cover plan is delivered exactly (this flag True). True by default
-    # (TOU-register control, where the rate is a ceiling); False on native
-    # SolaX, which never received #413, and on the period-list platforms,
-    # which have no per-period control to deliver a partial cover with.
-    # Read by the optimizer through
-    # execution_model.PlatformCapabilities.load_support_delivers_exact_cover
-    # to decide whether the off-lattice exact-cover candidate (#466) is
-    # executable here (#580).
-    load_support_delivers_exact_cover: ClassVar[bool] = True
+    # How much of the house deficit a planned LOAD_SUPPORT period delivers --
+    # one of execution_model's LOAD_SUPPORT_* values. Related to the flag
+    # above but NOT the same question, and the answers differ on solax_modbus
+    # VPP mode: there the rate register is a forced power (flag above
+    # False), yet LOAD_SUPPORT writes no rate at all -- #413 disables remote
+    # control for that intent and lets the inverter's own load-following
+    # self-use run the period, so a cover plan is delivered exactly
+    # (`ceiling`). `ceiling` by default (TOU-register control, where the
+    # rate is a ceiling); `unmodelled` on native SolaX, which never received
+    # #413, and on SPH/Huawei; `whole_load` on Solis, whose Self Use covers
+    # the whole deficit (#884). Read by the optimizer through
+    # execution_model.PlatformCapabilities.load_support_delivery to decide
+    # which load-cover discharges are executable here (#580, #884).
+    load_support_delivery: ClassVar[str] = LOAD_SUPPORT_CEILING
 
     # Whether the default _write_period_to_hardware() should skip re-sending
     # a register (grid_charge/discharge_rate) that already matches the last

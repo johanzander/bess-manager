@@ -763,6 +763,12 @@ class InverterController(ABC):
 
         False when there is no plan to read: with no trajectory there is no
         prediction to display, and the hold is the unchanged-behaviour answer.
+
+        **Not forced-aware.** A force mode overrides a period's decisions but
+        leaves the trajectory as the unforced plan's (`apply_force_mode`), so a
+        forced period reads where the plan, not the forced command, would have
+        the battery. Answering for the forced command needs a simulated forced
+        trajectory, which is not modelled.
         """
         if self.current_schedule is None:
             return False
@@ -786,11 +792,6 @@ class InverterController(ABC):
         unchanged-behaviour answer.
         """
         if self.current_schedule is None:
-            return False
-        forced_from = self.current_schedule.forced_from_period
-        if forced_from is not None and period >= forced_from:
-            # A forced period does not follow the plan's verdict: the write
-            # path holds a forced IDLE (BatterySystemManager), so show that.
             return False
         period_data = self.current_schedule.period_data
         if period >= len(period_data):

@@ -4,7 +4,7 @@ The optimizer keeps planning; only the command follows the override. Outcomes
 are asserted through the Growatt MIN execution model
 (`core/bess/simulation/inverter_simulator.py`) wherever it can see the
 behaviour. The write-path gates in `BatterySystemManager._apply_period_schedule`
-read the plan's own verdicts, which no execution model sees, so those tests
+read the commanded decisions, which no execution model sees, so those tests
 assert the command that lands on the inverter instead -- the same stance as
 `test_vpp_idle_gate_release.py`.
 """
@@ -42,12 +42,51 @@ PERIODS = 96
 DT = 24.0 / PERIODS
 
 
-def _plan(intent: str, action_kwh: float, periods: int = PERIODS) -> DPSchedule:
+def _plan(
+    intent: str,
+    action_kwh: float,
+    periods: int = PERIODS,
+    period_data: list[PeriodData | None] | None = None,
+) -> DPSchedule:
     return DPSchedule(
         actions=[action_kwh] * periods,
         state_of_energy=[10.0] * periods,
         prices=[1.0] * periods,
-        original_dp_results={"strategic_intent": [intent] * periods},
+        original_dp_results={
+            "strategic_intent": [intent] * periods,
+            "period_data": period_data or [],
+        },
+    )
+
+
+def _planned_period(
+    period: int,
+    intent: str,
+    discharge_allowed: bool,
+    grid_exported: float = 0.0,
+    sell_price: float = 0.5,
+    curtailed: bool = False,
+) -> PeriodData:
+    """One period as the optimizer planned it, timestamped like production."""
+    return PeriodData(
+        period=period,
+        energy=EnergyData(
+            solar_production=grid_exported,
+            home_consumption=0.0,
+            battery_charged=0.0,
+            battery_discharged=0.0,
+            grid_imported=0.0,
+            grid_exported=grid_exported,
+            battery_soe_start=10.0,
+            battery_soe_end=10.0,
+        ),
+        timestamp=time_utils.period_index_to_timestamp(period),
+        economic=EconomicData(sell_price=sell_price),
+        decision=DecisionData(
+            strategic_intent=intent,
+            intra_period_discharge_allowed=discharge_allowed,
+            curtailed=curtailed,
+        ),
     )
 
 
@@ -95,12 +134,48 @@ class TestForcedSchedule:
 
     def test_the_plan_itself_is_not_changed(self) -> None:
         settings = make_battery_settings()
-        plan = _plan("IDLE", 0.0)
+        plan = _plan(
+            "IDLE",
+            0.0,
+            period_data=[_planned_period(p, "IDLE", True) for p in range(PERIODS)],
+        )
 
         apply_force_mode(plan, "BATTERY_EXPORT", 0, settings)
 
         assert plan.strategic_intents == ["IDLE"] * PERIODS
         assert plan.forced_from_period is None
+        # The dashboard shows the stored plan, which shares these records.
+        assert all(
+            p.decision.strategic_intent == "IDLE"
+            and p.decision.intra_period_discharge_allowed
+            for p in plan.period_data
+        )
+
+    def test_forced_periods_carry_the_forced_commands_decisions(self) -> None:
+        """Every reader of the commanded schedule's decisions -- the write path,
+        the schedule view, the period-list platforms -- sees the forced mode,
+        not the plan's verdicts, without a forced check of its own."""
+        settings = make_battery_settings()
+        planned: list[PeriodData | None] = [
+            _planned_period(p, "SOLAR_STORAGE", True, grid_exported=0.4, curtailed=True)
+            for p in range(PERIODS)
+        ]
+        planned[0] = None  # an elapsed period the optimization did not cover
+        plan = _plan("SOLAR_STORAGE", 0.0, period_data=planned)
+
+        forced = apply_force_mode(plan, "BATTERY_EXPORT", 40, settings)
+
+        assert forced.period_data[0] is None
+        assert forced.period_data[39] is plan.period_data[39]
+        decision = forced.period_data[40].decision
+        assert decision.strategic_intent == "BATTERY_EXPORT"
+        assert decision.battery_action == forced.actions[40]
+        assert decision.intra_period_discharge_allowed is False
+        assert decision.curtailed is False
+        # Energy stays the plan's: what a forced period's flows would be is
+        # not modelled (a forecast-dependent simulation, out of scope here).
+        assert forced.period_data[40].energy is plan.period_data[40].energy
+        assert forced.period_data[40].timestamp == plan.period_data[40].timestamp
 
     def test_unknown_mode_is_rejected(self) -> None:
         with pytest.raises(ValueError):
@@ -185,11 +260,24 @@ def _make_bsm(
     return bsm, controller
 
 
-def _command_forced(bsm: BatterySystemManager, plan_intent: str, mode: str) -> None:
+def _command_forced(
+    bsm: BatterySystemManager,
+    plan_intent: str,
+    mode: str,
+    planned: PeriodData | None = None,
+) -> None:
+    """Command ``mode`` over a plan of ``plan_intent``. ``planned`` is the
+    plan's own record of PERIOD -- in production the commanded schedule is
+    built from the very PeriodData the schedule store holds."""
     inverter_controller = bsm._inverter_controller
     assert inverter_controller is not None
+    period_data: list[PeriodData | None] = [None] * PERIODS
+    period_data[PERIOD] = planned
     forced = apply_force_mode(
-        _plan(plan_intent, 0.0), mode, PERIOD, bsm.battery_settings
+        _plan(plan_intent, 0.0, period_data=period_data),
+        mode,
+        PERIOD,
+        bsm.battery_settings,
     )
     inverter_controller.strategic_intents = forced.strategic_intents
     inverter_controller.current_schedule = forced
@@ -211,28 +299,13 @@ def _store_plan_period(
     discharge_allowed: bool,
     grid_exported: float = 0.0,
     sell_price: float = 0.5,
-) -> None:
-    energy = EnergyData(
-        solar_production=grid_exported,
-        home_consumption=0.0,
-        battery_charged=0.0,
-        battery_discharged=0.0,
-        grid_imported=0.0,
-        grid_exported=grid_exported,
-        battery_soe_start=10.0,
-        battery_soe_end=10.0,
-    )
-    period_data = PeriodData(
-        period=PERIOD,
-        energy=energy,
-        timestamp=time_utils.period_index_to_timestamp(PERIOD),
-        economic=EconomicData(sell_price=sell_price),
-        decision=DecisionData(
-            strategic_intent=intent, intra_period_discharge_allowed=discharge_allowed
-        ),
+) -> PeriodData:
+    period_data = _planned_period(
+        PERIOD, intent, discharge_allowed, grid_exported, sell_price
     )
     result = OptimizationResult(input_data={}, period_data=[period_data])
     bsm.schedule_store.store_schedule(result, optimization_period=PERIOD)
+    return period_data
 
 
 class TestWritePathFollowsTheOverride:
@@ -243,8 +316,8 @@ class TestWritePathFollowsTheOverride:
         in test_solar_storage_discharge_gate.py); a forced SOLAR_STORAGE must
         not discharge."""
         bsm, controller = _make_bsm()
-        _command_forced(bsm, "SOLAR_STORAGE", "SOLAR_STORAGE")
-        _store_plan_period(bsm, "SOLAR_STORAGE", discharge_allowed=True)
+        planned = _store_plan_period(bsm, "SOLAR_STORAGE", discharge_allowed=True)
+        _command_forced(bsm, "SOLAR_STORAGE", "SOLAR_STORAGE", planned)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -304,8 +377,8 @@ class TestWritePathFollowsTheOverride:
                 }
             },
         )
-        _command_forced(bsm, "IDLE", "IDLE")
-        _store_plan_period(bsm, "IDLE", discharge_allowed=True)
+        planned = _store_plan_period(bsm, "IDLE", discharge_allowed=True)
+        _command_forced(bsm, "IDLE", "IDLE", planned)
 
         bsm._apply_period_schedule(PERIOD)
 
@@ -344,6 +417,32 @@ class TestWritePathFollowsTheOverride:
         bsm._apply_period_schedule(PERIOD)
 
         assert bsm._commanded_intent_for_period(PERIOD) == "GRID_CHARGING"
+
+
+class TestScheduleViewFollowsTheOverride:
+    def test_forced_idle_shows_the_hold_although_the_plan_would_release(
+        self,
+    ) -> None:
+        """On Growatt VPP a planned IDLE with an open verdict shows the release
+        (#786); the forced IDLE the write path holds must show as the hold."""
+        settings = BatterySettings(total_capacity=50.0, min_soc=10.0, max_soc=95.0)
+        inverter = SolaxModbusGrowattController(settings, control_mode="vpp")
+        plan = _plan(
+            "IDLE",
+            0.0,
+            period_data=[_planned_period(p, "IDLE", True) for p in range(PERIODS)],
+        )
+        inverter.strategic_intents = plan.strategic_intents
+        inverter.current_schedule = plan
+        assert inverter.get_period_settings(PERIOD)["vpp_remote_control"] is False
+
+        forced = apply_force_mode(plan, "IDLE", PERIOD, settings)
+        inverter.strategic_intents = forced.strategic_intents
+        inverter.current_schedule = forced
+
+        fields = inverter.get_period_settings(PERIOD)
+        assert fields["vpp_power_pct"] == 1
+        assert fields["vpp_remote_control"] is True
 
 
 class TestForceModeLifecycle:

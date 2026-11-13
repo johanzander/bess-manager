@@ -80,9 +80,9 @@ class SolisModbusController(InverterController):
     CONTROL_MODEL: ClassVar[str] = "period_list"
 
     # Export slots take their power and cut-off SoC, and an IDLE hold its
-    # "is this deliberate" verdict, from the plan's period_data
-    # (_export_slots, _is_deliberate_hold) -- which a force mode leaves as
-    # the unforced plan.
+    # battery-level check, from the plan's energy figures (_export_slots,
+    # _is_deliberate_hold) -- which a force mode leaves as the unforced plan.
+    # Its decisions are forced (apply_force_mode); its energy is not.
     SUPPORTED_FORCE_MODES: ClassVar[frozenset[str]] = FORCE_MODES - {
         "BATTERY_EXPORT",
         "IDLE",

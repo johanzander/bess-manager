@@ -3838,16 +3838,8 @@ class BatterySystemManager:
         # True, so the planner and this write path read the same hardware two
         # different ways. Solis now declares both explicitly; routing through
         # the capability is what keeps a future platform from re-opening it.
-        # Skipped under a force mode: the verdict is the unforced plan's, and
-        # lifting the ceiling would add discharge to a forced SOLAR_STORAGE or
-        # IDLE.
-        if not forced and self.platform_capabilities.discharge_rate_is_load_following:
-            # Resolved by exact timestamp (not positional index -
-            # optimization_period) so the standalone next-day schedule
-            # (period_data[0] anchored to tomorrow 00:00 despite
-            # optimization_period=0) is never misread as today's period.
-            target_timestamp = time_utils.period_index_to_timestamp(period)
-            period_data = self.schedule_store.get_period_data_at(target_timestamp)
+        if self.platform_capabilities.discharge_rate_is_load_following:
+            period_data = self._commanded_period_data(period)
             # Which intents lift, and IDLE's fall-through condition (#811), live
             # in `strategic_intent.discharge_ceiling_lifts`.
             if period_data is not None and discharge_ceiling_lifts(
@@ -3933,10 +3925,7 @@ class BatterySystemManager:
         self._desired_block_passive_charging = block_passive_charging
         self._desired_strategic_intent = strategic_intent
         self._desired_charge_rate = charge_rate
-        # A forced IDLE holds: the release verdict is the unforced plan's.
-        self._desired_discharge_authorized = (
-            False if forced else self._planned_discharge_authorized(period)
-        )
+        self._desired_discharge_authorized = self._planned_discharge_authorized(period)
         discharge_authorized = self._inhibit_gated(self._desired_discharge_authorized)
 
         # Check discharge inhibit (e.g. EV actively charging during Tibber grid award)
@@ -4056,20 +4045,49 @@ class BatterySystemManager:
         current_soe = self.battery_settings.total_capacity * soc / 100.0
         return current_soe <= self.battery_settings.min_soe_kwh
 
-    def _planned_discharge_authorized(self, period: int) -> bool:
-        """Whether the plan lets a forced-power platform release the IDLE hold
-        this period (#786); the rule lives in
-        `strategic_intent.idle_hold_releasable`.
+    def _commanded_period_data(self, period: int) -> PeriodData | None:
+        """The decisions the inverter is commanded from for this period.
 
-        Resolved by exact timestamp, like the intra-period gate, so the
-        standalone next-day schedule (period_data[0] anchored to tomorrow 00:00
-        despite optimization_period=0) is never misread as today's period.
+        A forced period's are the forced command's, written once onto the
+        commanded schedule by `apply_force_mode`, so no reader re-derives "is
+        this forced" for itself. Every other period's are the stored plan's,
+        resolved by exact timestamp (not positional index -
+        optimization_period) so the standalone next-day schedule
+        (period_data[0] anchored to tomorrow 00:00 despite
+        optimization_period=0) is never misread as today's period (#380).
 
-        False when the schedule store has no period: absence of an economic
-        basis is not permission (#526), and the hold is today's behaviour.
+        None when there is no record of the period.
         """
         target_timestamp = time_utils.period_index_to_timestamp(period)
-        period_data = self.schedule_store.get_period_data_at(target_timestamp)
+        assert self._inverter_controller is not None
+        commanded = self._inverter_controller.current_schedule
+        if (
+            commanded is not None
+            and commanded.forced_from_period is not None
+            and period >= commanded.forced_from_period
+        ):
+            wanted = target_timestamp.astimezone(UTC)
+            return next(
+                (
+                    p
+                    for p in commanded.period_data
+                    if p is not None
+                    and p.timestamp is not None
+                    and p.timestamp.astimezone(UTC) == wanted
+                ),
+                None,
+            )
+        return self.schedule_store.get_period_data_at(target_timestamp)
+
+    def _planned_discharge_authorized(self, period: int) -> bool:
+        """Whether the commanded decisions let a forced-power platform release
+        the IDLE hold this period (#786); the rule lives in
+        `strategic_intent.idle_hold_releasable`.
+
+        False when there is no record of the period: absence of an economic
+        basis is not permission (#526), and the hold is today's behaviour.
+        """
+        period_data = self._commanded_period_data(period)
         if period_data is None:
             return False
         return idle_hold_releasable(

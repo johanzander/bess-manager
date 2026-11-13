@@ -7,7 +7,10 @@ battery action -- so each platform runs a forced mode exactly the way it runs
 that intent when the optimizer plans it, with no platform-specific code here.
 """
 
+from dataclasses import replace
+
 from .dp_schedule import DPSchedule
+from .models import PeriodData
 from .settings import BatterySettings
 
 FORCE_MODES: frozenset[str] = frozenset(
@@ -41,6 +44,27 @@ def forced_action_kwh(
     return 0.0
 
 
+def _forced_period(planned: PeriodData, mode: str, action_kwh: float) -> PeriodData:
+    """``planned`` with its decisions replaced by the forced command's.
+
+    The forced mode is the whole command: its intent and action, no intra-period
+    discharge lift or IDLE release (both are the plan's verdict on its own
+    action, and would add discharge to a forced SOLAR_STORAGE or IDLE), and no
+    curtailment (it would cap a forced BATTERY_EXPORT). A copy, because the
+    stored plan the dashboard shows shares the planned record.
+    """
+    return replace(
+        planned,
+        decision=replace(
+            planned.decision,
+            strategic_intent=mode,
+            battery_action=action_kwh,
+            intra_period_discharge_allowed=False,
+            curtailed=False,
+        ),
+    )
+
+
 def apply_force_mode(
     schedule: DPSchedule,
     mode: str,
@@ -49,11 +73,14 @@ def apply_force_mode(
 ) -> DPSchedule:
     """A copy of ``schedule`` that commands ``mode`` from ``from_period`` onward.
 
-    Periods before ``from_period`` keep the plan's intent and action. The
-    plan's energy trajectory and per-period decisions (``state_of_energy``,
-    ``period_data``) are left as the optimizer produced them: they describe
-    what the optimizer would have done, and ``forced_from_period`` marks
-    where the commanded schedule stops following them.
+    Periods before ``from_period`` keep the plan's intent and action. From
+    ``from_period`` on, each period's decisions (``period_data[p].decision``)
+    are the forced command's, so a reader of the commanded schedule needs no
+    forced check of its own. The energy trajectory (``state_of_energy`` and
+    each period's ``energy``) stays as the optimizer produced it: what a forced
+    period's flows would be depends on the forecast and is not modelled here.
+    A reader of energy figures still has to treat a forced period, marked by
+    ``forced_from_period``, as not following them.
     """
     if mode not in FORCE_MODES:
         raise ValueError(f"Unknown force mode: {mode}")
@@ -71,6 +98,14 @@ def apply_force_mode(
 
     actions = list(schedule.actions[:from_period]) + [forced_action] * forced_count
     intents = list(schedule.strategic_intents[:from_period]) + [mode] * forced_count
+    period_data = [
+        (
+            planned
+            if p < from_period or planned is None
+            else _forced_period(planned, mode, forced_action)
+        )
+        for p, planned in enumerate(schedule.period_data)
+    ]
 
     return DPSchedule(
         actions=actions,
@@ -84,6 +119,7 @@ def apply_force_mode(
         original_dp_results={
             **schedule.original_dp_results,
             "strategic_intent": intents,
+            "period_data": period_data,
         },
         forced_from_period=from_period,
     )

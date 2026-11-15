@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Debug export: every inverter write now appears in a compact bundle** — Growatt VPP, SolaX VPP and export-limit commands were previously missing, so what BESS sent couldn't be checked. ([#886](https://github.com/johanzander/bess-manager/issues/886))
 - **Solis, Growatt SPH, SolaX: no more "Grid Charge Enabled" warning on every inverter page refresh** — platforms without a grid-charge switch no longer log it as missing configuration. ([#885](https://github.com/johanzander/bess-manager/issues/885))
 - **Growatt VPP: the discharge inhibit now stops the battery powering the house** — with an EV charging, a battery-support period holds instead of draining the battery into the car. ([#881](https://github.com/johanzander/bess-manager/issues/881))
 - **Fuse protection: charging no longer jumps back to full power every other minute** — the limit now settles under the fuse rating. ([#877](https://github.com/johanzander/bess-manager/issues/877))

@@ -1454,11 +1454,11 @@ class HomeAssistantAPIController:
             k: v for k, v in kwargs.items() if k not in ("return_response", "blocking")
         }
 
-        # Make API call
-        return self._api_request(
+        operation = operation or f"Call {service_domain}.{service_name}"
+        result = self._api_request(
             "post",
             path,
-            operation=operation or f"Call {service_domain}.{service_name}",
+            operation=operation,
             category=category
             or (
                 "battery_control"
@@ -1469,6 +1469,20 @@ class HomeAssistantAPIController:
             suppress_retry_warnings=suppress_retry_warnings,
             json=json_data,
         )
+
+        # #886: every write to the inverter, on every platform, passes through
+        # here, so this is the one place a write is recorded. The compact debug
+        # export keeps lines by the "HARDWARE:" marker alone -- a new write
+        # path needs no filter change to show up in a bundle.
+        if not is_safe_read:
+            logger.info(
+                "HARDWARE: %s (%s.%s %s)",
+                operation,
+                service_domain,
+                service_name,
+                context,
+            )
+        return result
 
     def _get_raw_state(self, sensor_name: str) -> str | None:
         """Get raw state string from HA. Returns None if not configured or unavailable."""

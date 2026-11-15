@@ -122,8 +122,12 @@ actions=$(printf '%s' "$digest" | jq \
     --argjson analyze_stale_hours "$ANALYZE_STALE_HOURS" \
     --argjson tooling_behind "$tooling_behind" \
     --arg tooling_ref "$TOOLING_REF" \
-    --argjson prs "$prs" \
+    --slurpfile prs <(printf '%s' "$prs") \
     --arg owner "$owner" '
+  # `prs` arrives through a file, not `--argjson`: open PRs carry their review
+  # bodies, and a command-line argument is capped by ARG_MAX (see the same
+  # note in backlog-digest.sh). `--slurpfile` binds an array; unwrap it.
+  $prs[0] as $prs |
   # Board cards for PRs, keyed by number. Absent on an older digest, so this
   # defaults to empty rather than failing -- a rhythm run against a stale
   # digest then simply defers nothing, which is the pre-existing behaviour.

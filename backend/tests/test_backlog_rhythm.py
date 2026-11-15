@@ -1677,3 +1677,12 @@ def test_a_stale_issue_card_orphan_becomes_a_move_card_action(tmp_path: Path) ->
     assert len(actions) == 1
     assert "Done" in actions[0]["detail"]
     assert actions[0]["rank"] == 6
+
+
+def test_open_prs_larger_than_the_argument_limit_still_run(tmp_path: Path) -> None:
+    """Open PRs carry their review bodies, and they used to reach jq as an
+    `--argjson` command-line argument, which the OS caps (macOS ARG_MAX is
+    1 MB). 2 MB of review text keeps this over the limit on every platform."""
+    review = {"state": "COMMENTED", "body": "x" * 100_000}
+    result = _run(tmp_path, [], prs=[_pr(901, reviews=[review] * 20)])
+    assert isinstance(result["actions"], list)

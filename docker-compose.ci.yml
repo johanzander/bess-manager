@@ -25,6 +25,9 @@ services:
       # See backend/Dockerfile.dev for the fixed libfaketime.so.1 symlink path.
       - LD_PRELOAD=${BESS_FAKETIME_PRELOAD:-}
       - FAKETIME=${BESS_FAKETIME:-}
+      # Production waits 3 minutes before a health problem raises a banner;
+      # e2e/tests/health-recovery.spec.ts waits just past this instead.
+      - BESS_HEALTH_BANNER_MIN_FAILURE_AGE_SECONDS=5
     ports:
       - "${BESS_PORT:-8080}:8080"
     volumes:

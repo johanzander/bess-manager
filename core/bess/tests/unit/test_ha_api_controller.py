@@ -249,7 +249,7 @@ class TestServiceCallWithRetry:
 
     def _fail_write(self, ctrl: HomeAssistantAPIController) -> None:
         ctrl.max_attempts = 1
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", side_effect=requests.ConnectionError("refused")
         )
         with pytest.raises(requests.ConnectionError):
@@ -263,7 +263,7 @@ class TestServiceCallWithRetry:
         self._fail_write(ctrl)
         assert len(self._active_failures(ctrl)) == 1
 
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", return_value=_mock_response(content_type="text/plain")
         )
         ctrl._service_call_with_retry("switch", "turn_off", entity_id="switch.x")
@@ -276,7 +276,7 @@ class TestServiceCallWithRetry:
         """A healthy register must not hide one that is still failing."""
         self._fail_write(ctrl)
 
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", return_value=_mock_response(content_type="text/plain")
         )
         ctrl._service_call_with_retry("switch", "turn_on", entity_id="switch.other")
@@ -288,7 +288,7 @@ class TestServiceCallWithRetry:
     ) -> None:
         self._fail_write(ctrl)
 
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", return_value=_mock_response(content_type="text/plain")
         )
         ctrl._service_call_with_retry(
@@ -302,13 +302,13 @@ class TestServiceCallWithRetry:
     ) -> None:
         ctrl.service_domain = "growatt_server"
         ctrl.max_attempts = 1
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", side_effect=requests.ConnectionError("refused")
         )
         with pytest.raises(requests.ConnectionError):
             ctrl._service_call_with_retry("growatt_server", "update_time_segment")
 
-        ctrl.session.post = _session_method_mock(
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
             "post", return_value=_mock_response({"result": "ok"})
         )
         ctrl._service_call_with_retry("growatt_server", "read_time_segments")

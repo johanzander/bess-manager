@@ -4255,7 +4255,10 @@ class BatterySystemManager:
     # A problem raises a banner only if a check still finds it this long after
     # it first appeared. Measured in time, not checks: startup's check and the
     # next 5-minute tick can land seconds apart while integrations load (#875).
-    HEALTH_BANNER_MIN_FAILURE_AGE: ClassVar[timedelta] = timedelta(minutes=3)
+    # The env override exists only so the E2E stack need not wait 3 minutes.
+    HEALTH_BANNER_MIN_FAILURE_AGE: ClassVar[timedelta] = timedelta(
+        seconds=int(os.environ.get("BESS_HEALTH_BANNER_MIN_FAILURE_AGE_SECONDS", "180"))
+    )
 
     def _run_health_check(self) -> dict[str, Any]:
         """Run system health check."""

@@ -10,23 +10,48 @@ import { test, expect } from '@playwright/test';
 // (which only shows once ALL active issues clear) can't be observed in the
 // DOM in this shared stack. That part is verified at the API level instead,
 // which is deterministic regardless of the scenario's other baseline noise.
+//
+// #875: a problem raises a banner only if a check still finds it some time
+// after it first appeared. Production waits 3 minutes; docker-compose.ci.yml
+// sets BESS_HEALTH_BANNER_MIN_FAILURE_AGE_SECONDS=5, so a "lasting" outage
+// here is one rechecked after PERSIST_MS.
 
 const MOCK_HA = 'http://localhost:8123';
 const SENSOR = 'number.growatt_battery_charging_power_rate';
 const SENSOR_ATTRS = { unit_of_measurement: '%', min: 0, max: 100 };
+const PERSIST_MS = 6_000;
 
-async function breakSensor(request: import('@playwright/test').APIRequestContext) {
+type Request = import('@playwright/test').APIRequestContext;
+
+async function breakSensor(request: Request) {
   await request.post(`${MOCK_HA}/mock/update_sensor/${SENSOR}`, {
     data: { state: 'unavailable', attributes: SENSOR_ATTRS },
   });
   await request.post('/api/system-health/recheck');
 }
 
-async function fixSensor(request: import('@playwright/test').APIRequestContext) {
+// Break the sensor and recheck once it has been failing long enough to count.
+async function breakSensorForGood(request: Request) {
+  await breakSensor(request);
+  await new Promise((resolve) => setTimeout(resolve, PERSIST_MS));
+  await request.post('/api/system-health/recheck');
+}
+
+async function fixSensor(request: Request) {
   await request.post(`${MOCK_HA}/mock/update_sensor/${SENSOR}`, {
     data: { state: '100', attributes: SENSOR_ATTRS },
   });
   await request.post('/api/system-health/recheck');
+}
+
+async function batteryControlIssue(request: Request) {
+  const summary = await (await request.get('/api/dashboard-health-summary')).json();
+  return summary.criticalIssues.find((i: { component: string }) => i.component === 'Battery Control');
+}
+
+async function batteryControlRecovery(request: Request) {
+  const recoveries = await (await request.get('/api/health-recoveries')).json();
+  return recoveries.find((r: { component: string }) => r.component === 'Battery Control');
 }
 
 test.describe('Health-check recovery banner (#215)', () => {
@@ -37,15 +62,20 @@ test.describe('Health-check recovery banner (#215)', () => {
     await request.post('/api/health-recoveries/acknowledge');
   });
 
-  test('breaking a required sensor surfaces it in the active-issue API and the dashboard banner', async ({
+  test('a lasting outage of a required sensor surfaces in the active-issue API and the dashboard banner', async ({
     request,
     page,
   }) => {
     await breakSensor(request);
+    // #875: one failed check is usually a blip, so it raises nothing yet.
+    expect(await batteryControlIssue(request)).toBeUndefined();
+
+    await new Promise((resolve) => setTimeout(resolve, PERSIST_MS));
+    await request.post('/api/system-health/recheck');
 
     const summary = await (await request.get('/api/dashboard-health-summary')).json();
     expect(summary.hasCriticalErrors).toBe(true);
-    const issue = summary.criticalIssues.find((i: { component: string }) => i.component === 'Battery Control');
+    const issue = await batteryControlIssue(request);
     expect(issue).toBeTruthy();
     // One banner line per device: detail names the component, not the sensor.
     expect(issue.detail).toContain('Battery Control');
@@ -71,36 +101,41 @@ test.describe('Health-check recovery banner (#215)', () => {
     await expect(page.getByRole('button', { name: /dismiss/i })).not.toBeVisible();
   });
 
-  test('fixing it records a recovery with the component and previous status', async ({ request }) => {
+  test('a blip leaves no recovery behind', async ({ request }) => {
     await breakSensor(request);
     await fixSensor(request);
 
-    const recoveries = await (await request.get('/api/health-recoveries')).json();
-    const recovery = recoveries.find((r: { component: string }) => r.component === 'Battery Control');
+    expect(await batteryControlRecovery(request)).toBeUndefined();
+  });
+
+  test('fixing a lasting outage records a recovery with the component and previous status', async ({
+    request,
+  }) => {
+    await breakSensorForGood(request);
+    await fixSensor(request);
+
+    const recovery = await batteryControlRecovery(request);
     expect(recovery).toBeTruthy();
     expect(recovery.previousStatus).toBe('ERROR');
     expect(recovery.detail).toContain('Battery Control');
   });
 
   test('acknowledging clears the recovery', async ({ request }) => {
-    await breakSensor(request);
+    await breakSensorForGood(request);
     await fixSensor(request);
 
     await request.post('/api/health-recoveries/acknowledge');
 
-    const recoveries = await (await request.get('/api/health-recoveries')).json();
-    expect(recoveries.find((r: { component: string }) => r.component === 'Battery Control')).toBeUndefined();
+    expect(await batteryControlRecovery(request)).toBeUndefined();
   });
 
-  test('a component erroring again clears its own stale pending recovery', async ({ request }) => {
-    await breakSensor(request);
+  test('a component failing again for good clears its own stale pending recovery', async ({ request }) => {
+    await breakSensorForGood(request);
     await fixSensor(request);
-    let recoveries = await (await request.get('/api/health-recoveries')).json();
-    expect(recoveries.find((r: { component: string }) => r.component === 'Battery Control')).toBeTruthy();
+    expect(await batteryControlRecovery(request)).toBeTruthy();
 
-    await breakSensor(request);
+    await breakSensorForGood(request);
 
-    recoveries = await (await request.get('/api/health-recoveries')).json();
-    expect(recoveries.find((r: { component: string }) => r.component === 'Battery Control')).toBeUndefined();
+    expect(await batteryControlRecovery(request)).toBeUndefined();
   });
 });

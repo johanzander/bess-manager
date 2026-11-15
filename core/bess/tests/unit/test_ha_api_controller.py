@@ -19,7 +19,7 @@ from core.bess.ha_api_controller import (
     HomeAssistantAPIController,
     solcast_detailed_hourly_to_quarterly,
 )
-from core.bess.runtime_failure_tracker import RuntimeFailureTracker
+from core.bess.runtime_failure_tracker import RuntimeFailure, RuntimeFailureTracker
 from core.bess.settings_store import SettingsStore
 
 
@@ -241,6 +241,79 @@ class TestServiceCallWithRetry:
                 "input_number", "set_value", entity_id="input_number.x", value=1
             )
             assert mock.call_args.kwargs["category"] == "battery_control"
+
+    @staticmethod
+    def _active_failures(ctrl: HomeAssistantAPIController) -> list[RuntimeFailure]:
+        assert ctrl.failure_tracker is not None
+        return ctrl.failure_tracker.get_active_failures()
+
+    def _fail_write(self, ctrl: HomeAssistantAPIController) -> None:
+        ctrl.max_attempts = 1
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", side_effect=requests.ConnectionError("refused")
+        )
+        with pytest.raises(requests.ConnectionError):
+            ctrl._service_call_with_retry("switch", "turn_on", entity_id="switch.x")
+
+    def test_successful_write_clears_an_earlier_failure_of_its_category(
+        self, ctrl: HomeAssistantAPIController
+    ) -> None:
+        """#875: nothing used to clear these, so one bad night left a banner
+        up until someone dismissed it by hand."""
+        self._fail_write(ctrl)
+        assert len(self._active_failures(ctrl)) == 1
+
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", return_value=_mock_response(content_type="text/plain")
+        )
+        ctrl._service_call_with_retry("switch", "turn_off", entity_id="switch.x")
+
+        assert self._active_failures(ctrl) == []
+
+    def test_successful_write_to_another_entity_leaves_the_failure(
+        self, ctrl: HomeAssistantAPIController
+    ) -> None:
+        """A healthy register must not hide one that is still failing."""
+        self._fail_write(ctrl)
+
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", return_value=_mock_response(content_type="text/plain")
+        )
+        ctrl._service_call_with_retry("switch", "turn_on", entity_id="switch.other")
+
+        assert len(self._active_failures(ctrl)) == 1
+
+    def test_successful_write_leaves_other_categories_alone(
+        self, ctrl: HomeAssistantAPIController
+    ) -> None:
+        self._fail_write(ctrl)
+
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", return_value=_mock_response(content_type="text/plain")
+        )
+        ctrl._service_call_with_retry(
+            "switch", "turn_off", category="other", entity_id="switch.x"
+        )
+
+        assert len(self._active_failures(ctrl)) == 1
+
+    def test_successful_read_does_not_clear_a_write_failure(
+        self, ctrl: HomeAssistantAPIController
+    ) -> None:
+        ctrl.service_domain = "growatt_server"
+        ctrl.max_attempts = 1
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", side_effect=requests.ConnectionError("refused")
+        )
+        with pytest.raises(requests.ConnectionError):
+            ctrl._service_call_with_retry("growatt_server", "update_time_segment")
+
+        ctrl.session.post = _session_method_mock(  # type: ignore[method-assign]
+            "post", return_value=_mock_response({"result": "ok"})
+        )
+        ctrl._service_call_with_retry("growatt_server", "read_time_segments")
+
+        assert len(self._active_failures(ctrl)) == 1
 
 
 # ── _get_raw_state / _get_sensor_value / _get_binary_state ───────────────────

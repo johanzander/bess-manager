@@ -680,6 +680,13 @@ The system includes comprehensive health checking:
 - **Optimization Health**: Algorithm convergence and result validation
 - **Hardware Connection**: Inverter communication and control verification
 
+**Banner policy**: the Health page always shows the latest check. The dashboard
+banner waits until a check still finds the problem at least 3 minutes after it
+first appeared, so a bad check (typically integrations still loading after a
+restart) raises nothing and leaves no "Recovered" note. Write-failure banners appear only once a period's
+retries have run out, or once a single service call has used up its attempts,
+and clear on the next successful write to the same entity.
+
 **Severity model**: each component check is governed by two flags —
 `is_required` (is this component critical to the system, used to set the
 dashboard's `has_critical_errors` banner) and `required_methods` (which

@@ -344,6 +344,8 @@ class SolaxModbusGrowattController(GrowattMinController):
                     self._update_tou_display_state()
                 except Exception as e:
                     logger.error("FAILED: set TOU segment mode to %s: %s", mode, e)
+                    # The write may still have reached the inverter (#875).
+                    self._last_written_tou_mode = None
                     errors.append(str(e))
             else:
                 # #717: a period whose intent leaves the mode unchanged issues
@@ -659,6 +661,9 @@ class SolaxModbusGrowattController(GrowattMinController):
             return True, ""
         except Exception as e:
             logger.error("FAILED: Growatt VPP period write: %s", e)
+            # The write may still have reached the inverter (#875).
+            self._last_written_vpp_remote_control = None
+            self._last_written_vpp_power = None
             return False, str(e)
 
     def sync_to_hardware(

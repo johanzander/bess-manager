@@ -319,6 +319,8 @@ class BatterySystemManager:
 
         self._runtime_failure_tracker = RuntimeFailureTracker()
         self._health_recovery_tracker = HealthRecoveryTracker()
+        self._health_failing_since: dict[str, datetime] = {}
+        self._sustained_health_failures: set[str] = set()
 
         # Historical-data-incomplete warning dismissal, keyed to the day and
         # the exact set of missing hours so a new gap (or the same gap
@@ -3814,17 +3816,7 @@ class BatterySystemManager:
         )
 
         if not success:
-            pt = format_period(period)
-            self._runtime_failure_tracker.dismiss_by_category("period_apply")
-            self._runtime_failure_tracker.record_failure(
-                category="period_apply",
-                operation=(
-                    f"Period {period} ({pt}): Could not apply "
-                    f"optimization to inverter, retrying in 3 min"
-                ),
-                error=Exception(error_msg),
-            )
-            self._schedule_period_retry(
+            retry_scheduled = self._schedule_period_retry(
                 period,
                 grid_charge,
                 discharge_rate,
@@ -3833,12 +3825,28 @@ class BatterySystemManager:
                 charge_rate=charge_rate,
                 discharge_authorized=self._desired_discharge_authorized,
             )
+            if not retry_scheduled:
+                self._report_period_apply_failure(
+                    f"Period {period} ({format_period(period)}): Could not apply "
+                    f"optimization to inverter, no retry available",
+                    error_msg,
+                )
         else:
             self._last_applied_discharge_rate = discharge_rate
             self._last_applied_discharge_authorized = discharge_authorized
+            self._runtime_failure_tracker.dismiss_by_category("period_apply")
 
         # Apply charging power rate (BSM-level concern: uses power monitor)
         self.adjust_charging_power()
+
+    def _report_period_apply_failure(self, operation: str, error_msg: str) -> None:
+        """Show one banner for the most recent period that could not be applied."""
+        self._runtime_failure_tracker.dismiss_by_category("period_apply")
+        self._runtime_failure_tracker.record_failure(
+            category="period_apply",
+            operation=operation,
+            error=Exception(error_msg),
+        )
 
     def _at_reserve_floor(self) -> bool:
         """Whether the battery is sitting on its reserve floor right now (#592).
@@ -3931,12 +3939,15 @@ class BatterySystemManager:
         attempt: int = 1,
         charge_rate: int = 100,
         discharge_authorized: bool = False,
-    ) -> None:
+    ) -> bool:
         """Schedule a one-shot retry of period hardware write.
 
         Retries twice within the 15-min period window (at +3 min and +8 min).
-        If the scheduler is not available (e.g. during tests), the retry is
-        skipped and the failure banner remains as-is.
+        Returns whether a retry was scheduled; it is not when the scheduler
+        does not exist yet (startup applies a period before it is created), and
+        the caller must then report the failure itself. No period_apply banner
+        is raised while a retry is pending, only once they run out (#875); a
+        service call that used up its own attempts raises its own banner.
 
         charge_rate (#754) is captured here at the *original* period, same as
         every other argument -- it must replay this period's actual planned
@@ -3951,11 +3962,11 @@ class BatterySystemManager:
         """
         max_attempts = len(self._PERIOD_RETRY_DELAYS_MIN)
         if attempt > max_attempts:
-            return
+            return False
 
         if not self._scheduler:
             logger.warning("Cannot schedule period retry — no scheduler available")
-            return
+            return False
 
         from apscheduler.triggers.date import DateTrigger
 
@@ -3982,16 +3993,15 @@ class BatterySystemManager:
                 charge_rate,
                 retry_authorized,
             )
-            self._runtime_failure_tracker.dismiss_by_category("period_apply")
             if not success:
                 if attempt < max_attempts:
-                    self._runtime_failure_tracker.record_failure(
-                        category="period_apply",
-                        operation=(
-                            f"Period {period} ({pt}): Retry {attempt} failed, "
-                            f"retrying in {self._PERIOD_RETRY_DELAYS_MIN[attempt] - delay_min} min"
-                        ),
-                        error=Exception(error_msg),
+                    logger.warning(
+                        "Period %d (%s): retry %d failed, retrying in %d min: %s",
+                        period,
+                        pt,
+                        attempt,
+                        self._PERIOD_RETRY_DELAYS_MIN[attempt] - delay_min,
+                        error_msg,
                     )
                     self._schedule_period_retry(
                         period,
@@ -4004,13 +4014,10 @@ class BatterySystemManager:
                         discharge_authorized,
                     )
                 else:
-                    self._runtime_failure_tracker.record_failure(
-                        category="period_apply",
-                        operation=(
-                            f"Period {period} ({pt}): Failed to apply "
-                            f"optimization after {max_attempts + 1} attempts"
-                        ),
-                        error=Exception(error_msg),
+                    self._report_period_apply_failure(
+                        f"Period {period} ({pt}): Failed to apply "
+                        f"optimization after {max_attempts + 1} attempts",
+                        error_msg,
                     )
             else:
                 logger.info(
@@ -4021,6 +4028,7 @@ class BatterySystemManager:
                 )
                 self._last_applied_discharge_rate = discharge_rate
                 self._last_applied_discharge_authorized = retry_authorized
+                self._runtime_failure_tracker.dismiss_by_category("period_apply")
 
         self._scheduler.add_job(
             retry_period_write,
@@ -4034,6 +4042,7 @@ class BatterySystemManager:
             attempt,
             retry_time.strftime("%H:%M:%S"),
         )
+        return True
 
     def _calculate_initial_cost_basis(self, current_period: int) -> float:
         """Calculate marginal cost of battery energy using historical data.
@@ -4243,8 +4252,17 @@ class BatterySystemManager:
             return current_hour - 1 if current_hour > 0 else 0
         return current_hour
 
+    # A problem raises a banner only if a check still finds it this long after
+    # it first appeared. Measured in time, not checks: startup's check and the
+    # next 5-minute tick can land seconds apart while integrations load (#875).
+    # The env override exists only so the E2E stack need not wait 3 minutes.
+    HEALTH_BANNER_MIN_FAILURE_AGE: ClassVar[timedelta] = timedelta(
+        seconds=int(os.environ.get("BESS_HEALTH_BANNER_MIN_FAILURE_AGE_SECONDS", "180"))
+    )
+
     def _run_health_check(self) -> dict[str, Any]:
         """Run system health check."""
+        failing_since_before = dict(self._health_failing_since)
         try:
             previous_results = getattr(self, "_cached_health_results", None)
 
@@ -4254,7 +4272,17 @@ class BatterySystemManager:
             # Cache results for dashboard (avoid re-running on every page load)
             self._cached_health_results = health_results
 
-            self._update_health_recoveries(previous_results, health_results)
+            previously_sustained = self.get_sustained_health_failures()
+            self._track_failing_components(
+                {
+                    component["name"]
+                    for component in health_results["checks"]
+                    if component["status"] in ("ERROR", "WARNING")
+                }
+            )
+            self._update_health_recoveries(
+                previous_results, health_results, previously_sustained
+            )
 
             logger.info("System Health Check Results:")
             logger.info("=" * 40)
@@ -4339,10 +4367,35 @@ class BatterySystemManager:
             logger.error(f"Health check failed: {e}")
             # Don't crash the system, allow degraded mode operation
             self._critical_sensor_failures = ["System Health Check"]
+            # A crashed run says nothing about the components it never
+            # finished checking, so their failure history stands.
+            self._health_failing_since = failing_since_before
+            self._track_failing_components(
+                set(failing_since_before) | {"System Health Check"}
+            )
             return {"status": "ERROR", "checks": []}
 
+    def _track_failing_components(self, failing: set[str]) -> None:
+        """Record when each failing component started failing; a pass resets it."""
+        now = time_utils.now()
+        self._health_failing_since = {
+            name: self._health_failing_since.get(name, now) for name in failing
+        }
+        self._sustained_health_failures = {
+            name
+            for name, since in self._health_failing_since.items()
+            if now - since >= self.HEALTH_BANNER_MIN_FAILURE_AGE
+        }
+
+    def get_sustained_health_failures(self) -> set[str]:
+        """Components that have failed long enough to raise a banner."""
+        return self._sustained_health_failures.copy()
+
     def _update_health_recoveries(
-        self, previous_results: dict[str, Any] | None, new_results: dict[str, Any]
+        self,
+        previous_results: dict[str, Any] | None,
+        new_results: dict[str, Any],
+        previously_sustained: set[str],
     ) -> None:
         """Detect device-level ERROR/WARNING -> OK transitions and record them.
 
@@ -4352,6 +4405,9 @@ class BatterySystemManager:
         recovered. A device any of whose components still fails clears any
         stale pending recovery for itself — the live banner already covers
         that device.
+
+        Only failures sustained long enough to have raised a banner count on
+        either side: a blip neither earns a recovery note nor clears one.
         """
         if not previous_results:
             return
@@ -4379,10 +4435,12 @@ class BatterySystemManager:
 
         # Devices with a component still failing: their live banner lines
         # supersede any pending "recovered" note, which must not linger.
+        sustained = self.get_sustained_health_failures()
         failing_devices = {
             _device_of(component)
             for component in new_results.get("checks", [])
             if component.get("status") in ("ERROR", "WARNING")
+            and component["name"] in sustained
         }
         for device in failing_devices:
             self._health_recovery_tracker.clear_for_component(device)
@@ -4400,6 +4458,7 @@ class BatterySystemManager:
                 previous_component is not None
                 and previous_status in ("ERROR", "WARNING")
                 and component["status"] == "OK"
+                and component["name"] in previously_sustained
             ):
                 device = _device_of(previous_component)
                 recovered_by_device.setdefault(device, []).append(component)
@@ -4712,7 +4771,7 @@ class BatterySystemManager:
         # discharge_rate entity directly -- on VPP-style platforms
         # (discharge_rate_is_load_following False) that entity is never
         # read by hardware, which made this a dead write there (#324).
-        self._inverter_controller.apply_period(
+        success, _ = self._inverter_controller.apply_period(
             self.controller,
             self._desired_grid_charge,
             target_rate,
@@ -4725,6 +4784,10 @@ class BatterySystemManager:
             self._desired_charge_rate,
             authorized,
         )
+        # A failed write is not applied: leave the old value so the next
+        # minute's call sees the change again and retries it (#875).
+        if not success:
+            return
         self._last_applied_discharge_rate = target_rate
         self._last_applied_discharge_authorized = authorized
 

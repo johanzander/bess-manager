@@ -73,8 +73,13 @@
    ```
    gh pr create --repo johanzander/bess-manager-beta \
      --base main --head beta-release-v<version>-tmp \
-     --title "release: v<version>" --body "<changelog>"
+     --title "release: v<version>" \
+     --body "No issue: beta release stamp; the changelog below links each change to its issue.
+
+   <changelog>"
    ```
+
+   The `No issue:` line is required: `pr-linkage.yml` (#828) fails any PR body that links no issue, and the changelog's `[#N](...)` links don't count as one.
 
    **If `beta/main`'s history still contains an old squash-merged release (from before step 12 switched to a regular merge), the Commits tab on this PR will show ~100 unrelated-looking commits spanning weeks — that's expected, not a sign something went wrong.** A squashed release commit has no ancestry to `origin/main`'s individual commits, so a branch cut fresh from `origin/main` (step 3) sees all of that history as "not yet in `beta/main`," even though most of it already shipped to beta users in substance. Once every release in the chain has used a regular merge (step 12), this stops happening — `beta/main` stays a true descendant of `origin/main` and each release's diff shrinks to the real delta. To review what's actually new regardless, use the **Files Changed** diff (`gh pr diff <pr-number> --stat`), not the Commits tab.
 11. **Monitor CI** on the PR. Check with:

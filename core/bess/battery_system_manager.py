@@ -251,6 +251,8 @@ class BatterySystemManager:
             area=self.price_settings.area,
             spot_multiplier=self.price_settings.spot_multiplier,
             export_spot_multiplier=self.price_settings.export_spot_multiplier,
+            grid_tariff_hourly=self.price_settings.grid_tariff_hourly,
+            grid_tariff_summer_hourly=self.price_settings.grid_tariff_summer_hourly,
             free_import_price=self._configured_free_import_price(),
             free_import_window_source=self._fetch_free_import_windows,
             power_down_window_source=self._fetch_power_down_windows,
@@ -4787,6 +4789,12 @@ class BatterySystemManager:
                 )
                 self._price_manager.export_spot_multiplier = (
                     self.price_settings.export_spot_multiplier
+                )
+                self._price_manager.grid_tariff_hourly = list(
+                    self.price_settings.grid_tariff_hourly
+                )
+                self._price_manager.grid_tariff_summer_hourly = list(
+                    self.price_settings.grid_tariff_summer_hourly
                 )
                 self._price_manager.clear_cache()
 

@@ -95,6 +95,8 @@ PRICE_REQUIRED_FIELDS: frozenset[str] = frozenset(
         "tax_reduction",
         "spot_multiplier",
         "export_spot_multiplier",
+        "grid_tariff_hourly",
+        "grid_tariff_summer_hourly",
     }
 )
 

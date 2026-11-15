@@ -606,6 +606,19 @@ class TestSchemaMigration:
         assert price["export_spot_multiplier"] == 1.0
         assert price["use_actual_price"] is False
 
+    def test_electricity_price_missing_grid_tariff_gets_empty_profiles(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Configs written before #861 start up with no time-of-day tariff."""
+        store = self._store_with_data(
+            tmp_path,
+            monkeypatch,
+            {"electricity_price": {"area": "DK2", "markup_rate": 0.08}},
+        )
+        price = store.get_section("electricity_price")
+        assert price["grid_tariff_hourly"] == []
+        assert price["grid_tariff_summer_hourly"] == []
+
     def test_octopus_config_missing_free_import_price_gets_default(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:

@@ -855,10 +855,18 @@ doesn't match the schedule:
 
 The optimizer works with buy and sell prices derived from spot prices:
 
-    buy_price  = (spot + markup) * VAT_multiplier + additional_costs
+    buy_price  = (spot + markup) * VAT_multiplier + additional_costs + grid_tariff[hour]
     sell_price = spot + export_compensation
 
-For Octopus Energy (UK), prices are already final — no markup/VAT applied.
+`grid_tariff[hour]` is the optional time-of-day grid transport fee (#861,
+`electricity_price.grid_tariff_hourly`): 24 VAT-inclusive values indexed by
+the period's local wall-clock hour (DST days included). If
+`grid_tariff_summer_hourly` is also set it replaces the year-round profile in
+April–September. Empty profile = 0 for every hour. It is a buy-side fee only,
+so it widens the buy/sell spread in peak hours — a reason the optimizer may
+discharge at an hour that is cheap on spot but expensive to import.
+
+For Octopus Energy (UK), prices are already final — no markup/VAT/tariff applied.
 
 For when a discharge is worthwhile, see **The Governing Economic Law** above —
 gross `sell_price` vs `cycle_cost` is *not* the test; marginal value vs the

@@ -27,6 +27,8 @@ const BASE_FORM: PricingForm = {
   taxReduction: 0,
   spotMultiplier: 1.0,
   exportSpotMultiplier: 1.0,
+  gridTariffHourly: [],
+  gridTariffSummerHourly: [],
 };
 
 describe('PricingFormSection', () => {
@@ -127,5 +129,80 @@ describe('PricingFormSection', () => {
     const notice = screen.getByTestId('power-down-calendar-disabled-warning');
     expect(notice).toBeInTheDocument();
     expect(notice).toHaveTextContent('calendar.octopus_energy_a_982b3d40_octoplus_power_down');
+  });
+
+  describe('time-of-day grid tariff (#861)', () => {
+    it('is off by default and enabling it creates a 24-hour zero profile', () => {
+      const onChange = vi.fn();
+      render(<PricingFormSection form={BASE_FORM} onChange={onChange} />);
+
+      expect(screen.queryByLabelText(/All year .* 17:00/)).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole('switch', { name: 'Hourly grid tariff' }));
+
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+        gridTariffHourly: Array(24).fill(0),
+        gridTariffSummerHourly: [],
+      }));
+    });
+
+    it('edits the fee of a single hour', () => {
+      const onChange = vi.fn();
+      const form = { ...BASE_FORM, gridTariffHourly: Array(24).fill(0.15) };
+      render(<PricingFormSection form={form} onChange={onChange} />);
+
+      fireEvent.change(screen.getByLabelText(/All year .* 17:00/), { target: { value: '1.35' } });
+
+      const expected = Array(24).fill(0.15);
+      expected[17] = 1.35;
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ gridTariffHourly: expected }));
+    });
+
+    it('splitting into seasons seeds the summer profile from the year-round one', () => {
+      const onChange = vi.fn();
+      const profile = Array.from({ length: 24 }, (_, h) => h / 10);
+      render(<PricingFormSection form={{ ...BASE_FORM, gridTariffHourly: profile }} onChange={onChange} />);
+
+      fireEvent.click(screen.getByRole('switch', { name: 'Separate summer and winter tariffs' }));
+
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+        gridTariffHourly: profile,
+        gridTariffSummerHourly: profile,
+      }));
+    });
+
+    it('labels the two profiles by season when split', () => {
+      const form = {
+        ...BASE_FORM,
+        gridTariffHourly: Array(24).fill(0.45),
+        gridTariffSummerHourly: Array(24).fill(0.23),
+      };
+      render(<PricingFormSection form={form} onChange={vi.fn()} />);
+
+      expect(screen.getByLabelText(/Winter, Oct–Mar .* 17:00/)).toHaveValue(0.45);
+      expect(screen.getByLabelText(/Summer, Apr–Sep .* 17:00/)).toHaveValue(0.23);
+      expect(screen.queryByLabelText(/All year/)).not.toBeInTheDocument();
+    });
+
+    it('disabling clears both profiles', () => {
+      const onChange = vi.fn();
+      const form = {
+        ...BASE_FORM,
+        gridTariffHourly: Array(24).fill(0.45),
+        gridTariffSummerHourly: Array(24).fill(0.23),
+      };
+      render(<PricingFormSection form={form} onChange={onChange} />);
+
+      fireEvent.click(screen.getByRole('switch', { name: 'Hourly grid tariff' }));
+
+      expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+        gridTariffHourly: [],
+        gridTariffSummerHourly: [],
+      }));
+    });
+
+    it('is hidden for Octopus, whose prices are already final', () => {
+      render(<PricingFormSection form={{ ...BASE_FORM, provider: 'octopus' }} onChange={vi.fn()} />);
+      expect(screen.queryByText('Time-of-Day Grid Tariff')).not.toBeInTheDocument();
+    });
   });
 });

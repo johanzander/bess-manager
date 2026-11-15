@@ -1018,3 +1018,56 @@ class TestDemoMode:
         _client.patch("/api/settings", json={"demoMode": {"enabled": True}})
         _client.patch("/api/settings", json={"demoMode": {"enabled": False}})
         inv.apply_period.assert_not_called()
+
+
+class TestPatchSettingsGridTariff:
+    """electricity_price.grid_tariff_* (#861) is validated before it is
+    persisted, so a malformed profile never reaches the store or the
+    optimizer's buy prices."""
+
+    def test_valid_profiles_persisted_and_applied_live(
+        self, mock_controller: MagicMock
+    ) -> None:
+        winter = [0.45] * 24
+        summer = [0.23] * 24
+        resp = _client.patch(
+            "/api/settings",
+            json={
+                "electricityPrice": {
+                    "gridTariffHourly": winter,
+                    "gridTariffSummerHourly": summer,
+                }
+            },
+        )
+        assert resp.status_code == 200
+        stored = mock_controller.settings_store.data["electricity_price"]
+        assert stored["grid_tariff_hourly"] == winter
+        assert stored["grid_tariff_summer_hourly"] == summer
+        price_calls = [
+            c
+            for c in mock_controller.system.update_settings.call_args_list
+            if "price" in c[0][0]
+        ]
+        assert price_calls[0][0][0]["price"]["grid_tariff_hourly"] == winter
+
+    @pytest.mark.parametrize(
+        "update",
+        [
+            pytest.param({"gridTariffHourly": [0.4] * 23}, id="short"),
+            pytest.param({"gridTariffHourly": [0.4] * 96}, id="quarterly"),
+            pytest.param(
+                {"gridTariffHourly": [], "gridTariffSummerHourly": [0.2] * 24},
+                id="summer-without-year-round",
+            ),
+        ],
+    )
+    def test_malformed_profile_rejected_and_not_persisted(
+        self, mock_controller: MagicMock, update: dict
+    ) -> None:
+        before = dict(mock_controller.settings_store.data.get("electricity_price", {}))
+        resp = _client.patch("/api/settings", json={"electricityPrice": update})
+        assert resp.status_code == 422
+        assert "grid_tariff" in resp.json()["detail"]
+        assert (
+            mock_controller.settings_store.data.get("electricity_price", {}) == before
+        )

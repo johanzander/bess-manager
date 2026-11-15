@@ -36,6 +36,20 @@
 **Description**: Since #875 the dashboard banner filters on sustained failures, so this method's only callers are tests and stale mock setup. Remove it, or redefine it on the sustained set.
 
 
+### **Solis: more hold periods compete for the six discharge slots**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/solis_modbus_controller.py`
+
+**Description**: Since #884 the plan holds instead of covering part of the load, so a Solis day can need more hold blocks. On the #869 bundle the whole horizon went from 4 to 8, today's part fits easily, but a day with more than six would drop holds to Self Use and drain the battery against the plan.
+
+
+### **Fuse monitor: first grid-charge tick can overshoot for one minute**
+
+**Impact**: Low | **Effort**: Medium | **Dependencies**: `core/bess/power_monitor.py`
+
+**Description**: Since #877 the monitor moves the rate by the measured headroom, so a charge start from a leftover high rate, or a sudden house-load jump, can exceed the fuse limit until the next one-minute tick. Settling also assumes the inverter responds within a tick; that is measured on Growatt cloud only.
+
+
 ### **Schedule Overview: elapsed row labels stay the plan while Solar and Grid are measured**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `backend/api.py`, `frontend/src/components/InverterStatusDashboard.tsx`

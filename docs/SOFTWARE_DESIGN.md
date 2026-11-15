@@ -203,7 +203,7 @@ These resolve to platform-specific entities via the sensor config (e.g. `grid_ch
 **Price Calculation**:
 
 ```python
-buy_price = (spot_price + markup) * vat_multiplier + additional_costs
+buy_price = (spot_price + markup) * vat_multiplier + additional_costs + grid_tariff[local_hour]
 sell_price = spot_price * export_rate - tax_reduction
 ```
 
@@ -214,9 +214,8 @@ sell_price = spot_price * export_rate - tax_reduction
 **Key Responsibilities**:
 
 - Monitor electrical phase loading to prevent circuit overload
-- Calculate available charging power from house-only phase load (the
-  battery's own draw is subtracted from the grid-side phase sensors), every
-  minute
+- Move the charging rate by the headroom left on the most loaded grid-side
+  phase sensor, every minute
 - Dynamically adjust battery charging power to stay within fuse limits
 - Provide safety margins for electrical system protection
 
@@ -366,7 +365,7 @@ The InverterController converts action intents into hardware-specific schedules.
 
 **Why SOLAR_EXPORT uses load_first (not grid_first)**: Solar exports naturally in `load_first` when generation exceeds consumption — no special inverter mode is needed. `SOLAR_EXPORT` exists as a distinct intent purely for UI display (distinguishing "solar actively exporting" from "nothing happening"). Using `grid_first` for battery-idle periods would lock the inverter in a mode that prevents the battery from supporting house load during temporary solar deficits.
 
-**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from signals threaded through `InverterController.apply_period`: a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) distinguishes `SOLAR_EXPORT` from `SOLAR_STORAGE`/`IDLE`, and a `strategic_intent` signal distinguishes `LOAD_SUPPORT` from `BATTERY_EXPORT` — both intents share identical `(grid_charge, discharge_rate)` values from the table above, but `SolaxModbusGrowattController`'s VPP mode releases control entirely for `LOAD_SUPPORT` (`vpp_remote_control` disabled, falling back to the inverter's own `load_first` self-consumption) rather than forcing a fixed `grid_first` rate the way `BATTERY_EXPORT` still does (issue #413). See
+**VPP-style control is the exception to this table** (`SolaxModbusGrowattController` `control_mode="vpp"`, `SolaxController`): these platforms have no `charge_rate` register at all (`supports_charge_rate_control=False`), so `load_first` vs. `grid_first` isn't selected via a persistent TOU mode the way it is here — it's chosen per-period from signals threaded through `InverterController.apply_period`: a `block_passive_charging` signal (derived from this same table's `charge_rate` column: `0` → block) distinguishes `SOLAR_EXPORT` from `SOLAR_STORAGE`/`IDLE`, and a `strategic_intent` signal distinguishes `LOAD_SUPPORT` from `BATTERY_EXPORT` — both intents share identical `(grid_charge, discharge_rate)` values from the table above, but `SolaxModbusGrowattController`'s VPP mode releases control entirely for `LOAD_SUPPORT` (`vpp_remote_control` disabled, falling back to the inverter's own `load_first` self-consumption) rather than forcing a fixed `grid_first` rate the way `BATTERY_EXPORT` still does (issue #413), except at a zero discharge rate (the discharge inhibit), where it holds `battery_first` like `IDLE` (issue #881). See
 [`docs/INVERTER_PLATFORMS.md`](INVERTER_PLATFORMS.md)'s "SOLAR_EXPORT semantics" section and
 [`docs/superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md`](superpowers/specs/2026-07-20-vpp-passive-charge-block-design.md)
 for the full VPP-mode design (issue #355).
@@ -408,7 +407,7 @@ influxdb:
 All other settings are stored in this file and managed via the settings API. Top-level sections:
 
 - **`battery`**: `total_capacity`, `min_soc`, `max_soc`, `max_charge_power_kw`, `max_discharge_power_kw`, `cycle_cost_per_kwh`, `charging_power_rate`, `efficiency_charge`, `efficiency_discharge`
-- **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `use_actual_price`
+- **`electricity_price`**: `area`, `markup_rate`, `vat_multiplier`, `additional_costs`, `tax_reduction`, `spot_multiplier`, `export_spot_multiplier`, `grid_tariff_hourly`, `grid_tariff_summer_hourly` (24 hourly fees each; empty = off), `use_actual_price`
 - **`home`**: `max_fuse_current`, `voltage`, `safety_margin`, `phase_count`, `default_hourly`, `currency`, `consumption_strategy`, `power_monitoring_enabled`
 - **`growatt`**: Inverter device ID and integration settings
 - **`sensors`**: Entity ID mappings for all Home Assistant sensors

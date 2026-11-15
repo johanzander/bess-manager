@@ -126,6 +126,26 @@ class TestUpdateSettings:
         assert system._price_manager.spot_multiplier == 1.0175
         assert system._price_manager.export_spot_multiplier == 1.018
 
+    def test_grid_tariff_synced_to_price_manager(self, system: Any) -> None:
+        """A tariff saved in Settings reaches the price manager without a restart (#861)."""
+        winter = [0.15] * 17 + [1.35] * 4 + [0.15] * 3
+        summer = [0.10] * 24
+        system.update_settings(
+            {
+                "price": {
+                    "grid_tariff_hourly": winter,
+                    "grid_tariff_summer_hourly": summer,
+                }
+            }
+        )
+        assert system.price_settings.grid_tariff_hourly == winter
+        assert system._price_manager.grid_tariff_hourly == winter
+        assert system._price_manager.grid_tariff_summer_hourly == summer
+
+    def test_malformed_grid_tariff_rejected(self, system: Any) -> None:
+        with pytest.raises(SystemConfigurationError):
+            system.update_settings({"price": {"grid_tariff_hourly": [0.4] * 23}})
+
     def test_invalid_settings_raises_system_configuration_error(self, system):
         with pytest.raises(SystemConfigurationError):
             system.update_settings({"battery": {"capacity": "not_a_number"}})

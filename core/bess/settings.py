@@ -33,6 +33,11 @@ TAX_REDUCTION = (
 SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot (1.0 = no adjustment)
 EXPORT_SPOT_MULTIPLIER = 1.0  # multiplicative factor on spot for sell price
 USE_ACTUAL_PRICE = False  # Use raw Nordpool spot prices or include markup, VAT, etc.
+# Time-of-day grid tariff (#861): 24 hourly per-kWh fees incl. VAT, added to the
+# buy price on top of ADDITIONAL_COSTS. Empty = no time-of-day tariff. When a
+# summer profile is also set it replaces the year-round one in these months.
+GRID_TARIFF_HOURS = 24
+GRID_TARIFF_SUMMER_MONTHS = frozenset(range(4, 10))  # April..September
 FREE_IMPORT_PRICE = 0.0  # buy price during an Octoplus free power window
 FREE_IMPORT_CAP_KWH = 16.0  # Weekend Happy Hour allowance; not modelled by the DP
 POWER_DOWN_EXPORT_KW = 1.0  # Octoplus Power Down export pulse rate
@@ -89,6 +94,32 @@ CYCLE_COST_BY_CURRENCY: dict[str, float] = {
 }
 
 
+def validate_grid_tariff(year_round: list[float], summer: list[float]) -> None:
+    """Reject a grid tariff profile the buy-price calculation cannot apply.
+
+    Each profile is empty (unset) or exactly GRID_TARIFF_HOURS values. A summer
+    profile only splits the year-round one into seasons, so it needs one.
+
+    Raises:
+        ValueError: If a profile has the wrong length, or a summer profile is
+            set without a year-round profile.
+    """
+    for name, profile in (
+        ("grid_tariff_hourly", year_round),
+        ("grid_tariff_summer_hourly", summer),
+    ):
+        if profile and len(profile) != GRID_TARIFF_HOURS:
+            raise ValueError(
+                f"{name} must have {GRID_TARIFF_HOURS} hourly values, "
+                f"got {len(profile)}"
+            )
+    if summer and not year_round:
+        raise ValueError(
+            "grid_tariff_summer_hourly requires grid_tariff_hourly "
+            "(the winter / year-round profile)"
+        )
+
+
 @dataclass
 class PriceSettings:
     """Price settings for electricity costs."""
@@ -101,6 +132,8 @@ class PriceSettings:
     spot_multiplier: float = SPOT_MULTIPLIER
     export_spot_multiplier: float = EXPORT_SPOT_MULTIPLIER
     use_actual_price: bool = USE_ACTUAL_PRICE
+    grid_tariff_hourly: list[float] = field(default_factory=list)
+    grid_tariff_summer_hourly: list[float] = field(default_factory=list)
 
     def update(self, **kwargs: Any) -> None:
         """Update settings from a snake_case dict — the store's native format.
@@ -115,6 +148,7 @@ class PriceSettings:
             if key not in valid_fields:
                 raise AttributeError(f"PriceSettings has no attribute '{key}'")
             setattr(self, key, value)
+        validate_grid_tariff(self.grid_tariff_hourly, self.grid_tariff_summer_hourly)
 
 
 @dataclass

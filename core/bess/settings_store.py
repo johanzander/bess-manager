@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import tempfile
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -578,6 +579,8 @@ class SettingsStore:
                 "spot_multiplier": SPOT_MULTIPLIER,
                 "export_spot_multiplier": EXPORT_SPOT_MULTIPLIER,
                 "use_actual_price": USE_ACTUAL_PRICE,
+                "grid_tariff_hourly": [],
+                "grid_tariff_summer_hourly": [],
             },
             "energy_provider": {
                 "provider": "nordpool_official",
@@ -719,17 +722,21 @@ class SettingsStore:
             if changed:
                 self.data["home"] = home
 
-        # --- electricity_price: spot_multiplier / export_spot_multiplier / use_actual_price ---
+        # --- electricity_price: spot_multiplier / export_spot_multiplier /
+        #     use_actual_price / grid_tariff_hourly / grid_tariff_summer_hourly ---
         # Added after these fields were introduced on PriceSettings; without a
         # default, build_system_settings() would raise ValueError at startup
         # for any config written before this migration existed.
         price = self.data.get("electricity_price")
         if isinstance(price, dict):
-            for key, default in (
+            price_defaults: list[tuple[str, Any]] = [
                 ("spot_multiplier", SPOT_MULTIPLIER),
                 ("export_spot_multiplier", EXPORT_SPOT_MULTIPLIER),
                 ("use_actual_price", USE_ACTUAL_PRICE),
-            ):
+                ("grid_tariff_hourly", []),
+                ("grid_tariff_summer_hourly", []),
+            ]
+            for key, default in price_defaults:
                 if key not in price:
                     price[key] = default
                     logger.info(

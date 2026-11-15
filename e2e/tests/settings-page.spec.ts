@@ -211,6 +211,36 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
+  test('hourly grid tariff with summer/winter profiles persists (#861)', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Electricity Pricing', exact: true }).click();
+
+    const tariffSwitch = page.getByRole('switch', { name: 'Hourly grid tariff' });
+    await expect(tariffSwitch).toHaveAttribute('aria-checked', 'false');
+    await tariffSwitch.click();
+    await page.getByLabel(/All year .* 17:00/).fill('1.35');
+
+    await page.getByRole('switch', { name: 'Separate summer and winter tariffs' }).click();
+    await page.getByLabel(/Summer, Apr–Sep .* 17:00/).fill('0.6');
+
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+
+    await page.reload();
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Electricity Pricing', exact: true }).click();
+
+    await expect(page.getByLabel(/Winter, Oct–Mar .* 17:00/)).toHaveValue('1.35');
+    await expect(page.getByLabel(/Winter, Oct–Mar .* 16:00/)).toHaveValue('0');
+    await expect(page.getByLabel(/Summer, Apr–Sep .* 17:00/)).toHaveValue('0.6');
+
+    // Restore the fixture: tariff off.
+    await page.getByRole('switch', { name: 'Hourly grid tariff' }).click();
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
+  });
+
   test('system tab shows diagnostics', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });

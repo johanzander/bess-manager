@@ -269,9 +269,11 @@ semantics" below):
   always `+100%`, discarding the fuse-aware import cap's throttled rate,
   issue #429), remote control enabled
 - `BATTERY_EXPORT` (rate>0) → `vpp_power=-rate%`, remote control enabled
-- `LOAD_SUPPORT` (any rate) → `vpp_power=0`, remote control **disabled**,
-  regardless of `discharge_rate` (releases to `load_first` self-use — see
-  "LOAD_SUPPORT semantics" below)
+- `LOAD_SUPPORT` (rate>0) → `vpp_power=0`, remote control **disabled**
+  (releases to `load_first` self-use — see "LOAD_SUPPORT semantics" below)
+- `LOAD_SUPPORT` (rate=0, e.g. discharge inhibit active) → `vpp_power=+1%`,
+  remote control **enabled** (`battery_first` hold, released at the reserve
+  floor like `IDLE` — issue [#881](https://github.com/johanzander/bess-manager/issues/881))
 - `SOLAR_STORAGE` (rate=0, `block_passive_charging=False`) → remote
   control disabled (`load_first`/self-use — battery may absorb solar surplus)
 - `IDLE` (rate=0) → `vpp_power=+1%`, remote control **enabled**
@@ -312,6 +314,13 @@ outright, falling back to the inverter's native `load_first` self-consumption
 — the VPP-mode equivalent of TOU's `load_first` mapping. Reported
 independently by two real-hardware testers (Growatt MIN, control_mode=vpp)
 on issue [#118](https://github.com/johanzander/bess-manager/issues/118).
+
+The release ignores `discharge_rate`, so it also ignored the **discharge
+inhibit**, which works by zeroing that rate: self-use covered the whole load,
+EV included, and drained the battery to its floor (issue
+[#881](https://github.com/johanzander/bess-manager/issues/881)). A zero-rate
+`LOAD_SUPPORT` period now holds with `IDLE`'s `battery_first` command instead
+— the same "no discharge" a zero `load_first` ceiling means on TOU.
 
 **SOLAR_EXPORT semantics (fixed — issue [#355](https://github.com/johanzander/bess-manager/issues/355)):**
 The Growatt VPP protocol

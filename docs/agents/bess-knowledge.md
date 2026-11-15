@@ -55,9 +55,18 @@ step at or above the residual delivers the residual exactly — the plan is
 the *delivery*, the command is on the lattice. It is gated so it always
 classifies as LOAD_SUPPORT and so a covering ceiling actually exists on
 the platform (`_residual_cover_p` in `action_selector.py`, and
-`load_support_delivers_exact_cover` in `execution_model.py` — the
-candidate is withdrawn on hardware where a discharge number is a forced
-power rather than a ceiling, #580).
+`load_support_delivery` in `execution_model.py` — the candidate is
+withdrawn on hardware where a discharge number is a forced power rather
+than a ceiling, #580).
+
+On Solis (`load_support_delivery = whole_load`, #884) LOAD_SUPPORT is the
+inverter's Self Use, which covers the *whole* deficit up to the battery's
+maximum discharge power and cannot cover less. There the cover candidate
+is that whole cover, and every smaller discharge in a deficit period is
+excluded from all passes (`_discharge_is_partial_cover`): a Solis period
+either covers the house completely, holds (IDLE), or exports. A battery too
+empty to cover a whole period is planned to hold rather than drain its last
+fraction of a period.
 
 Without it a period whose net load falls between two lattice steps has no
 action that covers the house: the step below under-covers and imports the
@@ -684,17 +693,21 @@ configured.
   and instead plans against the balanced-load assumption. Off (`None`) when
   `power_monitoring_enabled` is False, matching the AC cap's own
   `<= 0.0 → None` convention.
-- **Runtime monitor mechanics (#816)**: `HomePowerMonitor` runs every minute.
-  The phase-current sensors are grid-side meters, so while the battery
-  grid-charges they read house load *plus* the battery's own draw; the monitor
-  subtracts `battery_charge_power / phase_count` from each phase (clamped at
-  zero) before computing headroom, otherwise it sees its own charging as house
-  load and oscillates 0 %/100 %. Whether a period is fuse-checked comes from
-  the plan's `grid_charge` for that period, not from the inverter's grid-charge
-  switch, which lags a few seconds at a period boundary. The headroom is
-  converted to a rate with `max_charge_power_kw`, so that setting must equal
-  what the inverter really draws at 100 % — the monitor cannot correct a
-  rating that is set too low.
+- **Runtime monitor mechanics (#816, #877)**: `HomePowerMonitor` runs every
+  minute. The phase-current sensors are grid-side meters, so while the battery
+  grid-charges they read house load *plus* the battery's own draw. The monitor
+  therefore moves the rate it last wrote by the headroom left on the most
+  loaded phase, clamped to 0 and the period's target. It does not read the
+  battery power sensor: on Growatt cloud that sensor updates every 5 minutes,
+  and subtracting a stale value from a live meter made the rate alternate
+  (#877). Whether a period is fuse-checked comes from the plan's `grid_charge`
+  for that period, not from the inverter's grid-charge switch, which lags a few
+  seconds at a period boundary. The headroom is converted to a rate step with
+  `max_charge_power_kw`, so a wrong rating only changes the step size: the rate
+  still settles provided the real draw is under twice the rating and the
+  inverter responds within one tick (measured on Growatt cloud; unverified
+  elsewhere). The loop is reactive, so a charge start or a house-load jump can
+  overshoot for one tick.
 - **Total import, not charging-only**: the cap bounds `grid_imported` (house
   load + battery grid-charging) jointly, not just the charging component —
   `HomePowerMonitor` only throttles charging today because that is the only
@@ -842,10 +855,18 @@ doesn't match the schedule:
 
 The optimizer works with buy and sell prices derived from spot prices:
 
-    buy_price  = (spot + markup) * VAT_multiplier + additional_costs
+    buy_price  = (spot + markup) * VAT_multiplier + additional_costs + grid_tariff[hour]
     sell_price = spot + export_compensation
 
-For Octopus Energy (UK), prices are already final — no markup/VAT applied.
+`grid_tariff[hour]` is the optional time-of-day grid transport fee (#861,
+`electricity_price.grid_tariff_hourly`): 24 VAT-inclusive values indexed by
+the period's local wall-clock hour (DST days included). If
+`grid_tariff_summer_hourly` is also set it replaces the year-round profile in
+April–September. Empty profile = 0 for every hour. It is a buy-side fee only,
+so it widens the buy/sell spread in peak hours — a reason the optimizer may
+discharge at an hour that is cheap on spot but expensive to import.
+
+For Octopus Energy (UK), prices are already final — no markup/VAT/tariff applied.
 
 For when a discharge is worthwhile, see **The Governing Economic Law** above —
 gross `sell_price` vs `cycle_cost` is *not* the test; marginal value vs the

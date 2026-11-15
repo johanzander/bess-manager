@@ -558,6 +558,37 @@ class TestSetupComplete:
         assert elec["spot_multiplier"] == 1.0175
         assert elec["export_spot_multiplier"] == 1.018
 
+    def test_grid_tariff_profiles_persisted_and_sent_live(
+        self, complete_controller: MagicMock
+    ) -> None:
+        """The wizard shares the pricing form, so its tariff must not be dropped (#861)."""
+        winter = [0.45] * 24
+        summer = [0.23] * 24
+        payload = _full_wizard_payload(
+            gridTariffHourly=winter, gridTariffSummerHourly=summer
+        )
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 200
+        elec = complete_controller.settings_store.save_all.call_args[0][0][
+            "electricity_price"
+        ]
+        assert elec["grid_tariff_hourly"] == winter
+        assert elec["grid_tariff_summer_hourly"] == summer
+        price_calls = [
+            c
+            for c in complete_controller.system.update_settings.call_args_list
+            if "price" in c[0][0]
+        ]
+        assert price_calls[0][0][0]["price"]["grid_tariff_summer_hourly"] == summer
+
+    def test_malformed_grid_tariff_rejected(
+        self, complete_controller: MagicMock
+    ) -> None:
+        payload = _full_wizard_payload(gridTariffHourly=[0.45] * 23)
+        resp = _client.post("/api/setup/complete", json=payload)
+        assert resp.status_code == 422
+        complete_controller.settings_store.save_all.assert_not_called()
+
     def test_price_fields_saved_without_markup_or_vat(self, complete_controller):
         """additionalCosts/taxReduction must be persisted even without markupRate/vatMultiplier."""
         payload = {"additionalCosts": 0.99, "taxReduction": 0.25}

@@ -55,9 +55,18 @@ step at or above the residual delivers the residual exactly — the plan is
 the *delivery*, the command is on the lattice. It is gated so it always
 classifies as LOAD_SUPPORT and so a covering ceiling actually exists on
 the platform (`_residual_cover_p` in `action_selector.py`, and
-`load_support_delivers_exact_cover` in `execution_model.py` — the
-candidate is withdrawn on hardware where a discharge number is a forced
-power rather than a ceiling, #580).
+`load_support_delivery` in `execution_model.py` — the candidate is
+withdrawn on hardware where a discharge number is a forced power rather
+than a ceiling, #580).
+
+On Solis (`load_support_delivery = whole_load`, #884) LOAD_SUPPORT is the
+inverter's Self Use, which covers the *whole* deficit up to the battery's
+maximum discharge power and cannot cover less. There the cover candidate
+is that whole cover, and every smaller discharge in a deficit period is
+excluded from all passes (`_discharge_is_partial_cover`): a Solis period
+either covers the house completely, holds (IDLE), or exports. A battery too
+empty to cover a whole period is planned to hold rather than drain its last
+fraction of a period.
 
 Without it a period whose net load falls between two lattice steps has no
 action that covers the house: the step below under-covers and imports the
@@ -846,10 +855,18 @@ doesn't match the schedule:
 
 The optimizer works with buy and sell prices derived from spot prices:
 
-    buy_price  = (spot + markup) * VAT_multiplier + additional_costs
+    buy_price  = (spot + markup) * VAT_multiplier + additional_costs + grid_tariff[hour]
     sell_price = spot + export_compensation
 
-For Octopus Energy (UK), prices are already final — no markup/VAT applied.
+`grid_tariff[hour]` is the optional time-of-day grid transport fee (#861,
+`electricity_price.grid_tariff_hourly`): 24 VAT-inclusive values indexed by
+the period's local wall-clock hour (DST days included). If
+`grid_tariff_summer_hourly` is also set it replaces the year-round profile in
+April–September. Empty profile = 0 for every hour. It is a buy-side fee only,
+so it widens the buy/sell spread in peak hours — a reason the optimizer may
+discharge at an hour that is cheap on spot but expensive to import.
+
+For Octopus Energy (UK), prices are already final — no markup/VAT/tariff applied.
 
 For when a discharge is worthwhile, see **The Governing Economic Law** above —
 gross `sell_price` vs `cycle_cost` is *not* the test; marginal value vs the

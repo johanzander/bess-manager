@@ -437,10 +437,10 @@ def test_get_available_prices_today_and_tomorrow() -> None:
         assert len(sell) == 192
 
         # First 96 are today
-        assert all(b == pm._calculate_buy_price(0.5) for b in buy[:96])
+        assert all(b == pm._calculate_buy_price(0.5, 0.0) for b in buy[:96])
 
         # Last 96 are tomorrow
-        assert all(b == pm._calculate_buy_price(0.6) for b in buy[96:])
+        assert all(b == pm._calculate_buy_price(0.6, 0.0) for b in buy[96:])
 
 
 def test_get_available_prices_returns_full_arrays_from_midnight() -> None:
@@ -465,13 +465,13 @@ def test_get_available_prices_returns_full_arrays_from_midnight() -> None:
         buy, sell = pm.get_available_prices()
 
         # Index 0 should be first price (00:00 = period 0)
-        assert buy[0] == pm._calculate_buy_price(0.0)
+        assert buy[0] == pm._calculate_buy_price(0.0, 0.0)
         assert sell[0] == pm._calculate_sell_price(0.0)
 
         # Index 56 should be period 56 (14:00 = period 56)
         # Price for period 56 is 0.56
         period_56_price = 56 / 100.0
-        assert buy[56] == pm._calculate_buy_price(period_56_price)
+        assert buy[56] == pm._calculate_buy_price(period_56_price, 0.0)
         assert sell[56] == pm._calculate_sell_price(period_56_price)
 
         # Each quarter has its own price (no repetition)
@@ -935,3 +935,158 @@ def test_failed_window_fetch_warns_then_errors_once_it_persists() -> None:
     windows.error = None
     pm.refresh_cache()
     assert _free_import_health(pm) is None
+
+
+# ---------------------------------------------------------------------------
+# Time-of-day grid tariff (#861). A Danish DSO (e.g. Radius Elnet) charges a
+# grid transport fee that varies by hour and by season; it is added to the
+# buy price per period on top of the flat additional_costs.
+# ---------------------------------------------------------------------------
+
+# Radius-style bands: low 00-06, high 06-17, peak 17-21, high 21-24.
+_WINTER_TARIFF = [0.15] * 6 + [0.45] * 11 + [1.35] * 4 + [0.45] * 3
+_SUMMER_TARIFF = [0.15] * 6 + [0.23] * 11 + [0.60] * 4 + [0.23] * 3
+
+
+def _tariff_price_manager(
+    source: PriceSource,
+    grid_tariff_hourly: list[float],
+    grid_tariff_summer_hourly: list[float] | None = None,
+) -> PriceManager:
+    return PriceManager(
+        price_source=source,
+        markup_rate=0.05,
+        vat_multiplier=1.25,
+        additional_costs=0.9,
+        tax_reduction=0.1,
+        area="DK2",
+        grid_tariff_hourly=grid_tariff_hourly,
+        grid_tariff_summer_hourly=grid_tariff_summer_hourly or [],
+    )
+
+
+def _flat_buy(spot: float) -> float:
+    """Buy price for the _tariff_price_manager config with no tariff."""
+    return (spot + 0.05) * 1.25 + 0.9
+
+
+def test_grid_tariff_adds_the_local_hour_rate_to_each_buy_price() -> None:
+    pm = _tariff_price_manager(MockSource([0.5] * 96), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 1, 14))
+
+    assert len(entries) == 96
+    for period, entry in enumerate(entries):
+        hour = period // 4
+        assert entry["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[hour], period
+    # The tariff is a buy-side fee only -- the sell price is untouched.
+    assert all(entry["sellPrice"] == 0.5 + 0.1 for entry in entries)
+
+
+def test_grid_tariff_moves_the_cheapest_buy_period_away_from_the_spot_minimum() -> None:
+    """The outcome that matters to the optimizer: the price signal changes.
+
+    Spot is cheapest at 18:00, but the peak tariff (17-21) makes 18:00 one of
+    the most expensive hours to import -- the cheapest buy is now the night.
+    """
+    spot = [0.6] * 96
+    spot[18 * 4] = 0.2
+    pm = _tariff_price_manager(MockSource(spot), _WINTER_TARIFF)
+
+    buy = [entry["buyPrice"] for entry in pm.get_price_data(date(2026, 1, 14))]
+
+    assert spot.index(min(spot)) == 18 * 4
+    assert buy.index(min(buy)) < 6 * 4
+    assert buy[18 * 4] > buy[0]
+
+
+def test_summer_profile_applies_april_to_september_only() -> None:
+    pm = _tariff_price_manager(MockSource([0.5] * 96), _WINTER_TARIFF, _SUMMER_TARIFF)
+    peak = 18 * 4
+
+    for day, profile in (
+        (date(2026, 3, 31), _WINTER_TARIFF),
+        (date(2026, 4, 1), _SUMMER_TARIFF),
+        (date(2026, 9, 30), _SUMMER_TARIFF),
+        (date(2026, 10, 1), _WINTER_TARIFF),
+    ):
+        buy = pm.get_price_data(day)[peak]["buyPrice"]
+        assert buy == _flat_buy(0.5) + profile[18], day
+
+
+def test_year_round_profile_applies_in_summer_without_a_summer_profile() -> None:
+    pm = _tariff_price_manager(MockSource([0.5] * 96), _WINTER_TARIFF)
+
+    buy = pm.get_price_data(date(2026, 7, 1))[18 * 4]["buyPrice"]
+
+    assert buy == _flat_buy(0.5) + _WINTER_TARIFF[18]
+
+
+def test_grid_tariff_follows_wall_clock_hours_on_the_fall_back_day() -> None:
+    """2026-10-25 has 100 periods; 17:00 local is period 72, not 68."""
+    pm = _tariff_price_manager(MockSource([0.5] * 100), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 10, 25))
+
+    assert len(entries) == 100
+    assert entries[72]["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[17]
+    assert entries[68]["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[16]
+    # The repeated 02:00 hour carries the 02:00 rate both times.
+    assert entries[8]["buyPrice"] == entries[12]["buyPrice"]
+
+
+def test_grid_tariff_follows_wall_clock_hours_on_the_spring_forward_day() -> None:
+    """2026-03-29 has 92 periods; 17:00 local is period 64."""
+    pm = _tariff_price_manager(MockSource([0.5] * 92), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 3, 29))
+
+    assert len(entries) == 92
+    assert entries[64]["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[17]
+
+
+def test_empty_grid_tariff_leaves_buy_prices_unchanged() -> None:
+    pm = _tariff_price_manager(MockSource([0.5] * 96), [])
+
+    entries = pm.get_price_data(date(2026, 1, 14))
+
+    assert all(entry["buyPrice"] == _flat_buy(0.5) for entry in entries)
+
+
+def test_grid_tariff_is_not_added_to_final_source_prices() -> None:
+    """A source with prices_are_final (Octopus) already includes all fees."""
+
+    class _FinalSource(MockSource):
+        @property
+        def prices_are_final(self) -> bool:
+            return True
+
+    pm = _tariff_price_manager(_FinalSource([0.5] * 96), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 1, 14))
+
+    assert all(entry["buyPrice"] == 0.5 for entry in entries)
+
+
+def test_raw_price_buy_path_refuses_a_configured_grid_tariff() -> None:
+    """raw_prices carry no date, so the tariff hour cannot be placed."""
+    pm = _tariff_price_manager(MockSource([0.5] * 96), _WINTER_TARIFF)
+
+    try:
+        pm.get_buy_prices(raw_prices=[0.5] * 96)
+    except ValueError as e:
+        assert "grid tariff" in str(e)
+    else:
+        raise AssertionError("expected ValueError")
+
+
+def test_grid_tariff_tolerates_a_source_returning_more_than_a_day() -> None:
+    """Extended-horizon sources can return past midnight; the tariff must not
+    assume the list is exactly one day long."""
+    pm = _tariff_price_manager(MockSource([0.5] * 150), _WINTER_TARIFF)
+
+    entries = pm.get_price_data(date(2026, 1, 14))
+
+    assert len(entries) == 150
+    # Period 96 + 8*4 is 08:00 the next day -- the high-band fee.
+    assert entries[96 + 8 * 4]["buyPrice"] == _flat_buy(0.5) + _WINTER_TARIFF[8]

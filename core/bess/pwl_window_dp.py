@@ -15,6 +15,7 @@ import numpy as np
 
 from core.bess.action_selector import (
     PeriodInputs,
+    _discharge_is_partial_cover,
     _discharge_is_unexecutable,
     _residual_cover_p,
     _solar_export_bypass_is_unexecutable,
@@ -324,6 +325,16 @@ def _pwl_candidate_values_block(
     # them on the identical action set (see `_backward_discharge_levels`).
     feasible &= ~is_discharge | ~_discharge_is_unexecutable(
         np.abs(power_row), home_consumption[t], solar_production[t], dt
+    )
+    # Partial load covers (#884), masked here for the same reason and through
+    # the same shared definition the replay filters its candidates with.
+    feasible &= ~is_discharge | ~_discharge_is_partial_cover(
+        np.abs(power_row),
+        home_consumption[t],
+        solar_production[t],
+        dt,
+        capabilities,
+        battery_settings,
     )
 
     feasible &= (next_soe >= min_soe) & (next_soe <= max_soe)

@@ -25,6 +25,49 @@ export interface PricingForm {
   taxReduction: number;
   spotMultiplier: number;
   exportSpotMultiplier: number;
+  /** 24 hourly grid fees (VAT-incl.) added to the buy price; [] = off (#861). */
+  gridTariffHourly: number[];
+  /** 24 hourly fees used Apr–Sep instead of gridTariffHourly; [] = unused. */
+  gridTariffSummerHourly: number[];
+}
+
+const TARIFF_HOURS = Array.from({ length: 24 }, (_, h) => h);
+
+function tariffGrid(
+  label: string,
+  values: number[],
+  onChange: (_: number[]) => void,
+) {
+  return (
+    <div className="space-y-1">
+      <span className="text-sm font-medium text-gray-700 dark:text-gray-300">{label}</span>
+      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+        {TARIFF_HOURS.map(h => {
+          const hh = String(h).padStart(2, '0');
+          return (
+            <label key={h} className="block">
+              <span className="text-[11px] text-gray-500 dark:text-gray-400">{hh}:00</span>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                aria-label={`${label} ${hh}:00`}
+                value={values[h]}
+                onChange={e => {
+                  const n = parseFloat(e.target.value);
+                  if (Number.isNaN(n)) return;
+                  const next = [...values];
+                  next[h] = n;
+                  onChange(next);
+                }}
+                className="block w-full rounded-md border px-2 py-1 text-sm bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </label>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 interface Props {
@@ -47,6 +90,8 @@ export function PricingFormSection({ form, onChange, powerDownCalendarDisabledBy
     ((previewSpot * sm + form.markupRate) * form.vatMultiplier + form.additionalCosts).toFixed(4),
   );
   const previewSell = Number((previewSpot * esm + form.taxReduction).toFixed(4));
+  const tariffEnabled = form.gridTariffHourly.length > 0;
+  const seasonal = form.gridTariffSummerHourly.length > 0;
 
   return (
     <div className="space-y-3">
@@ -236,7 +281,7 @@ export function PricingFormSection({ form, onChange, powerDownCalendarDisabledBy
                 </div>
                 <div className="space-y-2 pt-2 border-t border-blue-200 dark:border-blue-700">
                   <p className="font-medium text-blue-900 dark:text-blue-200">How the raw spot price is converted:</p>
-                  <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Buy price:</strong> (spot × import multiplier + markup) × VAT + additional costs</p>
+                  <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Buy price:</strong> (spot × import multiplier + markup) × VAT + additional costs{tariffEnabled && ' + hourly grid tariff'}</p>
                   <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Sell price:</strong> spot × export multiplier + export compensation</p>
                 </div>
               </div>
@@ -251,7 +296,7 @@ export function PricingFormSection({ form, onChange, powerDownCalendarDisabledBy
 
                 <div className="space-y-2 pt-2 border-t border-blue-200 dark:border-blue-700">
                   <p className="font-medium text-blue-900 dark:text-blue-200">How the raw spot price is converted:</p>
-                  <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Buy price:</strong> (raw spot + markup) × VAT multiplier + grid fees</p>
+                  <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Buy price:</strong> (raw spot + markup) × VAT multiplier + grid fees{tariffEnabled && ' + hourly grid tariff'}</p>
                   <p className="pl-2 border-l-2 border-blue-300 dark:border-blue-600"><strong>Sell price:</strong> raw spot + export compensation</p>
                   <p className="text-gray-500 dark:text-gray-500 italic">Note: Markup is added before VAT (ex-VAT), while grid fees already include VAT.</p>
                 </div>
@@ -284,6 +329,41 @@ export function PricingFormSection({ form, onChange, powerDownCalendarDisabledBy
           </div>
         )}
       </SectionCard>
+
+      {!isOctopus && (
+        <SectionCard
+          title="Time-of-Day Grid Tariff"
+          description="For grid operators whose transport fee varies by hour (e.g. Danish DSOs such as Radius). Each hour's fee is added to the buy price on top of Additional Costs."
+        >
+          {toggle('Hourly grid tariff', tariffEnabled, on => onChange({
+            ...form,
+            gridTariffHourly: on ? TARIFF_HOURS.map(() => 0) : [],
+            gridTariffSummerHourly: [],
+          }))}
+          {tariffEnabled && (
+            <>
+              {toggle('Separate summer and winter tariffs', seasonal, on => onChange({
+                ...form,
+                gridTariffSummerHourly: on ? [...form.gridTariffHourly] : [],
+              }))}
+              {tariffGrid(
+                seasonal ? `Winter, Oct–Mar (${currency}/kWh)` : `All year (${currency}/kWh)`,
+                form.gridTariffHourly,
+                v => onChange({ ...form, gridTariffHourly: v }),
+              )}
+              {seasonal && tariffGrid(
+                `Summer, Apr–Sep (${currency}/kWh)`,
+                form.gridTariffSummerHourly,
+                v => onChange({ ...form, gridTariffSummerHourly: v }),
+              )}
+              <p className="text-xs text-gray-500 dark:text-gray-400">
+                Enter fees including VAT, by local clock hour. Remove the grid fee from Additional Costs
+                so it is not counted twice — keep only the fixed parts (e.g. electricity tax) there.
+              </p>
+            </>
+          )}
+        </SectionCard>
+      )}
     </div>
   );
 }

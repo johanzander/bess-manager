@@ -117,11 +117,12 @@ done
 # nothing as merged.
 #
 # The bodies are REDUCED to the issue numbers they reference before being passed
-# to jq. Passing 200 merged PR bodies through `--argjson` overflows the argument
-# list ("/usr/bin/jq: Argument list too long") — this repo's PR bodies run to
-# several KB each. Only the closing references and the branch name are needed to
-# decide whether a merged PR belongs to an issue, so extract those here and hand
-# jq a few hundred bytes instead of a megabyte.
+# to jq. This repo's PR bodies run to several KB each, and only the closing
+# references and the branch name are needed to decide whether a merged PR
+# belongs to an issue, so extract those here and hand the digest program a few
+# hundred bytes instead of a megabyte. (This reduction once also kept the
+# input under the command-line limit; the digest program now reads its inputs
+# through files instead -- see the jq call at the end.)
 # Inline-code spans carry EXAMPLES, never linkage declarations, so a `#N`
 # inside backticks must not associate a PR with an issue. Defined once, here,
 # because BOTH linkage scans need it and they are separate jq programs -- the
@@ -253,17 +254,33 @@ sessions=$(claude agents --json)
 board=$(gh project item-list "$PROJECT_NUMBER" --owner "${PROJECT_OWNER:-johanzander}" \
   --limit 200 --format json)
 
+# The evidence reaches jq through files, never as `--argjson` arguments: the
+# OS caps the total size of a command line (macOS ARG_MAX is 1 MB), and the
+# open issues' comment threads alone outgrew it, killing every pass with
+# "jq: Argument list too long" before anything was derived. `printf` is a
+# shell builtin, so feeding it through process substitution has no size
+# limit. `--slurpfile` binds an ARRAY of the file's values, hence the `[0]`
+# unwrap at the top of the program.
 jq -n \
-  --argjson issues "$issues" \
-  --argjson prs "$prs" \
-  --argjson merged_prs "$merged_prs" \
-  --argjson closed_prs "$closed_prs" \
-  --argjson worktrees "$worktrees" \
-  --argjson sessions "$sessions" \
-  --argjson board "$board" \
-  --argjson in_flight "$in_flight_files" \
-  --argjson undiffable_prs "$undiffable_prs" \
+  --slurpfile issues <(printf '%s' "$issues") \
+  --slurpfile prs <(printf '%s' "$prs") \
+  --slurpfile merged_prs <(printf '%s' "$merged_prs") \
+  --slurpfile closed_prs <(printf '%s' "$closed_prs") \
+  --slurpfile worktrees <(printf '%s' "$worktrees") \
+  --slurpfile sessions <(printf '%s' "$sessions") \
+  --slurpfile board <(printf '%s' "$board") \
+  --slurpfile in_flight <(printf '%s' "$in_flight_files") \
+  --slurpfile undiffable_prs <(printf '%s' "$undiffable_prs") \
   --arg now "$(date -u +%s)" "$jq_strip_code_spans"'
+  $issues[0] as $issues |
+  $prs[0] as $prs |
+  $merged_prs[0] as $merged_prs |
+  $closed_prs[0] as $closed_prs |
+  $worktrees[0] as $worktrees |
+  $sessions[0] as $sessions |
+  $board[0] as $board |
+  $in_flight[0] as $in_flight |
+  $undiffable_prs[0] as $undiffable_prs |
   def days_since($ts): (($now | tonumber) - ($ts | fromdateiso8601)) / 86400 | floor;
 
   def label_names: [.labels[].name];

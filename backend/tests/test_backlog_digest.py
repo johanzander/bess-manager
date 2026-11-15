@@ -205,6 +205,36 @@ def test_untouched_issue_lands_in_backlog(bin_dir: Path) -> None:
     assert digest["items"][0]["awaiting"] is None
 
 
+def test_a_board_larger_than_the_argument_limit_still_digests(bin_dir: Path) -> None:
+    # The evidence used to reach jq as `--argjson` command-line arguments, so
+    # once the open issues' comment threads grew past the OS argument limit
+    # (macOS ARG_MAX is 1 MB) every pass died with "jq: Argument list too
+    # long" before deriving anything. 2 MB of comment text keeps this test
+    # over the limit on every platform the scripts run on.
+    issue = {
+        "number": 601,
+        "title": "Long thread",
+        "labels": [{"name": "bug"}],
+        "author": {"login": "reporter"},
+        "createdAt": "2026-08-01T00:00:00Z",
+        "updatedAt": "2026-08-01T00:00:00Z",
+        "comments": [
+            {
+                "author": {"login": "reporter"},
+                "body": "x" * 100_000,
+                "createdAt": "2026-08-10T00:00:00Z",
+            }
+            for _ in range(20)
+        ],
+        "body": "",
+    }
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], []))
+
+    digest = _run(bin_dir)
+
+    assert [i["number"] for i in digest["items"]] == [601]
+
+
 def _issue(number: int, **over: object) -> dict:
     """An issue as `gh issue list --json ...` really returns it.
 

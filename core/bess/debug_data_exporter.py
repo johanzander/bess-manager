@@ -297,11 +297,14 @@ def _scrub_entity_registry_entry(
 # bess-analyst.md) for exactly those periods. Found investigating #466.
 _LOG_KEY_PATTERNS = re.compile(
     r"WARNING|ERROR|CRITICAL"
-    r"|HARDWARE:"
-    r"|Discharge inhibit|charge power|charging power|discharge rate"
-    # #717: keep every control-write line (grid charge, stop-SOC, TOU segment,
-    # Solis period) across the whole day, not only in the last-50-lines tail.
-    r"|grid charge|charge stop SOC|TOU segment|Solis.*period"
+    # #886: every hardware write is logged with this marker by the single
+    # write path in ha_api_controller, so it alone keeps them all -- no
+    # per-platform wording belongs here.
+    r"|HARDWARE:" r"|Discharge inhibit|charge power|charging power|discharge rate"
+    # TOU/Solis schedule decisions that did NOT write (e.g. "TOU segment 1
+    # mode: ... unchanged - no write", "Solis periods built") -- the writes
+    # themselves are covered by HARDWARE: above.
+    r"|TOU segment|Solis.*period"
     r"|Intent transition|DECISION:"
     r"|Starting optimization|Optimization complete"
     r"|Applying period|Apply schedule"

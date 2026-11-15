@@ -6,9 +6,13 @@ itself, which closes the loop on issue #91 (wrong Nordpool area discovered
 because BESS never saw the actual config-entry shape).
 """
 
+import logging
 from datetime import timedelta
-from typing import Any
-from unittest.mock import MagicMock
+from typing import Any, ClassVar
+from unittest.mock import MagicMock, patch
+
+import pytest
+import requests
 
 from core.bess import time_utils
 from core.bess.daily_view_builder import DailyView
@@ -22,32 +26,157 @@ from core.bess.debug_data_exporter import (
     _scrub_config_entry,
     _scrub_device,
 )
+from core.bess.ha_api_controller import HomeAssistantAPIController
 from core.bess.models import EnergyData, PeriodData
 from core.bess.settings import BatterySettings
+from core.bess.settings_store import SettingsStore
 
 
-class TestLogKeyPatternsRetainControlWrites:
-    """#717: every control-write log line must survive compact-log trimming, so
-    a debug bundle shows what was commanded across the whole day, not only in
-    the last-50-lines tail."""
+class TestCompactLogRetainsEveryHardwareWrite:
+    """#886: every write BESS sends to the inverter must survive compact-log
+    trimming, whatever platform issued it. #717 kept writes by listing each
+    platform's wording in the filter, and the Growatt VPP, SolaX VPP and
+    export-limit writes were never added -- so a compact bundle could not show
+    what BESS commanded on those platforms. These tests drive the real write
+    methods and check the compacted log, so a new write path is covered without
+    anyone editing the filter."""
 
-    def test_retains_control_write_lines(self) -> None:
-        prefix = "2026-08-19 09:02:01,123 INFO core.bess.ha_api_controller "
-        c = "2026-08-19 09:02:01,123 INFO core.bess.solax_modbus_growatt_controller "
+    SENSORS: ClassVar[dict[str, str]] = {
+        "growatt_vpp_remote_control": "select.vpp_remote_control",
+        "growatt_vpp_power": "number.vpp_power",
+        "growatt_vpp_time": "number.vpp_time",
+        "growatt_vpp_status": "select.vpp_status",
+        "growatt_vpp_allow_ac_charging": "select.vpp_allow_ac_charging",
+        "solax_power_control_mode": "select.solax_power_control",
+        "solax_active_power": "number.solax_active_power",
+        "solax_autorepeat_duration": "number.solax_autorepeat",
+        "solax_power_control_trigger": "button.solax_trigger",
+        "growatt_export_limit_mode": "select.export_limit_mode",
+        "growatt_export_limit_value": "number.export_limit_value",
+        "grid_charge": "switch.grid_charge",
+    }
+
+    @pytest.fixture
+    def ctrl(self) -> HomeAssistantAPIController:
+        store = SettingsStore()
+        store.data["sensors"] = dict(self.SENSORS)
+        c = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123",
+            token="test-token",
+            settings_store=store,
+            service_domain="solax_modbus",
+        )
+        c.max_attempts = 1
+        c.retry_base_delay = 0
+        return c
+
+    @staticmethod
+    def _kept(caplog: pytest.LogCaptureFixture) -> list[str]:
+        """The captured log lines, formatted as the app writes them, that the
+        compact export keeps."""
         lines = [
-            prefix + "Enabling grid charge",
-            prefix + "Disabling grid charge",
-            prefix + "Set charge stop SOC -> 12%",
-            prefix + "Set discharge stop SOC -> 12%",
-            prefix + "Set TOU segment 1 -> mode=load_first enabled=False 00:00-23:59",
-            prefix
-            + "Set inverter TOU segment 1 -> mode=load_first 00:00-23:59 (disabled)",
-            prefix + "Set Solis charge period slot 1 -> 02:00-04:00 enabled=True",
-            c + "TOU segment 1 mode: load_first unchanged (period 36, intent "
-            "SOLAR_STORAGE) - no write",
+            f"2026-11-10 23:37:01 | {r.levelname: <5} | {r.name} - {r.getMessage()}"
+            for r in caplog.records
         ]
-        for line in lines:
-            assert _LOG_KEY_PATTERNS.search(line), line
+        return [line for line in lines if _LOG_KEY_PATTERNS.search(line)]
+
+    def _assert_writes_kept(
+        self,
+        ctrl: HomeAssistantAPIController,
+        caplog: pytest.LogCaptureFixture,
+        expected: list[tuple[str, str]],
+    ) -> None:
+        kept = self._kept(caplog)
+        for entity_id, value in expected:
+            assert any(
+                entity_id in line and value in line for line in kept
+            ), f"write {entity_id}={value} missing from compact log:\n" + "\n".join(
+                kept
+            )
+
+    def test_growatt_vpp_period_writes_are_kept(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_api_request", return_value=None),
+            caplog.at_level(logging.INFO),
+        ):
+            ctrl.set_growatt_vpp_period(True, 100, 20)
+            ctrl.set_growatt_vpp_period(False, 0, 20)
+            ctrl.set_growatt_vpp_status(True)
+            ctrl.set_growatt_vpp_allow_ac_charging(True)
+        self._assert_writes_kept(
+            ctrl,
+            caplog,
+            [
+                ("number.vpp_power", "100"),
+                ("number.vpp_time", "20"),
+                ("select.vpp_remote_control", "Enabled"),
+                ("select.vpp_remote_control", "Disabled"),
+                ("number.vpp_power", "0"),
+                ("select.vpp_status", "Enabled"),
+                ("select.vpp_allow_ac_charging", "Enabled"),
+            ],
+        )
+
+    def test_solax_vpp_writes_are_kept(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_api_request", return_value=None),
+            caplog.at_level(logging.INFO),
+        ):
+            ctrl.set_solax_active_power_control(-2500)
+            ctrl.set_solax_vpp_disabled()
+        self._assert_writes_kept(
+            ctrl,
+            caplog,
+            [
+                ("select.solax_power_control", "Enabled Battery Control"),
+                ("number.solax_active_power", "-2500"),
+                ("button.solax_trigger", "press"),
+                ("select.solax_power_control", "Disabled"),
+            ],
+        )
+
+    def test_export_limit_and_grid_charge_writes_are_kept(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with (
+            patch.object(ctrl, "_api_request", return_value=None),
+            caplog.at_level(logging.INFO),
+        ):
+            ctrl.set_growatt_export_limit(True)
+            ctrl.set_grid_charge(True)
+        self._assert_writes_kept(
+            ctrl,
+            caplog,
+            [
+                ("select.export_limit_mode", "Meter 1"),
+                ("number.export_limit_value", "0"),
+                ("switch.grid_charge", "turn_on"),
+            ],
+        )
+
+    def test_reads_failures_and_test_mode_log_no_write(
+        self, ctrl: HomeAssistantAPIController, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Only a write that reached the inverter is recorded as one."""
+        with caplog.at_level(logging.INFO):
+            with patch.object(ctrl, "_api_request", return_value={"x": 1}):
+                ctrl._service_call_with_retry(
+                    "nordpool", "get_prices_for_date", config_entry="abc"
+                )
+            with (
+                patch.object(
+                    ctrl, "_api_request", side_effect=requests.ConnectionError()
+                ),
+                pytest.raises(requests.ConnectionError),
+            ):
+                ctrl.set_growatt_vpp_status(True)
+            ctrl.test_mode = True
+            ctrl.set_growatt_vpp_allow_ac_charging(True)
+        assert not [r for r in caplog.records if "HARDWARE:" in r.getMessage()]
 
 
 class TestIsSecretKey:

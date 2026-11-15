@@ -138,6 +138,69 @@ class TestInverterStatusChargePowerRate:
         assert resp.json()["chargePowerRate"] == 100
 
 
+class TestInverterStatusGridChargeEntityAbsent:
+    """A platform with no grid-charge entity (Solis, Growatt SPH, SolaX
+    native) must not log a missing-entity warning on every status poll
+    (issue #885). Uses a real HomeAssistantAPIController so the warning
+    under test is the one the production read path emits."""
+
+    @staticmethod
+    def _ha_controller(sensors: dict[str, str], states: dict[str, str]) -> Any:
+        from core.bess.ha_api_controller import HomeAssistantAPIController
+        from core.bess.settings_store import SettingsStore
+
+        store = SettingsStore()
+        store.data["sensors"] = dict(sensors)
+        ha: Any = HomeAssistantAPIController(
+            ha_url="http://ha.local:8123", token="t", settings_store=store
+        )
+
+        def fake_request(method: str, path: str, **kwargs: Any) -> Any:
+            entity_id = path.rsplit("/", 1)[-1]
+            return {"state": states[entity_id]} if entity_id in states else None
+
+        ha._api_request = fake_request
+        return ha
+
+    @staticmethod
+    def _status(ha: Any, control_model: str) -> Any:
+        ctrl = _make_controller("solis_modbus")
+        ctrl.system._controller = ha
+        ctrl.system._inverter_controller.CONTROL_MODEL = control_model
+        app_module: Any = sys.modules["app"]
+        app_module.bess_controller = ctrl
+        return _client.get("/api/inverter/status")
+
+    def test_no_warning_when_platform_has_no_grid_charge_entity(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        ha = self._ha_controller(
+            {"battery_soc": "sensor.battery_soc"}, {"sensor.battery_soc": "60"}
+        )
+        with caplog.at_level("WARNING"):
+            resp = self._status(ha, "period_list")
+        assert resp.status_code == 200
+        assert resp.json()["gridChargeEnabled"] is None
+        assert not [r for r in caplog.records if r.levelname == "WARNING"]
+
+    def test_configured_grid_charge_entity_is_still_read(self) -> None:
+        # Huawei is period_list yet has a grid-charge entity -- the gate is
+        # the entity, not the control model.
+        ha = self._ha_controller(
+            {
+                "battery_soc": "sensor.battery_soc",
+                "grid_charge": "switch.storage_charge_from_grid_function",
+            },
+            {
+                "sensor.battery_soc": "60",
+                "switch.storage_charge_from_grid_function": "on",
+            },
+        )
+        resp = self._status(ha, "period_list")
+        assert resp.status_code == 200
+        assert resp.json()["gridChargeEnabled"] is True
+
+
 # ===========================================================================
 # GET /api/growatt/detailed_schedule
 # ===========================================================================

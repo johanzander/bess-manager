@@ -243,14 +243,18 @@ written rate is.
 
 **Two questions, not one — do not collapse them.** "Is the rate register a
 ceiling" (`discharge_rate_is_load_following`, what the intra-period gate
-needs, since it writes a rate) and "is a load-support discharge delivered
-load-following" (`load_support_delivers_exact_cover`, what the cover
-candidate needs) have different answers on solax-modbus Growatt in VPP
-mode: the register is a forced power, but #413 makes LOAD_SUPPORT write no
-rate at all and release the period to the inverter's own self-use. Each is
-declared per controller and read through `PlatformCapabilities`; a caller
-reading either fact off a controller directly is the drift this phase
-removed.
+needs, since it writes a rate) and "how much of the deficit does a
+load-support period deliver" (`load_support_delivery`: `ceiling`,
+`whole_load` or `unmodelled`, what the cover candidates need) have different
+answers on two platforms. On solax-modbus Growatt in VPP mode the register
+is a forced power, but #413 makes LOAD_SUPPORT write no rate at all and
+release the period to the inverter's own self-use (`ceiling`). Solis has no
+rate at all, yet Self Use covers the whole deficit (#872), so its only
+deliverable covers are the whole one or none (`whole_load`, #884: partial
+covers are excluded from every pass via
+`action_selector._discharge_is_partial_cover`). Each is declared per
+controller and read through `PlatformCapabilities`; a caller reading either
+fact off a controller directly is the drift this phase removed.
 
 Consequences:
 

@@ -1335,6 +1335,7 @@ def _run_dynamic_programming(
     # circular -- the same arrangement pwl_window_dp already has with this
     # file.
     from core.bess.action_selector import (
+        _discharge_is_partial_cover,
         _discharge_is_unexecutable,
         _residual_cover_p,
         _solar_export_bypass_is_unexecutable,
@@ -1420,6 +1421,18 @@ def _run_dynamic_programming(
         # finer percent lattice really has than excluding it. Measured on all
         # 33 fixtures (2026-08-09): masking here helps 7 and hurts 10, net
         # -0.004 SEK -- approximation noise, not a real bug either way.
+        #
+        # Partial load covers ARE masked (#884): on whole-load hardware they
+        # are a whole band with no command behind it, not a proxy for one, and
+        # the whole cover the replay offers instead is the cover column below.
+        feasible &= ~is_discharge | ~_discharge_is_partial_cover(
+            np.abs(power_row),
+            home_consumption[t],
+            solar_production[t],
+            dt,
+            capabilities,
+            battery_settings,
+        )
         next_soe = _state_transition_grid(
             soe_col,
             power_row,

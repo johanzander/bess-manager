@@ -1,0 +1,27 @@
+name: PR linkage
+
+# Fails a PR whose body links no issue (#828). Separate from ci.yml on purpose:
+# it must re-run when the body is EDITED, and adding `edited` to ci.yml's
+# trigger would re-run the whole test matrix on every description change.
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  linkage:
+    name: PR links an issue
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: scripts
+
+      # The body goes through env, never `${{ }}` inside `run:` -- it is
+      # attacker-controlled text and would otherwise be spliced into the shell.
+      - name: Check the PR body for an issue link
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: printf '%s' "$PR_BODY" | scripts/check-pr-linkage.sh

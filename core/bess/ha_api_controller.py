@@ -1459,17 +1459,30 @@ class HomeAssistantAPIController:
             if service_domain in ["number", "input_number", "switch"]
             else ("inverter_control" if is_vendor_domain else "other")
         )
+        operation = operation or f"Call {service_domain}.{service_name}"
 
-        # Make API call
         result = self._api_request(
             "post",
             path,
-            operation=operation or f"Call {service_domain}.{service_name}",
+            operation=operation,
             category=resolved_category,
             context=context,
             suppress_retry_warnings=suppress_retry_warnings,
             json=json_data,
         )
+
+        # #886: every write to the inverter, on every platform, passes through
+        # here, so this is the one place a write is recorded. The compact debug
+        # export keeps lines by the "HARDWARE:" marker alone -- a new write
+        # path needs no filter change to show up in a bundle.
+        if not is_safe_read:
+            logger.info(
+                "HARDWARE: %s (%s.%s %s)",
+                operation,
+                service_domain,
+                service_name,
+                context,
+            )
 
         # A read succeeding says nothing about whether writes work again.
         if self.failure_tracker and not is_safe_read:

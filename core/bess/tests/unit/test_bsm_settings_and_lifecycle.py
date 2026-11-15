@@ -7,6 +7,7 @@ using MockHomeAssistantController from conftest.
 import logging
 from collections.abc import Iterator
 from datetime import date, datetime, timedelta
+from typing import Any, ClassVar
 from unittest.mock import MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -680,11 +681,179 @@ class TestRefreshHealthCheck:
         mock_update.assert_not_called()
 
 
+class TestHealthBannerNeedsPersistence:
+    """#875: a bad check, typically integrations still loading after a restart,
+    must not raise a banner or leave a "recovered" note behind."""
+
+    FAILING: ClassVar[dict[str, Any]] = {
+        "status": "ERROR",
+        "checks": [
+            {
+                "name": "Battery Control",
+                "status": "ERROR",
+                "required": True,
+                "checks": [],
+            },
+        ],
+    }
+    HEALTHY: ClassVar[dict[str, Any]] = {
+        "status": "OK",
+        "checks": [{"name": "Battery Control", "status": "OK", "required": True}],
+    }
+    # Fails after the banner bookkeeping is done: a check result whose shape
+    # the logging step cannot read.
+    CRASHES_WHILE_LOGGING: ClassVar[dict[str, Any]] = {
+        "status": "ERROR",
+        "checks": [
+            {
+                "name": "Battery Control",
+                "status": "ERROR",
+                "required": True,
+                "checks": [{"status": "ERROR"}],
+            },
+        ],
+    }
+
+    @staticmethod
+    def _at(minutes: float) -> datetime:
+        return datetime(2026, 1, 1, 12, 0, tzinfo=TIMEZONE) + timedelta(minutes=minutes)
+
+    def _run(
+        self, system: BatterySystemManager, result: dict[str, Any], minutes: float
+    ) -> None:
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                return_value=result,
+            ),
+            patch.object(system._controller, "get_device_maps", return_value=({}, {})),
+            patch(
+                "core.bess.battery_system_manager.time_utils.now",
+                return_value=self._at(minutes),
+            ),
+            # With no schedule yet, a healthy check also builds the first one,
+            # which is not what these tests are about.
+            patch.object(system, "_current_schedule", MagicMock()),
+        ):
+            system.refresh_health_check()
+
+    def _crash(self, system: BatterySystemManager, minutes: float) -> None:
+        with (
+            patch(
+                "core.bess.battery_system_manager.run_system_health_checks",
+                side_effect=RuntimeError("boom"),
+            ),
+            patch(
+                "core.bess.battery_system_manager.time_utils.now",
+                return_value=self._at(minutes),
+            ),
+        ):
+            system.refresh_health_check()
+
+    def test_a_single_failed_check_is_not_sustained(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+
+        assert system.get_sustained_health_failures() == set()
+        # The live view is unaffected: only the banner waits.
+        assert system.get_critical_sensor_failures() == ["Battery Control"]
+
+    def test_still_failing_at_the_next_check_is_sustained(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.FAILING, 5)
+
+        assert system.get_sustained_health_failures() == {"Battery Control"}
+
+    def test_checks_seconds_apart_are_not_sustained(
+        self, system: BatterySystemManager
+    ) -> None:
+        """Startup's check and the next 5-minute tick can land seconds apart
+        while integrations are still loading."""
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.FAILING, 0.2)
+
+        assert system.get_sustained_health_failures() == set()
+
+    def test_a_passing_check_restarts_the_clock(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.HEALTHY, 5)
+        self._run(system, self.FAILING, 10)
+
+        assert system.get_sustained_health_failures() == set()
+
+    def test_a_blip_leaves_no_recovery_note(self, system: BatterySystemManager) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.HEALTHY, 5)
+
+        assert system.get_health_recoveries() == []
+
+    def test_a_sustained_outage_leaves_a_recovery_note(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.FAILING, 5)
+        self._run(system, self.HEALTHY, 10)
+
+        assert len(system.get_health_recoveries()) == 1
+
+    def test_a_blip_does_not_clear_a_pending_recovery_note(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.FAILING, 5)
+        self._run(system, self.HEALTHY, 10)
+
+        self._run(system, self.FAILING, 15)
+
+        assert len(system.get_health_recoveries()) == 1
+
+    def test_a_health_check_that_keeps_crashing_raises_a_banner(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._crash(system, 0)
+        assert system.get_sustained_health_failures() == set()
+
+        self._crash(system, 5)
+        assert system.get_sustained_health_failures() == {"System Health Check"}
+
+    def test_crashing_after_the_checks_ran_still_raises_a_banner(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.CRASHES_WHILE_LOGGING, 0)
+        self._run(system, self.CRASHES_WHILE_LOGGING, 5)
+
+        assert "System Health Check" in system.get_sustained_health_failures()
+
+    def test_one_crash_does_not_erase_a_sustained_outage(
+        self, system: BatterySystemManager
+    ) -> None:
+        self._run(system, self.FAILING, 0)
+        self._run(system, self.FAILING, 5)
+
+        self._crash(system, 10)
+
+        assert "Battery Control" in system.get_sustained_health_failures()
+
+
 class TestHealthRecoveryTracking:
     """A component that goes ERROR/WARNING -> OK between health checks should
     be recorded as a recovery, surviving even if nobody was watching the live
     banner when it happened. See #215.
+
+    These pin what a recovery records, not how long an outage must last to
+    earn one (TestHealthBannerNeedsPersistence covers that).
     """
+
+    @pytest.fixture(autouse=True)
+    def _one_failed_check_is_sustained(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(
+            BatterySystemManager, "HEALTH_BANNER_MIN_FAILURE_AGE", timedelta(0)
+        )
 
     def _run(self, system, result, device_maps=({}, {})):
         with (

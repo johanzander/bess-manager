@@ -1,6 +1,41 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Health banner: a component that fails every other check never raises one**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/battery_system_manager.py`
+
+**Description**: Since #875 a banner needs the problem to persist for 3 minutes, and a passing check resets that. A required sensor that alternates fail/pass every 5 minutes shows on the Health page but never on the dashboard. A windowed count (N failures in the last M checks) would cover it.
+
+
+### **A failed period write that landed can still mislead the discharge inhibit**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/battery_system_manager.py`
+
+**Description**: #875 made the inhibit retry its own failed writes, but a failed period write leaves `_last_applied_discharge_rate` at its old value. If that write landed and the inhibit then activates with a target equal to the old value, the inhibit write is skipped. Needs an "unknown" state that does not trigger a write every minute during an outage.
+
+
+### **Period retry that never runs leaves only the service-call banner**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/battery_system_manager.py`
+
+**Description**: Since #875 the period_apply banner waits for retries to run out. A retry job that misfires, or a restart between attempts, never reports, so only the HA service-call banner for the failed write remains.
+
+
+### **Solax status logs report load_first after a failed write**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/solax_modbus_growatt_controller.py`
+
+**Description**: After #875 a failed TOU/VPP write resets the remembered mode to unknown, and the display/log helpers render unknown as `load_first` / "remote control disabled". A debug bundle from such a failure then shows a mode that was never confirmed.
+
+
+### **`has_critical_sensor_failures()` has no production caller**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/battery_system_manager.py`, `backend/tests/test_dashboard_api.py`
+
+**Description**: Since #875 the dashboard banner filters on sustained failures, so this method's only callers are tests and stale mock setup. Remove it, or redefine it on the sustained set.
+
+
 ### **Schedule Overview: elapsed row labels stay the plan while Solar and Grid are measured**
 
 **Impact**: Low | **Effort**: Medium | **Dependencies**: `backend/api.py`, `frontend/src/components/InverterStatusDashboard.tsx`

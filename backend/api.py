@@ -1879,8 +1879,9 @@ async def recheck_system_health():
 
     Unlike GET /api/system-health (which runs a fresh check but doesn't touch
     the cache), this updates ``_cached_health_results``/``_critical_sensor_failures``
-    so the dashboard banner immediately reflects the result — for a "Recheck now"
-    button after the user fixes a sensor in Home Assistant.
+    so a fixed problem immediately leaves the dashboard banner — for a "Recheck
+    now" button after the user fixes a sensor in Home Assistant. A newly found
+    problem still has to persist before it raises one.
     """
     from app import bess_controller
 
@@ -1937,10 +1938,16 @@ async def get_dashboard_health_summary():
     try:
         logger.debug("Starting dashboard health summary check")
 
+        sustained_failures = bess_controller.system.get_sustained_health_failures()
+        critical_failures = [
+            failure
+            for failure in bess_controller.system.get_critical_sensor_failures()
+            if failure in sustained_failures
+        ]
+
         # Check if system is in degraded mode first
-        if bess_controller.system.has_critical_sensor_failures():
+        if critical_failures:
             # System is in degraded mode due to critical sensor failures
-            critical_failures = bess_controller.system.get_critical_sensor_failures()
             cached_results = bess_controller.system.get_cached_health_results() or {}
             components_by_name = {
                 component.get("name"): component
@@ -2006,6 +2013,7 @@ async def get_dashboard_health_summary():
                 component
                 for component in health_results.get("checks", [])
                 if component.get("status") in ("WARNING", "ERROR")
+                and component.get("name") in sustained_failures
             ]
             has_critical_error = any(
                 component.get("required") and component.get("status") == "ERROR"

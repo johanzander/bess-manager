@@ -3,6 +3,9 @@
 Targets uncovered methods in each controller to push coverage toward 90%+.
 """
 
+from collections.abc import Callable
+from unittest.mock import MagicMock, patch
+
 import pytest
 
 from core.bess.dp_schedule import DPSchedule
@@ -476,6 +479,133 @@ class TestApplyPeriod:
         min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=50)
 
         assert mock_controller.calls["grid_charge"] == [True]
+
+
+class TestFailedWriteLeavesRegisterStateUnknown:
+    """#875: a write can return an error and still reach the inverter, so a
+    failed write says nothing about the register. These model that with a
+    fake register and assert where it ends up; neither inverter simulator can
+    express a write that errors yet lands, so the outcome is only observable
+    at this layer."""
+
+    @staticmethod
+    def _landed_then_errored(
+        register: dict[str, object], key: str
+    ) -> Callable[[object], None]:
+        def write(value: object) -> None:
+            register[key] = value
+            raise RuntimeError("500 Server Error")
+
+        return write
+
+    @staticmethod
+    def _landed(register: dict[str, object], key: str) -> Callable[[object], None]:
+        def write(value: object) -> None:
+            register[key] = value
+
+        return write
+
+    def test_grid_charge_is_stopped_after_a_failed_start_that_landed(
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
+        register: dict[str, object] = {}
+        mock_controller.set_grid_charge = self._landed(register, "grid_charge")  # type: ignore[method-assign]
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+
+        mock_controller.set_grid_charge = self._landed_then_errored(  # type: ignore[method-assign]
+            register, "grid_charge"
+        )
+        min_ctrl.apply_period(mock_controller, grid_charge=True, discharge_rate=0)
+        assert register["grid_charge"] is True
+
+        mock_controller.set_grid_charge = self._landed(register, "grid_charge")  # type: ignore[method-assign]
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+
+        assert register["grid_charge"] is False
+
+    def test_discharge_is_stopped_after_a_failed_start_that_landed(
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
+        register: dict[str, object] = {}
+        mock_controller.set_discharging_power_rate = self._landed(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+
+        mock_controller.set_discharging_power_rate = self._landed_then_errored(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=100)
+        assert register["rate"] == 100
+
+        mock_controller.set_discharging_power_rate = self._landed(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        min_ctrl.apply_period(mock_controller, grid_charge=False, discharge_rate=0)
+
+        assert register["rate"] == 0
+
+    def test_charge_rate_is_restored_after_a_failed_write_that_landed(
+        self,
+        min_ctrl: GrowattMinController,
+        mock_controller: MockHomeAssistantController,
+    ) -> None:
+        register: dict[str, object] = {}
+        mock_controller.set_charging_power_rate = self._landed(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 0)
+
+        mock_controller.set_charging_power_rate = self._landed_then_errored(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        with pytest.raises(RuntimeError):
+            min_ctrl.write_charge_rate_if_changed(mock_controller, 100)
+        assert register["rate"] == 100
+
+        mock_controller.set_charging_power_rate = self._landed(  # type: ignore[method-assign]
+            register, "rate"
+        )
+        min_ctrl.write_charge_rate_if_changed(mock_controller, 0)
+
+        assert register["rate"] == 0
+
+    def test_solax_vpp_is_released_after_a_failed_enable_that_landed(self) -> None:
+        ctrl = SolaxModbusGrowattController(
+            battery_settings=BatterySettings(), control_mode="vpp"
+        )
+        ha = MagicMock()
+        register: dict[str, object] = {}
+
+        def landed(**kwargs: object) -> None:
+            register["remote_control"] = kwargs["remote_control_enabled"]
+
+        def landed_then_errored(**kwargs: object) -> None:
+            landed(**kwargs)
+            raise RuntimeError("500 Server Error")
+
+        with (
+            patch.object(ctrl, "_ensure_vpp_status_enabled"),
+            patch.object(ctrl, "_intent_to_vpp") as intent_to_vpp,
+        ):
+            intent_to_vpp.return_value = (0, False)
+            ha.set_growatt_vpp_period.side_effect = landed
+            ctrl._apply_period_vpp(ha, False, 0)
+
+            intent_to_vpp.return_value = (100, True)
+            ha.set_growatt_vpp_period.side_effect = landed_then_errored
+            ctrl._apply_period_vpp(ha, True, 0)
+            assert register["remote_control"] is True
+
+            intent_to_vpp.return_value = (0, False)
+            ha.set_growatt_vpp_period.side_effect = landed
+            ctrl._apply_period_vpp(ha, False, 0)
+
+        assert register["remote_control"] is False
 
 
 class TestChargeRateWriteOnChange:

@@ -195,7 +195,9 @@ class InverterController(ABC):
         # Last register values successfully written by _write_period_to_hardware,
         # so repeat calls with an unchanged value skip the hardware write instead
         # of re-sending it (grid_charge/discharge_rate #402). None means unknown
-        # (always write). Left unset on a failed write so the next call retries.
+        # (always write). Reset to None on a failed write: a write can return
+        # an error and still reach the inverter, so the register's value is no
+        # longer known and the next command must not be skipped (#875).
         self._last_written_grid_charge: bool | None = None
         self._last_written_discharge_rate: int | None = None
         self._last_written_charge_rate: int | None = None
@@ -1202,6 +1204,7 @@ class InverterController(ABC):
                 self._last_written_grid_charge = grid_charge
             except Exception as e:
                 logger.error("FAILED: set_grid_charge(%s): %s", grid_charge, e)
+                self._last_written_grid_charge = None
                 errors.append(str(e))
 
         if self._discharge_rate_write_needed(discharge_rate):
@@ -1212,6 +1215,7 @@ class InverterController(ABC):
                 logger.error(
                     "FAILED: set_discharging_power_rate(%s): %s", discharge_rate, e
                 )
+                self._last_written_discharge_rate = None
                 errors.append(str(e))
 
         if errors:
@@ -1232,13 +1236,14 @@ class InverterController(ABC):
         exact cause unconfirmed, same spirit as #402).
         Same dedupe_register_writes policy as the register writes; on a failed
         write the exception propagates (adjust_charging_power's own handler logs
-        it) and _last_written is left unset so the next call retries.
+        it) and _last_written is reset so the next call always writes (#875).
         """
         if (
             self.dedupe_register_writes
             and charge_rate == self._last_written_charge_rate
         ):
             return
+        self._last_written_charge_rate = None
         controller.set_charging_power_rate(charge_rate)
         self._last_written_charge_rate = charge_rate
 

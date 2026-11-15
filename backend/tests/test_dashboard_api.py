@@ -182,6 +182,8 @@ def _make_started_controller() -> MagicMock:
     ctrl.system.get_health_recoveries.return_value = []
     ctrl.system.acknowledge_health_recoveries.return_value = 0
     ctrl.system.has_critical_sensor_failures.return_value = False
+    ctrl.system.get_critical_sensor_failures.return_value = []
+    ctrl.system.get_sustained_health_failures.return_value = set()
     ctrl.system.get_cached_health_results.return_value = {
         "checks": [],
         "system_mode": "normal",
@@ -782,6 +784,7 @@ class TestDashboardHealthSummary:
         ctrl = _make_started_controller()
         ctrl.system.has_critical_sensor_failures.return_value = True
         ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
+        ctrl.system.get_sustained_health_failures.return_value = {"Battery Control"}
         ctrl.system.get_cached_health_results.return_value = {
             "checks": [
                 {
@@ -819,6 +822,11 @@ class TestDashboardHealthSummary:
             "Battery Monitoring",
             "Energy Monitoring",
         ]
+        ctrl.system.get_sustained_health_failures.return_value = {
+            "Battery Control",
+            "Battery Monitoring",
+            "Energy Monitoring",
+        }
         ctrl.system.get_cached_health_results.return_value = {
             "checks": [
                 {
@@ -894,6 +902,10 @@ class TestDashboardHealthSummary:
             "Battery Control",
             "Battery Monitoring",
         ]
+        ctrl.system.get_sustained_health_failures.return_value = {
+            "Battery Control",
+            "Battery Monitoring",
+        }
         ctrl.system.get_cached_health_results.return_value = {
             "checks": [
                 {
@@ -924,6 +936,69 @@ class TestDashboardHealthSummary:
             "Battery Monitoring",
         }
         assert resp.json()["totalCriticalIssues"] == 2
+
+    def test_problem_seen_on_one_check_raises_no_banner(self) -> None:
+        """#875: the first failed check is usually a restart or a blip."""
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
+        ctrl.system.get_sustained_health_failures.return_value = set()
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                },
+                {
+                    "name": "Power Monitoring",
+                    "status": "WARNING",
+                    "required": False,
+                    "checks": [],
+                },
+            ],
+            "system_mode": "normal",
+        }
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        body = _client.get("/api/dashboard-health-summary").json()
+
+        assert body["hasCriticalErrors"] is False
+        assert body["hasWarnings"] is False
+        assert body["criticalIssues"] == []
+
+    def test_sustained_warning_shows_while_a_new_error_is_still_unconfirmed(
+        self,
+    ) -> None:
+        ctrl = _make_started_controller()
+        ctrl.system.has_critical_sensor_failures.return_value = True
+        ctrl.system.get_critical_sensor_failures.return_value = ["Battery Control"]
+        ctrl.system.get_sustained_health_failures.return_value = {"Power Monitoring"}
+        ctrl.system.get_cached_health_results.return_value = {
+            "checks": [
+                {
+                    "name": "Battery Control",
+                    "status": "ERROR",
+                    "required": True,
+                    "checks": [],
+                },
+                {
+                    "name": "Power Monitoring",
+                    "status": "WARNING",
+                    "required": False,
+                    "checks": [],
+                },
+            ],
+            "system_mode": "normal",
+        }
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        body = _client.get("/api/dashboard-health-summary").json()
+
+        assert body["hasCriticalErrors"] is False
+        assert body["hasWarnings"] is True
+        assert [i["detail"] for i in body["criticalIssues"]] == ["Power Monitoring"]
 
 
 # ===========================================================================

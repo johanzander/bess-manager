@@ -192,6 +192,30 @@ class RuntimeFailureTracker:
                     count += 1
             return count
 
+    def dismiss_by_category_and_entity(
+        self, category: str, entity_id: str | None
+    ) -> int:
+        """Dismiss a category's active failures recorded for this entity.
+
+        Args:
+            category: Category to match
+            entity_id: Entity the failure was recorded against
+
+        Returns:
+            Number of failures dismissed
+        """
+        with self._lock:
+            count = 0
+            for failure in self._failures:
+                if (
+                    not failure.dismissed
+                    and failure.category == category
+                    and failure.context.get("entity_id") == entity_id
+                ):
+                    failure.dismissed = True
+                    count += 1
+            return count
+
     def dismiss_all(self) -> int:
         """Dismiss all active failures.
 

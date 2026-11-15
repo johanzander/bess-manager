@@ -1,8 +1,10 @@
 """Tests for period-level hardware write retry logic."""
 
+from typing import Any
 from unittest.mock import MagicMock
 
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.runtime_failure_tracker import RuntimeFailureTracker
 from core.bess.settings import BatterySettings
 
 
@@ -121,9 +123,8 @@ class TestSchedulePeriodRetry:
 
         # Should have scheduled a second job (attempt=2)
         assert bsm._scheduler.add_job.call_count == 2
-        # Banner should mention retry
-        failure_call = bsm._runtime_failure_tracker.record_failure.call_args
-        assert "Retry 1 failed" in failure_call[1]["operation"]
+        # #875: a retry is still pending, so nothing is reported yet
+        bsm._runtime_failure_tracker.record_failure.assert_not_called()
 
     def test_final_retry_failure_records_permanent_banner(self):
         bsm = _make_bsm_with_mocks()
@@ -164,12 +165,8 @@ class TestSchedulePeriodRetry:
 class TestApplyPeriodScheduleRetry:
     """Test _apply_period_schedule failure → retry integration."""
 
-    def test_failure_triggers_retry_and_banner(self):
-        bsm = _make_bsm_with_mocks()
-        bsm._inverter_controller.apply_period.return_value = (
-            False,
-            "HA supervisor timeout",
-        )
+    def _prepare_period(self, bsm: Any, result: tuple[bool, str]) -> None:
+        bsm._inverter_controller.apply_period.return_value = result
         bsm._inverter_controller.strategic_intents = ["DISCHARGE"] * 96
         bsm._inverter_controller.current_schedule = None
         bsm._inverter_controller.compute_rates_for_period.return_value = (
@@ -181,13 +178,15 @@ class TestApplyPeriodScheduleRetry:
         bsm.adjust_charging_power = MagicMock()
         bsm._controller.get_discharge_inhibit_active.return_value = False
 
+    def test_failure_triggers_retry_without_a_banner(self) -> None:
+        """#875: a banner while retries are pending reports a problem that
+        usually resolves itself minutes later."""
+        bsm = _make_bsm_with_mocks()
+        self._prepare_period(bsm, (False, "HA supervisor timeout"))
+
         bsm._apply_period_schedule(68)
 
-        # Banner was posted
-        bsm._runtime_failure_tracker.record_failure.assert_called_once()
-        rec_call = bsm._runtime_failure_tracker.record_failure.call_args
-        assert "HA supervisor timeout" in str(rec_call[1]["error"])
-        assert "retrying in 3 min" in rec_call[1]["operation"]
+        bsm._runtime_failure_tracker.record_failure.assert_not_called()
 
         # Retry job scheduled
         bsm._scheduler.add_job.assert_called_once()
@@ -213,3 +212,50 @@ class TestApplyPeriodScheduleRetry:
 
         assert bsm._last_applied_discharge_rate == 80
         bsm._scheduler.add_job.assert_not_called()
+
+    def test_failure_with_no_scheduler_is_reported(self) -> None:
+        """Startup can apply a period before the scheduler exists. With no
+        retry coming, this attempt was the last one and must be visible."""
+        bsm = _make_bsm_with_mocks()
+        bsm._runtime_failure_tracker = RuntimeFailureTracker()
+        bsm._scheduler = None
+        self._prepare_period(bsm, (False, "HA supervisor timeout"))
+
+        bsm._apply_period_schedule(68)
+
+        failures = bsm._runtime_failure_tracker.get_active_failures()
+        assert len(failures) == 1
+        assert failures[0].error_message == "HA supervisor timeout"
+
+    def _exhaust_retries(self, bsm: Any) -> None:
+        bsm._inverter_controller.apply_period.return_value = (False, "timeout")
+        bsm._schedule_period_retry(68, True, 50, attempt=2)
+        bsm._scheduler.add_job.call_args[0][0]()
+
+    def test_exhausted_failure_clears_on_next_successful_period(self) -> None:
+        bsm = _make_bsm_with_mocks()
+        bsm._runtime_failure_tracker = RuntimeFailureTracker()
+        self._exhaust_retries(bsm)
+        assert len(bsm._runtime_failure_tracker.get_active_failures()) == 1
+
+        self._prepare_period(bsm, (True, ""))
+        bsm._apply_period_schedule(69)
+
+        assert bsm._runtime_failure_tracker.get_active_failures() == []
+
+    def test_exhausted_failure_survives_a_new_failure_that_is_still_retrying(
+        self,
+    ) -> None:
+        """#875: a later period starting to fail used to wipe the record of a
+        period that had really failed."""
+        bsm = _make_bsm_with_mocks()
+        bsm._runtime_failure_tracker = RuntimeFailureTracker()
+        self._exhaust_retries(bsm)
+
+        self._prepare_period(bsm, (False, "timeout"))
+        bsm._apply_period_schedule(69)
+        bsm._scheduler.add_job.call_args[0][0]()
+
+        failures = bsm._runtime_failure_tracker.get_active_failures()
+        assert len(failures) == 1
+        assert "after 3 attempts" in failures[0].operation

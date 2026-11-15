@@ -150,6 +150,27 @@ class TestApplyDischargeInhibit:
 
         assert controller.calls["discharge_rate"][-1] == 100
 
+    def test_failed_inhibit_write_is_retried_next_minute(self) -> None:
+        """#875: a failed write used to be recorded as applied, so later calls
+        saw no change and the battery kept discharging into the EV."""
+        bsm, controller = _make_bsm(inhibit_active=False)
+        _set_intent(bsm, PERIOD, "LOAD_SUPPORT")
+        _set_discharge_action(bsm, PERIOD, -3.75)  # -15 kW -> 100%
+        bsm._apply_period_schedule(PERIOD)
+        working = controller.set_discharging_power_rate
+
+        def rejected(rate: int) -> None:
+            raise RuntimeError("500 Server Error")
+
+        controller.set_discharging_power_rate = rejected  # type: ignore[method-assign]
+        controller.inhibit_active = True
+        bsm.apply_discharge_inhibit()
+
+        controller.set_discharging_power_rate = working  # type: ignore[method-assign]
+        bsm.apply_discharge_inhibit()
+
+        assert controller.calls["discharge_rate"][-1] == 0
+
     def test_no_inverter_write_when_inhibit_state_unchanged(self):
         """Must not write to the inverter on every tick — only on state changes."""
         bsm, controller = _make_bsm(inhibit_active=True)

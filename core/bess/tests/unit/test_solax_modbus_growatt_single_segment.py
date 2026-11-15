@@ -145,6 +145,34 @@ class TestApplyPeriod:
         self._apply_at_period(controller, mock_ha, 4, "IDLE")
         assert len(mock_ha.calls["tou_segments"]) == initial_writes
 
+    def test_mode_is_restored_after_a_failed_write_that_landed(
+        self,
+        controller: SolaxModbusGrowattController,
+        mock_ha: MockHomeAssistantController,
+    ) -> None:
+        """#875: a segment write can error and still reach the inverter, so
+        the mode after a failed write is unknown and the next one must be sent."""
+        schedule = make_schedule(hourly_to_quarterly({2: "GRID_CHARGING"}))
+        controller.apply_intents(schedule, current_period=0)
+        self._apply_at_period(controller, mock_ha, 0, "IDLE")
+
+        register: list[str] = []
+
+        def landed_then_errored(**kwargs: object) -> None:
+            register.append(str(kwargs["batt_mode"]))
+            raise RuntimeError("500 Server Error")
+
+        def landed(**kwargs: object) -> None:
+            register.append(str(kwargs["batt_mode"]))
+
+        mock_ha.set_tou_segment_via_entities = landed_then_errored  # type: ignore[method-assign,assignment]
+        self._apply_at_period(controller, mock_ha, 8, "GRID_CHARGING")
+
+        mock_ha.set_tou_segment_via_entities = landed  # type: ignore[method-assign,assignment]
+        self._apply_at_period(controller, mock_ha, 16, "IDLE")
+
+        assert register == ["battery_first", "load_first"]
+
     def test_unchanged_mode_logs_skip_at_info(
         self,
         controller: SolaxModbusGrowattController,

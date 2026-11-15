@@ -3,6 +3,7 @@
 from unittest.mock import MagicMock
 
 from core.bess.battery_system_manager import BatterySystemManager
+from core.bess.execution_model import LOAD_SUPPORT_CEILING
 from core.bess.settings import BatterySettings
 
 
@@ -10,6 +11,8 @@ def _make_bsm_with_mocks():
     """Create a minimal BSM with mocked dependencies for retry testing."""
     bsm = BatterySystemManager.__new__(BatterySystemManager)
     bsm._inverter_controller = MagicMock()
+    # PlatformCapabilities validates this declaration; a bare MagicMock is not one.
+    bsm._inverter_controller.load_support_delivery = LOAD_SUPPORT_CEILING
     bsm._controller = MagicMock()
     # A real SoC, not a bare MagicMock: the write path reads it to decide
     # whether the battery is on its reserve floor (#592). Well above the

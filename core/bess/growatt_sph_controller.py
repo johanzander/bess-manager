@@ -18,6 +18,7 @@ from typing import ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
+from .execution_model import LOAD_SUPPORT_UNMODELLED
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
@@ -47,7 +48,7 @@ class GrowattSphController(InverterController):
 
     # Same reason as the flag above, one level up: a discharge period is a
     # time slot with no rate, so a partial load cover cannot be commanded.
-    load_support_delivers_exact_cover: ClassVar[bool] = False
+    load_support_delivery: ClassVar[str] = LOAD_SUPPORT_UNMODELLED
 
     CONTROL_MODEL: ClassVar[str] = "period_list"
 

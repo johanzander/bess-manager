@@ -55,9 +55,18 @@ step at or above the residual delivers the residual exactly — the plan is
 the *delivery*, the command is on the lattice. It is gated so it always
 classifies as LOAD_SUPPORT and so a covering ceiling actually exists on
 the platform (`_residual_cover_p` in `action_selector.py`, and
-`load_support_delivers_exact_cover` in `execution_model.py` — the
-candidate is withdrawn on hardware where a discharge number is a forced
-power rather than a ceiling, #580).
+`load_support_delivery` in `execution_model.py` — the candidate is
+withdrawn on hardware where a discharge number is a forced power rather
+than a ceiling, #580).
+
+On Solis (`load_support_delivery = whole_load`, #884) LOAD_SUPPORT is the
+inverter's Self Use, which covers the *whole* deficit up to the battery's
+maximum discharge power and cannot cover less. There the cover candidate
+is that whole cover, and every smaller discharge in a deficit period is
+excluded from all passes (`_discharge_is_partial_cover`): a Solis period
+either covers the house completely, holds (IDLE), or exports. A battery too
+empty to cover a whole period is planned to hold rather than drain its last
+fraction of a period.
 
 Without it a period whose net load falls between two lattice steps has no
 action that covers the house: the step below under-covers and imports the

@@ -540,7 +540,7 @@ Both the official HA Nordpool integration and the older HACS custom component (`
 2. **The user selects** which provider to use in the Setup Wizard or Settings page (radio button: "Nord Pool (official HA integration)" vs "Nord Pool (HACS custom sensor)").
 3. **At runtime**, the selected provider determines how prices are fetched:
    - `nordpool_official`: Calls `nordpool.get_prices_for_date` service action (requires `config_entry_id`)
-   - `nordpool`: Reads quarterly prices from a single sensor entity's attributes. The timestamp-validated `raw_today`/`raw_tomorrow` arrays are preferred; otherwise it falls back to the plain `today`/`tomorrow` lists (VAT stripped). Tomorrow's plain list is used only when the sensor's `tomorrow_valid` attribute is true — before Nordpool publishes next-day prices it stays false while `tomorrow` still mirrors `today`, which if trusted inflated cached prices by the VAT multiplier (issue #704).
+   - `nordpool`: Reads quarterly prices from a single sensor entity's attributes. The timestamp-validated `raw_today`/`raw_tomorrow` arrays are preferred; otherwise it falls back to the plain `today`/`tomorrow` lists. Prices are returned VAT-inclusive as published; the source declares `prices_include_vat` and `PriceManager` divides by its own `vat_multiplier`, so the configured VAT is applied by one owner (issue #903). Tomorrow's plain list is used only when the sensor's `tomorrow_valid` attribute is true — before Nordpool publishes next-day prices it stays false while `tomorrow` still mirrors `today`, which if trusted inflated cached prices by the VAT multiplier (issue #704).
 
 #### Stage 2 — Intermediate Identifiers from Entity IDs
 

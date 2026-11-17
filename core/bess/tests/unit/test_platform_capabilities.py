@@ -327,6 +327,83 @@ class TestAdjustChargingPowerSkipsUnsupported:
         system.adjust_charging_power()  # must not raise
 
 
+class TestRealtimeFuseGuardFollowsCapability:
+    """#901: the real-time fuse guard exists exactly when fuse protection is
+    enabled AND the active controller can throttle the charge rate. Both the
+    health check and the Settings page read `realtime_fuse_guard_supported`,
+    so a monitor that outlives its capability -- or a capability with no
+    monitor -- would make them misreport."""
+
+    @staticmethod
+    def _system(
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        control_mode: str,
+    ) -> Any:
+        from core.bess.battery_system_manager import BatterySystemManager
+        from core.bess.price_manager import MockSource
+
+        monkeypatch.setattr(
+            "core.bess.sensor_collector.SensorCollector", MockSensorCollector
+        )
+        return BatterySystemManager(
+            controller=mock_controller,
+            price_source=MockSource(arbitrage_prices),
+            addon_options={
+                "inverter": {
+                    "platform": "solax_modbus_growatt_min",
+                    "control_mode": control_mode,
+                }
+            },
+        )
+
+    def test_vpp_mode_has_no_guard_and_warns_when_enabled(
+        self,
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        system = self._system(mock_controller, arbitrage_prices, monkeypatch, "vpp")
+        assert system.realtime_fuse_guard_supported is False
+
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+
+        assert system._power_monitor is None
+        assert "only the day-ahead schedule" in caplog.text
+
+    def test_switching_tou_to_vpp_drops_the_guard_and_back_restores_it(
+        self,
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        system = self._system(mock_controller, arbitrage_prices, monkeypatch, "tou")
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+        assert system.realtime_fuse_guard_supported is True
+        assert system._power_monitor is not None
+
+        system.switch_control_mode("vpp")
+        assert system._power_monitor is None
+
+        system.switch_control_mode("tou")
+        assert system._power_monitor is not None
+
+    def test_disabling_fuse_protection_drops_the_guard(
+        self,
+        mock_controller: Any,
+        arbitrage_prices: Any,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        system = self._system(mock_controller, arbitrage_prices, monkeypatch, "tou")
+        system.update_settings({"home": {"power_monitoring_enabled": True}})
+        assert system._power_monitor is not None
+
+        system.update_settings({"home": {"power_monitoring_enabled": False}})
+        assert system._power_monitor is None
+
+
 def _all_controller_subclasses(base: type[Any]) -> list[type[Any]]:
     found: list[type[Any]] = []
     for sub in base.__subclasses__():

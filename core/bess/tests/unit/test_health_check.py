@@ -2,7 +2,7 @@
 handling of required-but-unmapped sensors (see TODO.md "Health check silently
 skips genuinely-required-but-unmapped sensors")."""
 
-from typing import ClassVar
+from typing import Any, ClassVar
 from unittest.mock import MagicMock
 
 from core.bess.health_check import (
@@ -154,3 +154,66 @@ def test_run_system_health_checks_omits_influxdb_historical_data_component() -> 
 
     component_names = [component["name"] for component in result["checks"]]
     assert "Historical Data Access" not in component_names
+
+
+def _power_monitoring_component(
+    *, enabled: bool, guard_supported: bool, monitor: object | None
+) -> dict[str, Any]:
+    system_manager = MagicMock()
+    system_manager._price_manager.check_health.return_value = []
+    system_manager._inverter_controller.check_health.return_value = []
+    system_manager.sensor_collector.check_health.return_value = []
+    system_manager._controller.sensors.get.return_value = None
+    system_manager._runtime_failure_tracker.get_failure_stats.return_value = {}
+    system_manager.home_settings.power_monitoring_enabled = enabled
+    system_manager.realtime_fuse_guard_supported = guard_supported
+    system_manager._power_monitor = monitor
+
+    result = run_system_health_checks(system_manager)
+    (component,) = [c for c in result["checks"] if c["name"] == "Power Monitoring"]
+    return dict(component)
+
+
+def test_power_monitoring_warns_when_enabled_without_a_realtime_guard() -> None:
+    """#901: fuse protection enabled on a platform without per-period
+    charge-rate control (Growatt VPP, SPH, SolaX, Huawei, Solis) gets only the
+    day-ahead planning cap. Health reported that as OK/"Disabled" while the
+    user's setting said enabled, hiding that nothing throttles an overload."""
+    component = _power_monitoring_component(
+        enabled=True, guard_supported=False, monitor=None
+    )
+    assert component["status"] == "WARNING"
+    (check,) = component["checks"]
+    assert check["status"] == "WARNING"
+    assert "Safety Margin" in check["error"]
+
+
+def test_power_monitoring_warns_even_if_a_monitor_object_exists() -> None:
+    """Health follows the platform capability, not the monitor object's
+    existence: a monitor adjust_charging_power never calls protects nothing."""
+    monitor = MagicMock()
+    component = _power_monitoring_component(
+        enabled=True, guard_supported=False, monitor=monitor
+    )
+    assert component["status"] == "WARNING"
+    monitor.check_health.assert_not_called()
+
+
+def test_power_monitoring_reports_disabled_when_user_turned_it_off() -> None:
+    component = _power_monitoring_component(
+        enabled=False, guard_supported=False, monitor=None
+    )
+    assert component["status"] == "OK"
+    assert "Disabled" in component["checks"][0]["error"]
+
+
+def test_power_monitoring_reports_the_monitor_when_the_guard_runs() -> None:
+    monitor = MagicMock()
+    monitor.check_health.return_value = [
+        {"name": "Power Monitoring", "status": "OK", "checks": []}
+    ]
+    component = _power_monitoring_component(
+        enabled=True, guard_supported=True, monitor=monitor
+    )
+    monitor.check_health.assert_called_once()
+    assert component["status"] == "OK"

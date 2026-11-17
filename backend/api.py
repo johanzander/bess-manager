@@ -360,6 +360,14 @@ async def get_settings():
         # pointing at the migration note. Removed with the option in PR 6.
         data["influxdb_config_present"] = is_influxdb_configured()
 
+        # Whether fuse protection includes the real-time guard on the active
+        # platform/control mode, or is planning-only (#901). The Fuse
+        # Protection card warns on False; derived from the backend so the UI
+        # cannot infer it a second way.
+        data["realtime_fuse_guard_supported"] = (
+            bess_controller.system.realtime_fuse_guard_supported
+        )
+
         # Return the full per-platform sensors structure from the store.
         # Also include a flat "activeSensors" view for backwards compatibility.
         data.pop("sensors", None)

@@ -693,6 +693,13 @@ configured.
   and instead plans against the balanced-load assumption. Off (`None`) when
   `power_monitoring_enabled` is False, matching the AC cap's own
   `<= 0.0 → None` convention.
+- **Planning-only platforms (#901)**: the backstop needs per-period
+  charge-rate control (`realtime_fuse_guard_supported`). On Growatt VPP, SPH,
+  SolaX native, Huawei and Solis no monitor runs, so this cap is the only fuse
+  protection. It plans against *forecast* load, so an unforecast load (an EV,
+  a sauna) can push real import past the fuse. `safety_margin` (default 1.0)
+  is the user's only headroom there; ~0.7 is the advice. Health reports
+  `WARNING` in that state, never `OK`.
 - **Runtime monitor mechanics (#816, #877)**: `HomePowerMonitor` runs every
   minute. The phase-current sensors are grid-side meters, so while the battery
   grid-charges they read house load *plus* the battery's own draw. The monitor

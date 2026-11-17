@@ -131,9 +131,12 @@ interface Props {
   form: HomeForm;
   onChange: (f: HomeForm) => void;
   sensors?: Record<string, string>;
+  /** Backend capability (#901): false when the active platform/control mode
+   *  cannot throttle charging in real time. Undefined (setup wizard) shows nothing. */
+  realtimeFuseGuardSupported?: boolean;
 }
 
-export function HomeFormSection({ form, onChange, sensors }: Props) {
+export function HomeFormSection({ form, onChange, sensors, realtimeFuseGuardSupported }: Props) {
   const haStatsSensorConfigured = Boolean(sensors?.['lifetime_load_consumption']);
   const avgGridImportSensorConfigured = Boolean(sensors?.['48h_avg_grid_import']);
   const localLoadSensorConfigured = Boolean(sensors?.['local_load_power']);
@@ -228,6 +231,14 @@ export function HomeFormSection({ form, onChange, sensors }: Props) {
             Fuse protection requires {form.phaseCount === 1 ? 'the' : 'all three'} phase current
             sensor{form.phaseCount === 1 ? '' : 's'} ({form.phaseCount === 1 ? 'Current L1' : 'Current L1/L2/L3'})
             to be configured in the <strong>Sensors</strong> tab under Phase Current Monitoring first.
+          </p>
+        )}
+        {form.powerMonitoringEnabled && realtimeFuseGuardSupported === false && (
+          <p className="text-xs text-amber-600 dark:text-amber-400">
+            <strong>Planning-only protection.</strong> Your inverter platform/control mode cannot throttle
+            charging in real time, so only the day-ahead schedule keeps grid import under the fuse — and it
+            plans against <em>forecast</em> house load. Load the forecast misses (an EV, a sauna) can still
+            exceed the fuse. Lower the <strong>Safety Margin Factor</strong> (e.g. 0.7) to leave headroom.
           </p>
         )}
         {toggle('Enable fuse protection', form.powerMonitoringEnabled,

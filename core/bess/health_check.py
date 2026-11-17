@@ -450,7 +450,38 @@ def run_system_health_checks(system_manager):
     all_component_checks.extend(sensor_collector_health)
 
     # 5. Power Monitor (Power Monitoring) - real-time power flow tracking
-    if system_manager._power_monitor is not None:
+    if (
+        system_manager.home_settings.power_monitoring_enabled
+        and not system_manager.realtime_fuse_guard_supported
+    ):
+        # Enabled, but the platform cannot throttle the charge rate (#901):
+        # only the DP's planning cap protects the fuse, and it plans against
+        # forecast load. Not OK -- the user believes they are protected.
+        unavailable = (
+            "Real-time fuse protection is unavailable on this inverter "
+            "platform/control mode (no charge-rate control). Only the "
+            "day-ahead schedule keeps grid import under the fuse, against "
+            "forecast load — lower the Safety Margin in Settings → Home to "
+            "leave headroom for load the forecast misses."
+        )
+        power_checks = [
+            {
+                "name": "Power Monitoring",
+                "description": "Monitors home power consumption and adapts battery charging",
+                "required": False,
+                "status": "WARNING",
+                "checks": [
+                    {
+                        "name": "Power Monitor Status",
+                        "entity_id": None,
+                        "status": "WARNING",
+                        "error": unavailable,
+                    }
+                ],
+                "last_run": datetime.now().isoformat(),
+            }
+        ]
+    elif system_manager._power_monitor is not None:
         power_checks = system_manager._power_monitor.check_health()
     else:
         power_checks = [

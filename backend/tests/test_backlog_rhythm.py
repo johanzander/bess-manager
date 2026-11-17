@@ -1430,6 +1430,72 @@ def test_tooling_freshness_check_is_inert_under_the_test_seam(tmp_path: Path) ->
     assert result["tooling"] == {"behind": None, "ref": "origin/main"}
 
 
+def _rhythm_beside_failing_digest(root: Path) -> Path:
+    """Copy the rhythm script into `root/scripts/` next to a digest stub that
+    fails the way the pre-#895 digest did, so the real digest-call path runs
+    with no test seam set."""
+    scripts = root / "scripts"
+    scripts.mkdir(parents=True)
+    rhythm = scripts / "backlog-rhythm.sh"
+    rhythm.write_text(SCRIPT.read_text())
+    digest = scripts / "backlog-digest.sh"
+    digest.write_text("#!/bin/bash\necho 'jq: Argument list too long' >&2\nexit 126\n")
+    digest.chmod(0o755)
+    return rhythm
+
+
+def _git(root: Path, *args: str) -> None:
+    subprocess.run(
+        ["git", "-C", str(root), "-c", "user.name=t", "-c", "user.email=t@t", *args],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_a_failing_digest_exits_nonzero_and_says_so(tmp_path: Path) -> None:
+    """A digest crash used to kill the pass under `set -e` with only jq's own
+    error, which reads as an environment fault rather than "no actions were
+    computed". It must exit non-zero and name the failed step."""
+    rhythm = _rhythm_beside_failing_digest(tmp_path)
+    proc = subprocess.run(
+        ["bash", str(rhythm)],
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin"},
+    )
+    assert proc.returncode != 0
+    assert "backlog-digest.sh failed" in proc.stderr
+    assert "TOOLING" not in proc.stderr  # not a git checkout: freshness unknown
+
+
+def test_a_failing_digest_still_prints_the_tooling_line(tmp_path: Path) -> None:
+    """The case that actually happened: a stale checkout whose digest crashes
+    on a bug already fixed on main. The TOOLING hint is the one line that names
+    the cure, so it must survive the crash."""
+    _rhythm_beside_failing_digest(tmp_path)
+    _git(tmp_path, "init", "-q", "-b", "main")
+    _git(tmp_path, "add", "-A")
+    _git(tmp_path, "commit", "-qm", "base")
+    _git(tmp_path, "checkout", "-qb", "ahead")
+    (tmp_path / "scripts" / "backlog-digest.sh").write_text("#!/bin/bash\necho '{}'\n")
+    _git(tmp_path, "commit", "-qam", "fix the digest")
+    _git(tmp_path, "checkout", "-q", "main")
+
+    proc = subprocess.run(
+        ["bash", str(tmp_path / "scripts" / "backlog-rhythm.sh")],
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
+            "RHYTHM_SKIP_FETCH": "1",
+            "RHYTHM_TOOLING_REF": "ahead",
+        },
+    )
+    assert proc.returncode != 0
+    assert "backlog-digest.sh failed" in proc.stderr
+    assert "TOOLING 1 commit(s) behind ahead" in proc.stderr
+
+
 # --- the WIP limit --------------------------------------------------------
 
 

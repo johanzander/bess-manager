@@ -420,6 +420,47 @@ class BatterySystemManager:
         return self._inverter_controller.supports_charge_rate_control
 
     @property
+    def realtime_fuse_guard_supported(self) -> bool:
+        """Can the real-time fuse guard (`HomePowerMonitor`) run here?
+
+        It protects the fuse by throttling the per-period charge rate, so it
+        needs a platform that has one. Without it, fuse protection is only
+        the DP's planning cap, which works on forecast load (#901). The single
+        declaration the monitor's lifecycle, the health check and the
+        Settings page all derive from.
+        """
+        return self._supports_charge_rate_control
+
+    def _sync_power_monitor(self) -> None:
+        """Make the monitor exist exactly when fuse protection is enabled and
+        `realtime_fuse_guard_supported` holds.
+
+        Called wherever either side can change (startup, home settings, a
+        control-mode or platform switch), so a monitor never outlives its
+        capability -- adjust_charging_power would never call it, while the
+        health check would still report it running.
+        """
+        enabled = self.home_settings.power_monitoring_enabled
+        if not (enabled and self.realtime_fuse_guard_supported):
+            self._power_monitor = None
+            if enabled and self._inverter_controller is not None:
+                logger.warning(
+                    "Fuse protection is enabled, but %s cannot throttle the "
+                    "charge rate in real time: only the day-ahead schedule "
+                    "keeps grid import under the fuse, against forecast load. "
+                    "Lower the Safety Margin to leave headroom for load the "
+                    "forecast misses.",
+                    type(self._inverter_controller).__name__,
+                )
+            return
+        if self._power_monitor is None and self._controller is not None:
+            self._power_monitor = HomePowerMonitor(
+                self._controller,
+                home_settings=self.home_settings,
+                battery_settings=self.battery_settings,
+            )
+
+    @property
     def platform_capabilities(self) -> PlatformCapabilities:
         """What the active platform can express (Phase 4a, D2).
 
@@ -516,6 +557,7 @@ class BatterySystemManager:
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+        self._sync_power_monitor()
 
     def switch_control_mode(self, control_mode: str) -> None:
         """Switch control_mode (tou/vpp) for the current Growatt-modbus platform.
@@ -568,6 +610,7 @@ class BatterySystemManager:
             "Inverter controller recreated: %s",
             type(self._inverter_controller).__name__,
         )
+        self._sync_power_monitor()
 
     def _configured_free_import_price(self) -> float:
         """Buy price during an Octoplus free-import window.
@@ -749,17 +792,7 @@ class BatterySystemManager:
                 _status("Fetching electricity prices...")
                 self._price_manager.refresh_cache()
 
-                # Initialize power monitor only when feature is enabled and
-                # the platform has per-period charge rate control
-                if (
-                    self.home_settings.power_monitoring_enabled
-                    and self._supports_charge_rate_control
-                ):
-                    self._power_monitor = HomePowerMonitor(
-                        self._controller,
-                        home_settings=self.home_settings,
-                        battery_settings=self.battery_settings,
-                    )
+                self._sync_power_monitor()
 
                 # Run health check before we start using sensors
                 _status("Checking sensor health...")
@@ -4819,20 +4852,8 @@ class BatterySystemManager:
             if "home" in settings:
                 prev_strategy = self.home_settings.consumption_strategy
                 self.home_settings.update(**settings["home"])
-                # If power monitoring was just enabled and the monitor hasn't been
-                # created yet (disabled at startup), instantiate it now so it takes
-                # effect without requiring a restart.
-                if (
-                    self.home_settings.power_monitoring_enabled
-                    and self._power_monitor is None
-                    and self._controller is not None
-                    and self._supports_charge_rate_control
-                ):
-                    self._power_monitor = HomePowerMonitor(
-                        self._controller,
-                        home_settings=self.home_settings,
-                        battery_settings=self.battery_settings,
-                    )
+                # Toggling fuse protection takes effect without a restart.
+                self._sync_power_monitor()
                 # Refresh the prediction cache immediately when the consumption
                 # strategy changes so the next optimization uses the new source.
                 if self.home_settings.consumption_strategy != prev_strategy:

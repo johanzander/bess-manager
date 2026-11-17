@@ -208,6 +208,20 @@ class TestGetSettings:
             resp = _client.get("/api/settings")
         assert resp.json()["influxdbConfigPresent"] is False
 
+    def test_realtime_fuse_guard_supported_reflects_the_system(
+        self, mock_controller: MagicMock
+    ) -> None:
+        """#901: the Fuse Protection card warns that only planning-level
+        protection applies when the active platform has no real-time guard —
+        it must read the backend's capability, not infer it client-side."""
+        mock_controller.system.realtime_fuse_guard_supported = False
+        resp = _client.get("/api/settings")
+        assert resp.json()["realtimeFuseGuardSupported"] is False
+
+        mock_controller.system.realtime_fuse_guard_supported = True
+        resp = _client.get("/api/settings")
+        assert resp.json()["realtimeFuseGuardSupported"] is True
+
 
 # ===========================================================================
 # PATCH /api/settings — routing and conversion

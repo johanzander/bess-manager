@@ -211,12 +211,18 @@ def _effective_import_cap_kwh(
     runtime -- on a fully unloaded 3-phase house it authorizes the battery up
     to its full `max_charge_power_w` (not a single phase's worth), since
     `available_pct` is computed relative to `max_charge_power_w / phase_count`
-    per phase. `HomePowerMonitor` remains the real-time backstop against
-    unbalanced loads (it measures actual per-phase current and throttles
-    battery charging against the single worst-loaded phase, commit 37201cb9,
-    #11); the DP has no per-phase forecast to reproduce that live check, so it
-    caps against the balanced-load assumption instead of the unbalanced
-    worst case.
+    per phase. Where the platform supports it, `HomePowerMonitor` is the
+    real-time backstop against unbalanced loads (it measures actual per-phase
+    current and throttles battery charging against the single worst-loaded
+    phase, commit 37201cb9, #11); the DP has no per-phase forecast to
+    reproduce that live check, so it caps against the balanced-load
+    assumption instead of the unbalanced worst case.
+
+    The backstop exists only when `realtime_fuse_guard_supported` holds
+    (a per-period charge rate to throttle). On Growatt VPP, SPH, SolaX, Huawei
+    and Solis it does not, and this cap -- against *forecast* load -- is the
+    only fuse protection; `safety_margin` is then the user's sole headroom for
+    load the forecast misses (#901).
     """
     if home_settings is None or not home_settings.power_monitoring_enabled:
         return None

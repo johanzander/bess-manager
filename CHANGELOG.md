@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Updated electricity prices now reach the plan without a restart** — when a price sensor replaces a full day of prices, such as forecasts swapped for confirmed Nordpool prices, the next optimization uses them. ([#902](https://github.com/johanzander/bess-manager/issues/902))
 - **Nordpool (HACS sensor): prices now use your configured VAT** — with any VAT other than 25%, buy and sell prices were miscalculated after every restart. ([#903](https://github.com/johanzander/bess-manager/issues/903))
 - **Fuse protection on Growatt VPP, SPH, SolaX, Huawei and Solis: no longer shown as fully active** — health and Settings now warn it is planning-only and suggest a lower safety margin. ([#901](https://github.com/johanzander/bess-manager/issues/901))
 - **Inverter writes that report an error no longer leave the battery in the wrong mode** — the next command is always sent. ([#875](https://github.com/johanzander/bess-manager/issues/875))

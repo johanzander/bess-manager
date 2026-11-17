@@ -270,7 +270,9 @@ sell_price = spot_price * export_rate - tax_reduction
    └── PriceManager.refresh_cache() fetches today (+ tomorrow, once the
        market has published it) into the cache, synchronously, once
    └── The optimizer thereafter reads prices cache-only; a dedicated
-       scheduler job keeps the cache warm off the control path (#709)
+       scheduler job keeps the cache warm off the control path (#709),
+       re-fetching each cached day so it follows a source that replaces
+       a complete day (#902)
 
 4. Initial Optimization
 

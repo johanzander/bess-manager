@@ -40,7 +40,7 @@ Something look off? The built-in AI Analyst explains every decision in plain lan
 | **Resolution** | 15-minute granularity (Nordpool) or 30-minute (Octopus) |
 | **Solar aware** | Integrates solar forecast to maximize self-consumption |
 | **Battery protection** | Models cycle degradation cost — won't chase marginal gains that wear out your battery |
-| **Fuse protection** | Plans schedules and monitors real-time grid current to keep charging within your main fuse's limit |
+| **Fuse protection** | Plans schedules to keep grid import within your main fuse's limit, and on inverters with charge-rate control (Growatt MIN/TOU) also throttles charging against real-time phase current |
 | **Time-of-day grid tariffs** | Hourly grid transport fees (e.g. Danish DSOs), with optional summer/winter profiles, priced into every buy decision |
 | **Peak shaving** | Cap grid import during a configured time window, independent of price — for capacity/demand tariffs that charge by your peak import power |
 | **EV aware** | Automatically pauses battery discharge when your EV is charging |

@@ -469,11 +469,13 @@ supports_charge_rate_control: ClassVar[bool] = False
 supports_charge_rate_control: ClassVar[bool] = False
 ```
 
-| Capability | Description | MIN | SPH | SolaX Native | Modbus Growatt MIN |
-|---|---|---|---|---|---|
-| `supports_charge_rate_control` | Per-period charge/discharge rate register | Yes | **No** | **No** | Yes |
+| Capability | Description | MIN | SPH | SolaX Native | Modbus Growatt MIN (TOU) | Modbus Growatt (VPP) | Huawei | Solis |
+|---|---|---|---|---|---|---|---|---|
+| `supports_charge_rate_control` | Per-period charge/discharge rate register | Yes | **No** | **No** | Yes | **No** | **No** | **No** |
 
-SPH controls charge power globally via `write_ac_charge_times(charge_power=100%)`. SolaX native uses VPP active-power commands. Neither has a per-period register that the power monitor can read/write, so fuse protection cannot function.
+SPH controls charge power globally via `write_ac_charge_times(charge_power=100%)`. SolaX native and Growatt VPP mode use active-power commands. None of them has a per-period register the power monitor can read/write, so the real-time fuse guard cannot run there.
+
+BSM exposes this as `realtime_fuse_guard_supported` (#901), the one declaration everything about the real-time fuse guard derives from. `_sync_power_monitor()` keeps a `HomePowerMonitor` in existence exactly when fuse protection is enabled and the guard is supported, re-evaluated at startup, on home-settings changes, and on a control-mode or platform switch. The health check reports `WARNING` when fuse protection is enabled but the guard is unsupported, because only the DP's forecast-based import cap is protecting the fuse there. `GET /api/settings` returns the flag so the Settings page can say so too.
 
 #### Frontend Gating
 
@@ -484,6 +486,8 @@ The frontend disables UI features based on **sensor presence**, which correlates
 - HA Statistics strategy: disabled when `lifetime_load_consumption` sensor is not configured
 
 Sensor-based gating is the right default. A dedicated capabilities API should only be introduced when the frontend needs to gate on something that doesn't map to sensor presence.
+
+Growatt VPP mode is such a case. The `battery_charging_power_rate` entity exists there (it is the TOU-mode register), but the controller never throttles it. The Fuse Protection card therefore reads `realtimeFuseGuardSupported` from `GET /api/settings` and shows a "planning-only protection" note when it is false (#901). The toggle stays enabled, because the DP's import cap still applies.
 
 #### Evolution Path
 

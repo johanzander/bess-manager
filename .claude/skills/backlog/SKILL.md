@@ -59,15 +59,13 @@ Field options — do not invent values outside these sets:
 | `Awaiting` | `reporter`, `discussion`, `upstream`, `analysis`, `maintainer` |
 | `Source` | `issue`, `TODO` |
 
-`In Verification` and `maintainer` are the two new values the state-machine
-migration adds. **They are not on the live board yet** — adding them is a
-manual field-option edit, deliberately held for the maintainer to run by hand
-rather than scripted (`gh project field-list 1 --owner johanzander --format
-json` still returns the six-value `Status` and four-value `Awaiting` sets).
-Until that edit lands, `column()` in `backlog-digest.sh` can compute `In
-Verification` and the digest can report it, but the board card itself cannot
-be moved there or set to `Awaiting: maintainer` — reconcile those two values
-by hand (a comment on the issue) until the field option exists.
+Every value above exists on the live board — `gh project field-list 1 --owner
+johanzander --format json` returns the seven-value `Status` and five-value
+`Awaiting` sets — so every `column` the digest computes, `In Verification`
+included, is a card move you make, and `Awaiting: maintainer` is a field you
+set. An earlier version of this section said `In Verification` and
+`maintainer` were not on the board yet; passes that followed it labelled
+merged fixes `awaiting-release` and left their cards in *In Progress*.
 
 The digest's `column` values match `Status` exactly, so reconciling a card is a
 string comparison, not a translation.
@@ -357,7 +355,7 @@ than sorted alphabetically, and printed in that order. Who does what:
 | Action | Do |
 |---|---|
 | `escalated` | **Read first, always** — rank 0, above every other action. Three sources, each meaning something different: `Awaiting: maintainer` on the board (read the open question, decide, or send it back to *Analysis* by clearing `Awaiting` and re-opening the scope); `resume_count >= 2` **and no merged PR** (two implementation sessions have already been handed back on this issue — it is not implementable as specified, so decide or re-scope it, don't dispatch a third; suppressed once a fix has merged, since `resume_count` never decrements and the handbacks are then history); and, on a PR, 3 `CHANGES_REQUESTED` rounds with no intervening `APPROVED` (the reviewer and the diff disagree about the design, and a fourth round will not settle it) |
-| `announce_verification` | **Verify the PR resolves the issue first — see "Verify before a public write", rules 2–3; `Refs` is not a fix.** Rank 1, right after escalations. An issue is *In Verification* — its fix is on `main` and in a beta build — but that state lives only in the Project field, so a reporter reading the issue sees no sign it is fixed (#683 sat here for weeks with only stale WIP notes). Fires **once**: as the PO, comment the fix status (merged in #N, shipped in beta, closes on the stable release) and apply the `awaiting-release` label, which suppresses it thereafter. The issue still closes only on the graduation PR |
+| `announce_verification` | **Verify the PR resolves the issue first — see "Verify before a public write", rules 2–3; `Refs` is not a fix.** Rank 1, right after escalations. An issue is *In Verification* — its fix is on `main` and in a beta build — but that state lives only in the Project field, so a reporter reading the issue sees no sign it is fixed (#683 sat here for weeks with only stale WIP notes). Fires **once**: as the PO, comment the fix status (merged in #N, shipped in beta, closes on the stable release) and apply the `awaiting-release` label, which suppresses it thereafter — **and move the card to *In Verification* in the same pass**: the label silences this action, so a card left behind here is only ever caught by `move_card`. The issue still closes only on the graduation PR |
 | `mark_ready` | Route through `/advance-pr <n>` — its `draft, APPROVED, green` row runs exactly `gh pr ready <n>`, then report it. APPROVED, green, still a draft: the loop stopped one command short. **The one action no board decision can defer**, because it is a pipeline failure, not a priority call |
 | `awaiting_maintainer` | nothing; report it. Out of draft **and carrying an APPROVED review** is the finish line — the maintainer's merge is all that is left |
 | `request_review` | out of draft but Stage 4 never ran. `scripts/request-pr-review.sh <n>` (what `/advance-pr <n>` would also run). **Never report an unreviewed PR as ready to merge** — the draft flag is not a review, and a maintainer who flips it because a PR looks stuck routes around the one gate the pipeline is built on |

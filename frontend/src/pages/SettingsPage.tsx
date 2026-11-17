@@ -148,6 +148,8 @@ const SettingsPage: React.FC = () => {
   const [discovering, setDiscovering] = useState(false);
   const [lastDiscoveredAt, setLastDiscoveredAt] = useState<string | null>(null);
   const [powerDownCalendarDisabledBy, setPowerDownCalendarDisabledBy] = useState<string | undefined>(undefined);
+  // Backend capability, re-read after every save that can switch platform or control mode (#901)
+  const [realtimeFuseGuardSupported, setRealtimeFuseGuardSupported] = useState<boolean | undefined>(undefined);
 
   // ── warn before a refresh/close discards unsaved edits (#857) ─────────
   const hasUnsavedChanges = !loading && Object.values(isDirty).some(Boolean);
@@ -179,6 +181,7 @@ const SettingsPage: React.FC = () => {
       ]);
 
       const s = settingsRes.data;
+      setRealtimeFuseGuardSupported(s.realtimeFuseGuardSupported);
       const bat_s = s.battery ?? {};
       const home_s = s.home ?? {};
       const elec_s = s.electricityPrice ?? {};
@@ -579,6 +582,7 @@ const SettingsPage: React.FC = () => {
       });
       savedBattery.current = JSON.stringify(batteryForm);
       applyResolvedInverterDomain(saved);
+      setRealtimeFuseGuardSupported(saved.data?.realtimeFuseGuardSupported);
       setToast({ type: 'success', message: 'Battery settings saved.' });
     } catch (err) {
       setToast({ type: 'error', message: err instanceof Error ? err.message : 'Save failed.' });
@@ -616,6 +620,7 @@ const SettingsPage: React.FC = () => {
       savedSensors.current = stableStringify(sensors);
       savedPricing.current = JSON.stringify(pricingForm);
       applyResolvedInverterDomain(saved);
+      setRealtimeFuseGuardSupported(saved.data?.realtimeFuseGuardSupported);
       const failed = await checkAndUpdateSensorHealth(getActiveSensorsFlat(sensors));
       if (failed.length > 0) {
         setToast({
@@ -764,7 +769,12 @@ const SettingsPage: React.FC = () => {
 
           {/* ── Home ─────────────────────────────────────────────────────── */}
           {tab === 'home' && (
-            <HomeFormSection form={homeForm} onChange={setHomeForm} sensors={getActiveSensorsFlat(sensors)} />
+            <HomeFormSection
+              form={homeForm}
+              onChange={setHomeForm}
+              sensors={getActiveSensorsFlat(sensors)}
+              realtimeFuseGuardSupported={realtimeFuseGuardSupported}
+            />
           )}
 
           {/* ── Electricity Pricing ──────────────────────────────────────── */}

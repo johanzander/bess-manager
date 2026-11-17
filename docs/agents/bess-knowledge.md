@@ -868,6 +868,12 @@ discharge at an hour that is cheap on spot but expensive to import.
 
 For Octopus Energy (UK), prices are already final — no markup/VAT/tariff applied.
 
+`spot` is VAT-exclusive. A source that publishes VAT-inclusive prices (the
+Nordpool HACS sensor) is divided by the same `VAT_multiplier` before either
+formula, so one setting both strips and re-adds VAT (#903). Set it to the real
+rate even for a VAT-inclusive sensor: buy is then unchanged, and sell is priced
+on the VAT-exclusive spot. With 1.0, sell is priced on the VAT-inclusive spot.
+
 For when a discharge is worthwhile, see **The Governing Economic Law** above —
 gross `sell_price` vs `cycle_cost` is *not* the test; marginal value vs the
 counterfactual is.

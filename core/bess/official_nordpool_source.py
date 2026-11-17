@@ -27,22 +27,18 @@ class OfficialNordpoolSource(PriceSource):
     # available by 13:00 CET (Europe/Oslo tracks the market timezone).
     TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (12, 0, "Europe/Oslo")
 
-    def __init__(
-        self, ha_controller, config_entry_id: str, vat_multiplier: float, area: str = ""
-    ) -> None:
+    def __init__(self, ha_controller, config_entry_id: str, area: str = "") -> None:
         """Initialize with Home Assistant controller and config entry ID.
 
         Args:
             ha_controller: Controller with access to Home Assistant services
             config_entry_id: Configuration entry ID for the Nordpool integration
-            vat_multiplier: VAT multiplier (prices from official integration are VAT-exclusive)
             area: Market area code (e.g. "SE4", "NO1"). When provided it is passed
                   to the service call and used as the response key for an exact lookup.
                   When empty the first list in the response is used as a fallback.
         """
         self.ha_controller = ha_controller
         self.config_entry_id = config_entry_id
-        self.vat_multiplier = vat_multiplier
         self.area = area
 
     def get_prices_for_date(self, target_date: date) -> list[float]:

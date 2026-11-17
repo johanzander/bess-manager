@@ -225,10 +225,7 @@ scripts/gh-agent.sh --as dev pr comment <n> --body "..."
 Resolve `<awaiting-field-id>` and `<maintainer-option-id>` once via
 `gh project field-list "$PROJECT_NUMBER" --owner johanzander --format json` —
 don't hardcode them, the board is the source of truth for its own field
-shape. (As of this writing the `maintainer` option itself does not exist yet
-on the live board — adding it is the Task 1 board migration, held for the
-maintainer to run by hand per this plan's own review Ruling 6. This skill's
-job is to write to it correctly once it exists, not to create it.)
+shape. The `maintainer` option exists on the live board.
 
 - **Semantic conflict.** `git merge origin/main` produced conflicts that are
   not textual — the two sides disagree about *behaviour*, not just about

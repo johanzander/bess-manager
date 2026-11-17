@@ -644,7 +644,7 @@ class TestNordpoolServiceContract:
             }
         }
 
-        source = OfficialNordpoolSource(ha_controller, "test-config-entry-id", 1.25)
+        source = OfficialNordpoolSource(ha_controller, "test-config-entry-id")
 
         # Patch time_utils so the date-range guard accepts our target_date.
         with patch("core.bess.official_nordpool_source.time_utils") as mock_time:

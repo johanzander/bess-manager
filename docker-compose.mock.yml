@@ -28,5 +28,6 @@ services:
       - ./scripts/mock_ha/scenarios:/scenarios:ro
     environment:
       - SCENARIO=${SCENARIO}
+      - MOCK_SENSOR_OVERRIDES=${MOCK_SENSOR_OVERRIDES:-}
     networks:
       - bess-network

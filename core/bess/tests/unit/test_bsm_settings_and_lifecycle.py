@@ -324,6 +324,70 @@ class TestResolveInitialPlatform:
             )
 
 
+class TestNordpoolHacsVatFollowsSettings:
+    """Issue #903: the configured VAT must govern a VAT-inclusive source.
+
+    The manager is built with default price settings (VAT 1.25) and the real
+    settings arrive afterwards through update_settings -- the same order
+    backend/app.py uses at startup. Raw 0.25282 is the reporter's FI
+    14:00 price; additional costs 0.082 and tax reduction -0.02 are theirs.
+    """
+
+    RAW = 0.25282
+
+    @pytest.mark.parametrize(
+        ("vat", "expected_buy", "expected_sell"),
+        [
+            # VAT 1.0: nothing stripped, nothing re-added
+            (1.0, 0.25282 + 0.082, 0.25282 - 0.02),
+            # VAT 1.255: strip and re-add cancel on buy; sell is VAT-exclusive
+            (1.255, 0.25282 + 0.082, 0.25282 / 1.255 - 0.02),
+        ],
+    )
+    def test_buy_and_sell_use_the_configured_vat(
+        self,
+        mock_controller: Any,
+        vat: float,
+        expected_buy: float,
+        expected_sell: float,
+    ) -> None:
+        today = time_utils.today()
+        raw_today = [
+            {
+                "start": f"{today.isoformat()}T{hour:02d}:{minute:02d}:00+02:00",
+                "value": self.RAW,
+            }
+            for hour in range(24)
+            for minute in (0, 15, 30, 45)
+        ]
+        mock_controller._api_request = lambda method, path: {
+            "attributes": {"raw_today": raw_today}
+        }
+        system = BatterySystemManager(
+            controller=mock_controller,
+            energy_provider_config={
+                "provider": "nordpool_hacs",
+                "nordpool_hacs": {"entity": "sensor.bess_nordpool_forecast"},
+            },
+            addon_options=_DEFAULT_OPTIONS,
+        )
+
+        system.update_settings(
+            {
+                "price": {
+                    "vat_multiplier": vat,
+                    "markup_rate": 0.0,
+                    "additional_costs": 0.082,
+                    "tax_reduction": -0.02,
+                }
+            }
+        )
+
+        period = system._price_manager.get_today_prices()[0]
+        assert period["buyPrice"] == pytest.approx(expected_buy, abs=1e-9)
+        assert period["sellPrice"] == pytest.approx(expected_sell, abs=1e-9)
+
+
 class TestCreatePriceSource:
     def test_octopus_source(self, mock_controller):
         system = BatterySystemManager(

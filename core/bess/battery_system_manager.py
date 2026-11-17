@@ -732,7 +732,6 @@ class BatterySystemManager:
             price_source = OfficialNordpoolSource(
                 controller,
                 config_entry_id,
-                vat_multiplier=self.price_settings.vat_multiplier,
                 area=self.price_settings.area,
             )
             logger.info("Using official Home Assistant Nordpool integration")
@@ -743,7 +742,6 @@ class BatterySystemManager:
             logger.info("Using HACS custom Nordpool sensor integration")
             return HomeAssistantSource(
                 controller,
-                vat_multiplier=self.price_settings.vat_multiplier,
                 entity=hacs_config["entity"],
             )
 

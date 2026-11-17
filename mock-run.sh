@@ -141,9 +141,17 @@ TZ=$(python3 -c "import json; d=json.load(open('$SCENARIO_FILE')); print(d.get('
 export TZ
 
 # Optional time override: ./mock-run.sh <scenario> 09:00
-# Replaces the time portion of mock_time while keeping the original date.
+# Replaces the time portion of mock_time while keeping the original date, and
+# starts the battery from the level the bundle recorded for that time (#889).
+MOCK_SENSOR_OVERRIDES=""
 if [ -n "${2:-}" ]; then
   OVERRIDE_TIME=$2
+  # The SOC lookup imports core/, which the host's python3 may be too old for.
+  if [ ! -x .venv/bin/python ]; then
+    echo "Error: .venv/bin/python not found — run ./scripts/worktree-setup.sh first."
+    exit 1
+  fi
+  MOCK_SENSOR_OVERRIDES=$(.venv/bin/python scripts/mock_ha/replay_soc.py "$SCENARIO_FILE" "$OVERRIDE_TIME")
   MOCK_DATE=$(echo "$MOCK_TIME" | sed -n 's/.*\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\).*/\1/p')
   MOCK_TIME="@${MOCK_DATE} ${OVERRIDE_TIME}:00"
   echo "Mock time:     $MOCK_TIME  (overridden from command line)"
@@ -152,7 +160,7 @@ else
     echo "Mock time:     $MOCK_TIME  (from scenario)"
   fi
 fi
-export MOCK_TIME
+export MOCK_TIME MOCK_SENSOR_OVERRIDES
 
 # Build frontend
 echo "Building frontend..."

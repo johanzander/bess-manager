@@ -90,10 +90,21 @@ fi
 # `RHYTHM_DIGEST_FILE` and `RHYTHM_PRS_FILE` are test seams, the same shape as
 # `BESS_ENV_FILE` in gh-agent.sh: they let the rules be exercised against
 # fixtures without a network round-trip or a live board. Unset in normal use.
+#
+# A failing digest must still print the freshness line. The TOOLING line is
+# rendered with the actions, so under `set -e` a digest crash used to exit
+# before it -- and a stale checkout is exactly when the digest crashes: the
+# jq ARG_MAX overflow fixed on main in #895 killed every `/backlog` pass run
+# from an older checkout, silently, with the one hint that would have named
+# the cure never reached.
 if [ -n "${RHYTHM_DIGEST_FILE:-}" ]; then
     digest=$(cat "$RHYTHM_DIGEST_FILE")
-else
-    digest=$("$here/backlog-digest.sh")
+elif ! digest=$("$here/backlog-digest.sh"); then
+    echo "RHYTHM: backlog-digest.sh failed -- no actions computed" >&2
+    if [ "$tooling_behind" != null ] && [ "$tooling_behind" -gt 0 ]; then
+        echo "  TOOLING $tooling_behind commit(s) behind $TOOLING_REF -- restart the loop from an updated checkout; the failure may already be fixed there" >&2
+    fi
+    exit 1
 fi
 
 # The PR side of the loop. The goal is a READY PR for the maintainer to
@@ -392,7 +403,7 @@ actions=$(printf '%s' "$digest" | jq \
         and ((.labels | index("awaiting-release")) | not)
      then {issue: .number, action: "announce_verification",
            why: "In Verification (fix in #\(.merged_pr // 0) is on main / in beta) but the issue carries no visible fix-status signal",
-           detail: "FIRST verify #\(.merged_pr // 0) actually resolves the reported behaviour of this issue -- read its title/body against the issue; `Refs`/`Part of` only means linked, and also covers CI/tooling/diagnostic PRs (#795 on #791). Only then, as the PO, comment the fix status (merged in #\(.merged_pr // 0), closes on the stable release) and apply the `awaiting-release` label. If it does not resolve it, do neither -- report the column as wrong"}
+           detail: "FIRST verify #\(.merged_pr // 0) actually resolves the reported behaviour of this issue -- read its title/body against the issue; `Refs`/`Part of` only means linked, and also covers CI/tooling/diagnostic PRs (#795 on #791). Only then, as the PO, comment the fix status (merged in #\(.merged_pr // 0), closes on the stable release), apply the `awaiting-release` label, and move the card to In Verification. If it does not resolve it, do neither -- report the column as wrong"}
      else empty end),
 
     # An open issue with no labels at all is unfiled. Real and common.

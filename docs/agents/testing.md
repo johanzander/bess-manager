@@ -216,7 +216,7 @@ python scripts/mock_ha/scenarios/from_debug_log.py <debug-log-file.md> --issue <
 ./mock-run.sh <timestamp>
 # e.g. ./mock-run.sh 2026-03-24-225535
 
-# 3. Optionally replay from a specific time of day
+# 3. Optionally replay from a time of day (battery SOC from that period's recorded battery_soe_start)
 ./mock-run.sh 2026-03-24-225535 09:00
 
 # Access:

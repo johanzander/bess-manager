@@ -121,7 +121,6 @@ def test_controller_price_fetching() -> None:
 
     ha_source = HomeAssistantSource(
         mock_controller,
-        vat_multiplier=1.25,
         entity="sensor.nordpool_kwh_se4_sek_2_10_025",
     )
     pm = PriceManager(
@@ -136,11 +135,11 @@ def test_controller_price_fetching() -> None:
     # Get today's prices (quarterly - 96 periods)
     today_prices = pm.get_today_prices()
     assert len(today_prices) == 96
-    # Note: HomeAssistantSource now removes VAT from prices before returning them
+    # PriceManager strips VAT from the VAT-inclusive HomeAssistantSource prices
     assert today_prices[0]["price"] == 1.0 / 1.25
 
     # Check calculations with the updated formula:
-    base_price = 1.0 / 1.25  # Price after VAT removal in HomeAssistantSource
+    base_price = 1.0 / 1.25  # Price after VAT removal in PriceManager
     expected_buy_price = (base_price + 0.1) * 1.25 + 0.5
     assert today_prices[0]["buyPrice"] == expected_buy_price
 
@@ -151,11 +150,11 @@ def test_controller_price_fetching() -> None:
     # Get tomorrow's prices (quarterly - 96 periods)
     tomorrow_prices = pm.get_tomorrow_prices()
     assert len(tomorrow_prices) == 96
-    # Note: HomeAssistantSource now removes VAT from prices before returning them
+    # PriceManager strips VAT from the VAT-inclusive HomeAssistantSource prices
     assert tomorrow_prices[0]["price"] == 25.0 / 1.25
 
     # Calculate buy price with the updated formula
-    tomorrow_base_price = 25.0 / 1.25  # Price after VAT removal in HomeAssistantSource
+    tomorrow_base_price = 25.0 / 1.25  # Price after VAT removal in PriceManager
     tomorrow_expected_buy_price = (tomorrow_base_price + 0.1) * 1.25 + 0.5
     assert tomorrow_prices[0]["buyPrice"] == tomorrow_expected_buy_price
 
@@ -192,8 +191,13 @@ def test_mock_source() -> None:
     assert today_prices[0]["sellPrice"] == expected_sell_price
 
 
-def test_home_assistant_source_vat_parameter() -> None:
-    """Test that the VAT multiplier parameter in HomeAssistantSource works correctly."""
+def test_home_assistant_source_vat_removed_by_price_manager() -> None:
+    """HomeAssistantSource returns VAT-inclusive prices; PriceManager strips VAT.
+
+    The source declares prices_include_vat and never divides itself, so the
+    multiplier PriceManager holds -- the one settings updates keep current --
+    is the only one applied (#903).
+    """
     mock_controller = MagicMock()
 
     today_date = time_utils.today()
@@ -218,23 +222,20 @@ def test_home_assistant_source_vat_parameter() -> None:
 
     entity = "sensor.nordpool_kwh_se4_sek_2_10_025"
 
-    # Test with default VAT multiplier (1.25)
-    ha_source_default = HomeAssistantSource(
-        mock_controller,
-        vat_multiplier=1.25,
-        entity=entity,
-    )
-    prices_default = ha_source_default.get_prices_for_date(today_date)
-    assert prices_default[0] == 1.6  # 2.0 / 1.25 = 1.6
+    ha_source = HomeAssistantSource(mock_controller, entity=entity)
+    assert ha_source.prices_include_vat is True
+    assert ha_source.get_prices_for_date(today_date)[0] == 2.0  # as published
 
-    # Test with custom VAT multiplier (1.20 for 20% VAT)
-    ha_source_custom = HomeAssistantSource(
-        mock_controller,
-        vat_multiplier=1.20,
-        entity=entity,
-    )
-    prices_custom = ha_source_custom.get_prices_for_date(today_date)
-    assert round(prices_custom[0], 4) == round(2.0 / 1.20, 4)  # ~1.6667
+    for vat in (1.25, 1.20):
+        pm = PriceManager(
+            price_source=ha_source,
+            markup_rate=0.0,
+            vat_multiplier=vat,
+            additional_costs=0.0,
+            tax_reduction=0.0,
+            area="SE4",
+        )
+        assert pm.get_today_prices()[0]["price"] == 2.0 / vat
 
 
 def _quarterly_array(value: float) -> list[float]:
@@ -281,14 +282,12 @@ def test_home_assistant_source_rejects_premarket_tomorrow_mirror() -> None:
 
     mock_controller._api_request = mock_api_request
 
-    ha_source = HomeAssistantSource(
-        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
-    )
+    ha_source = HomeAssistantSource(mock_controller, entity="sensor.nordpool_x")
 
     # today still resolves from the validated raw path
-    assert ha_source.get_prices_for_date(today_date)[0] == 2.0 / 1.25
+    assert ha_source.get_prices_for_date(today_date)[0] == 2.0
 
-    # tomorrow must be reported unavailable, not returned as today * 1.25
+    # tomorrow must be reported unavailable, not returned as today
     try:
         ha_source.get_prices_for_date(tomorrow_date)
     except PriceDataUnavailableError:
@@ -302,7 +301,6 @@ def test_home_assistant_source_tomorrow_plain_array_used_when_valid() -> None:
 
     This is the shape used by the mock-HA scenarios and by HACS sensor
     configurations that expose ``today``/``tomorrow`` but not ``raw_*``.
-    VAT must still be stripped.
     """
     mock_controller = MagicMock()
     today_date = time_utils.today()
@@ -321,17 +319,15 @@ def test_home_assistant_source_tomorrow_plain_array_used_when_valid() -> None:
 
     mock_controller._api_request = mock_api_request
 
-    ha_source = HomeAssistantSource(
-        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
-    )
+    ha_source = HomeAssistantSource(mock_controller, entity="sensor.nordpool_x")
 
     prices = ha_source.get_prices_for_date(tomorrow_date)
     assert len(prices) == 96
-    assert prices[0] == 1.5 / 1.25
+    assert prices[0] == 1.5
 
 
 def test_home_assistant_source_tomorrow_from_valid_raw_data_still_works() -> None:
-    """A timestamp-validated ``raw_tomorrow`` array is still accepted, VAT stripped."""
+    """A timestamp-validated ``raw_tomorrow`` array is still accepted."""
     mock_controller = MagicMock()
     today_date = time_utils.today()
     tomorrow_date = today_date + timedelta(days=1)
@@ -352,17 +348,15 @@ def test_home_assistant_source_tomorrow_from_valid_raw_data_still_works() -> Non
 
     mock_controller._api_request = mock_api_request
 
-    ha_source = HomeAssistantSource(
-        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
-    )
+    ha_source = HomeAssistantSource(mock_controller, entity="sensor.nordpool_x")
 
     prices = ha_source.get_prices_for_date(tomorrow_date)
     assert len(prices) == 96
-    assert prices[0] == 0.8 / 1.25
+    assert prices[0] == 0.8
 
 
-def test_home_assistant_source_today_plain_array_fallback_strips_vat() -> None:
-    """The plain ``today`` array fallback (no ``raw_today``) must strip VAT too."""
+def test_home_assistant_source_today_plain_array_fallback() -> None:
+    """The plain ``today`` array fallback (no ``raw_today``) is used as published."""
     mock_controller = MagicMock()
     today_date = time_utils.today()
 
@@ -373,13 +367,11 @@ def test_home_assistant_source_today_plain_array_fallback_strips_vat() -> None:
 
     mock_controller._api_request = mock_api_request
 
-    ha_source = HomeAssistantSource(
-        mock_controller, vat_multiplier=1.25, entity="sensor.nordpool_x"
-    )
+    ha_source = HomeAssistantSource(mock_controller, entity="sensor.nordpool_x")
 
     prices = ha_source.get_prices_for_date(today_date)
     assert len(prices) == 96
-    assert prices[0] == 2.0 / 1.25
+    assert prices[0] == 2.0
 
 
 def test_get_available_prices_today_only() -> None:

@@ -81,6 +81,19 @@ class PriceSource:
         """
         return False
 
+    @property
+    def prices_include_vat(self) -> bool:
+        """Whether this source's spot prices are published VAT-inclusive.
+
+        When True, PriceManager divides them by its own vat_multiplier before
+        any buy/sell calculation, so the configured VAT is applied by exactly
+        one owner (#903). A source must never strip VAT itself: it would hold
+        a second copy of the setting that settings updates do not reach.
+
+        Default is False (sources return VAT-exclusive spot prices).
+        """
+        return False
+
     def get_sell_prices_for_date(self, target_date: date) -> list[float] | None:
         """Get separate sell/export prices for a specific date.
 
@@ -153,8 +166,8 @@ class HomeAssistantSource(PriceSource):
     """Home Assistant Nordpool sensor price source with robust timestamp-based parsing.
 
     This source handles Nordpool prices from Home Assistant, which include VAT.
-    It removes VAT from prices before returning them, ensuring all price sources
-    consistently return VAT-exclusive prices.
+    It returns them as published and declares prices_include_vat, so
+    PriceManager strips VAT with the configured multiplier.
     """
 
     # Nord Pool day-ahead auction clears ~12:42 CET, prices generally
@@ -164,21 +177,22 @@ class HomeAssistantSource(PriceSource):
     def __init__(
         self,
         ha_controller: Any,
-        vat_multiplier: float,
         entity: str,
     ) -> None:
         """Initialize with Home Assistant controller and entity ID.
 
         Args:
             ha_controller: Controller with access to Home Assistant
-            vat_multiplier: VAT multiplier used to convert VAT-inclusive prices to VAT-exclusive
-                            (must be provided from config.yaml)
             entity: HA entity ID for the Nordpool HACS sensor (exposes both today and
                     tomorrow prices as attributes on the same entity)
         """
         self.ha_controller = ha_controller
-        self.vat_multiplier = vat_multiplier
         self.entity = entity
+
+    @property
+    def prices_include_vat(self) -> bool:
+        """Nordpool HACS sensor prices include VAT."""
+        return True
 
     def get_prices_for_date(self, target_date: date) -> list:
         """Get prices from Home Assistant for the specified date.
@@ -262,7 +276,8 @@ class HomeAssistantSource(PriceSource):
         (VAT-inclusive) prices were cached as tomorrow, inflated by the VAT
         multiplier. When tomorrow is not yet confirmed we return None so the
         caller raises PriceDataUnavailableError and retries on a later cycle,
-        matching every other price source.
+        matching every other price source. Prices are returned VAT-inclusive,
+        as published.
         """
         if not sensor_attributes:
             return None
@@ -276,9 +291,7 @@ class HomeAssistantSource(PriceSource):
                     if prices:
                         return prices
 
-            # Fall back to the plain (timestamp-less) arrays. Nordpool HA
-            # arrays include VAT -- strip it to match the raw path and every
-            # other source.
+            # Fall back to the plain (timestamp-less) arrays.
             current_date = time_utils.today()
             tomorrow_date = current_date + timedelta(days=1)
 
@@ -292,7 +305,6 @@ class HomeAssistantSource(PriceSource):
                 prices = None
 
             if prices:
-                prices = [price / self.vat_multiplier for price in prices]
                 return self._handle_dst_transitions(prices)
 
             return None
@@ -330,10 +342,6 @@ class HomeAssistantSource(PriceSource):
 
             # Extract prices
             prices = [float(entry["value"]) for entry in raw_data if "value" in entry]
-
-            # Nordpool prices from Home Assistant include VAT - remove it
-            # to standardize all price sources to return VAT-exclusive prices
-            prices = [price / self.vat_multiplier for price in prices]
 
             # Handle DST transitions
             return self._handle_dst_transitions(prices)
@@ -459,7 +467,8 @@ class PriceManager:
         Args:
             price_source: Source of raw Nordpool prices
             markup_rate: Markup rate applied to buy prices
-            vat_multiplier: VAT multiplier applied to buy prices
+            vat_multiplier: VAT multiplier applied to buy prices, and removed
+                from the spot prices of a source whose prices_include_vat
             additional_costs: Additional fixed costs added to buy prices
             tax_reduction: Tax reduction applied to sell prices
             area: Price area code (e.g. "SE4", "NO1", "DK1")
@@ -627,6 +636,11 @@ class PriceManager:
                     target_date,
                 )
                 raw_prices = raw_prices[: len(direct_sell_prices)]
+
+            # Normalise to VAT-exclusive spot with the configured multiplier
+            # -- the same one _calculate_buy_price re-applies (#903).
+            if self.price_source.prices_include_vat:
+                raw_prices = [price / self.vat_multiplier for price in raw_prices]
 
             # Format prices with timestamp and calculations
             price_data = []

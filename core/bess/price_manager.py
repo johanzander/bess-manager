@@ -6,7 +6,7 @@ inversion.
 
 import logging
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
@@ -38,8 +38,11 @@ class PriceSource:
     # tomorrow fetch before this time — the prices provably do not exist
     # yet, and the failing call only adds load to a sometimes-flaky HA
     # integration (#709). A published market fact, not a tuning knob.
-    # Base default is permissive so an unrecognised source is never gated.
-    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (0, 0, "UTC")
+    # The wall-clock is on the day BEFORE the day being published. Base
+    # default is permissive so an unrecognised source is never gated: midnight
+    # in UTC+14, the first timezone to reach a date, precedes every user's own
+    # midnight.
+    TOMORROW_EARLIEST: ClassVar[tuple[int, int, str]] = (0, 0, "Pacific/Kiritimati")
 
     @property
     def period_duration_hours(self) -> float:
@@ -599,7 +602,7 @@ class PriceManager:
         """Fetch target_date's prices from the source and cache them.
 
         get_price_data() without the cache check. refresh_cache() calls it
-        directly to re-fetch a day that was cached short.
+        directly so a cached day follows the source.
         """
         try:
             # Get raw prices from the source
@@ -611,8 +614,8 @@ class PriceManager:
             # Some import/export tariff combinations project import prices
             # further ahead than export prices, so the sell list can stop short
             # of the buy list. Keep only the periods both lists cover, so the
-            # day ends early instead of failing outright. refresh_cache()
-            # re-fetches a short day.
+            # day ends early instead of failing outright. The next
+            # refresh_cache() picks up the rest once the source has it.
             if direct_sell_prices is not None and len(direct_sell_prices) < len(
                 raw_prices
             ):
@@ -716,13 +719,17 @@ class PriceManager:
     def _tomorrow_publication_reached(self) -> bool:
         """Whether the active market has published tomorrow's day-ahead prices.
 
-        Compared against the source's declared TOMORROW_EARLIEST in that
-        market's own timezone, so it is correct regardless of the user's
-        configured timezone.
+        Compared against the source's declared TOMORROW_EARLIEST on the day
+        before tomorrow, in that market's own timezone. The date matters: just
+        after midnight east of the market it is still the previous evening
+        there, past the time of day but ~12 h before publication (#902).
         """
         hour, minute, tzname = self.price_source.TOMORROW_EARLIEST
-        market_now = time_utils.now().astimezone(ZoneInfo(tzname))
-        return (market_now.hour, market_now.minute) >= (hour, minute)
+        tomorrow = time_utils.today() + timedelta(days=1)
+        publication = datetime.combine(
+            tomorrow - timedelta(days=1), time(hour, minute), tzinfo=ZoneInfo(tzname)
+        )
+        return time_utils.now() >= publication
 
     def refresh_cache(self) -> None:
         """Populate the today/tomorrow price cache off the optimizer's path.
@@ -730,10 +737,12 @@ class PriceManager:
         Called by the dedicated refresh scheduler job and once synchronously
         at startup. Every failure is swallowed: the optimizer reads whatever
         is cached via get_cached_*_prices() and never fetches on its own
-        thread (#709). get_price_data() is a no-op when the day is already
-        cached, so a warm day is not re-fetched. Tomorrow is skipped until
-        the market's publication time to avoid pointless calls against a
-        sometimes-flaky HA integration.
+        thread (#709). Each call re-fetches the day even when it is cached
+        complete: a source can replace a complete day (a forecast sensor
+        swapping in confirmed prices, a market correction), and the cache
+        must follow it (#902). Tomorrow is skipped until the market's
+        publication time to avoid pointless calls against a sometimes-flaky
+        HA integration.
 
         Free-import and Power Down windows are re-fetched on every call
         regardless, since a booking can change after the day's prices are
@@ -743,29 +752,20 @@ class PriceManager:
         self._refresh_free_import_windows(today)
         self._refresh_power_down_windows(today)
 
+        # _fetch_price_data writes the cache only after a successful build, so
+        # a failed fetch keeps the previously cached day.
         try:
-            self._refresh_day(today)
+            self._fetch_price_data(today)
         except Exception as e:
             self._logger.warning("Price refresh: today's prices unavailable: %s", e)
 
         if self._tomorrow_publication_reached():
             try:
-                self._refresh_day(today + timedelta(days=1))
+                self._fetch_price_data(today + timedelta(days=1))
             except Exception as e:
                 self._logger.debug(
                     "Price refresh: tomorrow's prices not yet available: %s", e
                 )
-
-    def _refresh_day(self, day: date) -> None:
-        """Cache a day's prices, re-fetching a day that was cached short.
-
-        A day trimmed to a short sell price list (see _fetch_price_data) is
-        fetched again on every refresh until the source fills it in. If that
-        fetch fails, the short day stays cached.
-        """
-        cached = self.get_price_data(day)
-        if len(cached) < time_utils.get_period_count(day):
-            self._fetch_price_data(day)
 
     def _refresh_free_import_windows(self, today: date) -> None:
         """Replace the free-import windows for today and tomorrow.

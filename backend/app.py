@@ -406,7 +406,8 @@ class BESSController:
         # cache populated ~5 min earlier and never races the fetch). Fetching
         # lives here, off the scheduler's hardware-control path, so a slow or
         # 500-ing HA price integration can no longer delay or skip a period
-        # switch (#709). The job is a no-op once each day's prices are cached.
+        # switch (#709). Each run re-fetches today and (once published)
+        # tomorrow, so a source that replaces a complete day is followed (#902).
         self.scheduler.add_job(
             self.system.refresh_prices,
             CronTrigger(minute="5,20,35,50"),

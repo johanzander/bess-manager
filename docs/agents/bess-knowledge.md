@@ -944,7 +944,11 @@ If expected savings DROP between snapshots, it means something changed:
    column vs schedule predictions.
 
 4. **Prices changed between runs** — updated price data shifted the
-   economics.  Check: logs for price fetch events.
+   economics.  The price refresh job re-fetches today and tomorrow every 15
+   min even when cached, so a source that replaces a complete day (a
+   forecast sensor swapping in confirmed Nordpool prices, a market
+   correction) reaches the next optimization (#902).  Check: logs for price
+   fetch events.
 
 **NEVER say savings "naturally decay" or "diminish over time."** A drop
 is always caused by a specific, identifiable change.

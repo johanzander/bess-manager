@@ -821,7 +821,15 @@ def test_official_nordpool_and_octopus_declare_publication_times() -> None:
 
 def test_base_source_tomorrow_is_never_gated_after_local_midnight() -> None:
     """The permissive base default must stay open from the user's own midnight."""
-    pm = _tracking_price_manager(MockSource([1.0] * 96))
+    # Plain MockSource: inherits the base PriceSource.TOMORROW_EARLIEST.
+    pm = PriceManager(
+        price_source=MockSource([1.0] * 96),
+        markup_rate=0.0,
+        vat_multiplier=1.0,
+        additional_costs=0.0,
+        tax_reduction=0.0,
+        area="SE4",
+    )
     for tz in ("Pacific/Auckland", "Europe/Helsinki", "America/Los_Angeles"):
         with patch(
             "core.bess.price_manager.time_utils.now",

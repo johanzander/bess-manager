@@ -266,6 +266,25 @@ def _generate_services(inverter_platform: str) -> dict:
     return services
 
 
+def _apply_sensor_overrides(raw: str) -> None:
+    """Replace snapshot entity states with the replay-time values mock-run.sh computed.
+
+    ``raw`` is a JSON ``{entity_id: state}`` object (``MOCK_SENSOR_OVERRIDES``),
+    e.g. the battery SOC a replay at an earlier time should start from (#889).
+    Attributes are kept as captured.
+    """
+    if not raw:
+        return
+    for entity_id, state in json.loads(raw).items():
+        logger.info(
+            "Replay override: %s %s -> %s",
+            entity_id,
+            _sensors[entity_id]["state"],
+            state,
+        )
+        _sensors[entity_id]["state"] = state
+
+
 def _load_scenario() -> None:
     """Load scenario JSON from /scenarios/{SCENARIO}.json."""
     scenario_name = os.environ.get("SCENARIO", "")
@@ -286,6 +305,7 @@ def _load_scenario() -> None:
 
     global _timezone
     _sensors.update(scenario.get("sensors", {}))
+    _apply_sensor_overrides(os.environ.get("MOCK_SENSOR_OVERRIDES", ""))
     _time_segments.extend(scenario.get("time_segments", []))
     _ac_charge_times.update(scenario.get("ac_charge_times", {}))
     _ac_discharge_times.update(scenario.get("ac_discharge_times", {}))

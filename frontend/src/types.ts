@@ -28,7 +28,7 @@ export interface HourlyData {
   batterySoeStart?: number;    // kWh
   batterySoeEnd?: number;      // kWh
 
-  // Detailed energy flows (all FormattedValue â€” backend serializes via safe_format)
+  // Detailed energy flows (all FormattedValue — backend serializes via safe_format)
   solarToHome?: FormattedValue;
   solarToBattery?: FormattedValue;
   solarToGrid?: FormattedValue;
@@ -42,7 +42,7 @@ export interface HourlyData {
   strategicIntent?: string;    // strategy name
   observedIntent?: string;     // what actually happened (set for past periods only)
   curtailed?: boolean;         // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
-  isFreeImport?: boolean;      // inside an Octoplus free-import window (Power Up / Happy Hour) â€” buyPrice is already the overlaid free price
+  isFreeImport?: boolean;      // inside an Octoplus free-import window (Power Up / Happy Hour) — buyPrice is already the overlaid free price
   shadowPrice?: FormattedValue | null; // plan's marginal value of stored energy per kWh delivered; null for elapsed periods and at the reserve floor
 
   // All user-facing data via FormattedValue - canonical naming
@@ -132,10 +132,10 @@ export interface BatterySettings {
   inverterMaxAcPowerKw: number;     // kW total AC output cap
   inverterAcPowerMargin: number; // 0-1 model-side haircut on the cap
 
-  // PV export-limit curtailment (issue #269) â€” opt-in, requires a grid
+  // PV export-limit curtailment (issue #269) — opt-in, requires a grid
   // CT/smart meter and a platform with export-limit register support.
   exportCurtailmentEnabled: boolean;
-  exportCurtailmentPriceFloor: number; // SEK/kWh â€” curtail below this sell price
+  exportCurtailmentPriceFloor: number; // SEK/kWh — curtail below this sell price
 
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
@@ -305,5 +305,103 @@ export interface RuntimeFailure {
  */
 export type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
 
+export interface HindsightEnergy {
+  homeConsumption: number;
+  solarToHome: number;
+  batteryToHome: number;
+  gridToHome: number;
+  solarToGrid: number;
+  batteryToGrid: number;
+  solarToBattery: number;
+  gridToBattery: number;
+  batteryDischarged: number;
+}
 
+export interface WeeklyScenario {
+  gridImportKwh: number;
+  gridExportKwh: number;
+  importCost: number;
+  exportRevenue: number;
+  initialSoc: number;
+  finalSoc: number;
+  netGridCost: number;
+  totalEconomicCost: number;
+  wearCost: number;
+  throughputKwh: number;
+  chargedKwh: number;
+  dischargedKwh: number;
+  solarExportKwh: number;
+  solarSelfConsumptionPercent: number | null;
+}
 
+export interface WeeklyPerformance {
+  startDate: string;
+  endDate: string;
+  timezone: string;
+  currency: string | null;
+  expectedPeriods: number;
+  verifiedPeriods: number;
+  coveragePercent: number;
+  status:
+    | 'complete'
+    | 'estimated'
+    | 'estimated_partial'
+    | 'insufficient_data'
+    | 'unsupported_model';
+  mode?: 'verified' | 'estimated';
+  scope?: 'full_week' | 'observed_intervals';
+  modelCostDifference?: number | null;
+  executionVerified?: boolean;
+  diagnostics?: Record<string, number | boolean | null>;
+  assumptionProfile?: {
+    source: string;
+    battery: Record<string, number>;
+    capabilities: Record<string, unknown>;
+    timezone: string;
+    currency: string;
+  } | null;
+  assumptionProfileError?: string | null;
+  assumptions?: { source: string } | null;
+  excludedIntervals?: { date: string; period: number; timestamp: string; reason: string }[];
+  actualValidation?: {
+    energyBalanceMismatches: number;
+    operationalSocViolations: number;
+    maxEnergyBalanceErrorKwh: number;
+    maxSoeAccountingErrorKwh: number;
+  };
+  socTimeline?: {
+    timestamp: string;
+    buyPrice: number | null;
+    actualSoc: number | null;
+    optimalSoc: number | null;
+    energyUnknown: boolean;
+  }[];
+  modelTerminalEnergyKwh?: number;
+  terminalTimestamp?: string;
+  terminalPolicy?: string;
+  issues: string[];
+  warnings: string[];
+  availableWeeks: string[];
+  actual: WeeklyScenario | null;
+  optimal: WeeklyScenario | null;
+  solarOnly: Pick<WeeklyScenario, 'netGridCost' | 'totalEconomicCost' | 'wearCost'> | null;
+  capturedPercent: number | null;
+  missedSavings: number | null;
+  solveSeconds?: number;
+  initialEnergyKwh?: number;
+  terminalEnergyKwh?: number;
+  terminalDifferenceKwh?: number;
+  daily: { date: string; actualGridCost: number; optimalGridCost: number }[];
+  periods: {
+    timestamp: string;
+    date: string;
+    buyPrice: number;
+    sellPrice: number;
+    actualSoc: number | null;
+    optimalSoc: number;
+    actualSocEnd: number | null;
+    optimalSocEnd: number;
+    actualEnergy: HindsightEnergy;
+    optimalEnergy: HindsightEnergy;
+  }[];
+}

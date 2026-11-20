@@ -9,13 +9,19 @@ import DateSelector from '../components/DateSelector';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { useAvailableDashboardDates } from '../hooks/useAvailableDashboardDates';
 import { toISODate } from '../utils/timeUtils';
+import WeeklyPerformanceView from '../components/WeeklyPerformanceView';
 
-type InsightsTab = 'forecast-accuracy' | 'battery-actions' | 'scenario-comparison';
+type InsightsTab =
+  | 'forecast-accuracy'
+  | 'battery-actions'
+  | 'scenario-comparison'
+  | 'weekly-performance';
 
 const TABS: { id: InsightsTab; label: string }[] = [
   { id: 'forecast-accuracy', label: 'Forecast Accuracy' },
   { id: 'battery-actions', label: 'Battery Actions' },
   { id: 'scenario-comparison', label: 'Scenario Comparison' },
+  { id: 'weekly-performance', label: 'Weekly Performance' },
 ];
 
 const isToday = (date: Date): boolean => toISODate(date) === toISODate(new Date());
@@ -29,8 +35,8 @@ const InsightsPage: React.FC = () => {
   return (
     <div className="p-6 space-y-6 bg-gray-50 dark:bg-gray-900 min-h-screen">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1 w-fit">
-          {TABS.map((tab) => (
+        <div className="flex flex-wrap bg-gray-100 dark:bg-gray-700 rounded-lg p-1 w-fit">
+          {TABS.map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
@@ -71,6 +77,7 @@ const InsightsPage: React.FC = () => {
       {activeTab === 'scenario-comparison' && (
         <DetailedSavingsAnalysis resolution={dataResolution} />
       )}
+      {activeTab === 'weekly-performance' && <WeeklyPerformanceView />}
     </div>
   );
 };

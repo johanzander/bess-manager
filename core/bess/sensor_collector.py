@@ -7,7 +7,7 @@ in-process ``PowerSampleBuffer`` (#387).
 """
 
 import logging
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import ClassVar
 
 from . import time_utils
@@ -164,7 +164,9 @@ class SensorCollector:
         )
         return resolved_ids
 
-    def collect_energy_data(self, period: int) -> EnergyData:
+    def collect_energy_data(
+        self, period: int, target_date: date | None = None
+    ) -> EnergyData:
         """Collect sensor data for a period and create EnergyData with automatic detailed flows.
 
         Uses simple cache approach for runtime: current_live - cached_last = delta.
@@ -181,7 +183,16 @@ class SensorCollector:
 
         # Check if this period is complete
         now = time_utils.now()
-        current_period = time_utils.timestamp_to_period_index(now)
+        requested_date = target_date or now.date()
+        historical_day = requested_date < now.date()
+        if requested_date > now.date():
+            raise ValueError("Cannot collect a future calendar day")
+        current_period = (
+            time_utils.get_period_count(requested_date)
+            if historical_day
+            else time_utils.timestamp_to_period_index(now)
+        )
+        date_offset = (requested_date - now.date()).days
         if period >= current_period:
             raise ValueError(
                 f"Period {period} is still in progress or in the future, cannot collect complete data"
@@ -194,7 +205,7 @@ class SensorCollector:
         # sensors for the last completed period would include energy from the
         # currently in-progress period, inflating the last period's data
         is_historical_backfill = (
-            period < current_period - 1 or self._last_readings is None
+            historical_day or period < current_period - 1 or self._last_readings is None
         )
 
         if is_historical_backfill:
@@ -204,7 +215,9 @@ class SensorCollector:
             )
 
             # Get current period readings from the HA recorder
-            current_readings = self._get_period_readings(period, date_offset=0)
+            current_readings = self._get_period_readings(
+                period, date_offset=date_offset
+            )
             if not current_readings:
                 raise HistoricalDataUnavailableError(
                     f"No recorder history available for period {period}. Cannot calculate energy flows."
@@ -213,12 +226,13 @@ class SensorCollector:
             # Get previous period readings from the HA recorder
             if period == 0:
                 # Period 0 needs yesterday's last period
-                prev_period = 95
-                date_offset = -1
+                prev_period = (
+                    time_utils.get_period_count(requested_date - timedelta(days=1)) - 1
+                )
+                date_offset -= 1
             else:
                 # All other periods need previous period from today
                 prev_period = period - 1
-                date_offset = 0
 
             previous_readings = self._get_period_readings(
                 prev_period, date_offset=date_offset
@@ -247,11 +261,13 @@ class SensorCollector:
                     f"Period {period}: First runtime collection, querying the HA recorder for previous period"
                 )
                 if period == 0:
-                    prev_period = 95
-                    date_offset = -1
+                    prev_period = (
+                        time_utils.get_period_count(requested_date - timedelta(days=1))
+                        - 1
+                    )
+                    date_offset -= 1
                 else:
                     prev_period = period - 1
-                    date_offset = 0
                 previous_readings = self._get_period_readings(
                     prev_period, date_offset=date_offset
                 )
@@ -268,6 +284,10 @@ class SensorCollector:
             current_readings, previous_readings
         )
         if not flow_dict:
+            if historical_day:
+                raise HistoricalDataUnavailableError(
+                    "Historical energy counters are unavailable"
+                )
             raise RuntimeError(f"Energy flow calculation failed for period {period}")
 
         # Gap-filling: when cumulative sensors show zero energy (due to 0.1 kWh resolution),
@@ -283,12 +303,29 @@ class SensorCollector:
             "battery_charged",
             "battery_discharged",
         ]
+        meter_mapping = self.energy_flow_calculator.sensor_to_flow_map
+        observation_verified = set(meter_mapping.values()) == set(energy_flow_keys) - {
+            "load_consumption"
+        } and all(
+            key in current_readings
+            and key in previous_readings
+            and current_readings[key] is not None
+            and previous_readings[key] is not None
+            and isinstance(current_readings[key], (int, float))
+            and isinstance(previous_readings[key], (int, float))
+            and current_readings[key] >= previous_readings[key]
+            for key in meter_mapping
+        )
+        if historical_day and not observation_verified:
+            raise HistoricalDataUnavailableError(
+                "Historical cumulative energy counters are incomplete or invalid"
+            )
         all_energy_zero = all(
             abs(flow_dict.get(key, 0.0)) < 0.001 for key in energy_flow_keys
         )
-        if all_energy_zero and is_historical_backfill:
-            target_date = time_utils.today()
-            power_flows = self._get_power_based_flows(period, target_date)
+        if all_energy_zero and is_historical_backfill and not historical_day:
+            observation_verified = False
+            power_flows = self._get_power_based_flows(period, requested_date)
             if power_flows:
                 for key in energy_flow_keys:
                     if key in power_flows and power_flows[key] > 0.001:
@@ -301,6 +338,7 @@ class SensorCollector:
         elif not is_historical_backfill:
             buffer_estimate = self._power_sample_buffer.consume(period)
             if all_energy_zero:
+                observation_verified = False
                 if buffer_estimate:
                     # Every cumulative-counter delta read zero for this period,
                     # which proves the true energy for each flow is under the
@@ -364,6 +402,11 @@ class SensorCollector:
         # meaning battery_soe_start == battery_soe_end for those periods (which is correct when
         # SOC is stable).
         if battery_soc_end_key not in current_readings:
+            if historical_day:
+                raise HistoricalDataUnavailableError(
+                    "Historical closing SOC is unavailable; live SOC is not a substitute"
+                )
+            observation_verified = False
             logger.warning(
                 f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from the HA recorder, "
                 "attempting to read current value from Home Assistant as fallback"
@@ -387,6 +430,11 @@ class SensorCollector:
 
         # Check for SOC in previous readings, fallback to current value if missing
         if battery_soc_end_key not in previous_readings:
+            if historical_day:
+                raise HistoricalDataUnavailableError(
+                    "Historical opening SOC is unavailable; live SOC is not a substitute"
+                )
+            observation_verified = False
             logger.warning(
                 f"Period {period}: SOC sensor '{battery_soc_end_key}' missing from previous recorder readings, "
                 "using current value from Home Assistant as fallback"
@@ -436,6 +484,7 @@ class SensorCollector:
             grid_exported=flow_dict.get("export_to_grid", 0.0),
             battery_soe_start=soe_start,
             battery_soe_end=soe_end,
+            observation_verified=observation_verified,
         )
 
         logger.debug(
@@ -448,7 +497,8 @@ class SensorCollector:
         )
 
         # Update cache with current readings for next period
-        self._last_readings = current_readings
+        if not historical_day:
+            self._last_readings = current_readings
         logger.debug(
             f"Period {period}: Updated cache with current readings for next period"
         )
@@ -477,7 +527,7 @@ class SensorCollector:
             # This ensures we have complete data for that day
             if target_date < today:
                 loaded_on = self._batch_cache_loaded_on.get(target_date)
-                if loaded_on != today:
+                if loaded_on != today or not self._batch_cache[target_date]:
                     logger.info(
                         "Invalidating stale batch cache for %s (loaded on %s, today is %s)",
                         target_date.strftime("%Y-%m-%d"),
@@ -686,6 +736,9 @@ class SensorCollector:
                 period,
                 target_date.strftime("%Y-%m-%d"),
             )
+            # Delayed recorder ingestion must be re-fetched on the next retry.
+            self._batch_cache.pop(target_date, None)
+            self._batch_cache_loaded_on.pop(target_date, None)
             return None
 
         logger.debug(

@@ -1,6 +1,6 @@
 // Unified API client for dashboard data
 import api from '../lib/api';
-import { FormattedValue } from '../types';
+import { FormattedValue, WeeklyPerformance } from '../types';
 
 /**
  * Fetch comprehensive dashboard data including schedule, energy flows, and financial metrics.
@@ -60,7 +60,7 @@ export interface DashboardHourlyData {
   solarOnlyCost: FormattedValue;
   solarSavings: FormattedValue;
   // Wear-free savings, computed backend-side (see backend/api_dataclasses.py
-  // APIDashboardHourlyData.from_internal) â€” do not re-derive these from
+  // APIDashboardHourlyData.from_internal) — do not re-derive these from
   // other fields on the frontend.
   batterySavings: FormattedValue;
   netSavings: FormattedValue;
@@ -234,6 +234,7 @@ export interface SavingsBucket {
   solarKwh: FormattedValue;
   batteryChargedKwh: FormattedValue;
   batteryDischargedKwh: FormattedValue;
+  weeklyPerformance?: WeeklyPerformance | null;
 }
 
 export interface SavingsAggregateResponse {

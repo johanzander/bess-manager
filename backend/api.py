@@ -4,10 +4,14 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 """
 
 import dataclasses
+import json
+import os
 import threading
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
-from typing import Any
+from hashlib import sha256
+from pathlib import Path
+from typing import Any, cast
 
 from api_conversion import (
     BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
@@ -58,6 +62,11 @@ from core.bess.settings_store import (
     flatten_sensors,
 )
 from core.bess.time_utils import get_period_count
+from core.bess.weekly_hindsight import (
+    analyze_week,
+    available_weeks,
+    retrospective_context,
+)
 
 router = APIRouter()
 
@@ -2329,6 +2338,86 @@ async def get_savings_aggregate(
     except Exception as e:
         logger.error(f"Error building savings aggregate: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/insights/weekly-performance")
+def get_weekly_performance(
+    date: str | None = Query(
+        None, description="Any local ISO date in the requested week"
+    ),
+    mode: str = Query("verified", pattern="^(verified|estimated)$"),
+    assumptions_source: str | None = Query(None, pattern="^backup$"),
+    allow_partial: bool = Query(False),
+) -> dict[str, Any]:
+    """Read persisted history only. No refresh, schedule build or HA service calls.
+
+    A synchronous route runs the CPU work off the event loop. The default walks
+    completed weeks newest first until a sufficiently observed week is found.
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+    store = bess_controller.system.daily_view_store
+    profile = None
+    profile_error = None
+    profile_path = os.environ.get("BESS_HINDSIGHT_ASSUMPTIONS_FILE")
+    if profile_path:
+        try:
+            content = Path(profile_path).read_bytes()
+            profile = retrospective_context(
+                json.loads(content),
+                f"{Path(profile_path).name} (SHA-256 {sha256(content).hexdigest()[:16]})",
+                str(time_utils.TIMEZONE),
+            )
+        except (OSError, ValueError, KeyError, TypeError) as e:
+            profile_error = f"The configured backup assumption profile is invalid: {e}"
+    if mode == "estimated" and (assumptions_source != "backup" or profile is None):
+        raise HTTPException(
+            status_code=422,
+            detail=profile_error
+            or "Explicit approval of a configured backup assumption profile is required; current settings are not substituted.",
+        )
+    try:
+        anchor = date_cls.fromisoformat(date) if date else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail="Invalid ISO date") from e
+    candidates = [anchor] if anchor else available_weeks(store)
+    if not candidates:
+        candidates = [time_utils.today() - timedelta(days=7)]
+    result = None
+    for candidate in candidates:
+        analysis = analyze_week(
+            store,
+            candidate,
+            mode=mode,
+            assumed_context=profile if mode == "estimated" else None,
+            allow_partial=allow_partial,
+        )
+        if result is None:
+            result = analysis
+        if analysis["status"] in ("complete", "estimated", "estimated_partial"):
+            result = analysis
+            break
+    assert result is not None
+    result["assumption_profile"] = (
+        {
+            "source": profile["assumption_source"],
+            "battery": profile["battery"],
+            "capabilities": profile["capabilities"],
+            "timezone": profile["timezone"],
+            "currency": profile["currency"],
+        }
+        if profile
+        else None
+    )
+    result["assumption_profile_error"] = profile_error
+    bucket = build_buckets(
+        "week", 1, store, today=date_cls.fromisoformat(result["start_date"])
+    )[0]
+    currency = result["currency"] or bess_controller.system.home_settings.currency
+    api_bucket = APISavingsBucket.from_internal(bucket, currency)
+    api_bucket.weeklyPerformance = result
+    return cast(dict[str, Any], convert_keys_to_camel_case(api_bucket))
 
 
 @router.get("/api/savings/history/disk-usage")

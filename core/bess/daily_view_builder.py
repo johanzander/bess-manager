@@ -39,6 +39,7 @@ class DailyView:
     # BatterySystemManager owns this feature end-to-end and attaches its own
     # in-memory record list onto the views it persists.
     power_down_sessions: list[PowerDownSessionOutcome] = field(default_factory=list)
+    finalization_pending: bool = False
 
 
 class DailyViewBuilder:

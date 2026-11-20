@@ -113,6 +113,7 @@ class APISavingsBucket:
     solarKwh: FormattedValue
     batteryChargedKwh: FormattedValue
     batteryDischargedKwh: FormattedValue
+    weeklyPerformance: dict | None = None
 
     @classmethod
     def from_internal(cls, bucket, currency: str) -> APISavingsBucket:

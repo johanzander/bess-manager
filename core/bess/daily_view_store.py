@@ -102,6 +102,22 @@ class DailyViewStore:
             )
         )
 
+    @property
+    def directory(self) -> Path:
+        """Where the daily views live; sibling stores derive their paths from it."""
+        return self._persist_dir
+
+    def fingerprint(self, days: list[date]) -> tuple:
+        """Identify the stored content of these days, to know when it changed."""
+        marks = []
+        for day in days:
+            path = self._persist_dir / f"{day.isoformat()}.json"
+            stat = path.stat() if path.exists() else None
+            marks.append(
+                (day.isoformat(), stat.st_mtime_ns, stat.st_size) if stat else None
+            )
+        return (str(self._persist_dir), *marks)
+
     def load_day(self, day: date) -> DailyView | None:
         """Load the persisted view for a specific day, or None if not saved."""
         path = self._persist_dir / f"{day.isoformat()}.json"

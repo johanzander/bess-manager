@@ -277,6 +277,7 @@ class EconomicData:
         buy_price: float,
         sell_price: float,
         battery_cycle_cost: float = 0.0,
+        prices_verified: bool | None = None,
     ) -> "EconomicData":
         """
         Create EconomicData from EnergyData and prices using standard calculations.
@@ -289,6 +290,9 @@ class EconomicData:
             buy_price: Price to buy from grid (per kWh)
             sell_price: Price to sell to grid (per kWh)
             battery_cycle_cost: Battery degradation cost - should include actual wear cost
+            prices_verified: Provenance of the prices, supplied by a caller that
+                holds evidence; a finite number alone is not proof of a
+                historically applicable price, so the default is unknown.
 
         Returns:
             EconomicData with all calculated fields
@@ -339,7 +343,7 @@ class EconomicData:
             grid_only_cost=grid_only_cost,
             solar_only_cost=solar_only_cost,
             hourly_savings=hourly_savings,
-            prices_verified=True,
+            prices_verified=prices_verified,
         )
 
 

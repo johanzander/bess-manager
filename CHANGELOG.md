@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 - **Debug-log replay at an earlier time starts from the battery level recorded then** — `mock-run.sh <bundle> HH:MM` no longer plans from the export-time SOC. ([#889](https://github.com/johanzander/bess-manager/issues/889))
+- **Insights → Performance: how close BESS came to perfect hindsight** — for any past week or month (or the one in progress), compare grid only, solar only, what BESS actually paid and what a perfect-foresight schedule would have paid, with missed savings, captured share, charging and discharging prices, an hour-by-hour view of what hindsight did differently, and the coverage and assumptions behind every figure. Battery capacity and efficiency are calibrated from your own history, quarters where the battery served backup below the reserve are left out, and Huawei users also see what their inverter could actually have executed. ([discussion #913](https://github.com/johanzander/bess-manager/discussions/913))
+- **The last quarter of each day is now recorded** — at midnight the closing 23:45 quarter is completed from the Home Assistant recorder instead of staying a prediction.
+- **Each day's recorded prices are checked against the price source's final values** — a price kept from a forecast is corrected at the end of the day.
 
 ### Fixed
 

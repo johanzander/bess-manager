@@ -17,7 +17,12 @@ from typing import Any
 
 from core.bess import time_utils
 from core.bess.daily_view_store import DailyViewStore
-from core.bess.weekly_hindsight import analyze_week, retrospective_context
+from core.bess.performance_hindsight import (
+    PRICE_REFERENCE_TOLERANCE,
+    analyze_period,
+    published_price_reference,
+    retrospective_context,
+)
 
 
 def _manifest(root: Path) -> dict[str, str]:
@@ -42,6 +47,7 @@ def run_backup_analysis(
     output_dir: Path,
     approve: bool,
     allow_partial: bool,
+    price_reference_dir: Path | None = None,
 ) -> dict[str, Any]:
     """Use copied assumptions and observations without editing source files."""
     data_dir = data_dir.resolve()
@@ -53,7 +59,60 @@ def run_backup_analysis(
     _write(output_dir / "original-backup-sha256.json", before)
     time_utils.set_timezone(timezone)
     store = DailyViewStore(data_dir / "daily_views")
-    strict = analyze_week(store, week)
+    settings_bytes = settings_file.read_bytes()
+    settings = json.loads(settings_bytes)
+    reference = None
+    if price_reference_dir is not None:
+        reference = published_price_reference(
+            price_reference_dir,
+            settings["electricity_price"],
+            [week + timedelta(days=offset) for offset in range(8)],
+        )
+        price_audit: list[dict[str, Any]] = []
+        for offset in range(7):
+            day = week + timedelta(days=offset)
+            view = store.load_day(day)
+            if view is None:
+                continue
+            for p in view.periods:
+                start = time_utils.period_start(day, p.period).isoformat()
+                published = reference["prices"].get(start)
+                price_audit.append(
+                    {
+                        "timestamp": start,
+                        "data_source": p.data_source,
+                        "recorded_buy": p.economic.buy_price,
+                        "recorded_sell": p.economic.sell_price,
+                        "published_buy": published[0] if published else None,
+                        "published_sell": published[1] if published else None,
+                        "matches": (
+                            published is not None
+                            and abs(p.economic.buy_price - published[0])
+                            <= PRICE_REFERENCE_TOLERANCE
+                            and abs(p.economic.sell_price - published[1])
+                            <= PRICE_REFERENCE_TOLERANCE
+                        ),
+                    }
+                )
+        _write(
+            output_dir / "price-reference-audit.json",
+            {
+                "source": reference["source"],
+                "tolerance_per_kwh": PRICE_REFERENCE_TOLERANCE,
+                "per_day_matching_quarters": {
+                    (week + timedelta(days=offset)).isoformat(): sum(
+                        row["matches"]
+                        for row in price_audit
+                        if row["timestamp"].startswith(
+                            (week + timedelta(days=offset)).isoformat()
+                        )
+                    )
+                    for offset in range(7)
+                },
+                "quarters": price_audit,
+            },
+        )
+    strict = analyze_period(store, week, price_reference=reference)
     _write(output_dir / "verified-full-week-attempt.json", strict)
     audit = []
     gaps = []
@@ -158,20 +217,24 @@ def run_backup_analysis(
     _write(output_dir / "midnight-log-evidence.json", midnight_evidence)
     result = strict
     if approve:
-        settings_bytes = settings_file.read_bytes()
         source = f"{settings_file.name} (SHA-256 {hashlib.sha256(settings_bytes).hexdigest()[:16]})"
-        context = retrospective_context(json.loads(settings_bytes), source, timezone)
+        context = retrospective_context(settings, source, timezone)
         _write(output_dir / "approved-assumptions.json", context)
-        complete_attempt = analyze_week(
-            store, week, mode="estimated", assumed_context=context
+        complete_attempt = analyze_period(
+            store,
+            week,
+            mode="estimated",
+            assumed_context=context,
+            price_reference=reference,
         )
         _write(output_dir / "estimated-full-week-attempt.json", complete_attempt)
-        result = analyze_week(
+        result = analyze_period(
             store,
             week,
             mode="estimated",
             assumed_context=context,
             allow_partial=allow_partial,
+            price_reference=reference,
         )
         _write(output_dir / "observed-interval-analysis.json", result)
     after = _manifest(data_dir)
@@ -201,6 +264,15 @@ def run_backup_analysis(
         "actual_validation": result.get("actual_validation"),
         "model_validation": result.get("model_validation"),
         "huawei_tou_blocks": result.get("huawei_tou_blocks"),
+        "huawei_feasible": result.get("huawei_feasible"),
+        "solar_only": result["solar_only"],
+        "grid_only": result["grid_only"],
+        "relaxed_bound_label": result.get("relaxed_bound_label"),
+        "price_reference_source": result.get("price_reference_source"),
+        "gap_boundaries": result.get("gap_boundaries"),
+        "excluded_intervals": result.get("excluded_intervals"),
+        "comparison_start": result.get("comparison_start"),
+        "comparison_end": result.get("comparison_end"),
         "execution_verified": result.get("execution_verified"),
     }
     _write(output_dir / "summary.json", summary)
@@ -217,6 +289,11 @@ def main() -> None:
     parser.add_argument("--output-dir", required=True, type=Path)
     parser.add_argument("--approve-backup-assumptions", action="store_true")
     parser.add_argument("--allow-partial", action="store_true")
+    parser.add_argument(
+        "--price-reference-dir",
+        type=Path,
+        help="Nord Pool data-portal DayAheadPrices JSON files (<area>-<date>.json)",
+    )
     args = parser.parse_args()
     logging.disable(logging.CRITICAL)
     result = run_backup_analysis(
@@ -227,6 +304,7 @@ def main() -> None:
         args.output_dir,
         args.approve_backup_assumptions,
         args.allow_partial,
+        args.price_reference_dir,
     )
     print(json.dumps(result, indent=2, allow_nan=False))
 

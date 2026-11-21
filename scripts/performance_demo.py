@@ -1,7 +1,7 @@
 """Isolated local review server: synthetic observations + the production API.
 
 Run from the repository root with the dev venv:
-    python -m uvicorn scripts.weekly_hindsight_demo:app --host 127.0.0.1 --port 8097
+    python -m uvicorn scripts.performance_demo:app --host 127.0.0.1 --port 8097
 
 No BatterySystemManager, HA client, scheduler or inverter is constructed. The
 production Insights and Savings UI is served from frontend/dist. The normal
@@ -23,7 +23,7 @@ from fastapi.staticfiles import StaticFiles
 
 from core.bess.daily_view_store import DailyViewStore
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
-from core.bess.tests.unit.test_weekly_hindsight import synthetic_week
+from core.bess.tests.unit.test_performance_hindsight import synthetic_week
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
@@ -66,7 +66,8 @@ for day_index in range(7):
     for original, realized in zip(view.periods, replay.period_data, strict=True):
         original.energy = realized.energy
         original.energy.observation_verified = True
-        original.economic = realized.economic
+        # Synthetic demo prices are declared, not inferred from finite values.
+        original.economic = replace(realized.economic, prices_verified=True)
     store.save_day(view)
 
 # A newer incomplete week exercises default selection and the coverage state.

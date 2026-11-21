@@ -223,18 +223,17 @@ Three real mistakes (#791, #792) set these rules:
    an `Awaiting: reporter` on such a card pulls it to *Analysis* and hides
    everything behind it (#792 sat there with a merged fix). Report the label as
    a triage false positive instead.
-2. **`Refs #N` / `Part of #N` means linked, not fixed.** The digest's
-   `merged_pr` is the first merged PR that *mentions* the issue, so CI, tooling,
-   diagnostic, test or docs PRs that cite an issue as their trigger flip it to
-   *In Verification*. #795 ("ci: run Stage 2 sub-agent in the foreground", Refs
-   #791) is a workflow fix; the bug in #791 was untouched, yet it was announced
-   as fixed. Before `announce_verification`, read each PR in `merged_prs` —
-   title and body against the issue's reported behaviour — and announce only
-   when one of them resolves it. If none does, post nothing, apply no
-   `awaiting-release`, and report that the digest's column is wrong. Never
-   announce on the digest's say-so alone, and never claim "fixed" for an issue
-   whose root cause is still open (a PR that says "re-run analyze after merge"
-   is a follow-up, not a fix).
+2. **A fix verb is the author's claim, not proof.** The digest's `merged_pr`
+   and `fixed_by` come only from a fix verb (`Resolves-on-release`, or a closing
+   verb), never from `Refs` / `Part of` or the branch name (#907). A CI or
+   tooling PR that cites an issue as its trigger therefore stays in
+   `merged_prs` without moving the column. #795 had done exactly that to #791.
+   The verb can still be wrong, so before `announce_verification` read each PR
+   in `fixed_by`, title and body, against the issue's reported behaviour. If
+   none resolves it, post nothing, apply no `awaiting-release`, and fix the PR
+   body's verb (`Refs`) so the column corrects itself. Never claim "fixed" for
+   an issue whose root cause is still open: a PR that says "re-run analyze
+   after merge" is a follow-up, not a fix.
 3. **A merged fix must not be hidden by a stale wait.** `announce_verification`
    keys off the *In Verification* column, and a recorded wait pulls an item
    back to *Analysis*, so a verified fix under a wait never fires it. When

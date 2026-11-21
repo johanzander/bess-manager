@@ -403,7 +403,7 @@ actions=$(printf '%s' "$digest" | jq \
         and ((.labels | index("awaiting-release")) | not)
      then {issue: .number, action: "announce_verification",
            why: "In Verification (fix in #\(.merged_pr // 0) is on main / in beta) but the issue carries no visible fix-status signal",
-           detail: "FIRST verify #\(.merged_pr // 0) actually resolves the reported behaviour of this issue -- read its title/body against the issue; `Refs`/`Part of` only means linked, and also covers CI/tooling/diagnostic PRs (#795 on #791). Only then, as the PO, comment the fix status (merged in #\(.merged_pr // 0), closes on the stable release), apply the `awaiting-release` label, and move the card to In Verification. If it does not resolve it, do neither -- report the column as wrong"}
+           detail: "FIRST verify #\(.merged_pr // 0) actually resolves the reported behaviour of this issue -- read its title/body against the issue; the fix verb (`Resolves-on-release`) is only the PR author claiming it, and a CI/tooling PR given it by mistake (#795 on #791) should say `Refs`. Only then, as the PO, comment the fix status (merged in #\(.merged_pr // 0), closes on the stable release), apply the `awaiting-release` label, and move the card to In Verification. If it does not resolve it, do neither -- change that PR body verb to `Refs`, which corrects the column"}
      else empty end),
 
     # An open issue with no labels at all is unfiled. Real and common.

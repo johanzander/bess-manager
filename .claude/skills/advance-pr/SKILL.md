@@ -195,8 +195,8 @@ this skill is where they get written. Both end the same way: **stop, write
 
 Since PR cards do not exist on the board — `Priority` and `Awaiting` live on
 the issue, so they cannot be ambiguous between two cards for one piece of
-work — resolve the PR's issue first. **If the PR body carries no `Refs #N`
-or `Closes #N` at all, stop here and report it rather than let the lookup
+work — resolve the PR's issue first. **If the PR body carries no `Resolves-on-release #N`,
+`Refs #N` or `Closes #N` at all, stop here and report it rather than let the lookup
 degrade into an empty `$item`** — spec §4 calls an orphan PR a reported
 defect, not a normal shape this skill should paper over.
 

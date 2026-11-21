@@ -32,9 +32,10 @@ cat >&2 <<'EOF'
 This PR body does not link an issue.
 
 Add one of:
-  Refs #<issue>             (or Part of / Tracks / tracking #<issue>)
-  Closes #<issue>           (graduation PRs only: it closes the issue on merge)
-  No issue: <reason>        (chores, docs and CI changes with no issue)
+  Resolves-on-release #<issue>  (the PR fixes it; the issue stays open to release)
+  Refs #<issue>                 (related or partial work; also Part of / Tracks)
+  Closes #<issue>               (graduation PRs only: it closes the issue on merge)
+  No issue: <reason>            (chores, docs and CI changes with no issue)
 
 A `#N` inside backticks, or after "Related to" / "Blocked by" / "see", does
 not count: the backlog board would not associate it either.

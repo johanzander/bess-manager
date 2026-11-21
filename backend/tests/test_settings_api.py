@@ -1085,3 +1085,78 @@ class TestPatchSettingsGridTariff:
         assert (
             mock_controller.settings_store.data.get("electricity_price", {}) == before
         )
+
+
+# ===========================================================================
+# PATCH /api/settings — model invariants checked before persisting (#917)
+# ===========================================================================
+
+
+class TestPatchSettingsModelInvariantsNotPersisted:
+    """A value the settings model rejects must be rejected with 422 BEFORE it
+    is written to bess_settings.json. Persisting first meant a rejected
+    safety_margin=0 survived on disk, and every restart then failed on the
+    same invariant -- the add-on could no longer start (#917)."""
+
+    @pytest.mark.parametrize(
+        ("field", "store_key"),
+        [
+            ("safetyMargin", "safety_margin"),
+            ("voltage", "voltage"),
+            ("maxFuseCurrent", "max_fuse_current"),
+        ],
+    )
+    def test_home_value_rejected_by_model_is_not_persisted(
+        self,
+        mock_controller: MagicMock,
+        wire_real_settings_models: Callable,
+        field: str,
+        store_key: str,
+    ) -> None:
+        _, home = wire_real_settings_models(mock_controller)
+        mock_controller.settings_store.data["sensors"]["shared"] = {
+            "current_l1": "sensor.current_l1",
+            "current_l2": "sensor.current_l2",
+            "current_l3": "sensor.current_l3",
+            "battery_charging_power_rate": "sensor.charge_rate",
+        }
+        before = deepcopy(mock_controller.settings_store.data["home"])
+        live_before = getattr(home, store_key)
+
+        response = _client.patch(
+            "/api/settings",
+            json={"home": {"powerMonitoringEnabled": True, field: 0}},
+        )
+
+        assert response.status_code == 422
+        assert store_key in response.json()["detail"]
+        assert mock_controller.settings_store.data["home"] == before
+        assert getattr(home, store_key) == live_before
+        assert home.power_monitoring_enabled is False
+
+    def test_battery_value_rejected_by_model_is_not_persisted(
+        self, mock_controller: MagicMock, wire_real_settings_models: Callable
+    ) -> None:
+        battery, _ = wire_real_settings_models(mock_controller)
+        before = deepcopy(mock_controller.settings_store.data["battery"])
+        live_before = battery.total_capacity
+
+        response = _client.patch(
+            "/api/settings", json={"battery": {"totalCapacity": 0}}
+        )
+
+        assert response.status_code == 422
+        assert "total_capacity" in response.json()["detail"]
+        assert mock_controller.settings_store.data["battery"] == before
+        assert battery.total_capacity == live_before
+
+    def test_valid_home_update_is_persisted_and_applied(
+        self, mock_controller: MagicMock, wire_real_settings_models: Callable
+    ) -> None:
+        _, home = wire_real_settings_models(mock_controller)
+
+        response = _client.patch("/api/settings", json={"home": {"safetyMargin": 0.9}})
+
+        assert response.status_code == 200
+        assert mock_controller.settings_store.data["home"]["safety_margin"] == 0.9
+        assert home.safety_margin == 0.9

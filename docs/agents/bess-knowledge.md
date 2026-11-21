@@ -735,7 +735,10 @@ configured.
   (`HomeSettings.__post_init__` raises if `power_monitoring_enabled` is set
   with non-positive `max_fuse_current`/`voltage`/`safety_margin`), never a
   silent no-op inside the DP — matches `BatterySettings.__post_init__`'s
-  existing validation pattern for `inverter_max_ac_power_kw`.
+  existing validation pattern for `inverter_max_ac_power_kw`. The Settings
+  PATCH and wizard save paths run these invariants *before* persisting and
+  reject with 422, so a refused value never reaches `bess_settings.json`
+  (where it would fail every later startup, #917).
 - **Out of scope**: export-side/feed-in capacity limits (a different
   regulatory concept), and any change to `HomePowerMonitor`'s own runtime
   behavior — it remains the real-time safety net; this constraint just makes

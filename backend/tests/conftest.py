@@ -11,7 +11,11 @@ Individual tests that need a specific bess_controller shape should set
 
 import os
 import sys
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock
+
+import pytest
 
 # Ensure project root is on sys.path so core.bess is importable
 # regardless of whether core/bess/tests/ has already been collected.
@@ -26,3 +30,28 @@ if "app" not in sys.modules:
 
 if "log_config" not in sys.modules:
     sys.modules["log_config"] = MagicMock()
+
+
+@pytest.fixture()
+def wire_real_settings_models() -> Callable[[MagicMock], tuple[Any, Any]]:
+    """Return a function that gives a mocked bess_controller real settings
+    models, applied the way BatterySystemManager.update_settings applies
+    them, so the models' own __post_init__ invariants run as in production
+    instead of a MagicMock accepting anything (#917)."""
+    from core.bess.settings import BatterySettings, HomeSettings
+
+    def _wire(ctrl: MagicMock) -> tuple[BatterySettings, HomeSettings]:
+        battery, home = BatterySettings(), HomeSettings()
+        ctrl.system.battery_settings = battery
+        ctrl.system.home_settings = home
+
+        def _update_settings(settings: dict) -> None:
+            if "battery" in settings:
+                battery.update(**settings["battery"])
+            if "home" in settings:
+                home.update(**settings["home"])
+
+        ctrl.system.update_settings.side_effect = _update_settings
+        return battery, home
+
+    return _wire

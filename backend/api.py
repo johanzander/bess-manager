@@ -49,7 +49,9 @@ from core.bess.models import PeriodData
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import (
     BatterySettings,
+    HomeSettings,
     canonicalize_consumption_strategy,
+    check_settings_update,
     validate_grid_tariff,
 )
 from core.bess.settings_store import (
@@ -217,6 +219,21 @@ def _validate_consumption_strategy(home_section: dict, active_sensors: dict) -> 
                 "strategy that does not need it."
             ),
         )
+
+
+def _check_model_update(
+    current: BatterySettings | HomeSettings, updates: dict[str, Any]
+) -> None:
+    """Raise HTTPException(422) if the settings model would reject ``updates``.
+
+    Must run before the section is persisted (#917). ``__post_init__`` signals
+    a rejected value with ValueError, AssertionError for phase_count, or
+    TypeError when a value of the wrong type (e.g. null) reaches a comparison.
+    """
+    try:
+        check_settings_update(current, updates)
+    except (ValueError, AssertionError, TypeError) as e:
+        raise HTTPException(status_code=422, detail=str(e)) from e
 
 
 def _validate_managed_load_sensors(home_section: dict) -> None:
@@ -507,11 +524,27 @@ async def patch_settings(updates: dict):
                 )
                 _validate_consumption_strategy(persisted_home, flatten_sensors(section))
 
+            # The live-model update for battery/home, built and checked
+            # against the model's own invariants BEFORE persisting: a value
+            # the model rejects must never reach bess_settings.json, or every
+            # later startup fails on it (#917).
+            # Filtered to known model fields — a stale pre-migration key
+            # (e.g. 'consumption') can coexist with its renamed successor if
+            # a migration was ever interrupted (see HOME_MODEL_ATTRS's comment
+            # in api_conversion.py); passing it straight through would raise
+            # AttributeError.
+            in_mem: dict[str, Any] = {}
+            if store_key == "battery":
+                in_mem = {k: v for k, v in section.items() if k in _BATTERY_MODEL_ATTRS}
+                _check_model_update(bess_controller.system.battery_settings, in_mem)
+            elif store_key == "home":
+                in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
+                _check_model_update(bess_controller.system.home_settings, in_mem)
+
             bess_controller.settings_store.save_section(store_key, section)
 
             # Apply in-memory updates for sections that drive live behaviour
             if store_key == "battery":
-                in_mem = {k: v for k, v in section.items() if k in _BATTERY_MODEL_ATTRS}
                 if in_mem:
                     bess_controller.system.update_settings({"battery": in_mem})
                 td = section.get("temperature_derating")
@@ -523,14 +556,6 @@ async def patch_settings(updates: dict):
                         obj.weather_entity = td["weather_entity"]
 
             elif store_key == "home":
-                # Filtered to known HomeSettings fields — a stale pre-migration
-                # key (e.g. 'consumption') can coexist with its renamed
-                # successor if a migration was ever interrupted (see
-                # HOME_MODEL_ATTRS's comment in api_conversion.py); passing it
-                # straight through would raise AttributeError.
-                # (Power-monitoring sensor validation already ran above, before
-                # save_section, so the invalid combination is never persisted.)
-                in_mem = {k: v for k, v in section.items() if k in _HOME_MODEL_ATTRS}
                 bess_controller.system.update_settings({"home": in_mem})
                 ps = section.get("peak_shaving")
                 if isinstance(ps, dict):
@@ -3520,41 +3545,6 @@ async def setup_complete(payload: APISetupCompletePayload):
         if payload.demoMode is not None:
             sections["demo_mode"] = {"enabled": payload.demoMode}
 
-        # Persist all sections atomically
-        bess_controller.settings_store.save_all(sections)
-
-        # Activate the inverter controller on the live system.  On a fresh
-        # install this is the first time a platform is set, transitioning the
-        # system from unconfigured → operational.
-        if "inverter" in sections:
-            bess_controller.system.switch_inverter_platform(
-                sections["inverter"]["platform"]
-            )
-            # switch_inverter_platform() resets control_mode to its platform
-            # default — apply an explicit wizard choice afterward. Only
-            # solax_modbus_growatt_min (GEN4) accepts an explicit choice here:
-            # GEN3 (solax_modbus_growatt_sph) was already resolved to "vpp"
-            # by switch_inverter_platform() above, and re-applying a stale
-            # client-side "tou" default would raise, since GEN3 rejects any
-            # other value.
-            if (
-                payload.inverterControlMode is not None
-                and sections["inverter"]["platform"] == "solax_modbus_growatt_min"
-            ):
-                bess_controller.system.switch_control_mode(payload.inverterControlMode)
-
-        # Apply settings to live system so BESS starts immediately without
-        # requiring a restart. Unconditional, not gated on payload.sensors:
-        # an inverter platform switch above also changes service_domain and
-        # the power polarities. ha_controller.sensors is a live settings_store
-        # view (#334) and needs no equivalent refresh.
-        bess_controller.refresh_service_domain()
-        bess_controller.refresh_power_polarities()
-        if payload.growattDeviceId:
-            bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
-        if payload.huaweiDeviceId:
-            bess_controller.ha_controller.huawei_device_id = payload.huaweiDeviceId
-
         def _nn(d: dict) -> dict:
             """Strip None values so update() only overwrites explicitly provided fields."""
             return {k: v for k, v in d.items() if v is not None}
@@ -3605,6 +3595,53 @@ async def setup_complete(payload: APISetupCompletePayload):
                     "grid_tariff_summer_hourly": payload.gridTariffSummerHourly,
                 }
             )
+        # Check the live-model updates against the models' own invariants
+        # BEFORE persisting: a value the model rejects must never reach
+        # bess_settings.json, or every later startup fails on it (#917).
+        if "battery" in live_updates:
+            _check_model_update(
+                bess_controller.system.battery_settings, live_updates["battery"]
+            )
+        if "home" in live_updates:
+            _check_model_update(
+                bess_controller.system.home_settings, live_updates["home"]
+            )
+
+        # Persist all sections atomically
+        bess_controller.settings_store.save_all(sections)
+
+        # Activate the inverter controller on the live system.  On a fresh
+        # install this is the first time a platform is set, transitioning the
+        # system from unconfigured → operational.
+        if "inverter" in sections:
+            bess_controller.system.switch_inverter_platform(
+                sections["inverter"]["platform"]
+            )
+            # switch_inverter_platform() resets control_mode to its platform
+            # default — apply an explicit wizard choice afterward. Only
+            # solax_modbus_growatt_min (GEN4) accepts an explicit choice here:
+            # GEN3 (solax_modbus_growatt_sph) was already resolved to "vpp"
+            # by switch_inverter_platform() above, and re-applying a stale
+            # client-side "tou" default would raise, since GEN3 rejects any
+            # other value.
+            if (
+                payload.inverterControlMode is not None
+                and sections["inverter"]["platform"] == "solax_modbus_growatt_min"
+            ):
+                bess_controller.system.switch_control_mode(payload.inverterControlMode)
+
+        # Apply settings to live system so BESS starts immediately without
+        # requiring a restart. Unconditional, not gated on payload.sensors:
+        # an inverter platform switch above also changes service_domain and
+        # the power polarities. ha_controller.sensors is a live settings_store
+        # view (#334) and needs no equivalent refresh.
+        bess_controller.refresh_service_domain()
+        bess_controller.refresh_power_polarities()
+        if payload.growattDeviceId:
+            bess_controller.ha_controller.growatt_device_id = payload.growattDeviceId
+        if payload.huaweiDeviceId:
+            bess_controller.ha_controller.huawei_device_id = payload.huaweiDeviceId
+
         if live_updates:
             bess_controller.system.update_settings(live_updates)
 

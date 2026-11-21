@@ -1,6 +1,20 @@
 # Energy Management System Improvements - Prioritized Implementation Plan
 
 
+### **Settings saves can still persist part of a rejected request**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `backend/api.py`
+
+**Description**: Found reviewing #917. A multi-section PATCH saves earlier sections before a later one is rejected with 422, and the wizard's `apply_discovered_config` writes before its validation runs. The `electricity_price` section is checked only by `validate_grid_tariff`, not the full `PriceSettings.update()`, so an unknown key can still be saved and fail startup. Validate every section before the first write.
+
+
+### **Settings save errors don't say which field was refused**
+
+**Impact**: Low | **Effort**: Small | **Dependencies**: `frontend/src/pages/SettingsPage.tsx`
+
+**Description**: Found reviewing #917. A 422 shows axios's "Request failed with status code 422" instead of the backend's `detail` (e.g. "safety_margin must be positive"). Show `response.data.detail` in the toast.
+
+
 ### **Health banner: a component that fails every other check never raises one**
 
 **Impact**: Low | **Effort**: Small | **Dependencies**: `core/bess/battery_system_manager.py`

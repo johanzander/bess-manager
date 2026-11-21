@@ -28,7 +28,7 @@ import {
 import DateSelector from './DateSelector';
 import ProofSection from './performance/ProofSection';
 import { number, panel } from './performance/format';
-import CostWaterfall from './performance/CostWaterfall';
+import CostComparison, { CostScenario } from './performance/CostComparison';
 import CoverageStrip from './performance/CoverageStrip';
 import MissedValueHeatmap from './performance/MissedValueHeatmap';
 import api from '../lib/api';
@@ -175,52 +175,44 @@ const PerformanceView: React.FC = () => {
         solar - optimalCost > 1e-9 ? (100 * (solar - actualCost)) / (solar - optimalCost) : null,
     };
   });
-  const waterfall =
+  const costScenarios: CostScenario[] =
     data?.gridOnly && data.solarOnly && actual && optimal
       ? [
           {
             label: 'Grid only',
-            from: data.gridOnly.totalEconomicCost,
-            to: data.gridOnly.totalEconomicCost,
-            kind: 'total' as const,
+            cost: data.gridOnly.totalEconomicCost,
+            description: 'No solar or battery',
+            tone: 'baseline',
           },
           {
-            label: 'Solar saved',
-            from: data.gridOnly.totalEconomicCost,
-            to: data.solarOnly.totalEconomicCost,
-            kind: 'saving' as const,
+            label: 'Solar only',
+            cost: data.solarOnly.totalEconomicCost,
+            description: 'No battery',
+            tone: 'baseline',
           },
           {
-            label: 'Battery saved (BESS)',
-            from: data.solarOnly.totalEconomicCost,
-            to: actual.totalEconomicCost,
-            kind: 'saving' as const,
+            label: 'Actual BESS',
+            cost: actual.totalEconomicCost,
+            description: 'Including battery wear',
+            tone: 'actual',
           },
           {
-            label: 'BESS Manager actual',
-            from: actual.totalEconomicCost,
-            to: actual.totalEconomicCost,
-            kind: 'total' as const,
-          },
-          {
-            label: 'Missed vs hindsight',
-            from: actual.totalEconomicCost,
-            to: optimal.totalEconomicCost,
-            kind: 'gap' as const,
-          },
-          {
-            label: 'Hindsight (relaxed bound)',
-            from: optimal.totalEconomicCost,
-            to: optimal.totalEconomicCost,
-            kind: 'total' as const,
+            label: 'Relaxed hindsight',
+            cost: optimal.totalEconomicCost,
+            description: data.executionVerified
+              ? 'Physical model with inverter replay'
+              : 'Theoretical model; inverter execution unverified',
+            tone: 'hindsight',
           },
           ...(data.huaweiFeasible
             ? [
                 {
-                  label: 'Hindsight, Huawei TOU rules',
-                  from: data.huaweiFeasible.terminalAdjustedTotalCost,
-                  to: data.huaweiFeasible.terminalAdjustedTotalCost,
-                  kind: 'total' as const,
+                  label: 'Huawei TOU simulation',
+                  cost: data.huaweiFeasible.terminalAdjustedTotalCost,
+                  description: data.huaweiFeasible.comparable
+                    ? 'Inferred inverter rules; simulated operation'
+                    : 'Inferred inverter rules; includes terminal energy adjustment',
+                  tone: 'inverter' as const,
                 },
               ]
             : []),
@@ -458,7 +450,7 @@ const PerformanceView: React.FC = () => {
                 <DateSelector
                   selectedDate={new Date(`${anchor ?? data.startDate}T00:00:00`)}
                   onDateChange={date => setAnchor(toISODate(date))}
-                  availableDates={new Set(data.availableWeeks)}
+                  availableDates={new Set(data.availablePeriods)}
                   resolution={period}
                   isLoading={loading}
                 />
@@ -637,44 +629,49 @@ const PerformanceView: React.FC = () => {
             ))}
           </div>
 
-          <div className={panel}>
-            <h2 className="font-semibold text-lg">Optimization opportunity</h2>
-            <p className="text-sm">
-              Total cost including battery wear
-              {data.scope === 'observed_intervals' ? ' · observed quarters only' : ''}: from buying
-              everything from the grid, through what solar and the battery saved, to what perfect
-              hindsight would have paid.
+          <section className={panel} aria-label="Cost comparison">
+            <h2 className="font-semibold text-lg">
+              {data.mode === 'estimated' ? 'Estimated cost comparison' : 'Cost comparison'}
+              {data.scope === 'observed_intervals' ? ' · observed intervals' : ''}
+            </h2>
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Total energy cost including battery wear. Each bar compares the same observed
+              quarters.
             </p>
-            <CostWaterfall steps={waterfall} format={value => number(value, currency)} />
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-              {(
-                [
-                  ['Average charging price', 'chargePrice'],
-                  ['Average price avoided by discharging', 'dischargePrice'],
-                  ['Spread captured per kWh', 'spread'],
-                ] as const
-              ).map(([label, key]) => (
-                <div key={key} className="rounded border border-gray-200 dark:border-gray-700 p-3">
-                  <p className="text-xs text-gray-600 dark:text-gray-300">{label}</p>
-                  <p className="tabular-nums">
-                    <span className="font-semibold">{price(trading.actual[key])}</span> actual
-                  </p>
-                  <p className="tabular-nums text-gray-600 dark:text-gray-300">
-                    {price(trading.optimal[key])} hindsight
-                  </p>
-                </div>
-              ))}
-            </div>
-            {capture != null && capture >= 0 && capture <= 100 && (
-              <div
-                role="img"
-                aria-label={`Captured ${capture.toFixed(1)}%, remaining ${(100 - capture).toFixed(1)}%`}
-                className="flex h-3 rounded overflow-hidden bg-amber-200 dark:bg-amber-800"
-              >
-                <div className="bg-emerald-500" style={{ width: `${capture}%` }} />
+            <CostComparison
+              scenarios={costScenarios}
+              format={value => number(value, currency)}
+              batteryBenefit={batteryBenefit}
+              estimated={data.mode === 'estimated'}
+            />
+            <details className="border-t border-gray-200 dark:border-gray-700 pt-3">
+              <summary className="cursor-pointer text-sm font-semibold">
+                Charging and discharging prices
+              </summary>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                {(
+                  [
+                    ['Average charging price', 'chargePrice'],
+                    ['Average price avoided by discharging', 'dischargePrice'],
+                    ['Spread captured per kWh', 'spread'],
+                  ] as const
+                ).map(([label, key]) => (
+                  <div
+                    key={key}
+                    className="rounded border border-gray-200 dark:border-gray-700 p-3"
+                  >
+                    <p className="text-xs text-gray-600 dark:text-gray-300">{label}</p>
+                    <p className="tabular-nums">
+                      <span className="font-semibold">{price(trading.actual[key])}</span> actual
+                    </p>
+                    <p className="tabular-nums text-gray-600 dark:text-gray-300">
+                      {price(trading.optimal[key])} hindsight
+                    </p>
+                  </div>
+                ))}
               </div>
-            )}
-          </div>
+            </details>
+          </section>
 
           {period === 'month' && weeklyReports.length > 0 && (
             <div className={panel}>

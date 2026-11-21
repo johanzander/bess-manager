@@ -15,7 +15,7 @@ describe('Weekly Performance coverage', () => {
           verifiedPeriods: 671,
           expectedPeriods: 672,
           coveragePercent: 99.85,
-          availableWeeks: ['2026-09-07'],
+          availablePeriods: ['2026-09-07'],
           status: 'insufficient_data',
           issues: ['Missing historical quarter.'],
           daily: [],

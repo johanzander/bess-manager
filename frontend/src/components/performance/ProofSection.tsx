@@ -103,8 +103,8 @@ const ProofSection: React.FC<{
         <p className="text-sm mt-2">
           The relaxed bound may use actions a Huawei period list cannot execute (for example battery
           export). The Huawei replay executes the same intents as charge periods at full power,
-          load-following discharge periods and idle otherwise; it is a feasible schedule, not the
-          Huawei optimum, and its rules are inferred from observed operation.
+          load-following discharge periods and idle otherwise; it is a simulation under inferred
+          rules, rather than proof of hardware execution or the Huawei optimum.
           {data.huaweiFeasible.comparable
             ? ''
             : ` It ends ${number(data.huaweiFeasible.terminalShortfallKwh, 'kWh')} below the measured closing energy; terminal-adjusted total ${number(data.huaweiFeasible.terminalAdjustedTotalCost, currency)}.`}

@@ -22,6 +22,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.bess.daily_view_store import DailyViewStore
+from core.bess.execution_model import PlatformCapabilities
+from core.bess.settings import HomeSettings
 from core.bess.simulation.inverter_simulator import derive_control_command, simulate
 from core.bess.tests.unit.test_performance_hindsight import synthetic_week
 
@@ -73,17 +75,37 @@ for day_index in range(7):
 # A newer incomplete week exercises default selection and the coverage state.
 partial = store.load_day(date(2026, 9, 7))
 assert partial is not None
-store.save_day(replace(partial, date=date(2026, 9, 14)))
+store.save_day(
+    replace(
+        partial,
+        date=date(2026, 9, 14),
+        periods=[replace(p, data_source="predicted") for p in partial.periods],
+    )
+)
 
 # api.py deliberately imports the initialized controller lazily. This stub exposes
 # only the read-side dependencies used in this review server.
+assert partial.periods[0].historical_inputs is not None
 _stub = ModuleType("app")
 _stub.__dict__["bess_controller"] = SimpleNamespace(
     startup_complete=True,
     system=SimpleNamespace(
         is_configured=True,
         daily_view_store=store,
-        home_settings=SimpleNamespace(currency="EUR"),
+        home_settings=HomeSettings(currency="EUR"),
+        battery_settings=battery,
+        platform_capabilities=PlatformCapabilities(
+            **partial.periods[0].historical_inputs["capabilities"]
+        ),
+        inverter_platform="growatt_server_min",
+        sensor_collector=SimpleNamespace(
+            energy_flow_calculator=SimpleNamespace(
+                sensor_to_flow_map={
+                    "synthetic_charge": "battery_charged",
+                    "synthetic_discharge": "battery_discharged",
+                }
+            )
+        ),
     ),
 )
 sys.modules["app"] = _stub

@@ -167,3 +167,16 @@ def test_weekly_analysis_is_reused_until_history_changes(
         client.get(url)
         assert len(calls) == 2
         assert list((tmp_path.parent / "performance").glob("week-2026-09-07-*.json"))
+        saved = tmp_path.parent / "performance" / "week-2026-09-07-verified.json"
+        # An interrupted write must never leave this read-only view unusable.
+        saved.write_text('{"key":', encoding="utf-8")
+        api_module._performance_cache.clear()
+        assert client.get(url).status_code == 200
+        assert len(calls) == 3
+        monkeypatch.setattr(
+            api_module,
+            "_PERFORMANCE_CACHE_VERSION",
+            api_module._PERFORMANCE_CACHE_VERSION + 1,
+        )
+        assert client.get(url).status_code == 200
+        assert len(calls) == 4

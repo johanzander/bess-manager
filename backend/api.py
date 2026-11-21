@@ -12,6 +12,7 @@ from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
 from hashlib import sha256
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Any, cast
 
 from api_conversion import (
@@ -2347,6 +2348,8 @@ async def get_savings_aggregate(
 # Weekly analyses are CPU-heavy and their inputs rarely change; see cached().
 _PERFORMANCE_CACHE_SIZE = 32
 _performance_cache: dict[tuple, dict[str, Any]] = {}
+# Bump when analysis semantics or persisted result fields change.
+_PERFORMANCE_CACHE_VERSION = 1
 
 
 @router.get("/api/insights/performance")
@@ -2439,6 +2442,7 @@ def get_weekly_performance(
         days = [first + timedelta(days=i) for i in range((last - first).days + 2)]
         now = time_utils.now()
         key = (
+            _PERFORMANCE_CACHE_VERSION,
             period,
             first,
             analysis_mode,
@@ -2465,24 +2469,46 @@ def get_weekly_performance(
             digest = sha256(json.dumps(key, default=str).encode()).hexdigest()
             stored = None
             if saved is not None and saved.exists():
-                content = json.loads(saved.read_text(encoding="utf-8"))
-                if content["key"] == digest:
-                    stored = content["result"]
+                try:
+                    content = json.loads(saved.read_text(encoding="utf-8"))
+                    if content["key"] == digest and isinstance(content["result"], dict):
+                        stored = content["result"]
+                except (OSError, ValueError, KeyError, TypeError) as e:
+                    logger.warning(
+                        "Recomputing unreadable performance cache %s: %s", saved, e
+                    )
             if stored is None:
                 stored = analyze_period(
                     store, candidate, mode=analysis_mode, period=period, **options
                 )
                 if saved is not None:
+                    temporary = None
                     try:
                         saved.parent.mkdir(parents=True, exist_ok=True)
-                        saved.write_text(
-                            json.dumps({"key": digest, "result": stored}, default=str),
+                        with NamedTemporaryFile(
+                            mode="w",
                             encoding="utf-8",
-                        )
+                            dir=saved.parent,
+                            suffix=".tmp",
+                            delete=False,
+                        ) as handle:
+                            temporary = Path(handle.name)
+                            json.dump(
+                                {"key": digest, "result": stored},
+                                handle,
+                                default=str,
+                                allow_nan=False,
+                            )
+                            handle.flush()
+                            os.fsync(handle.fileno())
+                        os.replace(temporary, saved)
                     except OSError as e:
                         logger.warning(
                             "Could not save performance result %s: %s", saved, e
                         )
+                    finally:
+                        if temporary is not None and temporary.exists():
+                            temporary.unlink()
             _performance_cache[key] = stored
         return copy.deepcopy(_performance_cache[key])
 

@@ -15,7 +15,7 @@ test('weekly hindsight renders real API results, signed flows and both themes', 
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.goto('/insights');
   await page.getByRole('button', { name: 'Performance', exact: true }).click();
-  await expect(page.getByText('Achievable savings captured', { exact: true })).toBeVisible();
+  await expect(page.getByText('Battery savings captured', { exact: true })).toBeVisible();
   await expect(page.getByText('672/672 actual energy quarters; 0 predicted (100.0% actual-energy coverage)', { exact: false })).toBeVisible();
   const response = await request.get('/api/insights/performance?date=2026-09-07');
   expect(response.ok()).toBeTruthy();
@@ -44,7 +44,7 @@ test('weekly hindsight renders real API results, signed flows and both themes', 
   await page.setViewportSize({ width: 1440, height: 1050 });
   await page.getByRole('button', { name: /Week of Sep 7, 2026/ }).locator('..').getByRole('button').last().click();
   await expect(page.getByText(/Comparison withheld/)).toBeVisible();
-  await expect(page.getByText('Achievable savings captured', { exact: true })).toHaveCount(0);
+  await expect(page.getByText('Battery savings captured', { exact: true })).toHaveCount(0);
   await expect(page.getByText(/Missed savings and captured savings: N\/A/)).toBeVisible();
   expect(mutations).toEqual([]);
   const after = await (await request.get(`${mockURL}/mock/service_log`)).json();
@@ -92,7 +92,15 @@ test('real backup exposes coverage, approved partial model and signed charts', a
   }
   await expect(page.getByText(/BESS saved .* against solar only/)).toBeVisible({ timeout: 120_000 });
   await expect(page.getByRole('img', { name: /^Coverage:/ })).toBeVisible();
-  await expect(page.getByRole('list', { name: 'Cost waterfall' })).toBeVisible();
+  const comparison = page.getByRole('region', { name: 'Cost comparison' });
+  await expect(comparison.getByRole('list', { name: 'Scenario costs' })).toBeVisible();
+  await expect(comparison.getByText('Actual BESS', { exact: true })).toBeVisible();
+  await expect(comparison.getByText('Relaxed hindsight', { exact: true })).toBeVisible();
+  await expect(comparison.getByText(money(estimated.actual.totalEconomicCost), { exact: true })).toBeVisible();
+  await expect(comparison.getByText(/Axis starts/)).toHaveCount(0);
+  await expect(comparison.getByRole('img', { name: /^Captured/ })).toHaveCount(0);
+  await expect(comparison.getByText('Estimated battery benefit vs solar only', { exact: true })).toBeVisible();
+  await comparison.screenshot({ path: `${artifacts}/cost-comparison-light.png` });
   // The proof section is collapsed by default.
   await page.getByText('Verification and calculation proof', { exact: true }).click();
   const battery = estimated.assumptions?.battery ?? estimated.assumptionProfile.battery;
@@ -125,10 +133,22 @@ test('real backup exposes coverage, approved partial model and signed charts', a
   await page.screenshot({ path: `${artifacts}/dashboard-light.png`, fullPage: true });
   await page.getByTitle(/Switch to dark mode/).click();
   await expect(page.locator('html')).toHaveClass(/dark/);
+  await comparison.screenshot({ path: `${artifacts}/cost-comparison-dark.png` });
   await page.screenshot({ path: `${artifacts}/dashboard-dark.png`, fullPage: true });
   await page.setViewportSize({ width: 390, height: 844 });
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBeTruthy();
   await page.screenshot({ path: `${artifacts}/dashboard-mobile.png`, fullPage: true });
+  // Fit the whole panel below the sticky navigation for the component capture.
+  await page.setViewportSize({ width: 390, height: 1200 });
+  await comparison.screenshot({ path: `${artifacts}/cost-comparison-mobile.png` });
+  await page.getByTitle(/Switch to light mode/).click();
+  await page.setViewportSize({ width: 1440, height: 1050 });
+  const monthResponse = page.waitForResponse(response => response.url().includes('/api/insights/performance') && response.url().includes('period=month'));
+  await page.getByRole('group', { name: 'Analysis period' }).getByRole('button', { name: 'Month', exact: true }).click();
+  const month = (await (await monthResponse).json()).performance;
+  await expect(comparison.getByText(money(month.actual.totalEconomicCost), { exact: true })).toBeVisible({ timeout: 120_000 });
+  await page.getByTitle(/Switch to dark mode/).click();
+  await comparison.screenshot({ path: `${artifacts}/cost-comparison-month.png` });
   await page.getByTitle(/Switch to light mode/).click();
   expect(mutations).toEqual([]);
   expect(browserErrors).toEqual([]);

@@ -396,7 +396,7 @@ export interface PerformanceResult {
   terminalPolicy?: string;
   issues: string[];
   warnings: string[];
-  availableWeeks: string[];
+  availablePeriods: string[];
   actual: PerformanceScenario | null;
   optimal: PerformanceScenario | null;
   solarOnly: Pick<PerformanceScenario, 'netGridCost' | 'totalEconomicCost' | 'wearCost'> | null;

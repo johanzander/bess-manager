@@ -15,6 +15,7 @@ from core.bess.daily_view_store import DailyViewStore
 from core.bess.exceptions import HistoricalDataUnavailableError
 from core.bess.ha_recorder_helper import get_sensor_data_batch
 from core.bess.models import EconomicData, EnergyData, PeriodData
+from core.bess.performance_hindsight import historical_context
 from core.bess.price_manager import MockSource
 from core.bess.sensor_collector import SensorCollector
 from core.bess.settings import BatterySettings
@@ -23,7 +24,6 @@ from core.bess.tests.unit.test_sensor_collector_gapfill import (
     _entity_map,
     _make_ha_controller,
 )
-from core.bess.weekly_hindsight import historical_context
 
 
 def _pin(monkeypatch: pytest.MonkeyPatch, day: date, minute: int = 0) -> None:
@@ -231,3 +231,37 @@ def test_recorder_uses_elapsed_quarters_and_includes_the_midnight_boundary(
     result = get_sensor_data_batch(controller, ["counter"], day)
     assert len(result["data"]) == count
     assert result["data"][count - 1]["sensor.counter"] == 101
+
+
+def test_next_day_preparation_confirms_and_corrects_todays_prices(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mock_controller: Any
+) -> None:
+    day = date(2026, 11, 9)
+    _pin(monkeypatch, day, minute=23 * 60 + 55)
+    manager = _manager(mock_controller, tmp_path)
+    final_buy, final_sell = manager.price_manager.get_available_prices()
+    energy = EnergyData(0, 0.4, 0, 0, 0.4, 0, 5, 5, observation_verified=True)
+    # Quarter 0 kept a stale forecast price; quarter 1 already had the final one.
+    manager.historical_store.record_period(
+        0,
+        PeriodData(
+            0, energy, None, "actual", EconomicData.from_energy_data(energy, 0.5, 0.1)
+        ),
+    )
+    manager.historical_store.record_period(
+        1,
+        PeriodData(
+            1,
+            energy,
+            None,
+            "actual",
+            EconomicData.from_energy_data(energy, final_buy[1], final_sell[1]),
+        ),
+    )
+    manager._handle_special_cases(95, True, False)
+    for period in (0, 1):
+        stored = manager.historical_store.get_period(period)
+        assert stored is not None
+        assert stored.economic.buy_price == pytest.approx(final_buy[period])
+        assert stored.economic.prices_verified is True
+        assert stored.economic.import_cost == pytest.approx(0.4 * final_buy[period])

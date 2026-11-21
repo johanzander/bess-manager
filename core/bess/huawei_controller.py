@@ -175,6 +175,15 @@ class HuaweiController(InverterController):
 
         return blocks
 
+    def period_list_for_intents(self, intents: list[str]) -> tuple[int, list[dict]]:
+        """The period list one day of intents becomes on the inverter.
+
+        Returns how many blocks the intents form and the blocks actually kept
+        under the period-list limit, as deploying the schedule would keep them.
+        """
+        blocks = self._group_huawei_periods(intents)
+        return len(blocks), self._enforce_period_limit(blocks)
+
     def _enforce_period_limit(self, blocks: list[dict]) -> list[dict]:
         """Enforce MAX_TOU_PERIODS by dropping shortest blocks."""
         if len(blocks) <= self.MAX_TOU_PERIODS:

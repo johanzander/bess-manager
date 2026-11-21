@@ -101,6 +101,9 @@ class EnergyData:
     # -- see apply_export_curtailment_to_period_data).
     clipped_solar: float = 0.0
 
+    # None preserves the distinction between legacy history and verified meters.
+    observation_verified: bool | None = None
+
     # Detailed flows (calculated automatically in __post_init__)
     solar_to_home: float = field(default=0.0, init=False)
     solar_to_battery: float = field(default=0.0, init=False)
@@ -255,6 +258,7 @@ class EconomicData:
         0.0  # cost with solar only (no battery - algorithm baseline)
     )
     hourly_savings: float = 0.0  # savings vs baseline scenario
+    prices_verified: bool | None = None
     solar_savings: float = field(default=0.0, init=False)  # calculated automatically
 
     def __post_init__(self):
@@ -273,6 +277,7 @@ class EconomicData:
         buy_price: float,
         sell_price: float,
         battery_cycle_cost: float = 0.0,
+        prices_verified: bool | None = None,
     ) -> "EconomicData":
         """
         Create EconomicData from EnergyData and prices using standard calculations.
@@ -285,6 +290,9 @@ class EconomicData:
             buy_price: Price to buy from grid (per kWh)
             sell_price: Price to sell to grid (per kWh)
             battery_cycle_cost: Battery degradation cost - should include actual wear cost
+            prices_verified: Provenance of the prices, supplied by a caller that
+                holds evidence; a finite number alone is not proof of a
+                historically applicable price, so the default is unknown.
 
         Returns:
             EconomicData with all calculated fields
@@ -335,6 +343,7 @@ class EconomicData:
             grid_only_cost=grid_only_cost,
             solar_only_cost=solar_only_cost,
             hourly_savings=hourly_savings,
+            prices_verified=prices_verified,
         )
 
 
@@ -473,6 +482,7 @@ class PeriodData:
     # force). None where no plan is available — an overlay-free install still
     # gets a breakdown, with planned == 0.
     consumption_breakdown: ConsumptionBreakdown | None = None
+    historical_inputs: dict | None = None
 
     # Factory methods for creating instances
     @classmethod

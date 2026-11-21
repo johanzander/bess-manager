@@ -9,6 +9,7 @@ import os
 import traceback
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, tzinfo
+from math import isfinite
 from typing import Any, ClassVar
 
 import requests
@@ -62,6 +63,7 @@ from .models import (
 )
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
+from .performance_hindsight import historical_context
 from .power_down_outcome import PowerDownSessionOutcome, match_rewarded_octopoints
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore, _period_data_from_dict
@@ -1289,6 +1291,13 @@ class BatterySystemManager:
                             timestamp=time_utils.now(),
                             data_source="actual",
                             economic=economic_data,
+                            historical_inputs=historical_context(
+                                self.battery_settings,
+                                self.home_settings,
+                                self.platform_capabilities,
+                                unsupported_constraints=True,
+                                platform=self.inverter_platform,
+                            ),
                             decision=DecisionData(
                                 strategic_intent=planned_intent or "IDLE",
                                 observed_intent=observed,
@@ -2083,6 +2092,10 @@ class BatterySystemManager:
         self, period: int, prepare_next_day: bool, is_first_run: bool
     ) -> None:
         """Handle special cases like midnight transition."""
+        if not prepare_next_day:
+            self._finalize_previous_days()
+        else:
+            self._confirm_todays_prices()
         if period == 0 and not prepare_next_day:
             # Actual midnight rollover (the 00:00 quarterly job) - clear
             # yesterday's actuals now that a new day has genuinely started.
@@ -2115,6 +2128,119 @@ class BatterySystemManager:
             logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
+
+    def _confirm_todays_prices(self) -> None:
+        """Check today's recorded quarters against the price source's final day.
+
+        Runs at the 23:55 next-day preparation, when today's day-ahead prices
+        are long published. A quarter recorded from a stale forecast (#902) is
+        corrected; every checked quarter's price is then marked confirmed, so
+        the Performance view can tell confirmed prices from historical values.
+        """
+        buy_prices, sell_prices = self.price_manager.get_available_prices()
+        corrected = 0
+        for period, recorded in enumerate(self.historical_store.get_today_periods()):
+            if recorded is None or recorded.data_source != "actual":
+                continue
+            if period >= len(buy_prices):
+                continue
+            buy, sell = buy_prices[period], sell_prices[period]
+            if (
+                abs(recorded.economic.buy_price - buy) > 1e-9
+                or abs(recorded.economic.sell_price - sell) > 1e-9
+            ):
+                corrected += 1
+            self.historical_store.record_period(
+                period,
+                replace(
+                    recorded,
+                    economic=EconomicData.from_energy_data(
+                        recorded.energy,
+                        buy,
+                        sell,
+                        recorded.economic.battery_cycle_cost,
+                        prices_verified=True,
+                    ),
+                ),
+            )
+        if corrected:
+            logger.warning(
+                "Corrected %d recorded quarter price(s) to the price source's final values for today",
+                corrected,
+            )
+
+    def _finalize_previous_days(self) -> None:
+        """Complete archived closing quarters before rollover; retry pending days."""
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
+        candidates = set(self.daily_view_store.list_pending_dates())
+        candidates.add(time_utils.today() - timedelta(days=1))
+        for day in sorted(candidates):
+            if day >= time_utils.today():
+                continue
+            view = self.daily_view_store.load_day(day)
+            if view is None:
+                continue
+            closing = [p for p in view.periods if p.period == get_period_count(day) - 1]
+            if len(closing) != 1 or closing[0].data_source == "actual":
+                continue
+            original = closing[0]
+            context = next(
+                (
+                    p.historical_inputs
+                    for p in reversed(view.periods)
+                    if p.data_source == "actual" and p.historical_inputs is not None
+                ),
+                None,
+            )
+            current = historical_context(
+                self.battery_settings, self.home_settings, self.platform_capabilities
+            )
+            if context is None or context["battery"] != current["battery"]:
+                logger.warning(
+                    "Closing quarter for %s preserved: historical battery configuration is unavailable or differs",
+                    day,
+                )
+                continue
+            # Energy is finalized from the recorder; the price keeps whatever
+            # provenance the original row had and is never upgraded here.
+            if not all(
+                isfinite(p)
+                for p in (original.economic.buy_price, original.economic.sell_price)
+            ):
+                logger.warning(
+                    "Closing quarter for %s preserved: original historical prices are unavailable",
+                    day,
+                )
+                continue
+            try:
+                energy = self.sensor_collector.collect_energy_data(
+                    original.period, target_date=day
+                )
+                if energy.observation_verified is not True:
+                    raise HistoricalDataUnavailableError(
+                        "Closing quarter has estimated or incomplete sensor observations"
+                    )
+            except HistoricalDataUnavailableError as e:
+                logger.warning("Closing quarter for %s remains pending: %s", day, e)
+                continue
+            economic = EconomicData.from_energy_data(
+                energy,
+                original.economic.buy_price,
+                original.economic.sell_price,
+                energy.battery_charged * context["battery"]["cycle_cost_per_kwh"],
+                prices_verified=original.economic.prices_verified,
+            )
+            completed = replace(
+                original,
+                energy=energy,
+                economic=economic,
+                timestamp=time_utils.period_start(day, original.period),
+                data_source="actual",
+                historical_inputs=context,
+                decision=DecisionData.from_observed_flows(energy),
+            )
+            self.daily_view_store.finalize_period(day, completed)
 
     def _get_price_data(
         self, prepare_next_day: bool
@@ -2269,6 +2395,31 @@ class BatterySystemManager:
                     timestamp=time_utils.now(),
                     data_source="actual",
                     economic=economic_data,
+                    historical_inputs=historical_context(
+                        self.battery_settings,
+                        self.home_settings,
+                        self.platform_capabilities,
+                        platform=self.inverter_platform,
+                        unsupported_constraints=(
+                            self.temperature_derating.enabled
+                            or self.peak_shaving.enabled
+                            or self.export_curtailment_active
+                            or (
+                                self._energy_provider_config.get("provider")
+                                == "octopus"
+                                and (
+                                    self._energy_provider_config["octopus"][
+                                        "power_down_enabled"
+                                    ]
+                                    or bool(
+                                        self._energy_provider_config["octopus"][
+                                            "power_up_calendar_entity"
+                                        ]
+                                    )
+                                )
+                            )
+                        ),
+                    ),
                     decision=DecisionData(
                         strategic_intent=planned_intent or "IDLE",
                         observed_intent=observed,
@@ -4715,7 +4866,15 @@ class BatterySystemManager:
         if self.schedule_store.get_latest_schedule() is None:
             return
         try:
-            self.daily_view_store.save_day(self.get_current_daily_view())
+            view = self.get_current_daily_view()
+            self.daily_view_store.save_day(
+                replace(
+                    view,
+                    finalization_pending=bool(
+                        view.periods and view.periods[-1].data_source != "actual"
+                    ),
+                )
+            )
         except Exception as e:
             logger.warning("Failed to persist today's view: %s", e)
 

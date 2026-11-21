@@ -12,12 +12,15 @@ than duplicating that logic — see _daily_view_from_dict in prediction_snapshot
 
 import json
 import logging
-from dataclasses import asdict
+import os
+from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from . import time_utils
 from .daily_view_builder import DailyView
+from .models import PeriodData
 from .prediction_snapshot import _daily_view_from_dict
 
 logger = logging.getLogger(__name__)
@@ -34,15 +37,86 @@ class DailyViewStore:
     def _is_today(self, path: Path) -> bool:
         return path.stem == time_utils.today().isoformat()
 
-    def save_day(self, view: DailyView) -> None:
+    def save_day(self, view: DailyView) -> bool:
         """Persist the given day's full view, overwriting any existing file for that date."""
+        temporary: Path | None = None
         try:
             self._persist_dir.mkdir(parents=True, exist_ok=True)
             path = self._persist_dir / f"{view.date.isoformat()}.json"
-            with open(path, "w") as f:
+            # A crash or failed write must not destroy the previous snapshot.
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._persist_dir,
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temporary = Path(f.name)
                 json.dump(asdict(view), f, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, path)
+            return True
         except OSError as e:
             logger.warning("Failed to persist daily view for %s: %s", view.date, e)
+            return False
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+
+    def list_pending_dates(self) -> list[date]:
+        """Closing quarters awaiting genuine recorder observations, across restarts."""
+        pending = []
+        for value in self.list_available_dates():
+            day = date.fromisoformat(value)
+            view = self.load_day(day)
+            if view is not None and view.finalization_pending:
+                pending.append(day)
+        return pending
+
+    def finalize_period(self, day: date, period: PeriodData) -> bool:
+        """Atomically replace a completed day's last prediction with actuals."""
+        if (
+            day >= time_utils.today()
+            or period.period != time_utils.get_period_count(day) - 1
+            or period.data_source != "actual"
+        ):
+            raise ValueError(
+                "Finalization requires an actual closing quarter of a completed day"
+            )
+        view = self.load_day(day)
+        if view is None:
+            return False
+        rows = [period if p.period == period.period else p for p in view.periods]
+        if sum(p.period == period.period for p in view.periods) != 1:
+            return False
+        return self.save_day(
+            replace(
+                view,
+                periods=rows,
+                actual_count=sum(p.data_source == "actual" for p in rows),
+                predicted_count=sum(p.data_source == "predicted" for p in rows),
+                missing_count=sum(p.data_source == "missing" for p in rows),
+                total_savings=sum(p.economic.hourly_savings for p in rows),
+                finalization_pending=False,
+            )
+        )
+
+    @property
+    def directory(self) -> Path:
+        """Where the daily views live; sibling stores derive their paths from it."""
+        return self._persist_dir
+
+    def fingerprint(self, days: list[date]) -> tuple:
+        """Identify the stored content of these days, to know when it changed."""
+        marks = []
+        for day in days:
+            path = self._persist_dir / f"{day.isoformat()}.json"
+            stat = path.stat() if path.exists() else None
+            marks.append(
+                (day.isoformat(), stat.st_mtime_ns, stat.st_size) if stat else None
+            )
+        return (str(self._persist_dir), *marks)
 
     def load_day(self, day: date) -> DailyView | None:
         """Load the persisted view for a specific day, or None if not saved."""
@@ -57,7 +131,7 @@ class DailyViewStore:
             return None
         try:
             return _daily_view_from_dict(data)
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, TypeError) as e:
             logger.warning("Could not parse daily view %s: %s", path, e)
             return None
 

@@ -1,12 +1,12 @@
 // Unified API client for dashboard data
 import api from '../lib/api';
-import { FormattedValue } from '../types';
+import { FormattedValue, PerformanceResult } from '../types';
 
 /**
  * Fetch comprehensive dashboard data including schedule, energy flows, and financial metrics.
  * This replaces multiple previous endpoints:
  * - /api/schedule
- * - /api/schedule/detailed  
+ * - /api/schedule/detailed
  * - /api/schedule/current
  * - /api/v2/daily_view
  */
@@ -29,7 +29,7 @@ export const fetchAvailableDashboardDates = async (): Promise<string[]> => {
 
 // Type definitions for the unified dashboard response
 export interface DashboardHourlyData {
-  period: number;  // Period index (0-23 hourly, 0-95 quarterly)
+  period: number; // Period index (0-23 hourly, 0-95 quarterly)
   dataSource: 'actual' | 'predicted';
 
   // Core energy flows - FormattedValue
@@ -158,17 +158,17 @@ export interface DashboardResponse {
   // Core metadata
   date: string;
   currentPeriod: number;
-  
+
   // Financial summary
   totalDailySavings: number;
   actualSavingsSoFar: number;
   predictedRemainingSavings: number;
-  
+
   // Data structure info
   actualHoursCount: number;
   predictedHoursCount: number;
   dataSources: string[];
-  
+
   // Main data
   hourlyData: DashboardHourlyData[];
   tomorrowData?: DashboardHourlyData[] | null;
@@ -178,13 +178,13 @@ export interface DashboardResponse {
   totals: DashboardTotals;
   strategicIntentSummary: Record<string, number>;
   batteryCapacity: number;
-  
+
   // Battery state
   batterySoc: number;
   batterySoe: number;
   batterySocFormatted: string;
   batterySoeFormatted: string;
-  
+
   // Real-time power data
   realTimePower: {
     // Raw power values in Watts
@@ -196,7 +196,7 @@ export interface DashboardResponse {
     batteryDischargePowerW: number;
     netBatteryPowerW: number;
     acPowerW: number;
-    
+
     // Formatted display values
     solarPowerFormatted: string;
     homeLoadPowerFormatted: string;
@@ -234,6 +234,7 @@ export interface SavingsBucket {
   solarKwh: FormattedValue;
   batteryChargedKwh: FormattedValue;
   batteryDischargedKwh: FormattedValue;
+  performance?: PerformanceResult | null;
 }
 
 export interface SavingsAggregateResponse {

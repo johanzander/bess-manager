@@ -3,6 +3,7 @@ API endpoints for battery and electricity settings, dashboard data, and decision
 
 """
 
+import copy
 import dataclasses
 import json
 import os
@@ -50,6 +51,14 @@ from core.bess.health_check import (
 )
 from core.bess.influxdb_helper import is_influxdb_configured
 from core.bess.models import PeriodData
+from core.bess.performance_hindsight import (
+    PERIOD_BOUNDS,
+    analyze_period,
+    available_periods,
+    historical_context,
+    published_price_reference,
+    retrospective_context,
+)
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import (
     BatterySettings,
@@ -62,11 +71,6 @@ from core.bess.settings_store import (
     flatten_sensors,
 )
 from core.bess.time_utils import get_period_count
-from core.bess.weekly_hindsight import (
-    analyze_week,
-    available_weeks,
-    retrospective_context,
-)
 
 router = APIRouter()
 
@@ -2340,19 +2344,30 @@ async def get_savings_aggregate(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/api/insights/weekly-performance")
+# Weekly analyses are CPU-heavy and their inputs rarely change; see cached().
+_PERFORMANCE_CACHE_SIZE = 32
+_performance_cache: dict[tuple, dict[str, Any]] = {}
+
+
+@router.get("/api/insights/performance")
 def get_weekly_performance(
     date: str | None = Query(
         None, description="Any local ISO date in the requested week"
     ),
-    mode: str = Query("verified", pattern="^(verified|estimated)$"),
+    mode: str = Query("auto", pattern="^(auto|verified|estimated)$"),
     assumptions_source: str | None = Query(None, pattern="^backup$"),
     allow_partial: bool = Query(False),
+    period: str = Query("week", pattern="^(week|month)$"),
 ) -> dict[str, Any]:
     """Read persisted history only. No refresh, schedule build or HA service calls.
 
     A synchronous route runs the CPU work off the event loop. The default walks
     completed weeks newest first until a sufficiently observed week is found.
+
+    ``auto`` (the default) needs no choice from the user: it returns the
+    verified comparison when the history supports one, and otherwise an
+    estimate on the quarters that were observed, priced and configured with
+    the best available inputs, each labelled as an assumption in the result.
     """
     from app import bess_controller
 
@@ -2360,12 +2375,15 @@ def get_weekly_performance(
     store = bess_controller.system.daily_view_store
     profile = None
     profile_error = None
+    profile_settings = None
     profile_path = os.environ.get("BESS_HINDSIGHT_ASSUMPTIONS_FILE")
+    reference_dir = os.environ.get("BESS_HINDSIGHT_PRICE_REFERENCE_DIR")
     if profile_path:
         try:
             content = Path(profile_path).read_bytes()
+            profile_settings = json.loads(content)
             profile = retrospective_context(
-                json.loads(content),
+                profile_settings,
                 f"{Path(profile_path).name} (SHA-256 {sha256(content).hexdigest()[:16]})",
                 str(time_utils.TIMEZONE),
             )
@@ -2381,17 +2399,118 @@ def get_weekly_performance(
         anchor = date_cls.fromisoformat(date) if date else None
     except ValueError as e:
         raise HTTPException(status_code=422, detail="Invalid ISO date") from e
-    candidates = [anchor] if anchor else available_weeks(store)
+    candidates = [anchor] if anchor else available_periods(store, period=period)
     if not candidates:
         candidates = [time_utils.today() - timedelta(days=7)]
+    if mode == "auto" and profile is None:
+        # Without a configured profile, the settings BESS is running with now
+        # are the best available model of the past; the result says so.
+        system = bess_controller.system
+        profile = historical_context(
+            system.battery_settings,
+            system.home_settings,
+            system.platform_capabilities,
+            platform=system.inverter_platform,
+        )
+        profile.update(
+            assumption_source="current BESS Manager settings (assumed for the past)",
+            configuration_source="current settings assumed for history",
+        )
     result = None
+
+    # Battery history comes from the lifetime charge/discharge meters when they
+    # are configured, otherwise from integrated battery power; say which.
+    flows = set(
+        bess_controller.system.sensor_collector.energy_flow_calculator.sensor_to_flow_map.values()
+    )
+    efficiency_source = (
+        "the lifetime battery charge/discharge meters"
+        if {"battery_charged", "battery_discharged"} <= flows
+        else "BESS power-based battery history"
+    )
+
+    def cached(candidate: date_cls, analysis_mode: str, **options: Any) -> dict:
+        """Reuse a week's analysis until its stored history or inputs change.
+
+        A week in progress also changes as quarters elapse, so its key carries
+        the current quarter; a completed week's key changes only with its files.
+        """
+        first, last = PERIOD_BOUNDS[period](candidate)
+        days = [first + timedelta(days=i) for i in range((last - first).days + 2)]
+        now = time_utils.now()
+        key = (
+            period,
+            first,
+            analysis_mode,
+            json.dumps(options, sort_keys=True, default=str),
+            store.fingerprint(days),
+            (
+                (now.date(), time_utils.timestamp_to_period_index(now))
+                if days[-1] > now.date()
+                else None
+            ),
+        )
+        if key not in _performance_cache:
+            if len(_performance_cache) >= _PERFORMANCE_CACHE_SIZE:
+                _performance_cache.pop(next(iter(_performance_cache)))
+            # A completed period's result is also kept on disk, so a restart
+            # does not recompute history that has not changed.
+            saved = (
+                store.directory.parent
+                / "performance"
+                / f"{period}-{first.isoformat()}-{analysis_mode}.json"
+                if key[-1] is None
+                else None
+            )
+            digest = sha256(json.dumps(key, default=str).encode()).hexdigest()
+            stored = None
+            if saved is not None and saved.exists():
+                content = json.loads(saved.read_text(encoding="utf-8"))
+                if content["key"] == digest:
+                    stored = content["result"]
+            if stored is None:
+                stored = analyze_period(
+                    store, candidate, mode=analysis_mode, period=period, **options
+                )
+                if saved is not None:
+                    try:
+                        saved.parent.mkdir(parents=True, exist_ok=True)
+                        saved.write_text(
+                            json.dumps({"key": digest, "result": stored}, default=str),
+                            encoding="utf-8",
+                        )
+                    except OSError as e:
+                        logger.warning(
+                            "Could not save performance result %s: %s", saved, e
+                        )
+            _performance_cache[key] = stored
+        return copy.deepcopy(_performance_cache[key])
+
     for candidate in candidates:
-        analysis = analyze_week(
-            store,
+        if mode == "auto":
+            verified = cached(candidate, "verified")
+            if verified["status"] == "complete":
+                result = verified
+                break
+        first, last = PERIOD_BOUNDS[period](candidate)
+        # Published prices are priced with the approved profile's formula, so
+        # they are only offered together with that explicit profile.
+        reference = (
+            published_price_reference(
+                Path(reference_dir),
+                profile_settings["electricity_price"],
+                [first + timedelta(days=i) for i in range((last - first).days + 2)],
+            )
+            if reference_dir and profile_settings is not None and mode != "verified"
+            else None
+        )
+        analysis = cached(
             candidate,
-            mode=mode,
-            assumed_context=profile if mode == "estimated" else None,
-            allow_partial=allow_partial,
+            "estimated" if mode == "auto" else mode,
+            assumed_context=profile if mode != "verified" else None,
+            allow_partial=allow_partial or mode == "auto",
+            price_reference=reference,
+            efficiency_source=efficiency_source if mode == "auto" else None,
         )
         if result is None:
             result = analysis
@@ -2412,11 +2531,11 @@ def get_weekly_performance(
     )
     result["assumption_profile_error"] = profile_error
     bucket = build_buckets(
-        "week", 1, store, today=date_cls.fromisoformat(result["start_date"])
+        period, 1, store, today=date_cls.fromisoformat(result["start_date"])
     )[0]
     currency = result["currency"] or bess_controller.system.home_settings.currency
     api_bucket = APISavingsBucket.from_internal(bucket, currency)
-    api_bucket.weeklyPerformance = result
+    api_bucket.performance = result
     return cast(dict[str, Any], convert_keys_to_camel_case(api_bucket))
 
 

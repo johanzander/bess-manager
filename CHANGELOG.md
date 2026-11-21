@@ -6,10 +6,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
-### Fixed
-
-- **Huawei: an idle plan clears old charge/discharge periods from the battery** — huawei_solar rejects an empty TOU list, so the previous plan's periods stayed on the battery and repeated daily. BESS now clears them with a period that applies on no day.
-
 ### Added
 
 - **Time-of-day grid tariffs** — enter an hourly grid transport fee, optionally with separate summer and winter profiles, and BESS prices it into every buy decision. ([#861](https://github.com/johanzander/bess-manager/issues/861))
@@ -19,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Huawei: an idle plan clears old charge/discharge periods from the battery** — huawei_solar rejects an empty TOU list, so the previous plan's periods stayed on the battery and repeated daily. BESS now clears them with a period that applies on no day. ([#914](https://github.com/johanzander/bess-manager/pull/914))
+- **Huawei and Growatt SPH: a schedule write the inverter rejects is retried** — BESS used to treat it as applied, so the battery kept its old periods until the next restart. ([#916](https://github.com/johanzander/bess-manager/issues/916))
 - **Updated electricity prices now reach the plan without a restart** — when a price sensor replaces a full day of prices, such as forecasts swapped for confirmed Nordpool prices, the next optimization uses them. ([#902](https://github.com/johanzander/bess-manager/issues/902))
 - **Nordpool (HACS sensor): prices now use your configured VAT** — with any VAT other than 25%, buy and sell prices were miscalculated after every restart. ([#903](https://github.com/johanzander/bess-manager/issues/903))
 - **Fuse protection on Growatt VPP, SPH, SolaX, Huawei and Solis: no longer shown as fully active** — health and Settings now warn it is planning-only and suggest a lower safety margin. ([#901](https://github.com/johanzander/bess-manager/issues/901))

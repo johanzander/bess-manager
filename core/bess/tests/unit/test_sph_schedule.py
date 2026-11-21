@@ -323,6 +323,34 @@ class TestWriteScheduleToHardware:
         assert call_kwargs.get("period_2_enabled") is False
         assert call_kwargs.get("period_3_enabled") is False
 
+    @pytest.mark.parametrize(
+        "failing_call", ["write_ac_charge_times", "write_ac_discharge_times"]
+    )
+    def test_failed_write_raises_after_attempting_both(
+        self, manager: GrowattSphController, failing_call: str
+    ) -> None:
+        """A write the inverter rejected must not count as applied (#916).
+
+        evaluate_intents compares the next plan against this controller's own
+        model, which apply_intents has already moved on, so a swallowed
+        failure is never retried. Raising lets battery_system_manager set
+        _hardware_write_pending and resend next cycle.
+
+        Command-level only: SPH has no inverter execution model to assert the
+        resulting periods against.
+        """
+        manager.apply_intents(
+            make_schedule_mock(make_intents({2: "GRID_CHARGING", 20: "LOAD_SUPPORT"}))
+        )
+        controller = MagicMock()
+        getattr(controller, failing_call).side_effect = RuntimeError("500")
+
+        with pytest.raises(RuntimeError, match=failing_call):
+            manager.sync_to_hardware(controller, 0)
+
+        controller.write_ac_charge_times.assert_called_once()
+        controller.write_ac_discharge_times.assert_called_once()
+
 
 # ── tou_intervals structure ───────────────────────────────────────────────────
 

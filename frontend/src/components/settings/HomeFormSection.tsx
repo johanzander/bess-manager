@@ -266,7 +266,7 @@ export function HomeFormSection({ form, onChange, sensors, realtimeFuseGuardSupp
             {numField('Voltage', form.voltage,
               v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
             {numField('Safety Margin Factor', form.safetyMarginFactor,
-              v => onChange({ ...form, safetyMarginFactor: v }), { min: 0, max: 2, step: 0.05 })}
+              v => onChange({ ...form, safetyMarginFactor: v }), { min: 0.05, max: 2, step: 0.05 })}
           </div>
         )}
       </SectionCard>

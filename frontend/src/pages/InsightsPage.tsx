@@ -9,19 +9,15 @@ import DateSelector from '../components/DateSelector';
 import { useUserPreferences } from '../hooks/useUserPreferences';
 import { useAvailableDashboardDates } from '../hooks/useAvailableDashboardDates';
 import { toISODate } from '../utils/timeUtils';
-import WeeklyPerformanceView from '../components/WeeklyPerformanceView';
+import PerformanceView from '../components/PerformanceView';
 
-type InsightsTab =
-  | 'forecast-accuracy'
-  | 'battery-actions'
-  | 'scenario-comparison'
-  | 'weekly-performance';
+type InsightsTab = 'forecast-accuracy' | 'battery-actions' | 'scenario-comparison' | 'performance';
 
 const TABS: { id: InsightsTab; label: string }[] = [
   { id: 'forecast-accuracy', label: 'Forecast Accuracy' },
   { id: 'battery-actions', label: 'Battery Actions' },
   { id: 'scenario-comparison', label: 'Scenario Comparison' },
-  { id: 'weekly-performance', label: 'Weekly Performance' },
+  { id: 'performance', label: 'Performance' },
 ];
 
 const isToday = (date: Date): boolean => toISODate(date) === toISODate(new Date());
@@ -77,7 +73,7 @@ const InsightsPage: React.FC = () => {
       {activeTab === 'scenario-comparison' && (
         <DetailedSavingsAnalysis resolution={dataResolution} />
       )}
-      {activeTab === 'weekly-performance' && <WeeklyPerformanceView />}
+      {activeTab === 'performance' && <PerformanceView />}
     </div>
   );
 };

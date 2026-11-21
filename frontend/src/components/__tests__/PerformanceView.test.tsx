@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import api from '../../lib/api';
-import WeeklyPerformanceView from '../WeeklyPerformanceView';
+import PerformanceView from '../PerformanceView';
 
 describe('Weekly Performance coverage', () => {
   it('withholds unsupported financial claims when history is incomplete', async () => {
     vi.spyOn(api, 'get').mockResolvedValueOnce({
       data: {
-        weeklyPerformance: {
+        performance: {
           startDate: '2026-09-07',
           endDate: '2026-09-13',
           timezone: 'Europe/Helsinki',
@@ -27,7 +27,7 @@ describe('Weekly Performance coverage', () => {
         },
       },
     });
-    render(<WeeklyPerformanceView />);
+    render(<PerformanceView />);
     await waitFor(() => expect(screen.getByText(/Comparison withheld/)).toBeInTheDocument());
     expect(screen.getByText('Missing historical quarter.')).toBeInTheDocument();
     expect(screen.queryByText('Actual net grid cost')).not.toBeInTheDocument();

@@ -9,26 +9,26 @@
  * Unified formatting interface for all user-facing values
  */
 export interface FormattedValue {
-  value: number;        // Raw numeric value for calculations/sorting
-  display: string;      // Formatted number without unit ("84.87", "700")
-  unit: string;         // Unit label (currency code, "kWh", "Wh", "%")
-  text: string;         // Complete formatted text ("84.87 EUR", "700 Wh")
+  value: number; // Raw numeric value for calculations/sorting
+  display: string; // Formatted number without unit ("84.87", "700")
+  unit: string; // Unit label (currency code, "kWh", "Wh", "%")
+  text: string; // Complete formatted text ("84.87 EUR", "700 Wh")
 }
 export interface HourlyData {
   // Core display fields (use these for UI)
-  period: number;  // Period index (0-23 for hourly, 0-95 for quarterly)
+  period: number; // Period index (0-23 for hourly, 0-95 for quarterly)
 
   // Economic fields (use these for cost calculations)
-  batteryCycleCost?: number;   // battery wear cost
-  gridCost?: number;           // net grid cost
-  hourlyCost?: number;         // total cost
-  hourlySavings?: number;      // savings
+  batteryCycleCost?: number; // battery wear cost
+  gridCost?: number; // net grid cost
+  hourlyCost?: number; // total cost
+  hourlySavings?: number; // savings
 
   // Battery state (established in SOC/SOE naming fix)
-  batterySoeStart?: number;    // kWh
-  batterySoeEnd?: number;      // kWh
+  batterySoeStart?: number; // kWh
+  batterySoeEnd?: number; // kWh
 
-  // Detailed energy flows (all FormattedValue — backend serializes via safe_format)
+  // Detailed energy flows (all FormattedValue â€” backend serializes via safe_format)
   solarToHome?: FormattedValue;
   solarToBattery?: FormattedValue;
   solarToGrid?: FormattedValue;
@@ -39,10 +39,10 @@ export interface HourlyData {
   batteryToGrid?: FormattedValue;
 
   // Control and decision fields
-  strategicIntent?: string;    // strategy name
-  observedIntent?: string;     // what actually happened (set for past periods only)
-  curtailed?: boolean;         // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
-  isFreeImport?: boolean;      // inside an Octoplus free-import window (Power Up / Happy Hour) — buyPrice is already the overlaid free price
+  strategicIntent?: string; // strategy name
+  observedIntent?: string; // what actually happened (set for past periods only)
+  curtailed?: boolean; // planned PV curtailment, distinct from a profitable SOLAR_EXPORT
+  isFreeImport?: boolean; // inside an Octoplus free-import window (Power Up / Happy Hour) â€” buyPrice is already the overlaid free price
   shadowPrice?: FormattedValue | null; // plan's marginal value of stored energy per kWh delivered; null for elapsed periods and at the reserve floor
 
   // All user-facing data via FormattedValue - canonical naming
@@ -67,82 +67,82 @@ export interface HourlyData {
   batterySocStart?: FormattedValue;
   batterySocEnd?: FormattedValue;
   batteryAction?: FormattedValue;
-  
+
   // Additional economic fields
   solarOnlyCost?: number;
   gridOnlyCost?: number;
   batterySavings?: number;
-  solarSavings?: number;       // Solar-Only vs Grid-Only savings
-  
+  solarSavings?: number; // Solar-Only vs Grid-Only savings
+
   // Metadata
-  dataSource?: string;  // 'actual' | 'predicted' | others
-  timestamp?: string;         // ISO format
+  dataSource?: string; // 'actual' | 'predicted' | others
+  timestamp?: string; // ISO format
 }
 
 export interface ScheduleSummary {
   // Baseline costs (what scenarios would cost)
-  gridOnlyCost: number;       // cost if only using grid
-  solarOnlyCost: number;      // cost if solar + grid (no battery)
-  optimizedCost: number;      // cost with battery optimization
+  gridOnlyCost: number; // cost if only using grid
+  solarOnlyCost: number; // cost if solar + grid (no battery)
+  optimizedCost: number; // cost with battery optimization
 
   // Component costs (breakdown of optimized scenario)
-  totalGridCost: number;      // net grid costs
+  totalGridCost: number; // net grid costs
   totalBatteryCycleCost: number; // battery wear costs
 
   // Savings calculations (vs baselines)
-  totalSavings: number;       // total savings vs grid-only
-  solarSavings: number;       // savings from solar vs grid-only
-  batterySavings: number;     // additional savings from battery
-  
+  totalSavings: number; // total savings vs grid-only
+  solarSavings: number; // savings from solar vs grid-only
+  batterySavings: number; // additional savings from battery
+
   // Energy totals (for context)
-  totalSolarProduction: number;   // kWh
-  totalHomeConsumption: number;   // kWh
-  totalBatteryCharged: number;    // kWh
+  totalSolarProduction: number; // kWh
+  totalHomeConsumption: number; // kWh
+  totalBatteryCharged: number; // kWh
   totalBatteryDischarged: number; // kWh
-  totalGridImported: number;      // kWh
-  totalGridExported: number;      // kWh
-  
+  totalGridImported: number; // kWh
+  totalGridExported: number; // kWh
+
   // Efficiency metrics
-  cycleCount: number;         // number of battery cycles
+  cycleCount: number; // number of battery cycles
 }
 
 export interface BatterySettings {
   // Capacity settings (kWh)
-  totalCapacity: number;        // kWh total capacity
-  reservedCapacity: number;     // kWh reserved (unusable)
-  
+  totalCapacity: number; // kWh total capacity
+  reservedCapacity: number; // kWh reserved (unusable)
+
   // State of charge limits (%)
-  minSoc: number;               // % minimum charge
-  maxSoc: number;               // % maximum charge
-  
-  // Power limits (kW) 
-  maxChargePowerKw: number;     // kW max charge power
-  maxDischargePowerKw: number;  // kW max discharge power
-  
+  minSoc: number; // % minimum charge
+  maxSoc: number; // % maximum charge
+
+  // Power limits (kW)
+  maxChargePowerKw: number; // kW max charge power
+  maxDischargePowerKw: number; // kW max discharge power
+
   // Economic settings
-  cycleCostPerKwh: number;      // wear cost per kWh
-  chargingPowerRate: number;    // % of max power to use
+  cycleCostPerKwh: number; // wear cost per kWh
+  chargingPowerRate: number; // % of max power to use
   dischargingPowerRate: number; // % of max power to use for discharge
-  
+
   // Efficiency settings (%)
-  efficiencyCharge: number;     // % charging efficiency
-  efficiencyDischarge: number;  // % discharge efficiency
+  efficiencyCharge: number; // % charging efficiency
+  efficiencyDischarge: number; // % discharge efficiency
 
   // Inverter AC output cap (solar clipping avoidance); 0 disables
-  inverterMaxAcPowerKw: number;     // kW total AC output cap
+  inverterMaxAcPowerKw: number; // kW total AC output cap
   inverterAcPowerMargin: number; // 0-1 model-side haircut on the cap
 
-  // PV export-limit curtailment (issue #269) — opt-in, requires a grid
+  // PV export-limit curtailment (issue #269) â€” opt-in, requires a grid
   // CT/smart meter and a platform with export-limit register support.
   exportCurtailmentEnabled: boolean;
-  exportCurtailmentPriceFloor: number; // SEK/kWh — curtail below this sell price
+  exportCurtailmentPriceFloor: number; // SEK/kWh â€” curtail below this sell price
 
   // Consumption estimate
   estimatedConsumption: number; // kWh daily estimate
-  consumptionStrategy: string;  // "sensor", "fixed", "load_power_7d_avg", or "ha_statistics"
-  
+  consumptionStrategy: string; // "sensor", "fixed", "load_power_7d_avg", or "ha_statistics"
+
   // Price settings
-  useActualPrice?: boolean;     // use actual vs estimated prices
+  useActualPrice?: boolean; // use actual vs estimated prices
 }
 
 export interface ElectricitySettings {
@@ -307,6 +307,9 @@ export type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
 
 export interface HindsightEnergy {
   homeConsumption: number;
+  solarProduction: number;
+  gridImported: number;
+  gridExported: number;
   solarToHome: number;
   batteryToHome: number;
   gridToHome: number;
@@ -314,10 +317,11 @@ export interface HindsightEnergy {
   batteryToGrid: number;
   solarToBattery: number;
   gridToBattery: number;
+  batteryCharged: number;
   batteryDischarged: number;
 }
 
-export interface WeeklyScenario {
+export interface PerformanceScenario {
   gridImportKwh: number;
   gridExportKwh: number;
   importCost: number;
@@ -334,7 +338,7 @@ export interface WeeklyScenario {
   solarSelfConsumptionPercent: number | null;
 }
 
-export interface WeeklyPerformance {
+export interface PerformanceResult {
   startDate: string;
   endDate: string;
   timezone: string;
@@ -349,6 +353,17 @@ export interface WeeklyPerformance {
     | 'insufficient_data'
     | 'unsupported_model';
   mode?: 'verified' | 'estimated';
+  inProgress?: boolean;
+  efficiencyCalibration?: {
+    source: string;
+    applied: boolean;
+    charge?: number;
+    discharge?: number;
+    capped?: boolean;
+    configuredCharge: number;
+    configuredDischarge: number;
+    reason?: string;
+  } | null;
   scope?: 'full_week' | 'observed_intervals';
   modelCostDifference?: number | null;
   executionVerified?: boolean;
@@ -361,7 +376,7 @@ export interface WeeklyPerformance {
     currency: string;
   } | null;
   assumptionProfileError?: string | null;
-  assumptions?: { source: string } | null;
+  assumptions?: { source: string; battery?: Record<string, number> } | null;
   excludedIntervals?: { date: string; period: number; timestamp: string; reason: string }[];
   actualValidation?: {
     energyBalanceMismatches: number;
@@ -382,16 +397,39 @@ export interface WeeklyPerformance {
   issues: string[];
   warnings: string[];
   availableWeeks: string[];
-  actual: WeeklyScenario | null;
-  optimal: WeeklyScenario | null;
-  solarOnly: Pick<WeeklyScenario, 'netGridCost' | 'totalEconomicCost' | 'wearCost'> | null;
+  actual: PerformanceScenario | null;
+  optimal: PerformanceScenario | null;
+  solarOnly: Pick<PerformanceScenario, 'netGridCost' | 'totalEconomicCost' | 'wearCost'> | null;
+  gridOnly?: Pick<PerformanceScenario, 'netGridCost' | 'totalEconomicCost' | 'wearCost'> | null;
   capturedPercent: number | null;
+  conditionalCapturedPercent?: number | null;
   missedSavings: number | null;
   solveSeconds?: number;
   initialEnergyKwh?: number;
   terminalEnergyKwh?: number;
   terminalDifferenceKwh?: number;
-  daily: { date: string; actualGridCost: number; optimalGridCost: number }[];
+  relaxedBoundLabel?: string;
+  priceReferenceSource?: string | null;
+  gapBoundaries?: { after: string; resumes: string; measuredEnergyChangeKwh: number | null }[];
+  huaweiTouBlocks?: Record<string, number>;
+  huaweiFeasible?:
+    | (PerformanceScenario & {
+        terminalShortfallKwh: number;
+        comparable: boolean;
+        terminalAdjustedTotalCost: number;
+      })
+    | null;
+  daily: {
+    date: string;
+    observedPeriods?: number;
+    actualGridCost: number;
+    optimalGridCost: number;
+    huaweiGridCost?: number | null;
+    gridOnlyCost?: number;
+    solarOnlyCost?: number;
+    actualWearCost?: number;
+    optimalWearCost?: number;
+  }[];
   periods: {
     timestamp: string;
     date: string;

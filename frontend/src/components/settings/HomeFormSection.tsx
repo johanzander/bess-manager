@@ -218,7 +218,7 @@ export function HomeFormSection({ form, onChange, sensors, realtimeFuseGuardSupp
 
       <SectionCard
         title="Fuse Protection"
-        description="Keeps the household within its fuse limit two ways: the day-ahead schedule plans grid import against it, and real-time monitoring throttles battery charging if a phase runs hot. Enable to configure."
+        description="Keeps the household within its fuse limit two ways: the day-ahead schedule plans grid import and export against it, and real-time monitoring throttles battery charging if a phase runs hot. Enable to configure."
       >
         {!chargeRateSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400">

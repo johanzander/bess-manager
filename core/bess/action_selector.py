@@ -681,6 +681,7 @@ class PeriodInputs:
     dt: float
     max_charge_power_per_period: list[float] | None = None
     import_cap_kwh: list[float | None] | None = None
+    export_cap_kwh: list[float | None] | None = None
     min_grid_export_kwh: list[float] | None = None
     capabilities: PlatformCapabilities = DEFAULT_CAPABILITIES
     sell_price_floored: list[bool] | None = None
@@ -738,9 +739,13 @@ def select_action(
     the minimum grid_imported any candidate actually achieves -- is
     computable before anything is discarded.
 
+    `period_inputs.export_cap_kwh` is the same fuse limit applied to grid
+    export (#910) -- a fuse trips on current in either direction -- filtered
+    right after the import cap with the same floor.
+
     `period_inputs.min_grid_export_kwh` is the period's minimum grid export
     (the Octopus Power Down export pulse), filtered with the same "constrain,
-    don't raise" floor, after the import cap -- see the comment at the filter.
+    don't raise" floor, after both fuse caps -- see the comment at the filter.
     """
     period_max_charge = (
         period_inputs.max_charge_power_per_period[t]
@@ -751,6 +756,11 @@ def select_action(
     import_cap_kwh = (
         period_inputs.import_cap_kwh[t]
         if period_inputs.import_cap_kwh is not None
+        else None
+    )
+    export_cap_kwh = (
+        period_inputs.export_cap_kwh[t]
+        if period_inputs.export_cap_kwh is not None
         else None
     )
     min_grid_export_kwh = (
@@ -862,12 +872,25 @@ def select_action(
             c for c in candidates if c.grid_imported <= effective_import_cap + 1e-9
         ]
 
+    # Export-cap filtering (#910): the same fuse, current flowing the other
+    # way, with the same floor -- when even the least-export action is over
+    # the cap (a solar surplus a full battery cannot absorb), that action
+    # survives rather than the period becoming infeasible. Measured over the
+    # import-feasible set, so the two physical caps are applied in a fixed
+    # order the backward passes reproduce exactly.
+    if export_cap_kwh is not None and candidates:
+        floor_grid_exported = min(c.grid_exported for c in candidates)
+        effective_export_cap = max(export_cap_kwh, floor_grid_exported)
+        candidates = [
+            c for c in candidates if c.grid_exported <= effective_export_cap + 1e-9
+        ]
+
     # Minimum-export filtering, same "constrain, don't raise" shape as the
     # import cap: a battery that cannot export the whole target exports the
     # most it can rather than making the period infeasible.
     #
-    # It runs AFTER the import cap, and the order is not arbitrary. The fuse
-    # cap is physical; the export target is a preference about which feasible
+    # It runs AFTER both fuse caps, and the order is not arbitrary. The fuse
+    # caps are physical; the export target is a preference about which feasible
     # action to take. Measuring the achievable export over the fuse-feasible
     # set means the target can never talk the plan into an action the fuse
     # already ruled out. The two backward passes apply the masks in the same
@@ -882,7 +905,7 @@ def select_action(
         ]
 
     # Plain IDLE is offered unconditionally and holds soe within bounds at
-    # every state, so it is always feasible, and neither filter above can
+    # every state, so it is always feasible, and none of the filters above can
     # empty a non-empty list (each threshold is floored at what the best
     # candidate in the set actually achieves, so that candidate always
     # survives) -- `candidates` is never empty and an IndexError below would

@@ -77,14 +77,14 @@ and that the backward pass values every off-lattice candidate type the
 selector can choose. Removing that test re-opens the #236 bug class.
 
 Per-period constraints on flows follow the same rule. `select_action`
-filters its gathered candidates against the #429 import cap and then the
-minimum grid export (the Octopus Power Down pulse), each with a "constrain,
-don't raise" floor. Both backward passes apply those masks in the same order
-and over every column the selector sees, including the SOLAR_EXPORT bypass
-and residual cover. The same test file pins that V equals the selector's
-constrained value. The order matters: the fuse cap is physical, so the
-achievable export is measured over the fuse-feasible set, never the other
-way round. One narrow use of `_discharge_is_unexecutable` in the grid pass
+filters its gathered candidates against the #429 import cap, then the same
+fuse limit on export (#910), then the minimum grid export (the Octopus Power
+Down pulse), each with a "constrain, don't raise" floor. Both backward passes
+apply those masks in the same order and over every column the selector sees,
+including the SOLAR_EXPORT bypass and residual cover. The same test file pins
+that V equals the selector's constrained value. The order matters: the fuse
+caps are physical, so the achievable export is measured over the
+fuse-feasible set, never the other way round. One narrow use of `_discharge_is_unexecutable` in the grid pass
 is deliberate. That pass still does not mask those cells, but it leaves them
 out when measuring the achievable export. Their sub-resolution export is one
 the selector can never choose, so letting it set the requirement would value

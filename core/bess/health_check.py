@@ -456,9 +456,12 @@ def run_system_health_checks(system_manager):
     ):
         # Enabled, but the platform cannot throttle the charge rate (#901):
         # only the DP's planning cap protects the fuse, and it plans against
-        # forecast load. Not OK -- the user believes they are protected.
+        # forecast load. Say so here rather than "Disabled". OK, not WARNING:
+        # it is a fixed platform property, not a fault, and every WARNING
+        # component reaches the dashboard banner on every page open (#911).
+        # The Fuse Protection card in Settings carries the warning.
         unavailable = (
-            "Real-time fuse protection is unavailable on this inverter "
+            "Planning-only. Real-time fuse protection is unavailable on this inverter "
             "platform/control mode (no charge-rate control). Only the "
             "day-ahead schedule keeps grid import under the fuse, against "
             "forecast load — lower the Safety Margin in Settings → Home to "
@@ -469,13 +472,15 @@ def run_system_health_checks(system_manager):
                 "name": "Power Monitoring",
                 "description": "Monitors home power consumption and adapts battery charging",
                 "required": False,
-                "status": "WARNING",
+                "status": "OK",
                 "checks": [
                     {
                         "name": "Power Monitor Status",
                         "entity_id": None,
-                        "status": "WARNING",
-                        "error": unavailable,
+                        "status": "OK",
+                        # message, not error: the System Health page renders
+                        # `error` a second time in red as "Error: ...".
+                        "message": unavailable,
                     }
                 ],
                 "last_run": datetime.now().isoformat(),

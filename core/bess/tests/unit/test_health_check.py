@@ -174,28 +174,38 @@ def _power_monitoring_component(
     return dict(component)
 
 
-def test_power_monitoring_warns_when_enabled_without_a_realtime_guard() -> None:
+def test_power_monitoring_explains_planning_only_without_a_dashboard_warning() -> None:
     """#901: fuse protection enabled on a platform without per-period
     charge-rate control (Growatt VPP, SPH, SolaX, Huawei, Solis) gets only the
-    day-ahead planning cap. Health reported that as OK/"Disabled" while the
-    user's setting said enabled, hiding that nothing throttles an overload."""
+    day-ahead planning cap. Health must say so -- not "Disabled", which
+    contradicts the user's setting.
+
+    #911: but it is a fixed property of the platform, not a fault, so it must
+    not be WARNING: every WARNING component reaches the dashboard banner,
+    which showed it on every page open as a "sensor configuration" problem.
+    The Fuse Protection card in Settings carries the actionable warning."""
     component = _power_monitoring_component(
         enabled=True, guard_supported=False, monitor=None
     )
-    assert component["status"] == "WARNING"
+    assert component["status"] == "OK"
     (check,) = component["checks"]
-    assert check["status"] == "WARNING"
-    assert "Safety Margin" in check["error"]
+    assert check["status"] == "OK"
+    assert "Planning-only" in check["message"]
+    assert "Disabled" not in check["message"]
+    # The System Health page renders any `error` in red as "Error: ...".
+    assert "error" not in check
 
 
-def test_power_monitoring_warns_even_if_a_monitor_object_exists() -> None:
+def test_power_monitoring_reports_planning_only_even_if_a_monitor_object_exists() -> (
+    None
+):
     """Health follows the platform capability, not the monitor object's
     existence: a monitor adjust_charging_power never calls protects nothing."""
     monitor = MagicMock()
     component = _power_monitoring_component(
         enabled=True, guard_supported=False, monitor=monitor
     )
-    assert component["status"] == "WARNING"
+    assert "Planning-only" in component["checks"][0]["message"]
     monitor.check_health.assert_not_called()
 
 

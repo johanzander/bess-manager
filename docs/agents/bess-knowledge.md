@@ -698,8 +698,9 @@ configured.
   SolaX native, Huawei and Solis no monitor runs, so this cap is the only fuse
   protection. It plans against *forecast* load, so an unforecast load (an EV,
   a sauna) can push real import past the fuse. `safety_margin` (default 1.0)
-  is the user's only headroom there; ~0.7 is the advice. Health reports
-  `WARNING` in that state, never `OK`.
+  is the user's only headroom there; ~0.7 is the advice. The Fuse Protection
+  card in Settings warns about it; System Health reports it as `OK` with a
+  "Planning-only" note, not `WARNING`, so it raises no dashboard banner (#911).
 - **Runtime monitor mechanics (#816, #877)**: `HomePowerMonitor` runs every
   minute. The phase-current sensors are grid-side meters, so while the battery
   grid-charges they read house load *plus* the battery's own draw. The monitor

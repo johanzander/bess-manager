@@ -637,8 +637,15 @@ places, the same read-compare-write shape Growatt MIN adopted in #551/#552:
   retried write, the corruption flag, the 23:55 next-day preparation) go
   through this check too.
 
-An empty plan still writes: the empty string is how BESS clears periods the
-battery is otherwise left running.
+An empty plan still writes, because periods left on the battery repeat every
+day. `set_tou_periods` rejects an empty string (HTTP 500), so BESS clears the
+list by writing one period effective on no day (`00:00-00:14//+`), and treats
+such a period read back from the battery as no schedule.
+
+A write that fails raises out of `sync_to_hardware` after the remaining writes
+have been attempted. `evaluate_intents` compares against BESS's own model,
+which already holds the new plan, so a swallowed failure would never be
+retried; raising lets BSM's `_hardware_write_pending` resend it next cycle.
 
 Readback is enabled by the sensor being *mapped*, never by attempting the
 read and catching failure. Installs whose integration exposes no such entity

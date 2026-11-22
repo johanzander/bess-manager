@@ -270,6 +270,7 @@ def _backward_pass_value(
     sell: float,
     soe: float,
     target: float | None,
+    export_cap: float | None = None,
 ) -> float:
     """One-period V at `soe` from the named backward pass, with a zero
     continuation row so the value is exactly the best reward it admits."""
@@ -284,6 +285,7 @@ def _backward_pass_value(
             solar_production=[solar],
             initial_soe=soe,
             min_grid_export_kwh=None if target is None else [target],
+            export_cap_kwh=None if export_cap is None else [export_cap],
         )
         return float(V[0, round((soe - settings.min_soe_kwh) / SOE_STEP_KWH)])
     power_row = np.concatenate(
@@ -309,6 +311,7 @@ def _backward_pass_value(
         None,
         DEFAULT_CAPABILITIES,
         min_grid_export_kwh=target,
+        export_cap_kwh=export_cap,
     )
     return float(values[0])
 
@@ -321,6 +324,7 @@ def _selector_value(
     sell: float,
     soe: float,
     target: float | None,
+    export_cap: float | None = None,
 ) -> float:
     """The selector's argmax value under the same zero continuation."""
     result = select_action(
@@ -336,6 +340,7 @@ def _selector_value(
             solar_production=[solar],
             dt=DT,
             min_grid_export_kwh=None if target is None else [target],
+            export_cap_kwh=None if export_cap is None else [export_cap],
         ),
         battery_settings=settings,
     )
@@ -400,4 +405,52 @@ def test_backward_passes_apply_the_selectors_minimum_export_mask(
     assert backward == pytest.approx(constrained, abs=1e-9), (
         f"{backward_pass} backward pass valued this state at {backward} while "
         f"the selector's best export-meeting candidate is worth {constrained}"
+    )
+
+
+# Exporting pays (positive sell price), so uncapped every pass exports as hard
+# as it can and each case below shows the fuse's export cap (#910) moving V.
+# 0.5 kWh per 15-minute period is a 2 kW fuse limit.
+EXPORT_CAP_KWH = 0.5
+EXPORT_CAP_CASES: dict[str, dict[str, float]] = {
+    # A mid battery would discharge at full rate; the cap holds it to ~2 kW.
+    "battery_export": {"home": 0.1, "solar": 0.0, "at_max": 0.0},
+    # A 1 kWh solar surplus below max: the SOLAR_EXPORT bypass exports all of
+    # it, over the cap, so the cap must mask that column too.
+    "solar_bypass_over_cap": {"home": 0.0, "solar": 4.0, "at_max": 0.0},
+    # The same surplus into a full battery: even the least-export action is
+    # over the cap, so the floor keeps it rather than emptying the row.
+    "unmeetable_at_full": {"home": 0.0, "solar": 4.0, "at_max": 1.0},
+}
+
+
+@pytest.mark.parametrize("backward_pass", ["grid", "pwl"])
+@pytest.mark.parametrize("case", EXPORT_CAP_CASES)
+def test_backward_passes_apply_the_selectors_export_cap_mask(
+    backward_pass: str, case: str
+) -> None:
+    """A backward pass that ignores the export cap values a discharge the
+    replay will never plan (P1). Both passes must land on the selector's
+    capped value, and the "constrain, don't raise" floor must hold."""
+    settings = make_battery_settings(cycle_cost_per_kwh=0.0)
+    spec = EXPORT_CAP_CASES[case]
+    home, solar, buy, sell = spec["home"], spec["solar"], 1.5, 2.0
+    soe = (
+        settings.max_soe_kwh
+        if spec["at_max"]
+        else settings.min_soe_kwh + 160 * SOE_STEP_KWH
+    )
+
+    capped = _selector_value(
+        settings, home, solar, buy, sell, soe, None, EXPORT_CAP_KWH
+    )
+    uncapped = _selector_value(settings, home, solar, buy, sell, soe, None)
+    assert capped < uncapped, "fixture no longer discriminates"
+
+    backward = _backward_pass_value(
+        backward_pass, settings, home, solar, buy, sell, soe, None, EXPORT_CAP_KWH
+    )
+    assert backward == pytest.approx(capped, abs=1e-9), (
+        f"{backward_pass} backward pass valued this state at {backward} while "
+        f"the selector's best export-capped candidate is worth {capped}"
     )

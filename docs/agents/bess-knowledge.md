@@ -740,8 +740,16 @@ configured.
   PATCH and wizard save paths run these invariants *before* persisting and
   reject with 422, so a refused value never reaches `bess_settings.json`
   (where it would fail every later startup, #917).
-- **Out of scope**: export-side/feed-in capacity limits (a different
-  regulatory concept), and any change to `HomePowerMonitor`'s own runtime
+- **Export is capped too (#910)**: a fuse trips on current in either
+  direction, so the same per-period limit bounds `grid_exported` (battery
+  plus solar export), via `period_export_caps_kwh`. It is filtered right
+  after the import cap, before the minimum export, with the same "constrain,
+  never raise" floor: a solar surplus a full battery cannot absorb still
+  exports. Peak-shaving and Power Down session caps stay import-only. Every
+  discharge candidate is a lattice step, so the written rate delivers exactly
+  the capped plan and nothing rounds it over the fuse.
+- **Out of scope**: regulatory feed-in limits (a grid operator's export
+  ceiling below the fuse), and any change to `HomePowerMonitor`'s own runtime
   behavior — it remains the real-time safety net; this constraint just makes
   the *plan* agree with it.
 

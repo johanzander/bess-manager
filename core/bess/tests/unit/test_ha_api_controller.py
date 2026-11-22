@@ -2002,3 +2002,113 @@ class TestGridPolarityOverride:
         }
         with pytest.raises(ValueError, match="grid_power_polarity"):
             store.get_grid_power_polarity()
+
+
+# ── Real-time home load on platforms with no load register (issue #598) ──────
+#
+# huawei_solar has no household-load register outside an EMMA, so after #818
+# nothing is mapped to local_load_power on a meterless-EMMA Huawei install. The
+# five power readings it does have balance to the house load exactly as the
+# lifetime counters do, so the live reading must come from that balance rather
+# than reading as absent (which the dashboard renders as a flat 0 W).
+
+_HUAWEI_PV = "sensor.inverter_input_power"
+_HUAWEI_GRID = "sensor.power_meter_active_power"
+_HUAWEI_BATTERY = "sensor.batteries_charge_discharge_power"
+
+
+def _huawei_power_ctrl(
+    states: dict[str, str], extra_sensors: dict | None = None
+) -> HomeAssistantAPIController:
+    """Huawei-shaped controller: signed export-positive grid meter, signed
+    charge-positive battery, PV power, and no local_load_power mapping."""
+    c = HomeAssistantAPIController(
+        ha_url="http://ha.local:8123",
+        token="test-token",
+        settings_store=_settings_store(
+            {
+                "pv_power": _HUAWEI_PV,
+                "import_power": _HUAWEI_GRID,
+                "export_power": _HUAWEI_GRID,
+                "battery_charge_power": _HUAWEI_BATTERY,
+                "battery_discharge_power": _HUAWEI_BATTERY,
+                **(extra_sensors or {}),
+            }
+        ),
+        grid_power_polarity="export_positive",
+        battery_power_polarity="charge_positive",
+    )
+    c.max_attempts = 1
+    c.retry_base_delay = 0
+
+    def _get(url: str, *args: object, **kwargs: object) -> object:
+        entity_id = url.rsplit("/", 1)[-1]
+        return _mock_response({"state": states[entity_id]})
+
+    c.session.get = _session_method_mock(  # type: ignore[method-assign]
+        "get", side_effect=_get
+    )
+    return c
+
+
+class TestRealtimeLoadPowerWithoutLoadRegister:
+    def test_grid_charging_reports_the_house_load_not_the_battery_draw(self) -> None:
+        """Night grid charge: 3 kW imported, 2.6 kW into the battery, no
+        solar. The house is drawing the remaining 400 W."""
+        c = _huawei_power_ctrl(
+            {_HUAWEI_PV: "0", _HUAWEI_GRID: "-3000", _HUAWEI_BATTERY: "2600"}
+        )
+        assert c.get_local_load_power() == pytest.approx(400.0)
+
+    def test_solar_export_with_battery_discharge(self) -> None:
+        """Daytime: 4 kW solar plus 1 kW from the battery, 3.5 kW exported —
+        the house uses 1.5 kW."""
+        c = _huawei_power_ctrl(
+            {_HUAWEI_PV: "4000", _HUAWEI_GRID: "3500", _HUAWEI_BATTERY: "-1000"}
+        )
+        assert c.get_local_load_power() == pytest.approx(1500.0)
+
+    def test_mapped_load_sensor_is_read_directly(self) -> None:
+        """An EMMA install maps a real load entity; that reading wins."""
+        c = _huawei_power_ctrl(
+            {
+                _HUAWEI_PV: "0",
+                _HUAWEI_GRID: "-3000",
+                _HUAWEI_BATTERY: "2600",
+                "sensor.emma_load_power": "777",
+            },
+            extra_sensors={"local_load_power": "sensor.emma_load_power"},
+        )
+        assert c.get_local_load_power() == 777.0
+
+    def test_unreadable_input_reports_no_load_and_names_it(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Dropping a term would report load plus that flow (the #528 defect),
+        so a missing input means no value — and the log says which one."""
+        c = _huawei_power_ctrl(
+            {_HUAWEI_PV: "0", _HUAWEI_GRID: "unavailable", _HUAWEI_BATTERY: "2600"}
+        )
+        with caplog.at_level(logging.WARNING):
+            assert c.get_local_load_power() is None
+        assert "import_power" in caplog.text
+
+    def test_small_negative_from_read_skew_reads_as_zero(self) -> None:
+        """The five entities are read one after another, so a near-idle house
+        can balance a few watts below zero. That is sampling skew, not a fault."""
+        c = _huawei_power_ctrl(
+            {_HUAWEI_PV: "0", _HUAWEI_GRID: "-2950", _HUAWEI_BATTERY: "3000"}
+        )
+        assert c.get_local_load_power() == 0.0
+
+    def test_large_negative_balance_reports_no_load(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A deficit far beyond read skew means the inputs disagree (e.g. a
+        wrong sign convention); a plausible number would hide that."""
+        c = _huawei_power_ctrl(
+            {_HUAWEI_PV: "0", _HUAWEI_GRID: "-1000", _HUAWEI_BATTERY: "3000"}
+        )
+        with caplog.at_level(logging.WARNING):
+            assert c.get_local_load_power() is None
+        assert "negative" in caplog.text

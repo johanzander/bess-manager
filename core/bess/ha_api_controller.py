@@ -32,6 +32,11 @@ from .settings_store import SettingsStore, apply_signed_pair_aliases
 logger = logging.getLogger(__name__)
 # logger.setLevel(logging.DEBUG)
 
+# The five live power entities are read one after another, so a near-idle
+# house can balance slightly below zero from sampling skew alone (#598).
+# Beyond this the readings genuinely disagree and no load is reported.
+_LIVE_LOAD_SKEW_TOLERANCE_W = 100.0
+
 # Growatt GEN4 via solax_modbus: the single place that says which TOU slots the
 # product controls (#794). The suffix map, the setup wizard's required-sensor
 # list and the controller health check all derive from this — never restate it.
@@ -3027,8 +3032,61 @@ class HomeAssistantAPIController:
         return self._get_sensor_value("export_power")
 
     def get_local_load_power(self):
-        """Get current home load power in watts."""
-        return self._get_sensor_value("local_load_power")
+        """Get current home load power in watts.
+
+        Reads the mapped load entity when it has a value, otherwise derives
+        the load from the live power balance — the real-time counterpart of
+        :meth:`get_load_consumption_lifetime`. huawei_solar has no load
+        register outside an EMMA (#818), so meterless installs always take the
+        derived path (#598).
+
+        Returns ``None`` when any of the five power readings is unreadable,
+        since dropping a term reports load plus that flow (issue #528), and
+        when the balance is negative by more than
+        ``_LIVE_LOAD_SKEW_TOLERANCE_W``, which means the inputs disagree.
+        """
+        direct = self._get_sensor_value("local_load_power")
+        if direct is not None:
+            return direct
+
+        inputs = {
+            "pv_power": self.get_pv_power(),
+            "import_power": self.get_import_power(),
+            "export_power": self.get_export_power(),
+            "battery_charge_power": self.get_battery_charge_power(),
+            "battery_discharge_power": self.get_battery_discharge_power(),
+        }
+        missing = [key for key, value in inputs.items() if value is None]
+        if missing:
+            logger.warning(
+                "Cannot derive home load power: %s unreadable "
+                "(unmapped or unavailable). All five power readings are required.",
+                ", ".join(missing),
+            )
+            return None
+        derived = derive_load_consumption(
+            solar_production=inputs["pv_power"],
+            import_from_grid=inputs["import_power"],
+            export_to_grid=inputs["export_power"],
+            battery_charged=inputs["battery_charge_power"],
+            battery_discharged=inputs["battery_discharge_power"],
+        )
+        if derived >= 0:
+            return derived
+        if derived >= -_LIVE_LOAD_SKEW_TOLERANCE_W:
+            return 0.0
+        logger.warning(
+            "Derived home load power is negative (%.0f W) - power readings "
+            "disagree, so no value can be reported. pv=%.0f import=%.0f "
+            "export=%.0f charge=%.0f discharge=%.0f",
+            derived,
+            inputs["pv_power"],
+            inputs["import_power"],
+            inputs["export_power"],
+            inputs["battery_charge_power"],
+            inputs["battery_discharge_power"],
+        )
+        return None
 
     def get_net_battery_power(self):
         """Get net battery power (positive = charging, negative = discharging) in watts."""

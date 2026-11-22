@@ -154,7 +154,7 @@ class TestWriteSchedule:
         ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
         ha.read_huawei_tou_periods.return_value = ["02:00-02:59/1234567/+"]
         controller.sync_to_hardware(ha, 0)
-        ha.write_huawei_tou_periods.assert_called_once_with("")
+        ha.write_huawei_tou_periods.assert_called_once_with("00:00-00:14//+")
 
     def test_write_schedule_raises_for_lg_resu_battery(
         self, controller: HuaweiController
@@ -355,6 +355,10 @@ class FakeHuaweiInverter:
         return self.periods_text.splitlines() if self.periods_text else []
 
     def write_huawei_tou_periods(self, periods_text: str) -> None:
+        # huawei_solar's set_tou_periods parses "".split("\n") as one empty
+        # period and fails the call with HTTP 500 — it cannot clear the list.
+        if periods_text == "":
+            raise RuntimeError("500 Server Error: set_tou_periods")
         self.periods_text = periods_text
         self.write_count += 1
 
@@ -488,6 +492,38 @@ class TestTouReadback:
         second.sync_to_hardware(inverter, 0)
 
         assert inverter.periods_text == text_after_first
+
+    def test_idle_plan_clears_periods_left_on_the_battery(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """Periods from an earlier plan repeat every day until replaced.
+
+        Left in place, yesterday's discharge window drains the battery into
+        the house again today while BESS believes it planned IDLE.
+        """
+        inverter = FakeHuaweiInverter("14:45-15:29/1234567/-\n15:45-20:29/1234567/-")
+        restarted = restart_against(inverter, battery_settings)
+
+        wrote = run_cycle(restarted, inverter, make_schedule_mock(make_intents({})))
+
+        assert wrote is True
+        assert inverter.periods_text == "00:00-00:14//+"
+
+    def test_cleared_battery_is_not_rewritten_after_restart(
+        self, battery_settings: BatterySettings
+    ) -> None:
+        """A battery holding only a no-days period holds no schedule.
+
+        Reading it back as a real period would make every restart during an
+        idle plan rewrite the battery's flash for nothing.
+        """
+        inverter = FakeHuaweiInverter("00:00-00:14//+")
+        restarted = restart_against(inverter, battery_settings)
+
+        wrote = run_cycle(restarted, inverter, make_schedule_mock(make_intents({})))
+
+        assert wrote is False
+        assert inverter.write_count == 0
 
     def test_unparseable_period_text_raises(
         self, battery_settings: BatterySettings

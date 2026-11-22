@@ -14,6 +14,7 @@ All user-facing settings should be configured and overridden via config.yaml:
 For production configuration, all user-facing values must be properly configured in config.yaml.
 """
 
+import copy
 from dataclasses import dataclass, field, fields
 from datetime import datetime
 from typing import Any
@@ -334,6 +335,20 @@ class HomeSettings:
             self.power_monitoring_enabled = home_config["power_monitoring_enabled"]
             self.__post_init__()
         return self
+
+
+def check_settings_update(
+    current: BatterySettings | HomeSettings, updates: dict[str, Any]
+) -> None:
+    """Raise exactly what ``current.update(**updates)`` would raise, without
+    modifying ``current``.
+
+    Lets a caller reject an update before persisting it. The invariants stay
+    declared only in the model's ``__post_init__``; this runs them on a copy.
+    A value persisted before being checked survives the rejection and makes
+    every later startup fail on the same invariant (#917).
+    """
+    copy.deepcopy(current).update(**updates)
 
 
 @dataclass

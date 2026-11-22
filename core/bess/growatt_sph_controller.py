@@ -175,6 +175,9 @@ class GrowattSphController(InverterController):
 
         Returns:
             Tuple of (writes, disables) — always (2, 0) for SPH
+
+        Raises:
+            RuntimeError: If either write failed, after both were attempted.
         """
         charge_power = 100  # Full power percentage
         discharge_power = 100
@@ -187,6 +190,7 @@ class GrowattSphController(InverterController):
         mains_enabled = len(self._charge_periods) > 0
 
         writes = 0
+        failures: list[str] = []
 
         logger.info(
             "SPH HARDWARE: Writing charge periods (power=%d%%, stop_soc=%d%%, mains=%s): %s",
@@ -206,6 +210,7 @@ class GrowattSphController(InverterController):
         except Exception as e:
             logger.error("FAILED: write_ac_charge_times: %s", e)
             # Failure already recorded by _api_request via record_failure_once
+            failures.append(f"write_ac_charge_times: {e}")
 
         logger.info(
             "SPH HARDWARE: Writing discharge periods (power=%d%%, stop_soc=%d%%): %s",
@@ -223,6 +228,17 @@ class GrowattSphController(InverterController):
         except Exception as e:
             logger.error("FAILED: write_ac_discharge_times: %s", e)
             # Failure already recorded by _api_request via record_failure_once
+            failures.append(f"write_ac_discharge_times: {e}")
+
+        if failures:
+            # evaluate_intents compares against this controller's own model,
+            # which apply_intents has already moved to the new plan, so a
+            # swallowed failure would never be retried (#916). Raising makes
+            # battery_system_manager._apply_schedule set
+            # _hardware_write_pending and resend both calls next cycle.
+            raise RuntimeError(
+                f"{len(failures)} SPH write(s) failed: {'; '.join(failures)}"
+            )
 
         return writes, 0
 

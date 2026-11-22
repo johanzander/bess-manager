@@ -30,6 +30,9 @@ def _check(body: str) -> subprocess.CompletedProcess[str]:
         "Closes #12",
         "fixes #12",
         "Resolves #12",
+        # The fix verb that does not auto-close (#907).
+        "Resolves-on-release #12",
+        "resolves-on-release #12",
         "Part of #409",
         "tracking #409",
         "Tracks #409",
@@ -76,14 +79,20 @@ def test_the_untouched_pr_template_fails() -> None:
     # must not satisfy the check, or an unfilled template would pass.
     template = (REPO_ROOT / ".github" / "pull_request_template.md").read_text()
     assert _check(template).returncode == 1
-    assert _check(template.replace("Refs #", "Refs #828")).returncode == 0
+    filled = template.replace(
+        "\nResolves-on-release #\n", "\nResolves-on-release #828\n"
+    )
+    assert filled != template
+    assert _check(filled).returncode == 0
 
 
 def test_the_linkage_regex_is_declared_once() -> None:
     # The check and the board must not be able to disagree. Before #828 the
     # work-verb regex was kept "byte-identical" by hand in two jq programs;
     # a third copy in the check would be one more place for them to drift.
-    pattern = re.compile(r"\(\?:fixes\|closes\|resolves")
+    # The verb list itself, so a copy of either the fix or the work verbs
+    # (#907 split them) is caught wherever it sits.
+    pattern = re.compile(r"fixes\|closes\|resolves")
     holders = sorted(
         str(p.relative_to(REPO_ROOT))
         for p in (REPO_ROOT / "scripts").rglob("*")

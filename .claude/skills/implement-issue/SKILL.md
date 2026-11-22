@@ -653,14 +653,13 @@ go straight to executing Option 2, do not present its 3-option menu, body:
 - Guard chosen: <mechanical check | skill-step change | prose rule | none, because …>
 - Budget: <rule replaced/merged/deleted | net +N lines, why | cap raised, why>
 
-Refs #<n>
+Resolves-on-release #<n>
 ```
 
-**Every PR body carries `Refs #<issue>`** — and only the graduation PR carries
-`Closes #<issue>`, per the no-auto-close rule. A beta or intermediate PR that
-used a closing verb would close the reporter's issue before the fix has shipped
-to them; one that referenced nothing at all would be invisible to the board,
-which associates PRs with issues by that line.
+**The fix PR carries `Resolves-on-release #<issue>`** — the non-closing fix
+verb that moves the issue to *In Verification*; related or partial work uses
+`Refs` (#907). Only the graduation PR carries `Closes #<issue>`, per the
+no-auto-close rule: earlier, it would close the issue before the fix ships.
 
 **These two sections are the point of the PR, not paperwork.** A reviewer
 cannot tell a real guard from a vacuous one by reading it — three times in

@@ -900,28 +900,81 @@ def test_worktree_abandoned_behind_a_closed_unmerged_pr_is_stale(
     assert item["column"] != "In Progress"
 
 
-def test_a_merged_pr_on_the_issue_branch_reads_as_in_verification(
+def test_a_merged_pr_on_the_issue_branch_is_visible_but_not_the_fix(
     bin_dir: Path,
 ) -> None:
-    """#428/#705: the shipping PR merged on `feat/issue-428-consumption-overlay`
-    and, under the no-auto-close rule, its body links the issue only as a bare
-    `#428` -- no work verb. Branch convention plus a non-cross-ref body mention
-    of the same number is enough to place the issue In Verification, so a board
-    pass stops reading a shipped-to-beta issue as un-started."""
-    issue = _issue(428, labels=[{"name": "enhancement"}])
+    """#907, the #795/#791 shape: #795 ("ci: run Stage 2 sub-agent in the
+    foreground") merged on `fix/issue-791-stage2-foreground` with the body
+    `Refs #788, #791.` It fixed the analysis workflow, not the bug, yet branch
+    convention plus the bare `#791` mention moved #791 to In Verification and
+    kept `announce_verification` firing for six weeks.
+
+    Branch convention says which issue a PR worked on, never that it fixed it:
+    the PR stays visible in `merged_prs`, but only a fix verb sets `merged_pr`
+    and `fixed_by`."""
+    issue = _issue(791, labels=[{"name": "bug"}, {"name": "analyzed"}])
     merged = [
         {
-            "number": 705,
-            "headRefName": "feat/issue-428-consumption-overlay",
-            "body": "Redesign from the discussion on #428. Ships the overlay.",
+            "number": 795,
+            "headRefName": "fix/issue-791-stage2-foreground",
+            "body": "Refs #788, #791.\n\nStage 2 run on #791 failed with "
+            "'Stage 2 posted NO comment'.",
         }
     ]
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
 
     item = _run(bin_dir)["items"][0]
 
-    assert item["merged_pr"] == 705
-    assert item["merged_prs"] == [705]
+    assert item["merged_prs"] == [795]
+    assert item["fixed_by"] == []
+    assert item["merged_pr"] is None
+    assert item["column"] != "In Verification"
+
+
+def test_a_refs_line_on_a_fix_for_another_issue_does_not_fix_it(
+    bin_dir: Path,
+) -> None:
+    """#907, the #899/#880 shape: #899 fixes #886 and also carries `Refs #880`
+    because the gap was found while analysing #880. The fix verb puts #886 In
+    Verification; the `Refs` line keeps #880 visible but leaves its column
+    alone, and #880 is not a release close candidate."""
+    issues = [
+        _issue(880, labels=[{"name": "bug"}, {"name": "analyzed"}]),
+        _issue(886, labels=[{"name": "bug"}, {"name": "analyzed"}]),
+    ]
+    merged = [
+        {
+            "number": 899,
+            "headRefName": "fix/issue-886-hardware-write-log",
+            "body": "From the #880 analysis: VPP writes were dropped.\n\n"
+            "Resolves-on-release #886\nRefs #880\n",
+        }
+    ]
+    _write_shim(bin_dir, "gh", _gh_shim(issues, [], [], merged))
+
+    items = {i["number"]: i for i in _run(bin_dir)["items"]}
+
+    assert items[886]["fixed_by"] == [899]
+    assert items[886]["merged_pr"] == 899
+    assert items[886]["column"] == "In Verification"
+    assert items[880]["merged_prs"] == [899]
+    assert items[880]["fixed_by"] == []
+    assert items[880]["merged_pr"] is None
+    assert items[880]["column"] != "In Verification"
+
+
+def test_resolves_on_release_marks_the_fix_without_closing(bin_dir: Path) -> None:
+    """#907: `Resolves-on-release #N` is the fix verb for every PR short of
+    graduation -- GitHub does not auto-close on it, so the issue stays open
+    through beta while the board reads it as fixed."""
+    issue = _issue(520, labels=[{"name": "enhancement"}])
+    merged = [_pr(725, body="Resolves-on-release #520", headRefName="feat/vpp-model")]
+    _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
+
+    item = _run(bin_dir)["items"][0]
+
+    assert item["fixed_by"] == [725]
+    assert item["merged_pr"] == 725
     assert item["column"] == "In Verification"
 
 
@@ -1074,27 +1127,25 @@ def test_active_follow_up_work_over_a_merged_pr_is_in_progress(bin_dir: Path) ->
     assert item["column"] == "In Progress"
 
 
-def test_a_merged_intermediate_pr_keeps_the_issue_in_verification(
-    bin_dir: Path,
+@pytest.mark.parametrize("verb", ["Part of", "Refs", "Tracks", "tracking"])
+def test_a_merged_related_pr_is_visible_but_not_the_fix(
+    bin_dir: Path, verb: str
 ) -> None:
-    """A merged intermediate PR (`Part of #N`) means the work has landed on main
-    and is awaiting graduation -- In Verification, never re-dispatchable.
-
-    This is the no-auto-close contract: beta PRs omit `Closes #N` until the
-    fix graduates, so `Part of`/`Refs` are how a fix normally reads on merge.
-    When the merged scan was narrowed to closing keywords only, issues whose
-    fix had already merged (#643 -> #675, #571 -> #584, #592 -> #619, #666 ->
-    #672, #542 -> #591) fell through to Backlog / Ready for Dev, so a backlog
-    pass could re-dispatch an issue whose partial work already landed."""
+    """#907: `Refs` / `Part of` / `Tracks` mean related or partial. The PR stays
+    visible in `merged_prs`, but it does not move the issue to In Verification
+    -- that needs a fix verb (`Resolves-on-release`, or a closing verb on the
+    graduation PR). Before #907 every one of these flipped the column, so a CI
+    or tooling PR that cited an issue read as its fix."""
     issue = _issue(517, labels=[{"name": "bug"}, {"name": "analyzed"}])
-    merged = [_pr(518, body="Part of #517", headRefName="fix/issue-517-a")]
+    merged = [_pr(518, body=f"{verb} #517", headRefName="fix/issue-517-a")]
     _write_shim(bin_dir, "gh", _gh_shim([issue], [], [], merged))
 
     item = _run(bin_dir)["items"][0]
 
-    assert item["merged_pr"] == 518
     assert item["merged_prs"] == [518]
-    assert item["column"] == "In Verification"
+    assert item["fixed_by"] == []
+    assert item["merged_pr"] is None
+    assert item["column"] != "In Verification"
 
 
 def test_a_merged_cross_ref_does_not_move_an_issue_to_in_verification(

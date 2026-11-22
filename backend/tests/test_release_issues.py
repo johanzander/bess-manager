@@ -1,10 +1,10 @@
 """Tests for scripts/release-issues.sh — the open issues a stable release ships.
 
 The release skill closes the issues a release shipped (#827). Which issue a PR
-belongs to is decided in exactly one place, `scripts/backlog-digest.sh` (its
-work-verb scan plus branch convention, #684), so this script reads the digest's
-per-issue `merged_prs` instead of scanning PR text itself. It adds only the tag
-range: an issue is a candidate when one of its merged PRs is in
+fixed is decided in exactly one place, `scripts/backlog-digest.sh` (#684), so
+this script reads the digest's per-issue `fixed_by` -- the merged PRs whose body
+carries a fix verb (#907) -- instead of scanning PR text itself. It adds only
+the tag range: an issue is a candidate when one of its fix PRs is in
 `<prev>..<new>`, and it is *partial* when another PR is still open.
 
 Fixtures: a throwaway git repo with two tags, and a hand-written digest handed
@@ -76,12 +76,19 @@ def _run(repo: Path, digest: Path) -> subprocess.CompletedProcess:
 
 
 def _item(
-    number: int, title: str, merged_prs: list[int], open_prs: Sequence[int] = ()
+    number: int,
+    title: str,
+    fixed_by: list[int],
+    open_prs: Sequence[int] = (),
+    merged_prs: list[int] | None = None,
 ) -> dict:
     return {
         "number": number,
         "title": title,
-        "merged_prs": merged_prs,
+        "fixed_by": fixed_by,
+        # Every fix PR is also a linked one; a test widens this to add PRs that
+        # only mention the issue.
+        "merged_prs": fixed_by if merged_prs is None else merged_prs,
         "prs": [
             {"number": n, "mergeable": "MERGEABLE", "isDraft": True} for n in open_prs
         ],
@@ -111,14 +118,29 @@ def test_issue_with_another_open_pr_is_partial(tmp_path: Path) -> None:
 
 
 def test_issue_found_through_a_pr_that_names_it_nowhere(tmp_path: Path) -> None:
-    # #765 never says "Refs #763" in its commit text. The digest still links
-    # them (branch convention), and the script follows the digest.
+    # #765's commit subject never names #763. The digest links them from the PR
+    # body, and the script follows the digest, not the commit text.
     repo = _make_repo(tmp_path)
     digest = _digest(tmp_path, [_item(763, "Diff color", [765])])
 
     proc = _run(repo, digest)
 
     assert "#763" in proc.stdout and "resolved" in proc.stdout
+
+
+def test_a_pr_that_only_mentions_an_issue_does_not_make_it_a_candidate(
+    tmp_path: Path,
+) -> None:
+    # #907, the #795/#791 shape: a merged PR linked by `Refs` or by branch
+    # convention is in `merged_prs` but not in `fixed_by`. Shipping it must not
+    # put the issue up for closing.
+    repo = _make_repo(tmp_path)
+    digest = _digest(tmp_path, [_item(791, "no night charge", [], merged_prs=[797])])
+
+    proc = _run(repo, digest)
+
+    assert proc.returncode == 0, proc.stderr
+    assert "#791" not in proc.stdout
 
 
 def test_issue_shipped_in_an_earlier_release_is_not_listed(tmp_path: Path) -> None:

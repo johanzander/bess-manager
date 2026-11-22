@@ -363,8 +363,10 @@ class HuaweiController(InverterController):
                 non-empty working-mode option list with no supported Time Of
                 Use option (stock ``time_of_use_luna2000`` or EMMA's
                 ``Time Of Use``) — i.e. it's an LG RESU battery, not supported.
+            RuntimeError: If any write failed, after every write was attempted.
         """
         writes = 0
+        failures: list[str] = []
 
         # Read before writing anything. The read raises rather than reporting
         # an empty list, so ordering decides what a failed read leaves behind:
@@ -403,6 +405,7 @@ class HuaweiController(InverterController):
                     writes += 1
                 except Exception as e:
                     logger.error("FAILED: set_huawei_working_mode: %s", e)
+                    failures.append(f"set_huawei_working_mode: {e}")
 
         has_charge_period = any(p["flag"] == "+" for p in self._periods)
         try:
@@ -410,6 +413,7 @@ class HuaweiController(InverterController):
             writes += 1
         except Exception as e:
             logger.error("FAILED: set_grid_charge: %s", e)
+            failures.append(f"set_grid_charge: {e}")
 
         if hardware_periods is not None and hardware_periods == self._periods:
             logger.info(
@@ -417,15 +421,26 @@ class HuaweiController(InverterController):
                 "— no write",
                 len(self._periods),
             )
-            return writes, 0
+        else:
+            periods_text = self._periods_to_text()
+            logger.info("HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods))
+            try:
+                controller.write_huawei_tou_periods(periods_text)
+                writes += 1
+            except Exception as e:
+                logger.error("FAILED: write_huawei_tou_periods: %s", e)
+                failures.append(f"write_huawei_tou_periods: {e}")
 
-        periods_text = self._periods_to_text()
-        logger.info("HUAWEI HARDWARE: Writing %d TOU period(s)", len(self._periods))
-        try:
-            controller.write_huawei_tou_periods(periods_text)
-            writes += 1
-        except Exception as e:
-            logger.error("FAILED: write_huawei_tou_periods: %s", e)
+        if failures:
+            # apply_intents has already moved this controller's model to the
+            # new plan, and evaluate_intents compares against that model — a
+            # swallowed failure would read as "schedules match" every cycle
+            # after, leaving the battery on the old periods (#916). Raising
+            # makes battery_system_manager._apply_schedule set
+            # _hardware_write_pending and retry the whole sync next cycle.
+            raise RuntimeError(
+                f"{len(failures)} Huawei write(s) failed: {'; '.join(failures)}"
+            )
 
         return writes, 0
 

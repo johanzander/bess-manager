@@ -135,19 +135,19 @@ merged_prs=$(gh pr list --repo "$repo" --state merged --limit 200 \
   | jq -c -L "$jq_lib" 'include "pr-linkage"; [ .[] | {
       number,
       headRefName,
-      # WORK references only (scripts/lib/pr-linkage.jq): a merged PR must not
-      # flip an issue it merely names to In Verification. Drives both
-      # `merged_pr` (the column) and `merged_prs` (the visibility list).
+      # WORK references (scripts/lib/pr-linkage.jq): drive `merged_prs`, the
+      # visibility list.
       refs: (.body | linkage_refs),
+      # FIX references: the only thing that drives `merged_pr` (the In
+      # Verification column) and `fixed_by` (release close candidates), #907.
+      fix_refs: (.body | fix_refs),
       # Any `#N` LEFT in the body once code spans and the cross-reference
       # phrases ("Related to", "See also", "Blocked by", ...) are stripped.
-      # Used ONLY to corroborate a branch-convention match in `merged_pr_for`:
-      # the branch name alone is not trusted to flip a column (a merged PR on
+      # Used ONLY to corroborate a branch-convention match for `merged_prs`:
+      # the branch name alone does not link a merged PR (one on
       # `fix/issue-403-logging` whose body says "Related to #403. Not closing
-      # it" must not), but branch convention PLUS a non-cross-ref body mention
-      # of the same number is the #428/#705 case -- a merged PR that genuinely
-      # implemented the issue but, under the no-auto-close rule, carries no
-      # closing verb.
+      # it" must not be listed), but branch convention PLUS a non-cross-ref
+      # body mention of the same number does -- the #428/#705 shape.
       mentions: [ (.body // "")
                   | strip_code_spans
                   | gsub("(?i)(blocked by|depends on|unblocks?(?:ing)?|related to|relationship to|follow[- ]?up to|see also|see|not part of) #[0-9]+"; "")
@@ -487,35 +487,30 @@ jq -n \
   # A merged PR for the same issue means the branch already landed and the
   # worktree is just un-pruned rot.
   #
-  # A merged PR belongs to an issue when EITHER:
-  #   (a) its body carries a work-verb reference (`fixes|closes|resolves|refs|
-  #       part of|tracking` #N -- the `refs` list), OR
+  # A merged PR is LINKED to an issue (listed in `merged_prs`) when EITHER:
+  #   (a) its body carries a work-verb reference (the `refs` list), OR
   #   (b) its head branch follows the dispatch convention `.../issue-<n>-...`
   #       (which `run-agent.sh` and implement-issue Step 4 enforce) AND the
   #       body still mentions `#n` once cross-reference phrases are stripped
-  #       (the `mentions` list).
+  #       (the `mentions` list) -- #705 linked #428 only as a bare `#428`.
+  #       A merged PR on `fix/issue-403-logging` whose body says "Related to
+  #       #403. Not closing it" is still not linked: `mentions` stripped it.
   #
-  # (b) exists because dropping the branch signal the instant a PR merges is
-  # the bug that left #428 reading `Backlog` after PR #705
-  # (`feat/issue-428-consumption-overlay`) shipped it to beta -- #705 links the
-  # issue only as a bare `#428` and a comment URL, no work verb, which is
-  # legitimate under the no-auto-close rule. The `mentions` half is what keeps
-  # (b) narrow: a merged PR on `fix/issue-403-logging` whose body says "Related
-  # to #403. Not closing it" still must NOT flip #403 -- the branch matches but
-  # the only body reference is a cross-ref phrase, which `mentions` has
-  # stripped. `prs_for` trusts the bare branch convention for OPEN PRs; the
-  # merged path is deliberately one notch stricter, because a merged PR moves a
-  # column and an open one does not.
-  #
-  # It still does not CLOSE the issue -- an open issue with a merged fix is the
-  # expected state through beta graduation. It drives the `In Verification`
-  # column and the `merged_prs` visibility list.
+  # A merged PR is the FIX for an issue only when its body carries a fix verb (the
+  # `fix_refs` list), #907. Linkage is not enough: `Refs` also means "related",
+  # and an `issue-<n>` branch says which issue a PR worked on, not that it fixed
+  # it -- #795 sat on `fix/issue-791-stage2-foreground`, fixed the analysis
+  # workflow, and read as the fix for #791 for six weeks. The fix drives the
+  # `In Verification` column (`merged_pr`) and `fixed_by`, which release close
+  # candidates come from. It still does not CLOSE the issue -- an open issue
+  # with a merged fix is the expected state through beta graduation.
   def merged_matches_issue($p; $n):
     (($p.refs | index($n)) != null)
     or (((($p.headRefName // "") | test("issue-\($n)(\\D|$)")))
         and (($p.mentions | index($n)) != null));
+  def merged_fixes_issue($p; $n): ($p.fix_refs | index($n)) != null;
   def merged_pr_for($n):
-    ([ $merged_prs[] | select(merged_matches_issue(.; $n)) ]) as $matches
+    ([ $merged_prs[] | select(merged_fixes_issue(.; $n)) ]) as $matches
     | if ($matches | length) == 0 then null else $matches[0].number end;
 
   # Column names match the board`s Status options exactly (Backlog, Analysis,
@@ -638,17 +633,20 @@ jq -n \
           last_analyze_comment: last_analyze_comment(.comments),
           priority: $prio,
           prs: $open_prs,
-          # Every merged PR that belongs to this issue -- a WORK-verb body
-          # reference (`fixes/closes/resolves/refs/part of/tracking`) OR the
-          # `issue-<n>` dispatch branch convention, the same association
-          # `merged_pr_for` uses. `merged_pr` above is the first in the order
-          # `gh` returns (the most recent merge) and drives the In Verification
-          # column; this plural exposes all of them, sorted, so a merged
-          # intermediate PR (`Part of #N`, which must not close the issue)
-          # stays visible even alongside later PRs.
+          # Every merged PR LINKED to this issue -- a work-verb body reference
+          # OR the `issue-<n>` branch convention (`merged_matches_issue`) --
+          # sorted, so related and partial PRs (`Refs`, `Part of`) stay
+          # visible alongside the fix.
           merged_prs: ([ $merged_prs[]
                          | select(merged_matches_issue(.; $i.number))
                          | .number ] | sort),
+          # The merged PRs that FIX it -- a fix-verb body reference only
+          # (`merged_fixes_issue`, #907). Release close candidates come from
+          # here. `merged_pr` is the first of them in the order `gh` returns
+          # (the most recent merge) and drives the In Verification column.
+          fixed_by: ([ $merged_prs[]
+                       | select(merged_fixes_issue(.; $i.number))
+                       | .number ] | sort),
           merged_pr: $merged_pr,
           worktree: ($wt.path // null),
           worktree_branch: ($wt.branch // null),

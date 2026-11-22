@@ -90,7 +90,8 @@ jobs:
                "Fix #${{ github.event.issue.number }}: <one-line summary>",
                body per the skill's Step 9 template (including the
                `## Scope assessment` section from CI-mode Step 3, and
-               `Closes #${{ github.event.issue.number }}`).
+               `Resolves-on-release #${{ github.event.issue.number }}` --
+               the fix verb that does not auto-close the issue on merge).
 
             5. Comment on the issue with the PR link, then:
                  gh issue edit ${{ github.event.issue.number }} --add-label has-fix-pr

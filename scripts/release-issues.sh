@@ -8,17 +8,19 @@
 # The release skill asks for approval BEFORE the new tag exists, so the end of
 # the range may be `origin/main` there and the real tag afterwards.
 #
-# Which issue a PR belongs to is decided in ONE place, scripts/backlog-digest.sh
-# (a work-verb scan of the PR body plus the `issue-<n>` branch convention).
-# That rule has been duplicated before and the copies drifted (#684), so this
-# script does not scan PR text: it reads the digest's per-issue `merged_prs` and
-# adds only the tag range. An issue is listed when one of its merged PRs is in
-# <previous-tag>..<new-tag>; it is PARTIAL when another PR for it is still open,
-# RESOLVED otherwise. The digest's `column` is deliberately ignored -- an issue
-# that was never put on the board reads as `Analysis` however finished it is.
+# Which PR fixed an issue is decided in ONE place, scripts/backlog-digest.sh
+# (a fix-verb scan of the PR body, scripts/lib/pr-linkage.jq). That rule has
+# been duplicated before and the copies drifted (#684), so this script does not
+# scan PR text: it reads the digest's per-issue `fixed_by` and adds only the tag
+# range. A PR that only says `Refs #N` is in the digest's `merged_prs` but not
+# in `fixed_by`, so shipping it does not make #N a candidate (#907). An issue is
+# listed when one of its fix PRs is in <previous-tag>..<new-tag>; it is PARTIAL
+# when another PR for it is still open, RESOLVED otherwise. The digest's
+# `column` is deliberately ignored -- an issue that was never put on the board
+# reads as `Analysis` however finished it is.
 #
-# Resolved is the script's reading, not a verdict: `Refs` only says "related",
-# so the release skill has the user confirm each issue before closing it.
+# Resolved is the script's reading, not a verdict: the PR author chose the fix
+# verb, so the release skill still has the user confirm each issue.
 #
 # DIGEST_JSON=<file> reads a saved digest instead of running it (tests).
 set -euo pipefail
@@ -46,7 +48,7 @@ listing=$(printf '%s' "$digest" | jq -r --arg subjects "$subjects" '
   ($subjects | split("\n") | map(select(length > 0) | split("\t") | {key: .[0], value: .[1]}) | from_entries) as $subj
   | .items[]
   | . as $i
-  | [ $i.merged_prs[] | tostring | select($subj[.] != null) ] as $in_range
+  | [ $i.fixed_by[] | tostring | select($subj[.] != null) ] as $in_range
   | select(($in_range | length) > 0)
   | [ $i.prs[].number | "#\(.)" ] as $open
   | "#\($i.number)\t\(if ($open | length) > 0 then "partial (open PR \($open | join(", ")))" else "resolved" end)\t\($i.title)\tshipped via \($in_range | map("#" + .) | join(", ")): \($subj[$in_range[0]])"

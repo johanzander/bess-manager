@@ -780,6 +780,36 @@ class TestDashboardHealthSummary:
         resp = _client.get("/api/dashboard-health-summary")
         assert resp.status_code == 503
 
+    def test_planning_only_fuse_protection_raises_no_banner(self) -> None:
+        """#911: on a platform with no real-time fuse guard, the health check
+        explains planning-only protection, but that is a fixed property of the
+        platform, not a fault -- it must not put a banner on every dashboard
+        open. Drives the real health check output through the endpoint."""
+        from core.bess.health_check import run_system_health_checks
+
+        system_manager = MagicMock()
+        system_manager._price_manager.check_health.return_value = []
+        system_manager._inverter_controller.check_health.return_value = []
+        system_manager.sensor_collector.check_health.return_value = []
+        system_manager._controller.sensors.get.return_value = None
+        system_manager._runtime_failure_tracker.get_failure_stats.return_value = {}
+        system_manager.home_settings.power_monitoring_enabled = True
+        system_manager.realtime_fuse_guard_supported = False
+        system_manager._power_monitor = None
+        health = run_system_health_checks(system_manager)
+
+        ctrl = _make_started_controller()
+        ctrl.system.get_cached_health_results.return_value = health
+        # Sustained: a fixed platform property never clears.
+        ctrl.system.get_sustained_health_failures.return_value = {"Power Monitoring"}
+        sys.modules["app"].bess_controller = ctrl  # type: ignore[attr-defined]
+
+        body = _client.get("/api/dashboard-health-summary").json()
+
+        assert body["hasWarnings"] is False
+        assert body["hasCriticalErrors"] is False
+        assert body["criticalIssues"] == []
+
     def test_critical_issue_names_the_failing_component(self):
         ctrl = _make_started_controller()
         ctrl.system.has_critical_sensor_failures.return_value = True

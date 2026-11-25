@@ -561,6 +561,24 @@ class TestPatchSettingsLiveUpdates:
         assert len(home_calls) >= 1
         assert "default_hourly" in home_calls[0][0][0]["home"]
 
+    def test_fuse_export_switch_is_saved_and_applied_live(
+        self, mock_controller: MagicMock
+    ) -> None:
+        """The Settings page's "Also limit export to the fuse" switch (#910)
+        travels through this generic PATCH path -- not the setup wizard's
+        `_HOME_MAP` -- so it must reach both the store and the live model."""
+        resp = _client.patch("/api/settings", json={"home": {"fuseLimitsExport": True}})
+        assert resp.status_code == 200
+
+        saved = mock_controller.settings_store.save_section.call_args_list[-1][0]
+        assert saved[0] == "home"
+        assert saved[1]["fuse_limits_export"] is True
+
+        calls = mock_controller.system.update_settings.call_args_list
+        home_calls = [c for c in calls if "home" in c[0][0]]
+        assert home_calls, "update_settings not called for home"
+        assert home_calls[0][0][0]["home"]["fuse_limits_export"] is True
+
     def test_home_update_excludes_stale_pre_migration_key(self, mock_controller):
         """A stale 'consumption' key coexisting with its renamed successor
         'default_hourly' (e.g. from an interrupted migration — the rename in

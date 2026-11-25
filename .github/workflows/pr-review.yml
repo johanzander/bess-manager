@@ -44,6 +44,30 @@ jobs:
           app-id: ${{ secrets.CLAUDE_REVIEWER_APP_ID }}
           private-key: ${{ secrets.CLAUDE_REVIEWER_PRIVATE_KEY }}
 
+      # Size gate, measured here rather than judged by the model. PR #915
+      # (~5k non-test lines) was approved after a review that skipped the
+      # checklist's call-site and lifecycle checks: one run cannot trace a diff
+      # that size. 2000 non-test lines tripped on 1 of the 200 PRs merged
+      # before it (#658, 2507). The REST files endpoint paginates; the GraphQL
+      # `files` field behind `gh pr view` stops at 100 files.
+      - name: Measure reviewable size
+        id: size
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.issue.number }}
+          MAX_REVIEWABLE_LINES: 2000
+        run: |
+          added=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" \
+            --jq '.[] | select(.filename | test("(^|/)(tests?|__tests__|e2e)/|\\.(spec|test)\\.[tj]sx?$|(^|/)test_[^/]*\\.py$|package-lock\\.json$|\\.lock$") | not) | .additions' \
+            | awk '{ s += $1 } END { print s + 0 }')
+          echo "added=$added" >> "$GITHUB_OUTPUT"
+          echo "limit=$MAX_REVIEWABLE_LINES" >> "$GITHUB_OUTPUT"
+          if [ "$added" -gt "$MAX_REVIEWABLE_LINES" ]; then
+            echo "oversized=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oversized=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: anthropics/claude-code-action@v1
         with:
           # Auth switch: BOT_AUTH=api_key uses the Anthropic API key (pay-per-token);
@@ -74,6 +98,21 @@ jobs:
               - .github/claude-bot.md        — review checklist
 
             Process:
+              0. Size gate (measured before you started; do not recompute):
+                 non-test lines added = ${{ steps.size.outputs.added }},
+                 limit = ${{ steps.size.outputs.limit }},
+                 oversized = ${{ steps.size.outputs.oversized }}.
+
+                 If oversized is `true`, do NOT do a line-level review: a
+                 diff this size cannot be traced properly in one run (PR
+                 #915 was approved that way). Read the diff only far enough
+                 to propose a split into independently mergeable PRs, each
+                 under the limit, naming each part's files and scope and
+                 which part should land first. Also list any blocker you
+                 already saw that would shape the split. Then submit the
+                 step 4 review as REQUEST_CHANGES with that proposal, and
+                 skip steps 2, 3 and 5.
+
               1. Read the PR diff:
                    gh pr diff ${{ github.event.issue.number }}
                    gh pr view ${{ github.event.issue.number }} --json title,body,files,headRefName,baseRefName
@@ -109,9 +148,11 @@ jobs:
                  There are exactly TWO verdicts, and the choice between them
                  is mechanical, not a matter of tone:
 
-                   - REQUEST_CHANGES — you can name at least one BLOCKER: a
-                     violation of a rule in `docs/agents/rules.md`, or a
-                     correctness bug stated as a concrete failure scenario
+                   - REQUEST_CHANGES — the step 0 size gate tripped, or you
+                     can name at least one BLOCKER: a violation of a rule in
+                     `docs/agents/rules.md`, a finding that a checklist item
+                     in `.github/claude-bot.md` calls a CONFIRMED finding, or
+                     a correctness bug stated as a concrete failure scenario
                      (inputs/state → wrong output or crash), with `file:line`
                      and the real code quoted.
                    - APPROVE — everything else, INCLUDING when you have
@@ -122,8 +163,16 @@ jobs:
                      author decides which to act on; that call is theirs, not
                      yours.
 
+                 Before you call any finding non-blocking, check it against
+                 `rules.md` and every checklist item that says CONFIRMED
+                 finding. If it matches one, it is a BLOCKER however mild it
+                 reads. PR #915 was approved with a separation-of-concerns
+                 violation the review had found itself and filed as
+                 "non-blocking". The anti-REQUEST_CHANGES guidance below is
+                 for genuine nits, never for a rule the review has matched.
+
                  **`COMMENT` is not a verdict in this repo. Never submit one.**
-                 If you catch yourself writing "not blocking", "worth a look",
+                 If, after that check, you catch yourself writing "not blocking", "worth a look",
                  or "neither finding blocks merge", you have already decided:
                  the verdict is APPROVE. Approving does not mean the PR is
                  perfect — it means you found nothing that MUST change before

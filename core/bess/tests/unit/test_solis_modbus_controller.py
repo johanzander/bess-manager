@@ -251,6 +251,21 @@ class TestPeriodLimitEnforcement:
 
         assert len(manager._discharge_periods) <= 6
 
+    def test_running_charge_block_beats_ended_ones(
+        self, manager: SolisModbusController
+    ) -> None:
+        """#926: 12 charge blocks against 6 slots. At 22:00 the running block
+        must hold a slot rather than lose it to blocks that ended hours ago.
+
+        Asserts the programmed charge periods: the plan-faithfulness simulator
+        models Growatt MIN only, and a Solis charge slot is the command itself."""
+        intents = make_intents(dict.fromkeys(range(0, 24, 2), "GRID_CHARGING"))
+
+        manager.apply_intents(make_schedule_mock(intents), current_period=22 * 4)
+
+        starts = [p["start_time"] for p in manager._charge_periods]
+        assert starts == ["12:00", "14:00", "16:00", "18:00", "20:00", "22:00"]
+
 
 # ── evaluate_intents ─────────────────────────────────────────────────────────
 

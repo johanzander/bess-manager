@@ -105,13 +105,15 @@ class GrowattSphController(InverterController):
     # ── Schedule building ─────────────────────────────────────────────────────
 
     def _build_candidate(
-        self, intents: list[str]
+        self, intents: list[str], current_period: int
     ) -> tuple[list[dict], list[dict], list[dict]]:
         """Compute charge/discharge periods and display TOU intervals for the
         given intents, without mutating self. Shared by apply_intents (commits
         onto self) and evaluate_intents (diffs against self's current state)."""
         charge_periods, discharge_periods, tou_intervals = (
-            self._build_period_list_schedule(intents, commit=False)
+            self._build_period_list_schedule(
+                intents, current_period=current_period, commit=False
+            )
         )
 
         logger.info(
@@ -126,11 +128,13 @@ class GrowattSphController(InverterController):
 
         return charge_periods, discharge_periods, tou_intervals
 
-    def _build_sph_periods(self) -> None:
+    def _build_sph_periods(self, current_period: int) -> None:
         """Unchanged public behavior: mutates self._charge_periods/
         self._discharge_periods/self.tou_intervals from self.strategic_intents.
         Delegates to _build_candidate, shared with apply_intents/evaluate_intents."""
-        charge, discharge, tou = self._build_candidate(self.strategic_intents)
+        charge, discharge, tou = self._build_candidate(
+            self.strategic_intents, current_period
+        )
         self._charge_periods = charge
         self._discharge_periods = discharge
         self.tou_intervals = tou
@@ -147,7 +151,7 @@ class GrowattSphController(InverterController):
             len(self.strategic_intents),
         )
 
-        self._build_sph_periods()
+        self._build_sph_periods(current_period)
 
         logger.info(
             "SPH schedule created: %d charge period(s), %d discharge period(s), "
@@ -397,7 +401,9 @@ class GrowattSphController(InverterController):
         """Compare SPH charge/discharge periods a candidate schedule would
         produce against what's currently applied."""
         candidate_intents = schedule.original_dp_results["strategic_intent"]
-        new_charge, new_discharge, _tou = self._build_candidate(candidate_intents)
+        new_charge, new_discharge, _tou = self._build_candidate(
+            candidate_intents, current_period
+        )
 
         return self._diff_period_lists(
             self._charge_periods,

@@ -15,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Huawei, Growatt SPH, Solis: the running charge/discharge period always gets a hardware slot** — on busy days, periods that had already ended could take every slot, leaving the battery idle. ([#926](https://github.com/johanzander/bess-manager/issues/926))
 - **Huawei: an idle plan clears old charge/discharge periods from the battery** — huawei_solar rejects an empty TOU list, so the previous plan's periods stayed on the battery and repeated daily. BESS now clears them with a period that applies on no day. ([#914](https://github.com/johanzander/bess-manager/pull/914))
 - **Huawei without EMMA: Home Usage shows the real house load instead of 0 W** — live load is derived from solar, grid and battery power when no load sensor is mapped. ([#598](https://github.com/johanzander/bess-manager/issues/598))
 - **Fuse protection now also limits battery export** — the plan no longer sends more power to the grid than your fuse allows. ([#910](https://github.com/johanzander/bess-manager/issues/910))

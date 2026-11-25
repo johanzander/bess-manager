@@ -215,11 +215,12 @@ class SolisModbusController(InverterController):
 
         charge_blocks, export_blocks = self._group_period_blocks(intents)
         charge_blocks = self._enforce_period_limit(
-            charge_blocks, self.MAX_CHARGE_PERIODS
+            charge_blocks, self.MAX_CHARGE_PERIODS, current_period
         )
         export_blocks = self._enforce_period_limit(
             [b for b in export_blocks if b["end_period"] >= current_period],
             self.MAX_DISCHARGE_PERIODS,
+            current_period,
         )
         # Exports share the six slots with holds and are placed first: a
         # dropped hold only falls back to Self Use, a dropped export forgoes
@@ -227,6 +228,7 @@ class SolisModbusController(InverterController):
         hold_blocks = self._enforce_period_limit(
             self._hold_blocks(intents, period_data, current_period),
             self.MAX_DISCHARGE_PERIODS - len(export_blocks),
+            current_period,
         )
 
         charge_periods = self._blocks_to_period_dicts(charge_blocks)

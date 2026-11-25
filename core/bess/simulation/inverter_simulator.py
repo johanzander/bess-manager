@@ -18,7 +18,7 @@ from core.bess.execution_model import (
     intra_period_discharge_gate,
 )
 from core.bess.inverter_controller import InverterController
-from core.bess.models import PeriodData  # noqa: F401  (type clarity)
+from core.bess.models import EconomicData, PeriodData
 from core.bess.settings import BatterySettings
 from core.bess.strategic_intent import discharge_ceiling_lifts
 
@@ -337,3 +337,74 @@ def simulate(
         soe = next_soe
     realized_cost = sum(pd.economic.hourly_cost for pd in period_data)
     return SimulationResult(period_data=period_data, realized_cost=realized_cost)
+
+
+def simulate_physical_plan(
+    planned: list[PeriodData],
+    solar: list[float],
+    home: list[float],
+    buy: list[float],
+    sell: list[float],
+    initial_soe: float,
+    settings: BatterySettings,
+    dt: float,
+    currency: str,
+    import_cap_kwh: list[float | None] | None = None,
+) -> SimulationResult:
+    """Replay hypothetical power choices through the shared physical kernel.
+
+    This does NOT validate a platform's commands. It is the explicit relaxed
+    physical model used for Estimated Historical when execution semantics are
+    unmodelled. Continuous state is recomputed, so a PWL pin's state-only drift
+    cannot become unaccounted energy. Charge wear is per input-side charged kWh.
+    """
+    soe = initial_soe
+    rows = []
+    ac_cap = _effective_ac_cap_kwh(settings, dt)
+    for index, plan in enumerate(planned):
+        action = plan.decision.battery_action
+        if action is None:
+            raise ValueError(
+                "A physical replay requires explicit planned battery actions"
+            )
+        power = action / dt
+        # The battery physically stops at reserve, even if an upstream plan
+        # requested more after a spliced trajectory shifted its opening state.
+        power = max(
+            power,
+            -max(0.0, soe - settings.min_soe_kwh) * settings.efficiency_discharge / dt,
+        )
+        cap = import_cap_kwh[index] if import_cap_kwh is not None else None
+        if power == 0 and plan.decision.strategic_intent == "SOLAR_EXPORT":
+            next_soe = soe
+        else:
+            next_soe = _state_transition(
+                soe, power, settings, dt, solar[index], home[index], ac_cap, cap
+            )
+        flows = _period_flows(
+            power, soe, next_soe, home[index], solar[index], settings, dt, cap
+        )
+        row = _build_period_data(
+            flows,
+            power,
+            soe,
+            next_soe,
+            index,
+            home[index],
+            settings,
+            dt,
+            buy,
+            sell,
+            solar[index],
+            settings.cycle_cost_per_kwh,
+            currency,
+        )
+        row.economic = EconomicData.from_energy_data(
+            row.energy,
+            buy[index],
+            sell[index],
+            row.energy.battery_charged * settings.cycle_cost_per_kwh,
+        )
+        rows.append(row)
+        soe = next_soe
+    return SimulationResult(rows, sum(p.economic.hourly_cost for p in rows))

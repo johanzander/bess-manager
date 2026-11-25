@@ -6,6 +6,7 @@ Complete replacement for battery_system.py that preserves ALL functionality.
 import json
 import logging
 import os
+import threading
 import traceback
 from dataclasses import replace
 from datetime import UTC, date, datetime, timedelta, tzinfo
@@ -62,6 +63,14 @@ from .models import (
 )
 from .octopus_energy_source import OctopusEnergySource
 from .official_nordpool_source import OfficialNordpoolSource
+from .performance_hindsight import (
+    HindsightModel,
+    PerformanceAnalysis,
+    PeriodKind,
+    analyze_period,
+    available_periods,
+    period_days,
+)
 from .power_down_outcome import PowerDownSessionOutcome, match_rewarded_octopoints
 from .power_monitor import HomePowerMonitor
 from .prediction_snapshot import PredictionSnapshotStore, _period_data_from_dict
@@ -317,6 +326,11 @@ class BatterySystemManager:
         # Scheduler reference for one-shot retry jobs (set via set_scheduler)
         self._scheduler = None
 
+        # Performance analyses, keyed by everything they read (see
+        # analyze_performance). The API calls in from its threadpool.
+        self._performance_cache: dict[tuple, PerformanceAnalysis] = {}
+        self._performance_cache_lock = threading.Lock()
+
         self._runtime_failure_tracker = RuntimeFailureTracker()
         self._health_recovery_tracker = HealthRecoveryTracker()
         self._health_failing_since: dict[str, datetime] = {}
@@ -384,6 +398,14 @@ class BatterySystemManager:
         return platform
 
     VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
+
+    # A day whose closing quarter the recorder still cannot supply after this
+    # many days is left as recorded: the recorder has most likely purged it,
+    # and every retry re-reads the day's file.
+    CLOSING_QUARTER_RETRY_DAYS: ClassVar[int] = 3
+
+    # Performance analyses are CPU-heavy and their inputs rarely change.
+    PERFORMANCE_CACHE_SIZE: ClassVar[int] = 32
 
     # Strategies whose forecast is a window of full calendar days ending at
     # today's midnight — the value can't change intraday, so it's cached
@@ -2115,6 +2137,61 @@ class BatterySystemManager:
             logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
+
+    def finalize_previous_days(self) -> None:
+        """Complete the closing quarter of recent days from the HA recorder.
+
+        The 23:45 quarter only ends at midnight, after its day's last
+        schedule update, so it is archived as a prediction. This replaces it
+        with recorder actuals once the recorder has them, retrying a day for
+        at most CLOSING_QUARTER_RETRY_DAYS. Runs as its own scheduler job so
+        a failure here can never cost a quarter of battery control.
+        """
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
+        today = time_utils.today()
+        for days_ago in range(self.CLOSING_QUARTER_RETRY_DAYS, 0, -1):
+            day = today - timedelta(days=days_ago)
+            view = self.daily_view_store.load_day(day)
+            if view is None or not view.finalization_pending:
+                continue
+            closing_period = get_period_count(day) - 1
+            closing = [p for p in view.periods if p.period == closing_period]
+            if len(closing) != 1:
+                logger.warning(
+                    "Closing quarter for %s not finalized: the stored day has %d rows for it",
+                    day,
+                    len(closing),
+                )
+                continue
+            original = closing[0]
+            try:
+                energy = self.sensor_collector.collect_energy_data(
+                    closing_period, target_date=day
+                )
+            except HistoricalDataUnavailableError as e:
+                logger.warning("Closing quarter for %s remains pending: %s", day, e)
+                continue
+            # Energy comes from the recorder; the price stays the one the
+            # day was recorded with.
+            economic = EconomicData.from_energy_data(
+                energy,
+                original.economic.buy_price,
+                original.economic.sell_price,
+                energy.battery_charged * self.battery_settings.cycle_cost_per_kwh,
+            )
+            self.daily_view_store.finalize_period(
+                day,
+                replace(
+                    original,
+                    energy=energy,
+                    economic=economic,
+                    timestamp=time_utils.period_start(day, closing_period),
+                    data_source="actual",
+                    decision=DecisionData.from_observed_flows(energy),
+                ),
+            )
+            logger.info("Closing quarter for %s finalized from the recorder", day)
 
     def _get_price_data(
         self, prepare_next_day: bool
@@ -4657,6 +4734,79 @@ class BatterySystemManager:
         """
         self._price_manager.refresh_cache()
 
+    def analyze_performance(
+        self, anchor: date | None, period: PeriodKind
+    ) -> PerformanceAnalysis:
+        """How close BESS came to perfect hindsight over a week or month.
+
+        Reads persisted history only. With no anchor, completed periods are
+        tried newest first until one has enough observations to compare.
+        Every period is modelled with the settings BESS runs with now, so the
+        result is an estimate and says so.
+        """
+        model = HindsightModel(
+            self.battery_settings, self.home_settings, self.platform_capabilities
+        )
+        flows = set(
+            self.sensor_collector.energy_flow_calculator.sensor_to_flow_map.values()
+        )
+        source = (
+            "the lifetime battery charge/discharge meters"
+            if {"battery_charged", "battery_discharged"} <= flows
+            else "BESS power-based battery history"
+        )
+        candidates = (
+            [anchor]
+            if anchor is not None
+            else available_periods(self.daily_view_store, period=period)
+            or [time_utils.today() - timedelta(days=7)]
+        )
+        first: PerformanceAnalysis | None = None
+        for candidate in candidates:
+            analysis = self._cached_performance(candidate, period, model, source)
+            if analysis.comparison is not None:
+                return analysis
+            first = first or analysis
+        assert first is not None
+        return first
+
+    def _cached_performance(
+        self, anchor: date, period: PeriodKind, model: HindsightModel, source: str
+    ) -> PerformanceAnalysis:
+        """One period's analysis, reused until its history or settings change.
+
+        A period in progress also changes as quarters elapse, so its key
+        carries the current quarter; a completed period's key changes only
+        with its day files (and the next day, whose opening SOC closes it).
+        """
+        days = period_days(anchor, period)
+        days.append(days[-1] + timedelta(days=1))
+        now = time_utils.now()
+        key = (
+            period,
+            days[0],
+            repr(model),
+            source,
+            self.daily_view_store.fingerprint(days),
+            (
+                (now.date(), time_utils.timestamp_to_period_index(now))
+                if days[-1] > now.date()
+                else None
+            ),
+        )
+        with self._performance_cache_lock:
+            if key not in self._performance_cache:
+                if len(self._performance_cache) >= self.PERFORMANCE_CACHE_SIZE:
+                    self._performance_cache.pop(next(iter(self._performance_cache)))
+                self._performance_cache[key] = analyze_period(
+                    self.daily_view_store,
+                    anchor,
+                    model,
+                    period=period,
+                    battery_history_source=source,
+                )
+            return self._performance_cache[key]
+
     def get_current_daily_view(self, current_period: int | None = None) -> DailyView:
         """Get daily view for specified or current period.
 
@@ -4715,7 +4865,15 @@ class BatterySystemManager:
         if self.schedule_store.get_latest_schedule() is None:
             return
         try:
-            self.daily_view_store.save_day(self.get_current_daily_view())
+            view = self.get_current_daily_view()
+            self.daily_view_store.save_day(
+                replace(
+                    view,
+                    finalization_pending=bool(
+                        view.periods and view.periods[-1].data_source != "actual"
+                    ),
+                )
+            )
         except Exception as e:
             logger.warning("Failed to persist today's view: %s", e)
 

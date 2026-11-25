@@ -1,6 +1,6 @@
 // Unified API client for dashboard data
 import api from '../lib/api';
-import { FormattedValue } from '../types';
+import { FormattedValue, PerformanceResult } from '../types';
 
 /**
  * Fetch comprehensive dashboard data including schedule, energy flows, and financial metrics.
@@ -234,6 +234,7 @@ export interface SavingsBucket {
   solarKwh: FormattedValue;
   batteryChargedKwh: FormattedValue;
   batteryDischargedKwh: FormattedValue;
+  performance?: PerformanceResult | null;
 }
 
 export interface SavingsAggregateResponse {

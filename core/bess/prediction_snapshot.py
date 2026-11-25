@@ -107,6 +107,7 @@ def _daily_view_from_dict(d: dict) -> DailyView:
         actual_count=d["actual_count"],
         predicted_count=d["predicted_count"],
         missing_count=d.get("missing_count", 0),
+        finalization_pending=d.get("finalization_pending", False),
         power_down_sessions=power_down_sessions,
     )
 

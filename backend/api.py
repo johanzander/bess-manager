@@ -7,7 +7,7 @@ import dataclasses
 import threading
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_cls
-from typing import Any
+from typing import Any, cast
 
 from api_conversion import (
     BATTERY_MODEL_ATTRS as _BATTERY_MODEL_ATTRS,
@@ -46,6 +46,7 @@ from core.bess.health_check import (
 )
 from core.bess.influxdb_helper import is_influxdb_configured
 from core.bess.models import PeriodData
+from core.bess.performance_hindsight import PeriodKind
 from core.bess.savings_aggregator import DEFAULT_COUNTS, build_buckets
 from core.bess.settings import (
     BatterySettings,
@@ -2354,6 +2355,38 @@ async def get_savings_aggregate(
     except Exception as e:
         logger.error(f"Error building savings aggregate: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.get("/api/insights/performance")
+def get_performance(
+    date: str | None = Query(
+        None, description="Any local ISO date in the requested week or month"
+    ),
+    period: str = Query("week", pattern="^(week|month)$"),
+) -> dict[str, Any]:
+    """The savings bucket of a week or month, with its perfect-hindsight estimate.
+
+    Synchronous so the CPU-heavy analysis runs in the threadpool, off the
+    event loop. Reads persisted history only.
+    """
+    from app import bess_controller
+
+    _require_configured_system(bess_controller)
+    try:
+        anchor = date_cls.fromisoformat(date) if date else None
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail="Invalid ISO date") from e
+    system = bess_controller.system
+    analysis = system.analyze_performance(anchor, cast(PeriodKind, period))
+    bucket = build_buckets(
+        period,
+        1,
+        system.daily_view_store,
+        today=date_cls.fromisoformat(analysis.start_date),
+    )[0]
+    api_bucket = APISavingsBucket.from_internal(bucket, analysis.currency)
+    api_bucket.performance = analysis
+    return cast(dict[str, Any], convert_keys_to_camel_case(api_bucket))
 
 
 @router.get("/api/savings/history/disk-usage")

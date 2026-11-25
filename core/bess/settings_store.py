@@ -569,6 +569,7 @@ class SettingsStore:
                 "safety_margin": SAFETY_MARGIN_FACTOR,
                 "phase_count": 1,
                 "power_monitoring_enabled": False,
+                "fuse_limits_export": False,
             },
             "electricity_price": {
                 "markup_rate": MARKUP_RATE,

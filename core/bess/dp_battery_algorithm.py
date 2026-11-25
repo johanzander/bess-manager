@@ -298,13 +298,18 @@ def period_import_caps_kwh(
 def period_export_caps_kwh(
     home_settings: HomeSettings | None, horizon: int, dt: float
 ) -> list[float | None] | None:
-    """Per-period grid-export caps (kWh), or None when fuse protection is off.
+    """Per-period grid-export caps (kWh), or None when fuse protection is off
+    or the user has not opted into limiting export (`fuse_limits_export`).
 
     A fuse trips on current in either direction, so the fuse-derived limit
-    that bounds import (#429) bounds export too (#910) -- same derivation,
-    from `_effective_import_cap_kwh`, so the two cannot drift. Only the fuse
-    applies here: peak-shaving and Power Down session caps limit import alone.
+    that bounds import (#429) can bound export too (#910) -- same derivation,
+    from `_effective_import_cap_kwh`, so the two cannot drift. It is opt-in
+    because some users set the fuse fields to a grid operator's import-only
+    limit and must keep exporting above it. Only the fuse applies here:
+    peak-shaving and Power Down session caps limit import alone.
     """
+    if home_settings is None or not home_settings.fuse_limits_export:
+        return None
     fuse_cap_kwh = _effective_import_cap_kwh(home_settings, dt)
     if fuse_cap_kwh is None:
         return None

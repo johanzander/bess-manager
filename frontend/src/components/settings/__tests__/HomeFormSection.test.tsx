@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { HomeFormSection } from '../HomeFormSection';
 import type { HomeForm } from '../HomeFormSection';
@@ -11,6 +11,7 @@ const BASE_FORM: HomeForm = {
   safetyMarginFactor: 1.0,
   phaseCount: 3,
   powerMonitoringEnabled: true,
+  fuseLimitsExport: false,
   managedLoadSensors: [],
   peakShavingEnabled: false,
   peakShavingStartTime: '07:00',
@@ -58,5 +59,30 @@ describe('HomeFormSection fuse protection (#901)', () => {
   it('does not warn when the capability is unknown (setup wizard)', () => {
     render(<HomeFormSection form={BASE_FORM} onChange={vi.fn()} sensors={SENSORS} />);
     expect(screen.queryByText(NOTE)).not.toBeInTheDocument();
+  });
+});
+
+const EXPORT_TOGGLE = { name: 'Also limit export to the fuse' };
+
+describe('HomeFormSection export limit (#910)', () => {
+  it('is off by default and turns on when clicked', () => {
+    const onChange = vi.fn();
+    render(<HomeFormSection form={BASE_FORM} onChange={onChange} sensors={SENSORS} realtimeFuseGuardSupported />);
+    const toggle = screen.getByRole('switch', EXPORT_TOGGLE);
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    expect(onChange).toHaveBeenCalledWith({ ...BASE_FORM, fuseLimitsExport: true });
+  });
+
+  it('is hidden while fuse protection is off', () => {
+    render(
+      <HomeFormSection
+        form={{ ...BASE_FORM, powerMonitoringEnabled: false }}
+        onChange={vi.fn()}
+        sensors={SENSORS}
+        realtimeFuseGuardSupported
+      />,
+    );
+    expect(screen.queryByRole('switch', EXPORT_TOGGLE)).not.toBeInTheDocument();
   });
 });

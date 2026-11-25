@@ -63,7 +63,7 @@ wizard can be re-run at any time from **Settings → Sensors → Auto-Configure*
 
 All other configuration is done in the **Settings** page:
 
-- **Home** — Currency, consumption baseline, fuse, voltage, phase count, safety margin, peak-shaving cap for capacity tariffs (see "Peak Shaving" in the User Guide)
+- **Home** — Currency, consumption baseline, fuse, voltage, phase count, safety margin, optional export limit at the fuse, peak-shaving cap for capacity tariffs (see "Peak Shaving" in the User Guide)
 - **Pricing** — Energy provider (Nordpool/Octopus), price area, VAT, markup, additional costs, optional hourly grid tariff with summer/winter profiles
 - **Battery** — Capacity, power limits, SOC range, cycle cost
 - **Sensors** — All sensor entity IDs grouped by integration, with live health status per sensor

@@ -1,9 +1,10 @@
 """Plan-faithfulness regression for the fuse cap on grid export (#910).
 
 A fuse trips on current in either direction, but the fuse-derived cap (#429)
-only bounded `grid_imported`. The #901 reporter's plan exported ~25 kW
-through a 13.8 kW fuse. The cap now bounds `grid_exported` too, with the same
-"constrain, don't raise" floor as the import side.
+only bounded `grid_imported`. When the user opts in (`fuse_limits_export`),
+the cap bounds `grid_exported` too, with the same "constrain, don't raise"
+floor as the import side. It is opt-in because some users set the fuse fields
+to a grid operator's import-only limit and must keep exporting above it.
 """
 
 from typing import Any
@@ -33,6 +34,7 @@ EXPORT_CAP_SCENARIO: dict[str, Any] = {
         "phase_count": 1,
         "safety_margin": 1.0,
         "power_monitoring_enabled": True,
+        "fuse_limits_export": True,
     },
     # One lucrative export hour (period 2): uncapped, the DP dumps the full
     # 10 kW discharge into it.
@@ -91,3 +93,32 @@ def test_export_cap_constrains_rather_than_raises_when_no_action_can_meet_it() -
         f"{surplus_period.energy.grid_exported:.2f} kWh is within the cap"
     )
     assert surplus_period.energy.battery_discharged == pytest.approx(0.0, abs=1e-9)
+
+
+# Fuse protection on, export limiting left off (the default): the fuse fields
+# carry an import-only limit, e.g. a grid operator's, and export above it is
+# allowed.
+IMPORT_ONLY_SCENARIO = {
+    **EXPORT_CAP_SCENARIO,
+    "home": {**EXPORT_CAP_SCENARIO["home"], "fuse_limits_export": False},
+}
+
+
+def test_export_is_not_capped_unless_the_user_opts_in() -> None:
+    result, realized_cost = run_scenario_realized(IMPORT_ONLY_SCENARIO)
+
+    assert realized_cost == pytest.approx(
+        result.economic_summary.battery_solar_cost, abs=0.01
+    ), "Plan is not faithfully executable (R != P)"
+
+    export_period = result.period_data[2]
+    assert export_period.energy.grid_exported > EXPORT_CAP_KWH + 1.0, (
+        f"export {export_period.energy.grid_exported:.2f} kWh was held to the "
+        f"fuse limit {EXPORT_CAP_KWH:.2f} kWh although export limiting is off"
+    )
+
+
+def test_export_limiting_is_off_by_default() -> None:
+    from core.bess.settings import HomeSettings
+
+    assert HomeSettings().fuse_limits_export is False

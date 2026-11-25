@@ -78,7 +78,7 @@ selector can choose. Removing that test re-opens the #236 bug class.
 
 Per-period constraints on flows follow the same rule. `select_action`
 filters its gathered candidates against the #429 import cap, then the same
-fuse limit on export (#910), then the minimum grid export (the Octopus Power
+fuse limit on export (#910, when the user opts in), then the minimum grid export (the Octopus Power
 Down pulse), each with a "constrain, don't raise" floor. Both backward passes
 apply those masks in the same order and over every column the selector sees,
 including the SOLAR_EXPORT bypass and residual cover. The same test file pins

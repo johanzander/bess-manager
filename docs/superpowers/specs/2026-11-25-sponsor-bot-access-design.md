@@ -134,6 +134,29 @@ accounts.
 
 ### 3. Run cost bounding
 
+**Separate Anthropic account for sponsor runs.** All existing bot runs share
+the maintainer's Anthropic capacity (API key, or Claude subscription when
+`BOT_AUTH=oauth`). Sponsor runs must not compete with it — otherwise heavy
+sponsor use blocks the maintainer's own Stage 2–5 runs and the PO agent.
+Sponsor workflows therefore authenticate **only** with
+`secrets.SPONSOR_ANTHROPIC_API_KEY`, a key from a dedicated Anthropic Console
+workspace with a **monthly spend limit**. They never read `ANTHROPIC_API_KEY`,
+`CLAUDE_CODE_OAUTH_TOKEN` or `BOT_AUTH`.
+
+- The workspace spend limit is the **hard** dollar cap, enforced by Anthropic.
+  The credit ceiling (`SPONSOR_MONTHLY_CREDIT_CEILING`) stays as the softer
+  first stop with a friendly message.
+- If a run fails because the workspace limit is hit, the poster job replies
+  "sponsor runs are paused until next month" (detected from the run's
+  failure, not guessed); the credit is still charged per section 2.
+- That workspace's usage is exactly the sponsor cost, to compare with
+  sponsorship income.
+
+**Maintainer setup (one-off, before enabling):** create the Console workspace,
+set its monthly spend limit, create a key in it, add it as repo secret
+`SPONSOR_ANTHROPIC_API_KEY`; add `SPONSORS_READ_TOKEN`; set
+`SPONSOR_MONTHLY_CREDIT_CEILING` and `SPONSOR_BOT_ENABLED=true`.
+
 Sponsor runs use Sonnet (`claude-sonnet-5-5`), a fixed `--max-turns` (builder
 picks; aim for a predictable ≤ $1 analyze, ≤ $3 fix), and a job
 `timeout-minutes`. They never use `bypassPermissions`; tools are an explicit
@@ -237,6 +260,9 @@ Replies from the sponsor workflows themselves:
 - Sponsors may run `analyze` and `fix`; only on issues they opened; a debug
   log is required.
 - No per-run maintainer approval.
+- Sponsor runs use their own Anthropic API key in a separate Console
+  workspace with a spend limit, so they never consume the maintainer's
+  capacity.
 - Fix gate = failing-test-first + path/size guard + reviewer that never sees
   the issue.
 - Sponsor runs may never change policy or skill files.

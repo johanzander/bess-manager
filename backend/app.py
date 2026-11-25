@@ -415,6 +415,17 @@ class BESSController:
             misfire_grace_time=30,
         )
 
+        # Closing-quarter finalization (every 15 minutes, offset from the
+        # quarterly schedule update and the price refresh). Kept out of
+        # update_battery_schedule so a recorder problem here can never cost
+        # a quarter of battery control.
+        self.scheduler.add_job(
+            self.system.finalize_previous_days,
+            CronTrigger(minute="7,22,37,52"),
+            id="finalize_previous_days",
+            misfire_grace_time=30,
+        )
+
         # Next day preparation (daily at 23:55)
         def prepare_next_day():
             now = time_utils.now()

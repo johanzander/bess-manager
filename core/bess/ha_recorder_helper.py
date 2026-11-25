@@ -39,8 +39,7 @@ _Series = dict[str, list[tuple[datetime, float]]]
 # 429496663.7 (uint overflow) spikes.
 _MAX_PLAUSIBLE_WATTS = 100000
 
-_PERIODS_PER_DAY = 96
-_PERIOD_SECONDS = 900
+_PERIOD_SECONDS = time_utils.INTERVAL_MINUTES * 60
 
 
 def _day_bounds(target_date: date | datetime) -> tuple[datetime, datetime]:
@@ -49,7 +48,9 @@ def _day_bounds(target_date: date | datetime) -> tuple[datetime, datetime]:
     if isinstance(target_date, datetime):
         target_date = target_date.date()
     start = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
-    end = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=local_tz)
+    end = datetime.combine(
+        target_date + timedelta(days=1), datetime.min.time()
+    ).replace(tzinfo=local_tz)
     return start, end
 
 
@@ -83,7 +84,13 @@ def _fetch_series(
     """
     local_tz = time_utils.TIMEZONE
     start_iso = start.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end_iso = end.astimezone(ZoneInfo("UTC")).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # Include the closing-midnight sample even for an exclusive end_time API.
+    # Period bucketing still rejects readings after the requested boundary.
+    end_iso = (
+        (end + timedelta(seconds=1))
+        .astimezone(ZoneInfo("UTC"))
+        .strftime("%Y-%m-%dT%H:%M:%SZ")
+    )
 
     raw = controller.get_history_period(entity_ids, start_iso, end_iso)
 
@@ -106,7 +113,7 @@ def _fetch_series(
             if ts is None:
                 continue
             samples.append((ts, value))
-        samples.sort(key=lambda s: s[0])
+        samples.sort(key=lambda s: s[0].timestamp())
         series[entity_id] = samples
     return series
 
@@ -148,7 +155,7 @@ def get_sensor_data_batch(
     sensors_list: list[str],
     target_date: date | datetime,
 ) -> dict:
-    """Last value of each cumulative sensor at all 96 period boundaries.
+    """Last value of each cumulative sensor at each local-day period boundary.
 
     Args:
         controller: an HomeAssistantAPIController exposing ``get_history_period``.
@@ -166,13 +173,14 @@ def get_sensor_data_batch(
     series, start = loaded
 
     period_data: dict[int, dict[str, float]] = {}
-    for period in range(_PERIODS_PER_DAY):
-        period_end = start + timedelta(seconds=(period + 1) * _PERIOD_SECONDS - 1)
+    period_count = time_utils.get_period_count(start.date())
+    for period in range(period_count):
+        period_end = time_utils.period_start(start.date(), period + 1).timestamp()
         bucket: dict[str, float] = {}
         for entity_id, samples in series.items():
             last_value = None
             for ts, value in samples:
-                if ts <= period_end:
+                if ts.timestamp() <= period_end:
                     last_value = value
                 else:
                     break
@@ -184,7 +192,7 @@ def get_sensor_data_batch(
     _LOGGER.info(
         "Recorder batch: %d/%d periods populated for %s (%d sensors)",
         len(period_data),
-        _PERIODS_PER_DAY,
+        period_count,
         start.date().isoformat(),
         len(sensors_list),
     )
@@ -214,8 +222,11 @@ def get_power_sensor_data_batch(
         for ts, value in samples:
             if abs(value) > _MAX_PLAUSIBLE_WATTS:
                 continue
-            offset = (ts - start).total_seconds()
-            if offset < 0 or offset >= _PERIODS_PER_DAY * _PERIOD_SECONDS:
+            offset = ts.timestamp() - start.timestamp()
+            if (
+                offset < 0
+                or offset >= time_utils.get_period_count(start.date()) * _PERIOD_SECONDS
+            ):
                 continue
             period = int(offset // _PERIOD_SECONDS)
             readings.setdefault(entity_id, {}).setdefault(period, []).append(value)

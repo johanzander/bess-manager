@@ -182,24 +182,6 @@ class HuaweiController(InverterController):
 
         return blocks
 
-    def _enforce_period_limit(self, blocks: list[dict]) -> list[dict]:
-        """Enforce MAX_TOU_PERIODS by dropping shortest blocks."""
-        if len(blocks) <= self.MAX_TOU_PERIODS:
-            return blocks
-
-        logger.warning(
-            "HUAWEI PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — dropping shortest",
-            len(blocks),
-            self.MAX_TOU_PERIODS,
-        )
-
-        def block_duration(b: dict) -> int:
-            return b["end_period"] - b["start_period"] + 1
-
-        sorted_by_duration = sorted(blocks, key=block_duration, reverse=True)
-        kept = sorted_by_duration[: self.MAX_TOU_PERIODS]
-        return sorted(kept, key=lambda b: b["start_period"])
-
     def _blocks_to_period_dicts(self, blocks: list[dict]) -> list[dict]:
         """Convert period blocks to time-string dicts with charge/discharge flag."""
         result = []
@@ -224,14 +206,16 @@ class HuaweiController(InverterController):
             )
         return result
 
-    def _build_candidate(self, intents: list[str]) -> list[dict]:
+    def _build_candidate(self, intents: list[str], current_period: int) -> list[dict]:
         """Compute the Huawei period list for ``intents``, without mutating self.
 
         Shared by apply_intents (commits onto self) and evaluate_intents
         (diffs against self's current state).
         """
         blocks = self._group_huawei_periods(intents)
-        blocks = self._enforce_period_limit(blocks)
+        blocks = self._enforce_period_limit(
+            blocks, self.MAX_TOU_PERIODS, current_period
+        )
         periods = self._blocks_to_period_dicts(blocks)
 
         logger.info("Huawei periods built: %d period(s)", len(periods))
@@ -262,11 +246,11 @@ class HuaweiController(InverterController):
             for idx, p in enumerate(periods)
         ]
 
-    def _build_huawei_periods(self) -> None:
+    def _build_huawei_periods(self, current_period: int) -> None:
         """Unchanged public behavior: mutates self._periods/self.tou_intervals
         from self.strategic_intents. Delegates to _build_candidate, shared
         with apply_intents/evaluate_intents."""
-        self._periods = self._build_candidate(self.strategic_intents)
+        self._periods = self._build_candidate(self.strategic_intents, current_period)
         self.tou_intervals = self._periods_to_tou_intervals(self._periods)
 
     def apply_intents(self, schedule: DPSchedule, current_period: int = 0) -> None:
@@ -276,7 +260,7 @@ class HuaweiController(InverterController):
         self.strategic_intents = schedule.original_dp_results["strategic_intent"]
         self.current_schedule = schedule
 
-        self._build_huawei_periods()
+        self._build_huawei_periods(current_period)
 
     # ── Hardware interface ────────────────────────────────────────────────
 
@@ -518,7 +502,7 @@ class HuaweiController(InverterController):
         """Compare Huawei periods a candidate schedule would produce against
         what's currently applied."""
         candidate_intents = schedule.original_dp_results["strategic_intent"]
-        new = self._build_candidate(candidate_intents)
+        new = self._build_candidate(candidate_intents, current_period)
         current = self._periods
 
         if len(current) != len(new):

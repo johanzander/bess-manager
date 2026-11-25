@@ -228,34 +228,30 @@ class TestPeriodLimitEnforcement:
 
         assert len(manager._discharge_periods) <= 3
 
-    def test_period_limit_keeps_longest_blocks(
+    def test_period_limit_keeps_the_running_block_over_ended_ones(
         self, manager: GrowattSphController
     ) -> None:
-        # 4 blocks of different durations: 4h, 1h, 1h, 1h → keep the 4h + 2 of the 1h blocks
+        """#926: four charge blocks against three slots. At 10:00 the 4-hour
+        00:00 block and the 06:00 block have ended; the running 10:00 block
+        must be programmed, not traded away for a longer block from the night.
+
+        Asserts the programmed charge periods rather than realized flows: the
+        plan-faithfulness simulator models Growatt MIN only, and an SPH charge
+        period is the command itself -- no period, no grid charging."""
         intents = ["IDLE"] * 96
-        # Block 1: 4 hours (hours 0-3)
-        for h in range(0, 4):
-            for p in range(h * 4, (h + 1) * 4):
+        for p in range(0 * 4, 4 * 4):  # 00:00-03:59 (4 h)
+            intents[p] = "GRID_CHARGING"
+        for hour in (6, 8, 10):  # 1 h each
+            for p in range(hour * 4, (hour + 1) * 4):
                 intents[p] = "GRID_CHARGING"
-        # Block 2: 1 hour (hour 6)
-        for p in range(6 * 4, 7 * 4):
-            intents[p] = "GRID_CHARGING"
-        # Block 3: 1 hour (hour 8)
-        for p in range(8 * 4, 9 * 4):
-            intents[p] = "GRID_CHARGING"
-        # Block 4: 1 hour (hour 10)
-        for p in range(10 * 4, 11 * 4):
-            intents[p] = "GRID_CHARGING"
 
-        manager.apply_intents(make_schedule_mock(intents))
+        manager.apply_intents(make_schedule_mock(intents), current_period=10 * 4)
 
-        assert len(manager._charge_periods) == 3
-        # The 4-hour block should be kept
-        durations = [
-            _time_to_minutes(p["end_time"]) - _time_to_minutes(p["start_time"]) + 1
-            for p in manager._charge_periods
+        assert [(p["start_time"], p["end_time"]) for p in manager._charge_periods] == [
+            ("06:00", "06:59"),
+            ("08:00", "08:59"),
+            ("10:00", "10:59"),
         ]
-        assert max(durations) >= 4 * 60 - 1  # ~4 hours
 
 
 # ── sync_to_hardware ────────────────────────────────────────────────
@@ -435,7 +431,7 @@ class TestBuildCandidateSph:
         manager._discharge_periods = ["sentinel"]
 
         candidate_intents = make_intents({10: "LOAD_SUPPORT"})
-        charge, _discharge, _tou = manager._build_candidate(candidate_intents)
+        charge, _discharge, _tou = manager._build_candidate(candidate_intents, 0)
 
         assert manager._charge_periods == ["sentinel"]
         assert manager._discharge_periods == ["sentinel"]
@@ -446,7 +442,7 @@ class TestBuildCandidateSph:
     ) -> None:
         intents = make_intents({2: "GRID_CHARGING", 10: "LOAD_SUPPORT"})
         manager.strategic_intents = intents
-        manager._build_sph_periods()
+        manager._build_sph_periods(0)
         expected_charge = [p.copy() for p in manager._charge_periods]
         expected_discharge = [p.copy() for p in manager._discharge_periods]
         expected_tou = [i.copy() for i in manager.tou_intervals]
@@ -454,7 +450,7 @@ class TestBuildCandidateSph:
         manager._charge_periods = []
         manager._discharge_periods = []
         manager.tou_intervals = []
-        charge, discharge, tou = manager._build_candidate(intents)
+        charge, discharge, tou = manager._build_candidate(intents, 0)
 
         assert charge == expected_charge
         assert discharge == expected_discharge
@@ -500,11 +496,3 @@ class TestEvaluateIntentsSph:
 
         assert differs is True
         assert "discharge" in reason.lower()
-
-
-# ── Helper ────────────────────────────────────────────────────────────────────
-
-
-def _time_to_minutes(time_str: str) -> int:
-    h, m = map(int, time_str.split(":"))
-    return h * 60 + m

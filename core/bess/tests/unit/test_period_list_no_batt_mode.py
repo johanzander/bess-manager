@@ -43,7 +43,7 @@ def test_default_stub_has_no_batt_mode(controller_cls, battery_settings):
 def test_built_period_list_has_no_batt_mode(controller_cls, battery_settings):
     controller = controller_cls(battery_settings=battery_settings)
     controller.strategic_intents = ["GRID_CHARGING"] * 4 + ["LOAD_SUPPORT"] * 4
-    controller._build_period_list_schedule()
+    controller._build_period_list_schedule(current_period=0)
     segments = controller.get_all_tou_segments()
     assert segments
     assert all("batt_mode" not in s for s in segments)
@@ -52,7 +52,7 @@ def test_built_period_list_has_no_batt_mode(controller_cls, battery_settings):
 def test_huawei_built_period_list_has_no_batt_mode(battery_settings):
     controller = HuaweiController(battery_settings=battery_settings)
     controller.strategic_intents = ["GRID_CHARGING"] * 4 + ["LOAD_SUPPORT"] * 4
-    controller._build_huawei_periods()
+    controller._build_huawei_periods(current_period=0)
     segments = controller.get_all_tou_segments()
     assert segments
     assert all("batt_mode" not in s for s in segments)

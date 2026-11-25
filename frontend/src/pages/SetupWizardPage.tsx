@@ -96,6 +96,7 @@ const SetupWizardPage: React.FC = () => {
     // Turned on in handleScan only once its required sensors are actually
     // detected on a new install -- see wizardNeededRef.
     powerMonitoringEnabled: false,
+    fuseLimitsExport: false,
     managedLoadSensors: [],
     peakShavingEnabled: false,
     peakShavingStartTime: '07:00',

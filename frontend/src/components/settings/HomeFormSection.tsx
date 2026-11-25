@@ -9,6 +9,9 @@ export interface HomeForm {
   safetyMarginFactor: number;
   phaseCount: number;
   powerMonitoringEnabled: boolean;
+  /** Also cap grid export at the fuse limit (issue #910). Off by default: the
+   * fuse fields are sometimes a grid operator's import-only limit. */
+  fuseLimitsExport: boolean;
   /** Cumulative/lifetime energy sensors for loads (typically EV chargers)
    * to exclude from the ha_statistics baseline before it is computed —
    * see issue #706. Empty by default; only meaningful for that strategy. */
@@ -218,7 +221,7 @@ export function HomeFormSection({ form, onChange, sensors, realtimeFuseGuardSupp
 
       <SectionCard
         title="Fuse Protection"
-        description="Keeps the household within its fuse limit two ways: the day-ahead schedule plans grid import and export against it, and real-time monitoring throttles battery charging if a phase runs hot. Enable to configure."
+        description="Keeps the household within its fuse limit two ways: the day-ahead schedule plans grid import against it (and export too, if you choose), and real-time monitoring throttles battery charging if a phase runs hot. Enable to configure."
       >
         {!chargeRateSensorConfigured && (
           <p className="text-xs text-amber-600 dark:text-amber-400">
@@ -267,6 +270,17 @@ export function HomeFormSection({ form, onChange, sensors, realtimeFuseGuardSupp
               v => onChange({ ...form, voltage: Math.round(v) }), { unit: 'V', min: 100, step: 1 })}
             {numField('Safety Margin Factor', form.safetyMarginFactor,
               v => onChange({ ...form, safetyMarginFactor: v }), { min: 0.05, max: 2, step: 0.05 })}
+          </div>
+        )}
+        {form.powerMonitoringEnabled && (
+          <div className="pt-1">
+            {toggle('Also limit export to the fuse', form.fuseLimitsExport,
+              v => onChange({ ...form, fuseLimitsExport: v }))}
+            <p className="text-xs text-gray-500 dark:text-gray-400 pt-1">
+              Turn on if the fuse values are your real main fuse, which trips in both directions.
+              Leave off if they are an import-only limit (for example, set by your grid operator)
+              and you may export more.
+            </p>
           </div>
         )}
       </SectionCard>

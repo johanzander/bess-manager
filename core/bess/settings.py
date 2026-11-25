@@ -272,6 +272,9 @@ class HomeSettings:
     currency: str = DEFAULT_CURRENCY
     consumption_strategy: str = "fixed"
     power_monitoring_enabled: bool = False
+    # Also cap grid export at the fuse limit (#910). Opt-in: some users set
+    # the fuse fields to a grid operator's import-only limit and export above it.
+    fuse_limits_export: bool = False
     managed_load_sensors: list[str] = field(default_factory=list)
 
     def __post_init__(self):

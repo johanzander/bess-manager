@@ -264,48 +264,52 @@ class InverterController(ABC):
 
         return charge_blocks, discharge_blocks
 
-    def _enforce_period_limit(self, blocks: list[dict], max_periods: int) -> list[dict]:
-        """Enforce maximum period count by dropping shortest blocks.
+    def _enforce_period_limit(
+        self, blocks: list[dict], max_periods: int, current_period: int
+    ) -> list[dict]:
+        """Fit blocks into ``max_periods`` hardware slots, giving the slots to
+        the block running now and the ones after it (#926).
+
+        Keeps ``max_periods`` consecutive blocks in time order, starting at the
+        first block that has not ended by ``current_period``. Later blocks are
+        deferred, not lost: every cycle rebuilds from the full plan, so each
+        gets a slot as earlier blocks end. When fewer than ``max_periods``
+        blocks remain, the spare slots keep the most recent ended blocks, so
+        a block ending is not by itself a change that rewrites the hardware.
 
         Args:
-            blocks: List of period blocks
-            max_periods: Maximum allowed blocks
+            blocks: Period blocks in chronological order
+            max_periods: Hardware slot count
+            current_period: Period being executed now (0 when preparing
+                the next day)
 
         Returns:
-            Trimmed list of at most max_periods blocks
+            At most max_periods blocks, in chronological order
         """
         if len(blocks) <= max_periods:
             return blocks
 
+        first_unfinished = next(
+            (i for i, b in enumerate(blocks) if b["end_period"] >= current_period),
+            len(blocks),
+        )
+        start = min(first_unfinished, len(blocks) - max_periods)
+        kept = blocks[start : start + max_periods]
+        deferred = blocks[start + max_periods :]
+
         logger.warning(
-            "PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — dropping shortest",
+            "PERIOD LIMIT EXCEEDED: %d blocks, maximum is %d — %d later block(s) "
+            "deferred until a slot frees up",
             len(blocks),
             max_periods,
+            len(deferred),
         )
-
-        def block_duration(b: dict) -> int:
-            return b["end_period"] - b["start_period"] + 1
-
-        # Keep the longest blocks, sorted by original order
-        sorted_by_duration = sorted(blocks, key=block_duration, reverse=True)
-        kept = sorted_by_duration[:max_periods]
-        dropped = sorted_by_duration[max_periods:]
-
-        for b in dropped:
+        for b in deferred:
             sh, sm = self._period_to_time(b["start_period"])
             eh, em = self._period_to_time(b["end_period"])
-            logger.warning(
-                "  DROPPED: %02d:%02d-%02d:%02d (%d periods) intents=%s",
-                sh,
-                sm,
-                eh,
-                em + 14,
-                block_duration(b),
-                b["intents"],
-            )
+            logger.warning("  DEFERRED: %02d:%02d-%02d:%02d", sh, sm, eh, em + 14)
 
-        # Return kept blocks in chronological order
-        return sorted(kept, key=lambda b: b["start_period"])
+        return kept
 
     def _blocks_to_period_dicts(self, blocks: list[dict]) -> list[dict]:
         """Convert period blocks to time-string dicts for hardware and display.
@@ -339,7 +343,11 @@ class InverterController(ABC):
         return result
 
     def _build_period_list_schedule(
-        self, intents: list[str] | None = None, *, commit: bool = True
+        self,
+        intents: list[str] | None = None,
+        *,
+        current_period: int,
+        commit: bool = True,
     ) -> tuple[list[dict], list[dict], list[dict]]:
         """Group strategic intents into charge/discharge period lists and build
         the display TOU intervals — the shared "new schedule" build for any
@@ -349,6 +357,8 @@ class InverterController(ABC):
             intents: Strategic intents to build from. Defaults to
                 ``self.strategic_intents``; pass a candidate list to compute
                 without depending on self's committed state.
+            current_period: Period being executed now; decides which blocks
+                get the hardware slots when there are too many.
             commit: When True (default), also assigns ``self.tou_intervals``.
                 Callers building a read-only candidate (e.g. for diffing
                 against self's current state) must pass ``commit=False``.
@@ -358,10 +368,10 @@ class InverterController(ABC):
         """
         charge_blocks, discharge_blocks = self._group_period_blocks(intents)
         charge_blocks = self._enforce_period_limit(
-            charge_blocks, self.MAX_CHARGE_PERIODS
+            charge_blocks, self.MAX_CHARGE_PERIODS, current_period
         )
         discharge_blocks = self._enforce_period_limit(
-            discharge_blocks, self.MAX_DISCHARGE_PERIODS
+            discharge_blocks, self.MAX_DISCHARGE_PERIODS, current_period
         )
 
         charge_periods = self._blocks_to_period_dicts(charge_blocks)
@@ -431,7 +441,7 @@ class InverterController(ABC):
         Args:
             current_charge/current_discharge: Self's currently-applied periods.
             new_charge/new_discharge: A candidate's periods (e.g. from
-                ``_build_period_list_schedule(intents, commit=False)``).
+                ``_build_period_list_schedule(intents, current_period=..., commit=False)``).
             label: Platform label used in log/reason strings (e.g. "SPH", "Solis").
         """
 

@@ -95,9 +95,9 @@ def start() -> None
   `power_monitoring_enabled` — derives a per-period grid-import cap that
   constrains total import (load + battery charging), forcing the battery to
   cover a load spike via discharge rather than importing past the house's
-  fuse limit. The same limit caps grid export (#910), since a fuse trips in
-  either direction. See `docs/agents/bess-knowledge.md`'s "grid import (fuse)
-  cap" section (#429).
+  fuse limit. When `fuse_limits_export` is also set (opt-in, #910), the same
+  limit caps grid export, since a fuse trips in either direction. See
+  `docs/agents/bess-knowledge.md`'s "grid import (fuse) cap" section (#429).
 - An optional peak-shaving window (`BatterySystemManager.peak_shaving`) — a
   user-configured per-period grid-import cap, active only during a
   configured time window/weekdays, combined with the fuse cap above via

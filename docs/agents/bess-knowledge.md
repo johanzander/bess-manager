@@ -740,9 +740,12 @@ configured.
   PATCH and wizard save paths run these invariants *before* persisting and
   reject with 422, so a refused value never reaches `bess_settings.json`
   (where it would fail every later startup, #917).
-- **Export is capped too (#910)**: a fuse trips on current in either
-  direction, so the same per-period limit bounds `grid_exported` (battery
-  plus solar export), via `period_export_caps_kwh`. It is filtered right
+- **Export cap, opt-in (#910)**: a fuse trips on current in either
+  direction, so with `HomeSettings.fuse_limits_export` set the same
+  per-period limit bounds `grid_exported` (battery plus solar export), via
+  `period_export_caps_kwh`. It is off by default because some users enter a
+  grid operator's import-only limit in the fuse fields and must keep
+  exporting above it (Settings: "Also limit export to the fuse"). It is filtered right
   after the import cap, before the minimum export, with the same "constrain,
   never raise" floor: a solar surplus a full battery cannot absorb still
   exports. Peak-shaving and Power Down session caps stay import-only. Every

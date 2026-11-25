@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Added
 
+- **Fuse protection can also limit export** — turn on "Also limit export to the fuse" and the plan never exports more than your fuse allows. Off by default. ([#910](https://github.com/johanzander/bess-manager/issues/910))
 - **Time-of-day grid tariffs** — enter an hourly grid transport fee, optionally with separate summer and winter profiles, and BESS prices it into every buy decision. ([#861](https://github.com/johanzander/bess-manager/issues/861))
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
@@ -16,9 +17,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- **Huawei, Growatt SPH, Solis: the running charge/discharge period always gets a hardware slot** — on busy days, periods that had already ended could take every slot, leaving the battery idle. ([#926](https://github.com/johanzander/bess-manager/issues/926))
 - **Huawei: an idle plan clears old charge/discharge periods from the battery** — huawei_solar rejects an empty TOU list, so the previous plan's periods stayed on the battery and repeated daily. BESS now clears them with a period that applies on no day. ([#914](https://github.com/johanzander/bess-manager/pull/914))
 - **Huawei without EMMA: Home Usage shows the real house load instead of 0 W** — live load is derived from solar, grid and battery power when no load sensor is mapped. ([#598](https://github.com/johanzander/bess-manager/issues/598))
-- **Fuse protection now also limits battery export** — the plan no longer sends more power to the grid than your fuse allows. ([#910](https://github.com/johanzander/bess-manager/issues/910))
 - **Huawei and Growatt SPH: a schedule write the inverter rejects is retried** — BESS used to treat it as applied, so the battery kept its old periods until the next restart. ([#916](https://github.com/johanzander/bess-manager/issues/916))
 - **Saving an invalid battery or home setting no longer breaks the next start** — a rejected value, such as a Fuse Protection safety margin of 0, is now refused without being saved. ([#917](https://github.com/johanzander/bess-manager/issues/917))
 - **Updated electricity prices now reach the plan without a restart** — when a price sensor replaces a full day of prices, such as forecasts swapped for confirmed Nordpool prices, the next optimization uses them. ([#902](https://github.com/johanzander/bess-manager/issues/902))

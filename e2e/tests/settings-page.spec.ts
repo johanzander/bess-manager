@@ -179,6 +179,41 @@ test.describe('Settings Page', () => {
     await expect(page.getByText(/saved|success/i).first()).toBeVisible({ timeout: 5_000 });
   });
 
+  test('fuse export limit is opt-in and persists through the API (#910)', async ({ request }) => {
+    const before = (await (await request.get('/api/settings')).json()).home;
+    expect(before.fuseLimitsExport ?? false).toBe(false);
+
+    const on = await request.patch('/api/settings', { data: { home: { fuseLimitsExport: true } } });
+    expect(on.ok()).toBeTruthy();
+    const after = (await (await request.get('/api/settings')).json()).home;
+    expect(after.fuseLimitsExport).toBe(true);
+
+    // Restore so this test leaves the fixture as it found it.
+    const off = await request.patch('/api/settings', { data: { home: { fuseLimitsExport: false } } });
+    expect(off.ok()).toBeTruthy();
+  });
+
+  test('fuse export toggle appears with fuse protection and starts off (#910)', async ({ page }) => {
+    // The CI fixture has no phase-current sensors, so fuse protection cannot
+    // be switched on through the UI; serve settings with it already on.
+    await page.route('**/api/settings', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const response = await route.fetch();
+      const body = await response.json();
+      body.home = { ...body.home, powerMonitoringEnabled: true };
+      await route.fulfill({ response, json: body });
+    });
+    await page.goto('/settings');
+    await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });
+    await page.getByRole('button', { name: 'Home', exact: true }).click();
+
+    const exportSwitch = page.getByRole('switch', { name: 'Also limit export to the fuse' });
+    await expect(exportSwitch).toHaveAttribute('aria-checked', 'false');
+    await exportSwitch.click();
+    await expect(exportSwitch).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeEnabled();
+  });
+
   test('peak shaving all-day switch hides the window times and persists (#96)', async ({ page }) => {
     await page.goto('/settings');
     await expect(page.getByText('Loading settings')).not.toBeVisible({ timeout: 15_000 });

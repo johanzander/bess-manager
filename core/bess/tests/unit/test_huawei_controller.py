@@ -75,6 +75,127 @@ class TestScheduleBuilding:
         assert len(controller._periods) <= HuaweiController.MAX_TOU_PERIODS
 
 
+# The reporter's day in #926 (debug bundle 2026-11-24 23:15, Inverter Schedule
+# View): every non-IDLE run as (first period, last period, intent). It groups
+# into 18 Huawei blocks against 14 slots.
+REPORTER_DAY_926 = [
+    (12, 12, "GRID_CHARGING"),  # 03:00
+    (16, 16, "GRID_CHARGING"),  # 04:00
+    (20, 20, "GRID_CHARGING"),  # 05:00
+    (22, 22, "GRID_CHARGING"),  # 05:30
+    (24, 24, "GRID_CHARGING"),  # 06:00
+    (27, 27, "LOAD_SUPPORT"),  # 06:45
+    (28, 28, "GRID_CHARGING"),  # 07:00
+    (30, 30, "GRID_CHARGING"),  # 07:30
+    (32, 32, "GRID_CHARGING"),  # 08:00
+    (34, 35, "GRID_CHARGING"),  # 08:30-08:59
+    (37, 43, "LOAD_SUPPORT"),  # 09:15-10:59
+    (45, 47, "LOAD_SUPPORT"),  # 11:15-11:59
+    (50, 75, "LOAD_SUPPORT"),  # 12:30-18:59
+    (77, 79, "LOAD_SUPPORT"),  # 19:15-19:59
+    (81, 86, "LOAD_SUPPORT"),  # 20:15-21:44
+    (89, 90, "LOAD_SUPPORT"),  # 22:15-22:44
+    (92, 92, "LOAD_SUPPORT"),  # 23:00 -- the block the battery never got
+    (94, 94, "GRID_CHARGING"),  # 23:30
+]
+
+# What the EMMA held at 23:00 (reporter's readback == BESS's last write).
+REPORTER_HARDWARE_926 = [
+    "03:00-03:14/1234567/+",
+    "04:00-04:14/1234567/+",
+    "05:00-05:14/1234567/+",
+    "05:30-05:44/1234567/+",
+    "06:00-06:14/1234567/+",
+    "06:45-06:59/1234567/-",
+    "07:00-07:14/1234567/+",
+    "08:30-08:59/1234567/+",
+    "09:15-10:59/1234567/-",
+    "11:15-11:59/1234567/-",
+    "12:30-18:59/1234567/-",
+    "19:15-19:59/1234567/-",
+    "20:15-21:44/1234567/-",
+    "22:15-22:44/1234567/-",
+]
+
+
+def reporter_day_926() -> list[str]:
+    intents = ["IDLE"] * 96
+    for first, last, intent in REPORTER_DAY_926:
+        for p in range(first, last + 1):
+            intents[p] = intent
+    return intents
+
+
+class TestPeriodLimitKeepsWhatIsRunningNow:
+    """#926: with more blocks than slots, the block running now (and the next
+    ones) must win the slots, not blocks that already ended this morning.
+
+    These assert the period list handed to the EMMA, not realized flows: the
+    plan-faithfulness simulator models Growatt MIN only, so no execution model
+    exists for a Huawei TOU list. The list IS the command Huawei acts on: it
+    discharges only inside a '-' period, so a missing period is a battery that
+    sits idle."""
+
+    def test_active_discharge_block_is_programmed_at_23(
+        self, controller: HuaweiController
+    ) -> None:
+        controller.apply_intents(
+            make_schedule_mock(reporter_day_926()), current_period=92
+        )
+
+        programmed = {
+            (p["start_time"], p["end_time"], p["flag"]) for p in controller._periods
+        }
+        assert ("23:00", "23:14", "-") in programmed
+        assert ("23:30", "23:44", "+") in programmed
+        assert len(controller._periods) == HuaweiController.MAX_TOU_PERIODS
+
+    def test_hardware_missing_the_active_block_is_rewritten(
+        self, controller: HuaweiController
+    ) -> None:
+        """The reporter's 23:00 cycle said "schedules match" and wrote nothing,
+        because the candidate had dropped the same block the EMMA lacked."""
+        controller._periods = [
+            HuaweiController._period_from_text(line) for line in REPORTER_HARDWARE_926
+        ]
+
+        differ, _reason = controller.evaluate_intents(
+            make_schedule_mock(reporter_day_926()), current_period=92
+        )
+
+        assert differ
+
+    def test_a_later_block_waits_for_a_slot_and_then_gets_one(
+        self, controller: HuaweiController
+    ) -> None:
+        intents = reporter_day_926()
+        # At midnight the first 14 blocks take every slot: 23:00 waits.
+        controller.apply_intents(make_schedule_mock(intents), current_period=0)
+        starts = [p["start_time"] for p in controller._periods]
+        assert starts[0] == "03:00"
+        assert "23:00" not in starts
+
+        # Once 03:00, 04:00 and 05:00 have ended (now 05:30), 23:00 has a slot.
+        controller.apply_intents(make_schedule_mock(intents), current_period=22)
+        starts = [p["start_time"] for p in controller._periods]
+        assert starts[0] == "05:30"
+        assert "23:00" in starts
+
+    def test_no_rewrite_once_every_remaining_block_fits(
+        self, controller: HuaweiController
+    ) -> None:
+        """Ended blocks keep spare slots, so a block ending is not by itself a
+        reason to rewrite the EMMA."""
+        schedule = make_schedule_mock(reporter_day_926())
+        controller.apply_intents(schedule, current_period=91)
+
+        for period in (92, 93, 94, 95):
+            differ, _reason = controller.evaluate_intents(
+                schedule, current_period=period
+            )
+            assert not differ, f"rewrite requested at period {period}"
+
+
 class TestWriteSchedule:
     def test_write_schedule_sets_working_mode_when_drifted(
         self, controller: HuaweiController

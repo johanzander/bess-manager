@@ -307,3 +307,158 @@ export type ControlModel = 'tou_register' | 'vpp_power' | 'period_list';
 
 
 
+
+/** Insights → Performance: one week or month against perfect hindsight. */
+export interface HindsightEnergy {
+  homeConsumption: number;
+  solarProduction: number;
+  gridImported: number;
+  gridExported: number;
+  solarToHome: number;
+  batteryToHome: number;
+  gridToHome: number;
+  solarToGrid: number;
+  batteryToGrid: number;
+  solarToBattery: number;
+  gridToBattery: number;
+  batteryCharged: number;
+  batteryDischarged: number;
+}
+
+export interface ScenarioCost {
+  netGridCost: number;
+  wearCost: number;
+  totalEconomicCost: number;
+}
+
+export interface PerformanceScenario extends ScenarioCost {
+  gridImportKwh: number;
+  gridExportKwh: number;
+  importCost: number;
+  exportRevenue: number;
+  chargedKwh: number;
+  dischargedKwh: number;
+  throughputKwh: number;
+  solarExportKwh: number;
+  solarSelfConsumptionPercent: number | null;
+  initialSoc: number;
+  finalSoc: number;
+  terminalShortfallCost: number;
+}
+
+export interface PerformanceCoverage {
+  expectedPeriods: number;
+  analyzedPeriods: number;
+  coveragePercent: number;
+  actualPeriods: number;
+  predictedPeriods: number;
+  missingPeriods: number;
+  invalidRecords: number;
+  restartPlaceholders: number;
+  socDropouts: number;
+  belowReservePeriods: number;
+  excludedIntervals: { date: string; period: number; timestamp: string; reason: string }[];
+  gapBoundaries: { after: string; resumes: string; measuredEnergyChangeKwh: number | null }[];
+}
+
+export interface PerformanceBatteryModel {
+  capacityKwh: number;
+  minSoc: number;
+  maxSoc: number;
+  maxChargePowerKw: number;
+  maxDischargePowerKw: number;
+  efficiencyCharge: number;
+  efficiencyDischarge: number;
+  cycleCostPerKwh: number;
+  historySource: string | null;
+  efficiencyCalibration: {
+    applied: boolean;
+    configuredCharge: number;
+    configuredDischarge: number;
+    charge: number | null;
+    discharge: number | null;
+    capped: boolean;
+    reason: string | null;
+  } | null;
+  capacityCalibration: {
+    applied: boolean;
+    configuredCapacityKwh: number;
+    capacityKwh: number | null;
+    reason: string | null;
+  } | null;
+}
+
+export interface PhysicsCheck {
+  maxEnergyBalanceErrorKwh: number;
+  energyBalanceMismatches: number;
+  operationalSocViolations: number;
+  minimumEnergyKwh: number;
+  maximumEnergyKwh: number;
+}
+
+export interface PerformanceComparison {
+  actual: PerformanceScenario;
+  optimal: PerformanceScenario;
+  solarOnly: ScenarioCost;
+  gridOnly: ScenarioCost;
+  missedSavings: number;
+  capturedPercent: number | null;
+  comparisonStart: string;
+  comparisonEnd: string;
+  initialEnergyKwh: number;
+  terminalEnergyKwh: number;
+  terminalTimestamp: string;
+  terminalEvidence: string;
+  modelTerminalEnergyKwh: number;
+  terminalDifferenceKwh: number;
+  executionReplayed: boolean;
+  solver: { solveSeconds: number };
+  actualValidation: PhysicsCheck;
+  modelValidation: PhysicsCheck;
+}
+
+export interface PerformanceResult {
+  startDate: string;
+  endDate: string;
+  period: 'week' | 'month';
+  inProgress: boolean;
+  timezone: string;
+  currency: string;
+  status: 'estimated' | 'estimated_partial' | 'insufficient_data' | 'unsupported_model';
+  issues: string[];
+  warnings: string[];
+  availablePeriods: string[];
+  coverage: PerformanceCoverage;
+  batteryModel: PerformanceBatteryModel | null;
+  comparison: PerformanceComparison | null;
+  daily: {
+    date: string;
+    observedPeriods: number;
+    actualGridCost: number;
+    optimalGridCost: number;
+    gridOnlyCost: number;
+    solarOnlyCost: number;
+    actualWearCost: number;
+    optimalWearCost: number;
+  }[];
+  periods: {
+    timestamp: string;
+    date: string;
+    buyPrice: number;
+    sellPrice: number;
+    actualSoc: number | null;
+    optimalSoc: number;
+    actualSocEnd: number | null;
+    optimalSocEnd: number;
+    actualEnergy: HindsightEnergy;
+    optimalEnergy: HindsightEnergy;
+  }[];
+  socTimeline: {
+    timestamp: string;
+    buyPrice: number | null;
+    sellPrice: number | null;
+    actualSoc: number | null;
+    optimalSoc: number | null;
+    energyUnknown: boolean;
+  }[];
+}

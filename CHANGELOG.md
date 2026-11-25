@@ -13,6 +13,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 - **Debug-log replay at an earlier time starts from the battery level recorded then** — `mock-run.sh <bundle> HH:MM` no longer plans from the export-time SOC. ([#889](https://github.com/johanzander/bess-manager/issues/889))
+- **Insights → Performance: how close BESS came to perfect hindsight** — for any past week or month (or the one in progress), compare grid only, solar only, what BESS actually paid and what a perfect-foresight schedule would have paid, with missed savings, captured share, charging and discharging prices and an hour-by-hour view of what hindsight did differently. It is an estimate on your current settings: battery capacity and efficiency are calibrated from your own history, and quarters with no recorded energy or with the battery serving backup below the reserve are left out. ([discussion #913](https://github.com/johanzander/bess-manager/discussions/913))
 
 ### Fixed
 

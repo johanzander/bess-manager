@@ -10,6 +10,7 @@ from datetime import datetime
 from pydantic import BaseModel, field_validator
 
 from core.bess import time_utils
+from core.bess.performance_hindsight import PerformanceAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -113,6 +114,7 @@ class APISavingsBucket:
     solarKwh: FormattedValue
     batteryChargedKwh: FormattedValue
     batteryDischargedKwh: FormattedValue
+    performance: PerformanceAnalysis | None = None
 
     @classmethod
     def from_internal(cls, bucket, currency: str) -> APISavingsBucket:

@@ -625,8 +625,10 @@ surplus by its "Excess PV energy use in TOU" select (register 47299, options
 it at each 15-minute period's plan — `fed_to_grid` when the plan blocks
 passive solar charging (SOLAR_EXPORT and the discharging intents), `charge`
 otherwise — reading first and writing only on change, since it is a
-persistent config register. Unmapped (e.g. EMMA installs), it is left alone
-and surplus follows whatever the select is set to.
+persistent config register. Unmapped (e.g. EMMA installs), it is left alone,
+surplus follows whatever the select is set to, and System Health reports the
+select as a WARNING under Battery Control so the user can see why SOLAR_EXPORT
+periods may charge the battery.
 
 **Schedule readback (optional, #431).** `huawei_solar` has no
 `read_tou_periods` service, but its TOU period sensor publishes the

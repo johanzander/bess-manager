@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **Debug export: planned consumption changes shown beside measured managed-load energy** — a bundle now shows whether an EV charger or other managed load followed the blocks you declared. ([#863](https://github.com/johanzander/bess-manager/issues/863))
 - **Debug export: Inverter page schedule included** — a bundle now records the Schedule Overview values you saw, so display problems can be checked directly. ([#866](https://github.com/johanzander/bess-manager/issues/866))
 - **Debug-log replay at an earlier time starts from the battery level recorded then** — `mock-run.sh <bundle> HH:MM` no longer plans from the export-time SOC. ([#889](https://github.com/johanzander/bess-manager/issues/889))
+- **Huawei: Solar Export periods send PV surplus to the grid** — BESS sets the battery's "Excess PV energy use in TOU" select per period, so planned export no longer charges the battery. ([#925](https://github.com/johanzander/bess-manager/issues/925))
 
 ### Fixed
 
@@ -49,9 +50,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - **A malformed Planned Consumption Changes block no longer freezes the schedule** — BESS now ignores the bad block, keeps planning on the base forecast and logs the error, instead of blocking optimization until the template is fixed. ([#824](https://github.com/johanzander/bess-manager/pull/824))
 - **DST change days: the scheduler and inverter schedules now follow real time too** — the 15-minute cycle, startup and sensor collection still counted the current period from the wall clock, and TOU / charge-period times were still written as `period // 4`, so after the repeated hour every action ran an hour after the price it was planned on. Growatt MIN no longer programs overlapping segments in the repeated hour, and the dashboard no longer fails with `hour must be in 0..23` for the day's last hour. ([#844](https://github.com/johanzander/bess-manager/pull/844))
 - **Octopus free-import windows on the 25-hour fall-back day** — each period now shows its own free-import flag instead of the wrong hour's. ([#833](https://github.com/johanzander/bess-manager/issues/833))
-### Fixed
-
-- **Huawei: solar surplus follows the plan during Solar Export** — BESS now sets the battery's "Excess PV energy use in TOU" select per period, so planned export no longer charges the battery.
 
 ## [11.1.0] - 2026-10-20
 

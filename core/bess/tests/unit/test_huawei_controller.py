@@ -871,3 +871,59 @@ class TestExcessPvFollowsThePlan:
         surplus_destination_per_period(controller, select, intents)
 
         assert select.write_count == 0
+
+
+class TestCheckHealthReportsExcessPvSelect:
+    """An unmapped excess-PV select leaves SOLAR_EXPORT periods charging the
+    battery. Skipping the write is right, but it must not be silent: the user
+    has to be able to see in System Health why their export periods don't
+    export (#925)."""
+
+    @staticmethod
+    def _ha(
+        excess_pv_mapped: bool, excess_pv_option: str | None = "charge"
+    ) -> MagicMock:
+        ha = MagicMock()
+        ha.service_domain = "huawei_solar"
+        ha.is_sensor_configured.side_effect = lambda key: (
+            excess_pv_mapped if key == "huawei_excess_pv_mode" else True
+        )
+        ha.get_huawei_working_mode.return_value = "time_of_use_luna2000"
+        ha.get_huawei_excess_pv_mode.return_value = excess_pv_option
+        return ha
+
+    @staticmethod
+    def _excess_pv_check(result: list) -> dict:
+        return next(c for c in result[0]["checks"] if "excess PV" in c["component"])
+
+    def test_unmapped_select_is_reported_as_warning(
+        self, controller: HuaweiController
+    ) -> None:
+        result = controller.check_health(self._ha(excess_pv_mapped=False))
+
+        assert result[0]["status"] == "WARNING"
+        check = self._excess_pv_check(result)
+        assert check["status"] == "WARNING"
+        assert "SOLAR_EXPORT" in check["message"]
+
+    def test_mapped_select_reports_ok_with_its_current_option(
+        self, controller: HuaweiController
+    ) -> None:
+        result = controller.check_health(
+            self._ha(excess_pv_mapped=True, excess_pv_option="fed_to_grid")
+        )
+
+        assert result[0]["status"] == "OK"
+        check = self._excess_pv_check(result)
+        assert check["status"] == "OK"
+        assert "fed_to_grid" in check["message"]
+
+    def test_mapped_select_without_state_is_reported_as_warning(
+        self, controller: HuaweiController
+    ) -> None:
+        result = controller.check_health(
+            self._ha(excess_pv_mapped=True, excess_pv_option=None)
+        )
+
+        assert result[0]["status"] == "WARNING"
+        assert self._excess_pv_check(result)["status"] == "WARNING"

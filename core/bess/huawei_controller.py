@@ -25,7 +25,7 @@ otherwise.
 import logging
 import re
 from datetime import datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -33,6 +33,9 @@ from .exceptions import SystemConfigurationError
 from .execution_model import LOAD_SUPPORT_UNMODELLED
 from .inverter_controller import InverterController
 from .settings import BatterySettings
+
+if TYPE_CHECKING:
+    from .ha_api_controller import HomeAssistantAPIController
 
 logger = logging.getLogger(__name__)
 
@@ -699,24 +702,14 @@ class HuaweiController(InverterController):
                     "an energy manager that owns the mode."
                 )
             )
-            return [
+            return self._battery_control_health(
+                controller,
                 {
-                    "name": "Battery Control (Huawei LUNA2000)",
-                    "description": (
-                        "Controls Huawei battery TOU schedule via set_tou_periods"
-                    ),
-                    "required": True,
+                    "component": "Huawei working mode (select)",
                     "status": status,
-                    "checks": [
-                        {
-                            "component": "Huawei working mode (select)",
-                            "status": status,
-                            "message": message,
-                        }
-                    ],
-                    "last_run": datetime.now().isoformat(),
-                }
-            ]
+                    "message": message,
+                },
+            )
 
         try:
             mode = controller.get_huawei_working_mode()
@@ -726,29 +719,72 @@ class HuaweiController(InverterController):
                     "status": "OK",
                     "message": f"Connected — current mode={mode}",
                 }
-                overall_status = "OK"
             else:
                 check = {
                     "component": "Huawei working mode (select)",
                     "status": "ERROR",
                     "message": "Entity returned no state — check sensor config",
                 }
-                overall_status = "ERROR"
         except Exception as e:
             check = {
                 "component": "Huawei working mode (select)",
                 "status": "ERROR",
                 "message": f"Read failed: {e}",
             }
-            overall_status = "ERROR"
 
+        return self._battery_control_health(controller, check)
+
+    def _battery_control_health(
+        self, controller: "HomeAssistantAPIController", working_mode_check: dict
+    ) -> list:
+        """Combine the working-mode check with the excess-PV select check.
+
+        The overall status is the worst of the two, so an unmapped select —
+        whose write is skipped — still shows in System Health (#925).
+        """
+        checks = [working_mode_check, self._excess_pv_check(controller)]
+        statuses = {c["status"] for c in checks}
+        overall = next(s for s in ("ERROR", "WARNING", "OK") if s in statuses)
         return [
             {
                 "name": "Battery Control (Huawei LUNA2000)",
                 "description": "Controls Huawei battery TOU schedule via set_tou_periods",
                 "required": True,
-                "status": overall_status,
-                "checks": [check],
+                "status": overall,
+                "checks": checks,
                 "last_run": datetime.now().isoformat(),
             }
         ]
+
+    def _excess_pv_check(self, controller: "HomeAssistantAPIController") -> dict:
+        component = "Huawei excess PV use (select)"
+        if not controller.is_sensor_configured("huawei_excess_pv_mode"):
+            return {
+                "component": component,
+                "status": "WARNING",
+                "message": (
+                    "Not mapped — BESS cannot send PV surplus to the grid, so "
+                    "SOLAR_EXPORT and discharge periods may charge the battery "
+                    "instead. Map the battery's 'Excess PV energy use in TOU' "
+                    "select in Settings. Expected on EMMA-managed installs."
+                ),
+            }
+        try:
+            option = controller.get_huawei_excess_pv_mode()
+        except Exception as e:
+            return {
+                "component": component,
+                "status": "WARNING",
+                "message": f"Read failed: {e}",
+            }
+        if option is None:
+            return {
+                "component": component,
+                "status": "WARNING",
+                "message": "Entity returned no state — check sensor config",
+            }
+        return {
+            "component": component,
+            "status": "OK",
+            "message": f"Connected — current option={option}",
+        }

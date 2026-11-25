@@ -773,7 +773,7 @@ class FakeExcessPvSelect:
     one, and how often the (NVM-backed) register was rewritten.
     """
 
-    def __init__(self, option: str = "charge", mapped: bool = True) -> None:
+    def __init__(self, option: str | None = "charge", mapped: bool = True) -> None:
         self.option = option
         self.mapped = mapped
         self.write_count = 0
@@ -815,6 +815,7 @@ def surplus_destination_per_period(
             strategic_intent=intent,
         )
         assert success, error
+        assert select.option is not None
         destinations.append(select.option)
     return destinations
 
@@ -872,6 +873,27 @@ class TestExcessPvFollowsThePlan:
 
         assert select.write_count == 0
 
+    def test_select_without_state_is_not_written_and_fails_the_period(
+        self, controller: HuaweiController
+    ) -> None:
+        """An unavailable select gives no current option to compare against,
+        so writing would break read-compare-write. The period reports the
+        failure instead, and the existing retry path picks it up."""
+        intents = make_intents({11: "SOLAR_EXPORT"})
+        select = FakeExcessPvSelect(option=None)
+        controller.apply_intents(make_schedule_mock(intents))
+        grid_charge, discharge_rate, block = controller.compute_rates_for_period(
+            44, 0.0
+        )
+
+        success, error = controller.apply_period(
+            select, grid_charge, discharge_rate, block, strategic_intent="SOLAR_EXPORT"
+        )
+
+        assert not success
+        assert "no state" in error
+        assert select.write_count == 0
+
 
 class TestCheckHealthReportsExcessPvSelect:
     """An unmapped excess-PV select leaves SOLAR_EXPORT periods charging the
@@ -881,10 +903,12 @@ class TestCheckHealthReportsExcessPvSelect:
 
     @staticmethod
     def _ha(
-        excess_pv_mapped: bool, excess_pv_option: str | None = "charge"
+        excess_pv_mapped: bool,
+        excess_pv_option: str | None = "charge",
+        service_domain: str = "huawei_solar",
     ) -> MagicMock:
         ha = MagicMock()
-        ha.service_domain = "huawei_solar"
+        ha.service_domain = service_domain
         ha.is_sensor_configured.side_effect = lambda key: (
             excess_pv_mapped if key == "huawei_excess_pv_mode" else True
         )
@@ -896,15 +920,30 @@ class TestCheckHealthReportsExcessPvSelect:
     def _excess_pv_check(result: list) -> dict:
         return next(c for c in result[0]["checks"] if "excess PV" in c["component"])
 
-    def test_unmapped_select_is_reported_as_warning(
+    def test_unmapped_select_is_shown_without_lowering_battery_control(
         self, controller: HuaweiController
     ) -> None:
+        """Optional and unmapped is SKIPPED — visible in System Health, but an
+        install that never had the select must not get a permanent WARNING
+        and dashboard banner after upgrading."""
         result = controller.check_health(self._ha(excess_pv_mapped=False))
 
-        assert result[0]["status"] == "WARNING"
+        assert result[0]["status"] == "OK"
         check = self._excess_pv_check(result)
-        assert check["status"] == "WARNING"
+        assert check["status"] == "SKIPPED"
         assert "SOLAR_EXPORT" in check["message"]
+
+    def test_unmapped_select_on_emma_install_says_it_is_expected(
+        self, controller: HuaweiController
+    ) -> None:
+        result = controller.check_health(
+            self._ha(excess_pv_mapped=False, service_domain="huawei_emma_management")
+        )
+
+        check = self._excess_pv_check(result)
+        assert check["status"] == "SKIPPED"
+        assert "EMMA" in check["message"]
+        assert "SOLAR_EXPORT" not in check["message"]
 
     def test_mapped_select_reports_ok_with_its_current_option(
         self, controller: HuaweiController

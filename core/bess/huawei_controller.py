@@ -165,6 +165,8 @@ class HuaweiController(InverterController):
 
         target = EXCESS_PV_FED_TO_GRID if block_passive_charging else EXCESS_PV_CHARGE
         current = controller.get_huawei_excess_pv_mode()
+        if current is None:
+            return False, "excess PV select has no state — not written"
         if current == target:
             return True, ""
 
@@ -739,8 +741,8 @@ class HuaweiController(InverterController):
     ) -> list:
         """Combine the working-mode check with the excess-PV select check.
 
-        The overall status is the worst of the two, so an unmapped select —
-        whose write is skipped — still shows in System Health (#925).
+        The overall status is the worst of the two; an unmapped select is
+        SKIPPED, which shows in System Health without lowering it (#925).
         """
         checks = [working_mode_check, self._excess_pv_check(controller)]
         statuses = {c["status"] for c in checks}
@@ -759,24 +761,27 @@ class HuaweiController(InverterController):
     def _excess_pv_check(self, controller: "HomeAssistantAPIController") -> dict:
         component = "Huawei excess PV use (select)"
         if not controller.is_sensor_configured("huawei_excess_pv_mode"):
+            # Optional and unmapped: SKIPPED, the codebase's status for an
+            # intentionally unconfigured sensor — visible in System Health,
+            # but it does not lower Battery Control or raise the dashboard
+            # banner on installs that never had the select (#925).
+            is_managed_install = controller.service_domain != DEFAULT_SERVICE_DOMAIN
             return {
                 "component": component,
-                "status": "WARNING",
+                "status": "SKIPPED",
                 "message": (
-                    "Not mapped — BESS cannot send PV surplus to the grid, so "
-                    "SOLAR_EXPORT and discharge periods may charge the battery "
-                    "instead. Map the battery's 'Excess PV energy use in TOU' "
-                    "select in Settings. Expected on EMMA-managed installs."
+                    "Not configured — expected on EMMA-managed installs, which "
+                    "expose no excess-PV select."
+                    if is_managed_install
+                    else (
+                        "Not configured — BESS cannot send PV surplus to the "
+                        "grid, so SOLAR_EXPORT and discharge periods may charge "
+                        "the battery instead. Map the battery's 'Excess PV "
+                        "energy use in TOU' select in Settings."
+                    )
                 ),
             }
-        try:
-            option = controller.get_huawei_excess_pv_mode()
-        except Exception as e:
-            return {
-                "component": component,
-                "status": "WARNING",
-                "message": f"Read failed: {e}",
-            }
+        option = controller.get_huawei_excess_pv_mode()
         if option is None:
             return {
                 "component": component,

@@ -46,7 +46,7 @@ const EMPTY_BATTERY: BatteryForm = {
 const EMPTY_HOME: HomeForm = {
   consumption: 3.5, consumptionStrategy: 'fixed',
   maxFuseCurrent: 25, voltage: 230, safetyMarginFactor: 1.0,
-  phaseCount: 3, powerMonitoringEnabled: true,
+  phaseCount: 3, powerMonitoringEnabled: true, fuseLimitsExport: false,
   managedLoadSensors: [],
   peakShavingEnabled: false, peakShavingStartTime: '07:00', peakShavingEndTime: '20:00',
   peakShavingAllDay: false,
@@ -217,6 +217,7 @@ const SettingsPage: React.FC = () => {
         safetyMarginFactor: home_s.safetyMargin ?? 1.0,
         phaseCount: home_s.phaseCount ?? 3,
         powerMonitoringEnabled: home_s.powerMonitoringEnabled ?? true,
+        fuseLimitsExport: home_s.fuseLimitsExport ?? false,
         managedLoadSensors: home_s.managedLoadSensors ?? [],
         peakShavingEnabled: home_s.peakShaving?.enabled ?? false,
         peakShavingStartTime: home_s.peakShaving?.startTime ?? '07:00',
@@ -453,6 +454,7 @@ const SettingsPage: React.FC = () => {
           safetyMargin: homeForm.safetyMarginFactor,
           phaseCount: homeForm.phaseCount,
           powerMonitoringEnabled: homeForm.powerMonitoringEnabled,
+          fuseLimitsExport: homeForm.fuseLimitsExport,
           // Drop blank rows left by "+ Add managed load sensor" — the API
           // rejects an empty string as an invalid entity ID.
           managedLoadSensors: homeForm.managedLoadSensors.filter(Boolean),

@@ -385,6 +385,11 @@ class BatterySystemManager:
 
     VALID_CONTROL_MODES: ClassVar[set[str]] = {"tou", "vpp"}
 
+    # A day whose closing quarter the recorder still cannot supply after this
+    # many days is left as recorded: the recorder has most likely purged it,
+    # and every retry re-reads the day's file.
+    CLOSING_QUARTER_RETRY_DAYS: ClassVar[int] = 3
+
     # Strategies whose forecast is a window of full calendar days ending at
     # today's midnight — the value can't change intraday, so it's cached
     # until the date rolls over instead of refetched every quarterly cycle.
@@ -2115,6 +2120,61 @@ class BatterySystemManager:
             logger.info("Preparing for next day - refreshing predictions")
             self.prediction_snapshot_store.clear()
             self._fetch_predictions()
+
+    def finalize_previous_days(self) -> None:
+        """Complete the closing quarter of recent days from the HA recorder.
+
+        The 23:45 quarter only ends at midnight, after its day's last
+        schedule update, so it is archived as a prediction. This replaces it
+        with recorder actuals once the recorder has them, retrying a day for
+        at most CLOSING_QUARTER_RETRY_DAYS. Runs as its own scheduler job so
+        a failure here can never cost a quarter of battery control.
+        """
+        if os.environ.get("BESS_HISTORICAL_SEED_FILE", ""):
+            return
+        today = time_utils.today()
+        for days_ago in range(self.CLOSING_QUARTER_RETRY_DAYS, 0, -1):
+            day = today - timedelta(days=days_ago)
+            view = self.daily_view_store.load_day(day)
+            if view is None or not view.finalization_pending:
+                continue
+            closing_period = get_period_count(day) - 1
+            closing = [p for p in view.periods if p.period == closing_period]
+            if len(closing) != 1:
+                logger.warning(
+                    "Closing quarter for %s not finalized: the stored day has %d rows for it",
+                    day,
+                    len(closing),
+                )
+                continue
+            original = closing[0]
+            try:
+                energy = self.sensor_collector.collect_energy_data(
+                    closing_period, target_date=day
+                )
+            except HistoricalDataUnavailableError as e:
+                logger.warning("Closing quarter for %s remains pending: %s", day, e)
+                continue
+            # Energy comes from the recorder; the price stays the one the
+            # day was recorded with.
+            economic = EconomicData.from_energy_data(
+                energy,
+                original.economic.buy_price,
+                original.economic.sell_price,
+                energy.battery_charged * self.battery_settings.cycle_cost_per_kwh,
+            )
+            self.daily_view_store.finalize_period(
+                day,
+                replace(
+                    original,
+                    energy=energy,
+                    economic=economic,
+                    timestamp=time_utils.period_start(day, closing_period),
+                    data_source="actual",
+                    decision=DecisionData.from_observed_flows(energy),
+                ),
+            )
+            logger.info("Closing quarter for %s finalized from the recorder", day)
 
     def _get_price_data(
         self, prepare_next_day: bool
@@ -4715,7 +4775,15 @@ class BatterySystemManager:
         if self.schedule_store.get_latest_schedule() is None:
             return
         try:
-            self.daily_view_store.save_day(self.get_current_daily_view())
+            view = self.get_current_daily_view()
+            self.daily_view_store.save_day(
+                replace(
+                    view,
+                    finalization_pending=bool(
+                        view.periods and view.periods[-1].data_source != "actual"
+                    ),
+                )
+            )
         except Exception as e:
             logger.warning("Failed to persist today's view: %s", e)
 

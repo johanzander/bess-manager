@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - **Huawei, Growatt SPH, Solis: the running charge/discharge period always gets a hardware slot** — on busy days, periods that had already ended could take every slot, leaving the battery idle. ([#926](https://github.com/johanzander/bess-manager/issues/926))
+- **The last quarter of each day is now recorded** — the 23:45 quarter is completed from the Home Assistant recorder after midnight instead of staying a prediction, including on daylight-saving days. ([discussion #913](https://github.com/johanzander/bess-manager/discussions/913))
+- **Daylight-saving days read the right recorder history** — the 23- and 25-hour days are no longer cut to 96 quarters, and a restart can no longer leave a day's saved file half-written. ([discussion #913](https://github.com/johanzander/bess-manager/discussions/913))
 - **Huawei: an idle plan clears old charge/discharge periods from the battery** — huawei_solar rejects an empty TOU list, so the previous plan's periods stayed on the battery and repeated daily. BESS now clears them with a period that applies on no day. ([#914](https://github.com/johanzander/bess-manager/pull/914))
 - **Huawei without EMMA: Home Usage shows the real house load instead of 0 W** — live load is derived from solar, grid and battery power when no load sensor is mapped. ([#598](https://github.com/johanzander/bess-manager/issues/598))
 - **Huawei and Growatt SPH: a schedule write the inverter rejects is retried** — BESS used to treat it as applied, so the battery kept its old periods until the next restart. ([#916](https://github.com/johanzander/bess-manager/issues/916))

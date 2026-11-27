@@ -12,12 +12,15 @@ than duplicating that logic — see _daily_view_from_dict in prediction_snapshot
 
 import json
 import logging
-from dataclasses import asdict
+import os
+from dataclasses import asdict, replace
 from datetime import date
 from pathlib import Path
+from tempfile import NamedTemporaryFile
 
 from . import time_utils
 from .daily_view_builder import DailyView
+from .models import PeriodData
 from .prediction_snapshot import _daily_view_from_dict
 
 logger = logging.getLogger(__name__)
@@ -34,15 +37,60 @@ class DailyViewStore:
     def _is_today(self, path: Path) -> bool:
         return path.stem == time_utils.today().isoformat()
 
-    def save_day(self, view: DailyView) -> None:
+    def save_day(self, view: DailyView) -> bool:
         """Persist the given day's full view, overwriting any existing file for that date."""
+        temporary: Path | None = None
         try:
             self._persist_dir.mkdir(parents=True, exist_ok=True)
             path = self._persist_dir / f"{view.date.isoformat()}.json"
-            with open(path, "w") as f:
+            # A crash or failed write must not destroy the previous snapshot.
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self._persist_dir,
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temporary = Path(f.name)
                 json.dump(asdict(view), f, default=str)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(temporary, path)
+            return True
         except OSError as e:
             logger.warning("Failed to persist daily view for %s: %s", view.date, e)
+            return False
+        finally:
+            if temporary is not None and temporary.exists():
+                temporary.unlink()
+
+    def finalize_period(self, day: date, period: PeriodData) -> bool:
+        """Atomically replace a completed day's closing prediction with actuals."""
+        if (
+            day >= time_utils.today()
+            or period.period != time_utils.get_period_count(day) - 1
+            or period.data_source != "actual"
+        ):
+            raise ValueError(
+                "Finalization requires an actual closing quarter of a completed day"
+            )
+        view = self.load_day(day)
+        if view is None:
+            return False
+        if sum(p.period == period.period for p in view.periods) != 1:
+            return False
+        rows = [period if p.period == period.period else p for p in view.periods]
+        return self.save_day(
+            replace(
+                view,
+                periods=rows,
+                actual_count=sum(p.data_source == "actual" for p in rows),
+                predicted_count=sum(p.data_source == "predicted" for p in rows),
+                missing_count=sum(p.data_source == "missing" for p in rows),
+                total_savings=sum(p.economic.hourly_savings for p in rows),
+                finalization_pending=False,
+            )
+        )
 
     def load_day(self, day: date) -> DailyView | None:
         """Load the persisted view for a specific day, or None if not saved."""

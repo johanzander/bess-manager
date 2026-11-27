@@ -15,12 +15,17 @@ Huawei Intent Mapping:
 - GRID_CHARGING              → charge period (+)
 - LOAD_SUPPORT/BATTERY_EXPORT → discharge period (-)
 - SOLAR_STORAGE/SOLAR_EXPORT/IDLE → no period (self-consumption default)
+
+Outside a period the battery routes PV surplus by its excess-PV select, so
+that select follows each period's plan: "fed_to_grid" when the plan blocks
+passive solar charging (SOLAR_EXPORT, and the discharging intents), "charge"
+otherwise.
 """
 
 import logging
 import re
 from datetime import datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from . import time_utils
 from .dp_schedule import DPSchedule
@@ -29,9 +34,17 @@ from .execution_model import LOAD_SUPPORT_UNMODELLED
 from .inverter_controller import InverterController
 from .settings import BatterySettings
 
+if TYPE_CHECKING:
+    from .ha_api_controller import HomeAssistantAPIController
+
 logger = logging.getLogger(__name__)
 
 WORKING_MODE_TOU = "time_of_use_luna2000"
+
+# huawei_solar's excess-PV select options: the lowercased names of
+# huawei-solar-lib's StorageExcessPvEnergyUseInTOU (FED_TO_GRID=0, CHARGE=1).
+EXCESS_PV_CHARGE = "charge"
+EXCESS_PV_FED_TO_GRID = "fed_to_grid"
 
 # Working-mode select options that mean "BESS-controlled Time Of Use", across
 # the integrations that front a Huawei battery. Stock huawei_solar exposes
@@ -138,7 +151,32 @@ class HuaweiController(InverterController):
         discharge_rate: int,
         block_passive_charging: bool = False,
     ) -> tuple[bool, str]:
-        """No-op: Huawei deploys the full schedule atomically via set_tou_periods."""
+        """Point the battery's PV surplus where this period's plan sends it.
+
+        Charge/discharge windows are deployed atomically by sync_to_hardware
+        via set_tou_periods; this per-period write only covers what that list
+        cannot say — whether surplus outside a window charges the battery or
+        goes to the grid. The select is a persistent config register, so it is
+        read first and written only when the destination actually changes.
+        Skipped when the select is unmapped (EMMA installs expose none).
+        """
+        if not controller.is_sensor_configured("huawei_excess_pv_mode"):
+            return True, ""
+
+        target = EXCESS_PV_FED_TO_GRID if block_passive_charging else EXCESS_PV_CHARGE
+        current = controller.get_huawei_excess_pv_mode()
+        if current is None:
+            return False, "excess PV select has no state — not written"
+        if current == target:
+            return True, ""
+
+        logger.info(
+            "HUAWEI HARDWARE: excess PV use is %r, setting to %r", current, target
+        )
+        try:
+            controller.set_huawei_excess_pv_mode(target)
+        except Exception as e:
+            return False, f"set_huawei_excess_pv_mode({target}) failed: {e}"
         return True, ""
 
     @property
@@ -650,24 +688,14 @@ class HuaweiController(InverterController):
                     "an energy manager that owns the mode."
                 )
             )
-            return [
+            return self._battery_control_health(
+                controller,
                 {
-                    "name": "Battery Control (Huawei LUNA2000)",
-                    "description": (
-                        "Controls Huawei battery TOU schedule via set_tou_periods"
-                    ),
-                    "required": True,
+                    "component": "Huawei working mode (select)",
                     "status": status,
-                    "checks": [
-                        {
-                            "component": "Huawei working mode (select)",
-                            "status": status,
-                            "message": message,
-                        }
-                    ],
-                    "last_run": datetime.now().isoformat(),
-                }
-            ]
+                    "message": message,
+                },
+            )
 
         try:
             mode = controller.get_huawei_working_mode()
@@ -677,29 +705,75 @@ class HuaweiController(InverterController):
                     "status": "OK",
                     "message": f"Connected — current mode={mode}",
                 }
-                overall_status = "OK"
             else:
                 check = {
                     "component": "Huawei working mode (select)",
                     "status": "ERROR",
                     "message": "Entity returned no state — check sensor config",
                 }
-                overall_status = "ERROR"
         except Exception as e:
             check = {
                 "component": "Huawei working mode (select)",
                 "status": "ERROR",
                 "message": f"Read failed: {e}",
             }
-            overall_status = "ERROR"
 
+        return self._battery_control_health(controller, check)
+
+    def _battery_control_health(
+        self, controller: "HomeAssistantAPIController", working_mode_check: dict
+    ) -> list:
+        """Combine the working-mode check with the excess-PV select check.
+
+        The overall status is the worst of the two; an unmapped select is
+        SKIPPED, which shows in System Health without lowering it (#925).
+        """
+        checks = [working_mode_check, self._excess_pv_check(controller)]
+        statuses = {c["status"] for c in checks}
+        overall = next(s for s in ("ERROR", "WARNING", "OK") if s in statuses)
         return [
             {
                 "name": "Battery Control (Huawei LUNA2000)",
                 "description": "Controls Huawei battery TOU schedule via set_tou_periods",
                 "required": True,
-                "status": overall_status,
-                "checks": [check],
+                "status": overall,
+                "checks": checks,
                 "last_run": datetime.now().isoformat(),
             }
         ]
+
+    def _excess_pv_check(self, controller: "HomeAssistantAPIController") -> dict:
+        component = "Huawei excess PV use (select)"
+        if not controller.is_sensor_configured("huawei_excess_pv_mode"):
+            # Optional and unmapped: SKIPPED, the codebase's status for an
+            # intentionally unconfigured sensor — visible in System Health,
+            # but it does not lower Battery Control or raise the dashboard
+            # banner on installs that never had the select (#925).
+            is_managed_install = controller.service_domain != DEFAULT_SERVICE_DOMAIN
+            return {
+                "component": component,
+                "status": "SKIPPED",
+                "message": (
+                    "Not configured — expected on EMMA-managed installs, which "
+                    "expose no excess-PV select."
+                    if is_managed_install
+                    else (
+                        "Not configured — BESS cannot send PV surplus to the "
+                        "grid, so SOLAR_EXPORT and discharge periods may charge "
+                        "the battery instead. Map the battery's 'Excess PV "
+                        "energy use in TOU' select in Settings."
+                    )
+                ),
+            }
+        option = controller.get_huawei_excess_pv_mode()
+        if option is None:
+            return {
+                "component": component,
+                "status": "WARNING",
+                "message": "Entity returned no state — check sensor config",
+            }
+        return {
+            "component": component,
+            "status": "OK",
+            "message": f"Connected — current option={option}",
+        }

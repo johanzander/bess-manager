@@ -308,6 +308,11 @@ def _huawei_registry(serial: str = "HW2024ABCDEF") -> list[dict]:
             f"{serial}_storage_maximum_discharging_power",
         ),
         _entity(
+            "select.huawei_battery_excess_pv_energy_use_in_tou",
+            "huawei_solar",
+            f"{serial}_storage_excess_pv_energy_use_in_tou",
+        ),
+        _entity(
             "number.huawei_battery_charging_cutoff_capacity",
             "huawei_solar",
             f"{serial}_storage_charging_cutoff_capacity",
@@ -2555,7 +2560,18 @@ class TestHuaweiDiscovery:
             result["battery_discharge_stop_soc"]
             == "number.huawei_battery_discharging_cutoff_capacity"
         )
-        assert len(result) == 16
+        assert len(result) == 17
+
+    def test_excess_pv_select_mapped(self) -> None:
+        """huawei-solar-lib register_names.py STORAGE_EXCESS_PV_ENERGY_USE_IN_TOU
+        (register 47299), exposed by huawei_solar select.py as a select."""
+        result, _disabled = self.ctrl._map_registry_entities(
+            _huawei_registry(), ["huawei_solar"], self.ctrl.HUAWEI_SUFFIX_MAP
+        )
+        assert (
+            result["huawei_excess_pv_mode"]
+            == "select.huawei_battery_excess_pv_energy_use_in_tou"
+        )
 
     def test_inverter_active_power_is_not_household_load(self) -> None:
         """Issue #818: active_power (32080) is the inverter's signed AC output.

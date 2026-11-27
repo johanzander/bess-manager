@@ -989,6 +989,10 @@ class HomeAssistantAPIController:
         "storage_discharging_cutoff_capacity": "battery_discharge_stop_soc",
         "storage_charge_from_grid_function": "grid_charge",
         "storage_working_mode_settings": "huawei_working_mode",
+        # Register 47299 (huawei-solar-lib StorageExcessPvEnergyUseInTOU):
+        # where PV surplus goes outside a TOU period — "charge" or
+        # "fed_to_grid", the lowercased enum names huawei_solar's select uses.
+        "storage_excess_pv_energy_use_in_tou": "huawei_excess_pv_mode",
         # No household-load entry: the huawei_solar integration has no load
         # register outside an EMMA. active_power (32080) is the inverter's
         # signed AC output and goes negative while the battery charges from the
@@ -1988,6 +1992,29 @@ class HomeAssistantAPIController:
             "select",
             "select_option",
             operation=f"Set Huawei working mode to {option}",
+            entity_id=entity_id,
+            option=option,
+        )
+
+    def get_huawei_excess_pv_mode(self) -> str | None:
+        """Get where the battery sends PV surplus outside a TOU period
+        ('charge' or 'fed_to_grid')."""
+        return self._get_raw_state("huawei_excess_pv_mode")
+
+    def set_huawei_excess_pv_mode(self, option: str) -> None:
+        """Set where the battery sends PV surplus outside a TOU period.
+
+        Args:
+            option: "charge" or "fed_to_grid".
+
+        Raises:
+            ValueError: If the excess-PV select isn't configured.
+        """
+        entity_id = self._get_entity_for_service("huawei_excess_pv_mode")
+        self._service_call_with_retry(
+            "select",
+            "select_option",
+            operation=f"Set Huawei excess PV use to {option}",
             entity_id=entity_id,
             option=option,
         )

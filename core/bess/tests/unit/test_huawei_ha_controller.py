@@ -21,7 +21,12 @@ def controller() -> HomeAssistantAPIController:
         ha_url="http://ha.local",
         token="tok",
         settings_store=_settings_store(
-            {"huawei_working_mode": "select.huawei_working_mode"}
+            {
+                "huawei_working_mode": "select.huawei_working_mode",
+                "huawei_excess_pv_mode": (
+                    "select.batteries_excess_pv_energy_use_in_tou"
+                ),
+            }
         ),
         huawei_device_id="dev-123",
         service_domain="huawei_solar",
@@ -42,6 +47,28 @@ class TestHuaweiServiceCalls:
             assert args[1] == "/api/services/select/select_option"
             assert kwargs["json"]["entity_id"] == "select.huawei_working_mode"
             assert kwargs["json"]["option"] == "time_of_use_luna2000"
+
+    def test_set_huawei_excess_pv_mode_calls_select_select_option(
+        self, controller: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(controller, "_api_request") as mock_request:
+            mock_request.return_value = {}
+            controller.set_huawei_excess_pv_mode("fed_to_grid")
+            args, kwargs = mock_request.call_args
+            assert args[0] == "post"
+            assert args[1] == "/api/services/select/select_option"
+            assert (
+                kwargs["json"]["entity_id"]
+                == "select.batteries_excess_pv_energy_use_in_tou"
+            )
+            assert kwargs["json"]["option"] == "fed_to_grid"
+
+    def test_get_huawei_excess_pv_mode_reads_select_state(
+        self, controller: HomeAssistantAPIController
+    ) -> None:
+        with patch.object(controller, "_get_raw_state", return_value="charge") as m:
+            assert controller.get_huawei_excess_pv_mode() == "charge"
+            m.assert_called_once_with("huawei_excess_pv_mode")
 
     def test_write_huawei_tou_periods_includes_device_id(
         self, controller: HomeAssistantAPIController
